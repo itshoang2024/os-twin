@@ -712,7 +712,7 @@
     },
     {
       "name": "security-engineer",
-      "description": "Security Engineer — shift-left security: threat modeling, secure code review, vulnerability management, security architecture, and compliance mapping",
+      "description": "Security Engineer — shift-left security: threat modeling, risk-based secure code review, OWASP Top 10 validation, vulnerability management, security architecture, and compliance mapping",
       "definition": "roles/security-engineer/role.json",
       "prompt": "roles/security-engineer/ROLE.md",
       "default_assignment": false,
@@ -725,14 +725,26 @@
       "capabilities": [
         "threat-modeling",
         "secure-code-review",
+        "owasp-top10-review",
+        "risk-based-review",
+        "source-to-sink-tracing",
+        "code-crawling",
+        "security-metrics",
         "vulnerability-management",
         "security-architecture",
+        "security-configuration-review",
+        "session-security",
+        "access-control-review",
+        "csrf-review",
         "compliance-mapping",
         "penetration-testing",
         "security-automation"
       ],
       "quality_gates": [
         "threat-model-complete",
+        "owasp-a1-a10-reviewed",
+        "source-to-sink-traced",
+        "security-metrics-considered",
         "vulnerabilities-triaged",
         "compliance-mapped",
         "no-critical-findings"
