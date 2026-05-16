@@ -149,7 +149,7 @@ pending → developing → review → passed
 When a room enters `pending` without a `lifecycle.json`, the manager can **auto-generate** one by:
 
 1. Running `Analyze-TaskRequirements.ps1` to detect required capabilities from the task brief
-2. Calling `Resolve-Pipeline.ps1` to build a lifecycle with the right roles (e.g., adding a position-based `review` state for `security-auditor` on security tasks)
+2. Calling `Resolve-Pipeline.ps1` to build a lifecycle with the right roles (e.g., adding a position-based `review` state for `security-engineer` on security tasks)
 
 ---
 

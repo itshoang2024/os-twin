@@ -203,7 +203,7 @@ elseif ($CandidateRoles.Count -gt 0) {
 elseif ($RequiredCapabilities.Count -gt 0) {
     $baseRole = $AssignedRole -replace ':.*$', ''
     $capReviewerMap = @{
-        'security'       = 'security-auditor'
+        'security'       = 'security-engineer'
         'database'       = 'database-architect'
         'architecture'   = 'architect'
         'infrastructure' = 'devops'
