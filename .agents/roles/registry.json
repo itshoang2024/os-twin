@@ -713,6 +713,7 @@
     {
       "name": "security-engineer",
       "description": "Security Engineer — shift-left security: threat modeling, risk-based secure code review, OWASP Top 10 validation, vulnerability management, security architecture, and compliance mapping",
+      "runner": "roles/_base/Start-DynamicRole.ps1",
       "definition": "roles/security-engineer/role.json",
       "prompt": "roles/security-engineer/ROLE.md",
       "default_assignment": false,
@@ -723,6 +724,7 @@
         "epic"
       ],
       "capabilities": [
+        "security",
         "threat-modeling",
         "secure-code-review",
         "owasp-top10-review",
@@ -730,6 +732,7 @@
         "source-to-sink-tracing",
         "code-crawling",
         "security-metrics",
+        "dependency-vulnerability",
         "vulnerability-management",
         "security-architecture",
         "security-configuration-review",
@@ -749,7 +752,8 @@
         "compliance-mapped",
         "no-critical-findings"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "google-vertex/zai-org/glm-5-maas",
+      "timeout": 3600
     },
     {
       "name": "vietnamese-content-strategist",

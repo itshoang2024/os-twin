@@ -3,6 +3,7 @@
   "description": "Security Engineer — shift-left security specialist owning threat modeling, risk-based secure code review, OWASP Top 10 validation, dependency vulnerability management, security architecture review, and compliance mapping",
   "instance_type": "evaluator",
   "capabilities": [
+    "security",
     "threat-modeling",
     "secure-code-review",
     "owasp-top10-review",
@@ -10,6 +11,7 @@
     "source-to-sink-tracing",
     "code-crawling",
     "security-metrics",
+    "dependency-vulnerability",
     "vulnerability-management",
     "security-architecture",
     "security-configuration-review",

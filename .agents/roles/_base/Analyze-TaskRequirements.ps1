@@ -103,7 +103,7 @@ if ($detectedCapabilities.Count -gt 0) {
 
 # --- Suggest primary role based on dominant capability ---
 $roleMapping = @{
-    'security'       = 'security-auditor'
+    'security'       = 'security-engineer'
     'database'       = 'database-architect'
     'infrastructure' = 'devops-engineer'
     'architecture'   = 'architect'
