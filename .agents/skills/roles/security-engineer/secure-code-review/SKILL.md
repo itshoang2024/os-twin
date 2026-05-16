@@ -51,6 +51,7 @@ Look for untrusted input sent to SQL, HQL, LDAP, XPath, OS commands, JSON/JavaSc
 
 Required controls:
 - Use parameterized queries/prepared statements such as `SqlParameterCollection`, bind variables, or ORM parameter APIs.
+- Treat ORM usage as review scope: Hibernate/HQL and native SQL calls are still injectable when queries are built with string concatenation or interpolation.
 - Avoid query construction through string concatenation. If dynamic clauses are required, build them only from server-side allowlists.
 - Validate input with exact-match or allowlist rules before it reaches interpreters.
 - Do not use `eval()` for JSON/text. Parse with safe parsers.
