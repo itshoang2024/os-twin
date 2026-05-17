@@ -6,21 +6,9 @@
     "security",
     "threat-modeling",
     "secure-code-review",
-    "owasp-top10-review",
-    "risk-based-review",
-    "source-to-sink-tracing",
-    "code-crawling",
-    "security-metrics",
     "dependency-vulnerability",
-    "vulnerability-management",
     "security-architecture",
-    "security-configuration-review",
-    "session-security",
-    "access-control-review",
-    "csrf-review",
-    "compliance-mapping",
-    "penetration-testing",
-    "security-automation"
+    "compliance-mapping"
   ],
   "prompt_file": "ROLE.md",
   "quality_gates": [
