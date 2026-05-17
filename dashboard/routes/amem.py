@@ -9,6 +9,7 @@ import os
 from fastapi import APIRouter, HTTPException, Depends
 from pathlib import Path
 from typing import Annotated, Optional
+import asyncio
 import json
 import re
 import sys
@@ -21,7 +22,7 @@ MEMORY_BASE_DIR = Path(os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".o
 # Reuse the canonical note parser from the co-located agentic_memory package
 # instead of duplicating the YAML/frontmatter logic. We import from `memory_note`
 # (not `memory_system`) to avoid pulling in the heavy retriever stack
-# (sentence_transformers, chromadb, nltk, litellm) at dashboard startup.
+# (chromadb, nltk, litellm) at dashboard startup.
 
 try:
     from dashboard.agentic_memory.memory_note import MemoryNote  # type: ignore
@@ -311,8 +312,9 @@ async def get_memory_graph(plan_id: str, user: Annotated[dict, Depends(get_curre
     """Get the memory graph for a plan's project."""
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
-    return _build_graph(notes)
+    # File I/O + graph computation is CPU-bound — offload to thread pool
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
+    return await asyncio.to_thread(_build_graph, notes)
 
 
 def _render_graph_png(graph_data: dict) -> bytes:
@@ -407,18 +409,18 @@ def _render_graph_png(graph_data: dict) -> bytes:
 )
 async def get_memory_graph_image(plan_id: str, user: Annotated[dict, Depends(get_current_user)] = None):
     """Render the memory graph as a PNG image."""
-    import asyncio
-    import io
     from fastapi.responses import StreamingResponse
 
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
-    graph_data = _build_graph(notes)
+    # File I/O + graph computation + matplotlib rendering are all CPU-heavy
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
+    graph_data = await asyncio.to_thread(_build_graph, notes)
 
     if not graph_data["nodes"]:
         raise HTTPException(status_code=404, detail="No memories to graph")
 
+    # CPU-bound matplotlib rendering — must run in executor
     loop = asyncio.get_event_loop()
     try:
         png_bytes = await loop.run_in_executor(None, _render_graph_png, graph_data)
@@ -435,7 +437,7 @@ async def get_memory_tree(plan_id: str, user: Annotated[dict, Depends(get_curren
     """Get a tree-like directory structure of all memory notes."""
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
 
     if not notes:
         return {"tree": "(empty)", "total": 0}
@@ -471,7 +473,7 @@ async def list_memory_notes(plan_id: str, user: Annotated[dict, Depends(get_curr
     """List all memory notes for a plan's project."""
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
     for n in notes:
         n.pop("content", None)
     return notes
@@ -482,7 +484,7 @@ async def get_memory_note(plan_id: str, note_id: str, user: Annotated[dict, Depe
     """Get a single memory note by ID."""
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
     for note in notes:
         if note["id"] == note_id:
             return note
@@ -494,7 +496,7 @@ async def get_memory_stats(plan_id: str, user: Annotated[dict, Depends(get_curre
     """Get memory statistics for a plan's project."""
     mem_dir = _require_memory_dir(plan_id)
     notes_dir = mem_dir / "notes"
-    notes = _load_notes(notes_dir)
+    notes = await asyncio.to_thread(_load_notes, notes_dir)
 
     tags = set()
     keywords = set()
@@ -532,64 +534,68 @@ MEMORY_BASE_DIR = Path(os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".o
 @router.get("/api/amem/namespaces")
 async def list_namespaces(user: Annotated[dict, Depends(get_current_user)]):
     """List all memory namespaces with stats."""
-    if not MEMORY_BASE_DIR.exists():
-        return []
+    # Heavy file system scanning — offload to thread pool
+    def _scan_namespaces():
+        if not MEMORY_BASE_DIR.exists():
+            return []
 
-    namespaces = []
-    for entry in sorted(MEMORY_BASE_DIR.iterdir()):
-        if not entry.is_dir():
-            continue
-        # Skip archived namespaces in listing (they have .archive- in name)
-        if ".archive-" in entry.name:
-            continue
+        namespaces = []
+        for entry in sorted(MEMORY_BASE_DIR.iterdir()):
+            if not entry.is_dir():
+                continue
+            # Skip archived namespaces in listing (they have .archive- in name)
+            if ".archive-" in entry.name:
+                continue
 
-        plan_id = entry.name
-        notes_dir = entry / "notes"
-        notes_count = len(list(notes_dir.rglob("*.md"))) if notes_dir.exists() else 0
+            plan_id = entry.name
+            notes_dir = entry / "notes"
+            notes_count = len(list(notes_dir.rglob("*.md"))) if notes_dir.exists() else 0
 
-        # Disk usage
-        disk_bytes = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
+            # Disk usage
+            disk_bytes = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
 
-        # Plan title from registry
-        title = plan_id
-        meta_file = PLANS_DIR / f"{plan_id}.meta.json"
-        if meta_file.exists():
-            try:
-                meta = json.loads(meta_file.read_text())
-                title = meta.get("title", plan_id)
-            except Exception:
-                pass
-        if plan_id == "_global":
-            title = "(Global)"
+            # Plan title from registry
+            title = plan_id
+            meta_file = PLANS_DIR / f"{plan_id}.meta.json"
+            if meta_file.exists():
+                try:
+                    meta = json.loads(meta_file.read_text())
+                    title = meta.get("title", plan_id)
+                except Exception:
+                    pass
+            if plan_id == "_global":
+                title = "(Global)"
 
-        # Archived versions count
-        archived = len(
-            [d for d in MEMORY_BASE_DIR.iterdir() if d.is_dir() and d.name.startswith(f"{plan_id}.archive-")]
-        )
+            # Archived versions count
+            archived = len(
+                [d for d in MEMORY_BASE_DIR.iterdir() if d.is_dir() and d.name.startswith(f"{plan_id}.archive-")]
+            )
 
-        # Timestamps
-        created_at = None
-        last_modified = None
-        if notes_dir.exists():
-            md_files = list(notes_dir.rglob("*.md"))
-            if md_files:
-                times = [f.stat().st_mtime for f in md_files]
-                created_at = datetime.fromtimestamp(min(times)).isoformat()
-                last_modified = datetime.fromtimestamp(max(times)).isoformat()
+            # Timestamps
+            created_at = None
+            last_modified = None
+            if notes_dir.exists():
+                md_files = list(notes_dir.rglob("*.md"))
+                if md_files:
+                    times = [f.stat().st_mtime for f in md_files]
+                    created_at = datetime.fromtimestamp(min(times)).isoformat()
+                    last_modified = datetime.fromtimestamp(max(times)).isoformat()
 
-        namespaces.append(
-            {
-                "plan_id": plan_id,
-                "title": title,
-                "notes_count": notes_count,
-                "disk_bytes": disk_bytes,
-                "created_at": created_at,
-                "last_modified": last_modified,
-                "archived_versions": archived,
-            }
-        )
+            namespaces.append(
+                {
+                    "plan_id": plan_id,
+                    "title": title,
+                    "notes_count": notes_count,
+                    "disk_bytes": disk_bytes,
+                    "created_at": created_at,
+                    "last_modified": last_modified,
+                    "archived_versions": archived,
+                }
+            )
 
-    return namespaces
+        return namespaces
+
+    return await asyncio.to_thread(_scan_namespaces)
 
 
 @router.delete("/api/amem/{plan_id}")

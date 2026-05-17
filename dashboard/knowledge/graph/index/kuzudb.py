@@ -49,7 +49,7 @@ KUZU_DATABASE_PATH = str(KNOWLEDGE_DIR)
 
 
 # Module-level embedder cache — lazy-instantiated on first call so that
-# importing this module doesn't trigger sentence-transformers loading.
+# importing this module doesn't trigger embedding client setup.
 _embedder_singleton = None
 
 

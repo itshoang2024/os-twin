@@ -65,7 +65,7 @@ class TestKnowledgeE2ERestLifecycle:
         This test validates the entire Knowledge system REST API works end-to-end.
         Target runtime: < 180 seconds on CI hardware.
 
-        Note: Requires kuzu, sentence-transformers, and potentially anthropic for full coverage.
+        Note: Requires kuzu, zvec, and potentially anthropic for full coverage.
         """
         client = client_with_auth
         start_time = time.perf_counter()

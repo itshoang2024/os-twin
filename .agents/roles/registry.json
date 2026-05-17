@@ -738,6 +738,46 @@
         "no-critical-findings"
       ],
       "default_model": "google-vertex/zai-org/glm-5-maas"
+    },
+    {
+      "name": "vietnamese-content-strategist",
+      "description": "vietnamese-content-strategist specialist agent",
+      "runner": "contributes/roles/vietnamese-content-strategist/Start-VietnameseContentStrategist.ps1",
+      "definition": "contributes/roles/vietnamese-content-strategist/role.json",
+      "prompt": "contributes/roles/vietnamese-content-strategist/ROLE.md",
+      "default_assignment": false,
+      "instance_support": true,
+      "supported_task_types": [
+        "task",
+        "epic"
+      ],
+      "capabilities": [
+        "code-generation",
+        "file-editing",
+        "shell-execution"
+      ],
+      "quality_gates": [],
+      "default_model": "google-vertex/gemini-3-flash-preview"
+    },
+    {
+      "name": "researcher",
+      "description": "researcher specialist agent",
+      "runner": "contributes/roles/researcher/Start-Researcher.ps1",
+      "definition": "contributes/roles/researcher/role.json",
+      "prompt": "contributes/roles/researcher/ROLE.md",
+      "default_assignment": false,
+      "instance_support": true,
+      "supported_task_types": [
+        "task",
+        "epic"
+      ],
+      "capabilities": [
+        "code-generation",
+        "file-editing",
+        "shell-execution"
+      ],
+      "quality_gates": [],
+      "default_model": "google-vertex/gemini-3-flash-preview"
     }
   ],
   "assignment_rules": {

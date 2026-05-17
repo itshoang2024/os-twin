@@ -12,7 +12,7 @@ All 9 endpoints:
   - GET    /api/knowledge/namespaces/{namespace}/graph
 
 All endpoints require authentication via `Depends(get_current_user)`.
-Heavy libraries (kuzu, zvec, sentence_transformers) are lazy-loaded
+Heavy libraries (kuzu, zvec, MarkItDown) are lazy-loaded
 inside KnowledgeService methods — importing this module is cheap.
 """
 
@@ -73,7 +73,7 @@ _service_lock = threading.Lock()
 def _get_service() -> Any:
     """Lazy singleton for KnowledgeService.
 
-    Imports dashboard.knowledge.service lazily (no kuzu/zvec/sentence_transformers
+    Imports dashboard.knowledge.service lazily (no kuzu/zvec/MarkItDown
     at module import time) and caches the instance for the lifetime of the process.
     """
     global _service_instance

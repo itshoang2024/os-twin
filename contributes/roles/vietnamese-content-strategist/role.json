@@ -1,0 +1,16 @@
+{
+  "name": "vietnamese-content-strategist",
+  "description": "vietnamese-content-strategist specialist agent",
+  "capabilities": [
+    "code-generation",
+    "file-editing",
+    "shell-execution"
+  ],
+  "prompt_file": "ROLE.md",
+  "quality_gates": [],
+  "skill_refs": [],
+  "cli": "agent",
+  "instance_type": "worker",
+  "model": "google-vertex/gemini-3-flash-preview",
+  "timeout": 600
+}

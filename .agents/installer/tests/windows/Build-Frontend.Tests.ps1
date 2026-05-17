@@ -22,6 +22,10 @@ Describe "Build-Frontend" {
         { Build-Frontend -SubDir "nonexistent\dir" -Label "Test FE" } | Should -Not -Throw
     }
 
+    It "Should throw when required frontend directory not found" {
+        { Build-Frontend -SubDir "nonexistent\dir" -Label "Required FE" -Required } | Should -Throw
+    }
+
     It "Should warn when no package manager found" {
         # Create a fake frontend dir with package.json
         $feDir = Join-Path $sourceDir "dashboard\fe"
@@ -36,8 +40,19 @@ Describe "Build-Frontend" {
         { Build-Frontend -SubDir "dashboard\fe" -Label "Test FE" } | Should -Not -Throw
     }
 
+    It "Should throw when no package manager found for required frontend" {
+        $feDir = Join-Path $sourceDir "dashboard\fe"
+        New-Item -ItemType Directory -Path $feDir -Force | Out-Null
+        Set-Content -Path (Join-Path $feDir "package.json") -Value '{"name": "test"}'
+
+        Mock Get-Command { $null } -ParameterFilter {
+            $Name -in @("bun", "pnpm", "npm", "yarn")
+        }
+
+        { Build-Frontend -SubDir "dashboard\fe" -Label "Test FE" -Required } | Should -Throw
+    }
+
     It "Should use default label when not specified" {
         { Build-Frontend -SubDir "test\dir" } | Should -Not -Throw
     }
 }
-

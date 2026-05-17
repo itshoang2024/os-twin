@@ -173,7 +173,7 @@ class TestLoadFromEnv:
         assert cfg.provider == "google"
         assert cfg.completion_model == "gemini-3-flash-preview"
         assert cfg.cloud_embedding_model == "text-embedding-005"
-        assert cfg.local_embedding_model == "all-MiniLM-L6-v2"
+        assert cfg.local_embedding_model == "qwen3-embedding:0.6b"
         assert cfg.timeout == 60
         assert cfg.max_retries == 2
 

@@ -10,8 +10,8 @@ Public surface (post EPIC-003 v2):
   :class:`NamespaceExistsError`, :class:`InvalidNamespaceIdError`.
 - :class:`KnowledgeLLM` — multi-provider LLM wrapper (via ``llm_client.py``)
   for entity extraction, query planning, and answer aggregation.
-- :class:`KnowledgeEmbedder` — embedding helper supporting local
-  sentence-transformers and Google Gemini backends.
+- :class:`KnowledgeEmbedder` — embedding helper supporting Ollama, Google, Vertex,
+  and OpenAI-compatible backends.
 - :class:`NamespaceVectorStore`, :class:`VectorHit` — per-namespace zvec
   vector wrapper used by ingestion and (in EPIC-004) query.
 - Graph internals: :class:`KuzuLabelledPropertyGraph`, :class:`GraphRAGExtractor`,
@@ -19,7 +19,7 @@ Public surface (post EPIC-003 v2):
   :class:`TrackVectorRetriever`.
 
 Importing this module is intentionally cheap — heavy deps (kuzu, zvec,
-sentence_transformers, markitdown) are imported lazily inside the
+markitdown) are imported lazily inside the
 methods that need them.
 """
 

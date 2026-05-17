@@ -3,8 +3,8 @@
  *
  * Sessions are keyed by "platform:userId" to avoid collision.
  * Sessions are persisted to ~/.ostwin/sessions.json so they survive
- * bot restarts.  Binary fields (pendingAttachments, lastTranscription)
- * are excluded from persistence — they are transient by nature.
+ * bot restarts.  Binary fields (pendingAttachments) are excluded
+ * from persistence — they are transient by nature.
  *
  * Writes are debounced (2 s) to avoid hammering the disk on rapid
  * message bursts.
@@ -30,6 +30,12 @@ export interface StagedAttachment {
   epicRef?: string;
 }
 
+export interface PendingContextEntry {
+  command: string;
+  result: string;
+  timestamp: number;
+}
+
 export interface Session {
   userId: string;
   platform: string;
@@ -37,17 +43,17 @@ export interface Session {
   mode: SessionMode;
   chatHistory: ChatMessage[];
   lastActivity: number;
-  lastTranscription?: string;
   workingDir?: string;
   activeEpicRef?: string;
   pendingAttachments: StagedAttachment[];
+  pendingContext: PendingContextEntry[];
 }
 
 // ---------------------------------------------------------------------------
 // Persistence config
 // ---------------------------------------------------------------------------
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — conversations persist
 const PERSIST_DEBOUNCE_MS = 2_000;          // flush at most every 2 s
 const SESSIONS_DIR = path.join(os.homedir(), '.ostwin');
 const SESSIONS_FILE = path.join(SESSIONS_DIR, 'sessions.json');
@@ -90,6 +96,7 @@ function _newSession(userId: string | number, platform: string): Session {
     chatHistory: [],
     lastActivity: Date.now(),
     pendingAttachments: [],
+    pendingContext: [],
   };
 }
 
@@ -111,9 +118,6 @@ function _loadFromDisk(): void {
     let loaded = 0;
 
     for (const [key, persisted] of Object.entries(data)) {
-      // Skip expired sessions
-      if (now - persisted.lastActivity > SESSION_TIMEOUT_MS) continue;
-
       const session: Session = {
         userId: persisted.userId,
         platform: persisted.platform,
@@ -123,7 +127,8 @@ function _loadFromDisk(): void {
         lastActivity: persisted.lastActivity,
         workingDir: persisted.workingDir,
         activeEpicRef: persisted.activeEpicRef,
-        pendingAttachments: [], // never persisted
+        pendingAttachments: [],
+        pendingContext: [],
       };
       sessions.set(key, session);
       loaded++;
@@ -143,13 +148,8 @@ function _loadFromDisk(): void {
 
 function _serializeForDisk(): Record<string, PersistedSession> {
   const out: Record<string, PersistedSession> = {};
-  const now = Date.now();
 
   for (const [key, session] of sessions.entries()) {
-    // Don't persist expired or idle-with-no-history sessions
-    if (now - session.lastActivity > SESSION_TIMEOUT_MS) continue;
-    if (session.mode === 'idle' && session.chatHistory.length === 0 && !session.activePlanId) continue;
-
     out[key] = {
       userId: session.userId,
       platform: session.platform,
@@ -200,17 +200,10 @@ function _schedulePersist(): void {
 
 export function getSession(userId: string | number, platform = 'telegram'): Session {
   const key = _key(userId, platform);
-  const now = Date.now();
   let session = sessions.get(key);
 
   if (session) {
-    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
-      session = _newSession(userId, platform);
-      sessions.set(key, session);
-      _schedulePersist();
-    } else {
-      session.lastActivity = now;
-    }
+    session.lastActivity = Date.now();
   } else {
     session = _newSession(userId, platform);
     sessions.set(key, session);

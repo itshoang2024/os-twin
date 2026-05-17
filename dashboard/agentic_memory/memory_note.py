@@ -2,7 +2,7 @@
 
 Extracted from memory_system.py so it can be imported by lightweight
 consumers (like the dashboard) without dragging in the heavy retriever
-stack (sentence_transformers, chromadb, nltk, litellm).
+stack (chromadb, nltk, litellm).
 
 Anything that wants to read or write a memory note's markdown file should
 go through this class.

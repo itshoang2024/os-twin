@@ -37,7 +37,7 @@ function Setup-OpenCodePermissions {
         return
     }
 
-    Write-Step "Patching OpenCode permissions (allow .env reads)..."
+    Write-Step "Patching OpenCode permissions (allow file reads + external directories)..."
     if (-not (Test-Path $ocDir)) {
         New-Item -ItemType Directory -Path $ocDir -Force | Out-Null
     }
@@ -54,9 +54,9 @@ function Setup-OpenCodePermissions {
             }
         }
         catch {
-            Write-Warn "Failed to patch OpenCode permissions — agents may not be able to read .env files"
+            Write-Warn "Failed to patch OpenCode permissions — headless agents may wait on file-read prompts"
             Write-Info "Manually add to ${ocConfig}:"
-            Write-Info '  "permission": { "read": { "*": "allow", "*.env": "allow", "*.env.*": "allow" } }'
+            Write-Info '  "permission": { "read": { "*": "allow" }, "external_directory": { "*": "allow" } }'
         }
     }
 }

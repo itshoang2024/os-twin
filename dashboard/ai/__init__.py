@@ -67,7 +67,7 @@ def _detect_embed_model(purpose: str = "knowledge") -> str:
                 return know_cfg.knowledge_embedding_model
     except Exception:
         pass
-    return os.environ.get("OSTWIN_KNOWLEDGE_EMBED_MODEL", "BAAI/bge-base-en-v1.5")
+    return os.environ.get("OSTWIN_KNOWLEDGE_EMBED_MODEL", "qwen3-embedding:0.6b")
 
 
 def _detect_embed_provider(purpose: str = "knowledge") -> str:
@@ -93,7 +93,7 @@ def _detect_embed_provider(purpose: str = "knowledge") -> str:
                 return know_cfg.knowledge_embedding_backend
     except Exception:
         pass
-    return os.environ.get("OSTWIN_KNOWLEDGE_EMBED_PROVIDER", "sentence-transformers")
+    return os.environ.get("OSTWIN_KNOWLEDGE_EMBED_PROVIDER", "ollama")
 
 
 def _detect_embed_compatible_url(purpose: str = "knowledge") -> str | None:
@@ -225,6 +225,10 @@ def get_embedding(
             error=str(exc),
         )
         raise
+
+
+def _embedder_model(embedder) -> str:
+    return getattr(embedder, "model_name", None) or getattr(embedder, "model", "unknown")
 
 
 def embed(

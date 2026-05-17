@@ -1,12 +1,24 @@
 
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { cleanupSession, sessions } from '../src/commands/join';
+import { cleanupSession, data as joinData, sessions } from '../src/commands/join';
 import { PassThrough } from 'node:stream';
 
-import { execute as pingExecute } from '../src/commands/ping';
+import { data as leaveData } from '../src/commands/leave';
+import { data as pingData, execute as pingExecute } from '../src/commands/ping';
+import { getCommandDef } from '../src/commands';
 
 describe('Voice Commands Unit Tests', () => {
+  describe('slash command metadata', () => {
+    it('uses COMMAND_REGISTRY definitions', () => {
+      for (const data of [joinData, leaveData, pingData]) {
+        const json = data.toJSON();
+        const def = getCommandDef(json.name)!;
+        expect(json.description).to.equal(def.description);
+      }
+    });
+  });
+
   describe('join.ts — cleanupSession', () => {
     it('returns empty if no session exists', async () => {
       const result = await cleanupSession('non-existent');

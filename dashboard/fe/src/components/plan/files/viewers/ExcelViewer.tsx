@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import * as XLSX from 'xlsx';
+import { useState, useEffect } from 'react';
+import readExcelFile, { type Sheet as ParsedXlsxSheet, type SheetData as ParsedSheetData } from 'read-excel-file/browser';
 import { base64ToUint8Array } from './utils';
 
 interface SheetData {
@@ -16,44 +16,138 @@ interface SheetData {
 interface ExcelViewerProps {
   data: string;
   encoding: 'utf-8' | 'base64';
+  extension: string;
 }
 
 // P2-16: Limits to prevent browser DoS from huge spreadsheets
 const MAX_ROWS = 1000;
 const MAX_COLS = 50;
 
-export default function ExcelViewer({ data, encoding }: ExcelViewerProps) {
+type SpreadsheetCell = ParsedSheetData[number][number];
+
+function cellToString(cell: SpreadsheetCell): string {
+  if (cell === null || cell === undefined) return '';
+  if (cell instanceof Date) return cell.toISOString();
+  return String(cell);
+}
+
+function rowsToSheet(name: string, rows: ParsedSheetData): SheetData {
+  const trimmed = rows.slice(0, MAX_ROWS).map((row) =>
+    row.slice(0, MAX_COLS).map(cellToString)
+  );
+  const headers = trimmed.length > 0 ? trimmed[0] : [];
+  const dataRows = trimmed.slice(1);
+  const truncated_rows = rows.length > MAX_ROWS;
+  const truncated_cols = rows.some((row) => row.length > MAX_COLS);
+
+  return {
+    name,
+    headers,
+    rows: dataRows,
+    truncated_rows,
+    truncated_cols,
+    total_rows: Math.max(0, rows.length - 1),
+  };
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const bytes = base64ToUint8Array(base64);
+  return uint8ArrayToArrayBuffer(bytes);
+}
+
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function parseDelimitedRows(text: string, delimiter: ',' | '\t'): string[][] {
+  if (!text) return [];
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        cell += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === delimiter) {
+      row.push(cell);
+      cell = '';
+    } else if (char === '\n' || char === '\r') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      if (char === '\r' && next === '\n') i++;
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
+
+async function parseSpreadsheet(data: string, encoding: 'utf-8' | 'base64', extension: string): Promise<SheetData[]> {
+  if (extension === 'csv' || extension === 'tsv') {
+    const text = encoding === 'base64'
+      ? new TextDecoder().decode(base64ToUint8Array(data))
+      : data;
+    return [rowsToSheet(extension.toUpperCase(), parseDelimitedRows(text, extension === 'tsv' ? '\t' : ','))];
+  }
+
+  if (extension === 'xls') {
+    throw new Error('Legacy .xls previews are disabled because the previous parser had unpatched vulnerabilities. Convert the file to .xlsx, .csv, or .tsv to preview it.');
+  }
+
+  const input = encoding === 'base64'
+    ? base64ToArrayBuffer(data)
+    : uint8ArrayToArrayBuffer(new TextEncoder().encode(data));
+  const sheets: ParsedXlsxSheet[] = await readExcelFile(input);
+  return sheets.map((sheet) => rowsToSheet(sheet.sheet, sheet.data));
+}
+
+export default function ExcelViewer({ data, encoding, extension }: ExcelViewerProps) {
   const [sheets, setSheets] = useState<SheetData[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      let wb: XLSX.WorkBook;
-      if (encoding === 'base64') {
-        const byteArray = base64ToUint8Array(data);
-        wb = XLSX.read(byteArray, { type: 'array' });
-      } else {
-        wb = XLSX.read(data, { type: 'string' });
-      }
-      const parsed: SheetData[] = wb.SheetNames.map((name) => {
-        const ws = wb.Sheets[name];
-        const json: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        // P2-16: Enforce row and column limits to prevent browser DoS
-        const trimmed = json.slice(0, MAX_ROWS).map((row) =>
-          (row as string[]).slice(0, MAX_COLS).map(String)
-        );
-        const headers = trimmed.length > 0 ? trimmed[0] : [];
-        const rows = trimmed.slice(1);
-        const truncated_rows = json.length > MAX_ROWS;
-        const truncated_cols = json.length > 0 && (json[0] as string[]).length > MAX_COLS;
-        return { name, headers, rows, truncated_rows, truncated_cols, total_rows: json.length - 1 };
+    let cancelled = false;
+    setError(null);
+    setSheets([]);
+    setActiveSheet(0);
+
+    parseSpreadsheet(data, encoding, extension)
+      .then((parsed) => {
+        if (!cancelled) setSheets(parsed);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to parse spreadsheet');
       });
-      setSheets(parsed);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse spreadsheet');
-    }
-  }, [data, encoding]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data, encoding, extension]);
 
   const sheet = sheets[activeSheet];
 

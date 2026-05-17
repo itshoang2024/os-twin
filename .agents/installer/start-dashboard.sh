@@ -12,6 +12,19 @@
 [[ -n "${_START_DASHBOARD_SH_LOADED:-}" ]] && return 0
 _START_DASHBOARD_SH_LOADED=1
 
+_is_dashboard_process_for_port() {
+  local pid="$1"
+  local port="$2"
+  local comm
+  comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+  local args
+  args=$(ps -p "$pid" -o args= 2>/dev/null || true)
+  case "$comm $args" in
+    *uvicorn*|*api.py*"--port $port"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 start_dashboard() {
   local dashboard_script="$INSTALL_DIR/.agents/dashboard.sh"
   if [[ ! -f "$dashboard_script" ]] || [[ ! -f "$INSTALL_DIR/dashboard/api.py" ]]; then
@@ -35,9 +48,7 @@ start_dashboard() {
   if [[ -n "$local_pids" ]]; then
     local py_pids=""
     for p in $local_pids; do
-      local comm
-      comm=$(ps -p "$p" -o comm= 2>/dev/null || true)
-      case "$comm" in *python*|*uvicorn*) py_pids="$py_pids $p" ;; esac
+      _is_dashboard_process_for_port "$p" "$DASHBOARD_PORT" && py_pids="$py_pids $p"
     done
     if [[ -n "$py_pids" ]]; then
       step "Stopping existing dashboard on :$DASHBOARD_PORT..."

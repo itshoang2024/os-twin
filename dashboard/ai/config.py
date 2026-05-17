@@ -43,7 +43,7 @@ class AIConfig:
 
     # Embedding models
     cloud_embedding_model: str = "text-embedding-005"
-    local_embedding_model: str = "all-MiniLM-L6-v2"
+    local_embedding_model: str = "qwen3-embedding:0.6b"
 
     # Runtime
     timeout: int = 60
@@ -153,7 +153,7 @@ def _load_from_settings() -> AIConfig:
     completion_model = (
         (ai_ns.completion_model if ai_ns and ai_ns.completion_model else None)
         or google.default_model
-        or "gemini-3-flash-preview"
+        or "gemini-3.1-flash-lite"
     )
     knowledge_model = ai_ns.knowledge_model if ai_ns else None
     memory_model = ai_ns.memory_model if ai_ns else None
@@ -164,7 +164,7 @@ def _load_from_settings() -> AIConfig:
     )
     local_embedding = (
         ai_ns.local_embedding_model if ai_ns else None
-    ) or "all-MiniLM-L6-v2"
+    ) or "qwen3-embedding:0.6b"
     timeout = (
         ai_ns.timeout_seconds if ai_ns and hasattr(ai_ns, "timeout_seconds") else 60
     )
@@ -198,7 +198,7 @@ def _load_from_env() -> AIConfig:
             "LLM_CLOUD_EMBEDDING_MODEL", "text-embedding-005"
         ),
         local_embedding_model=os.environ.get(
-            "LLM_LOCAL_EMBEDDING_MODEL", "all-MiniLM-L6-v2"
+            "LLM_LOCAL_EMBEDDING_MODEL", "qwen3-embedding:0.6b"
         ),
         timeout=int(os.environ.get("LLM_TIMEOUT", "60")),
         max_retries=int(os.environ.get("LLM_MAX_RETRIES", "2")),

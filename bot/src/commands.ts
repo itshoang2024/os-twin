@@ -9,9 +9,8 @@
 
 import api, { PlanAsset, ClawhubSkill, RoleInfo } from './api';
 import { registry } from './connectors/registry';
-import { getSession, clearSession, clearChatHistory, setPlan, setWorkingDir, persistAfterMessage } from './sessions';
-import { askAgent } from './agent-bridge';
-import { listRecordings, transcribeAudio } from './audio-transcript';
+import { getSession, clearSession, clearChatHistory, setPlan, setWorkingDir } from './sessions';
+import { SlashCommandBuilder } from 'discord.js';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -48,18 +47,18 @@ export interface CommandDef {
   telegramMenu?: string; // description shown in Telegram's setMyCommands
 }
 
+export type CommandPlatform = 'telegram' | 'discord' | 'slack';
+
 export const COMMAND_REGISTRY: CommandDef[] = [
   // ── Plans & AI ──────────────────────────────────────────────────
   { name: 'menu',            description: 'Main Control Center',                                 telegramMenu: '🏢 Main Control Center' },
   { name: 'help',            description: 'Detailed user guide',                                 telegramMenu: '❓ Detailed user guide' },
-  { name: 'start',           description: 'Start / Help (Telegram convention)' },
   { name: 'draft',           description: 'Draft a new Plan with AI',                            arg: 'idea',     argDescription: 'Your project idea',                   deferReply: true, telegramMenu: '📝 Draft a new Plan with AI' },
   { name: 'edit',            description: 'Select a plan to edit with AI',                       deferReply: true },
   { name: 'viewplan',        description: "View a plan's content",                               deferReply: true },
   { name: 'startplan',       description: 'Select and launch a plan',                            deferReply: true },
   { name: 'resume',          description: 'Resume a failed or stopped plan',                     deferReply: true },
   { name: 'assets',          description: 'List assets for the active or selected plan',         deferReply: true },
-  { name: 'transcribe',      description: 'Transcribe a voice recording and draft a plan',       deferReply: true },
   { name: 'setdir',          description: 'Set target project directory for new plans',          arg: 'path',     argDescription: 'Absolute path to project directory' },
   { name: 'cancel',          description: 'Exit current editing session' },
   { name: 'clear',           description: 'Clear conversation history with the AI' },
@@ -68,7 +67,6 @@ export const COMMAND_REGISTRY: CommandDef[] = [
   // ── Monitoring ──────────────────────────────────────────────────
   { name: 'dashboard',       description: 'Real-time War-Room progress',                         deferReply: true, telegramMenu: '📊 Real-time War-Room progress' },
   { name: 'status',          description: 'List running War-Rooms',                              deferReply: true, telegramMenu: '💻 List running War-Rooms' },
-  { name: 'compact',         description: 'Latest messages from agents',                         deferReply: true },
   { name: 'errors',          description: 'Error summary with root causes',                      deferReply: true },
   { name: 'logs',            description: 'View war-room channel messages',                      arg: 'room_id',  argDescription: 'War-room ID (e.g. room-001)',          deferReply: true, telegramMenu: '📜 View war-room logs' },
   { name: 'health',          description: 'System health check',                                 deferReply: true, telegramMenu: '🏥 System health check' },
@@ -82,11 +80,8 @@ export const COMMAND_REGISTRY: CommandDef[] = [
   { name: 'skillremove',     description: 'Remove an installed skill',                           arg: 'name',     argDescription: 'Skill name to remove',                  argRequired: true, deferReply: true },
   { name: 'skillsync',       description: 'Sync skills with dashboard',                          deferReply: true },
   { name: 'roles',           description: 'List all agent roles',                                deferReply: true },
-  { name: 'clonerole',       description: 'Clone a role for project-local override',             arg: 'role',     argDescription: 'Role name to clone',                    argRequired: true, deferReply: true },
 
   // ── System ──────────────────────────────────────────────────────
-  { name: 'usage',           description: 'Stats report',                                        deferReply: true },
-  { name: 'config',          description: 'View system configuration',                           arg: 'key',      argDescription: 'Config key in dot notation (e.g. manager.poll_interval_seconds)', deferReply: true },
   { name: 'triage',          description: 'Triage a failed war-room',                            arg: 'room_id',  argDescription: 'War-room ID to triage',                 deferReply: true },
   { name: 'clearplans',      description: 'Wipe all plan data',                                  deferReply: true },
   { name: 'new',             description: 'Wipe old War-Room data to start fresh',               deferReply: true },
@@ -101,12 +96,58 @@ export const COMMAND_REGISTRY: CommandDef[] = [
   { name: 'ping',            description: 'Check bot latency',                                   discordOnly: true },
 ];
 
-// Pre-computed views for connectors
-export const COMMANDS_WITH_ARGS = COMMAND_REGISTRY.filter(c => c.arg && !c.discordOnly);
-export const COMMANDS_NO_ARGS = COMMAND_REGISTRY.filter(c => !c.arg && !c.discordOnly);
-export const ALL_PLATFORM_COMMANDS = COMMAND_REGISTRY.filter(c => !c.discordOnly);
-export const TELEGRAM_MENU_COMMANDS = COMMAND_REGISTRY.filter(c => c.telegramMenu);
+export function getCommandDef(name: string): CommandDef | undefined {
+  return COMMAND_REGISTRY.find(c => c.name === name);
+}
+
+export function requireCommandDef(name: string): CommandDef {
+  const def = getCommandDef(name);
+  if (!def) throw new Error(`Command "${name}" is missing from COMMAND_REGISTRY`);
+  return def;
+}
+
+export function getCommandsForPlatform(platform: CommandPlatform): CommandDef[] {
+  return COMMAND_REGISTRY.filter(c => platform === 'discord' || !c.discordOnly);
+}
+
+export function getCommandsWithArgsForPlatform(platform: CommandPlatform): CommandDef[] {
+  return getCommandsForPlatform(platform).filter(c => c.arg);
+}
+
+export function getCommandsWithoutArgsForPlatform(platform: CommandPlatform): CommandDef[] {
+  return getCommandsForPlatform(platform).filter(c => !c.arg);
+}
+
+export function buildDiscordSlashCommand(def: CommandDef): SlashCommandBuilder {
+  const builder = new SlashCommandBuilder()
+    .setName(def.name)
+    .setDescription(def.description);
+
+  if (def.arg) {
+    builder.addStringOption(opt =>
+      opt.setName(def.arg!)
+        .setDescription(def.argDescription || def.arg!)
+        .setRequired(def.argRequired ?? false),
+    );
+  }
+
+  return builder;
+}
+
+export function buildDiscordSlashCommands(defs: CommandDef[] = getCommandsForPlatform('discord')): SlashCommandBuilder[] {
+  return defs.map(buildDiscordSlashCommand);
+}
+
+// Pre-computed views for compatibility; connectors should use platform helpers above.
+export const COMMANDS_WITH_ARGS = getCommandsWithArgsForPlatform('telegram');
+export const COMMANDS_NO_ARGS = getCommandsWithoutArgsForPlatform('telegram');
+export const ALL_PLATFORM_COMMANDS = getCommandsForPlatform('telegram');
+export const TELEGRAM_MENU_COMMANDS = getCommandsForPlatform('telegram').filter(c => c.telegramMenu);
 export const DEFERRED_COMMANDS = new Set(COMMAND_REGISTRY.filter(c => c.deferReply).map(c => c.name));
+
+export function isDeferredCommand(name: string): boolean {
+  return DEFERRED_COMMANDS.has(name);
+}
 
 // ── Response helpers ──────────────────────────────────────────────
 
@@ -135,12 +176,54 @@ function cmdMenu(): BotResponse {
   ]);
 }
 
+function _editDistance(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * Build a fallback response for unknown slash commands.
+ * Suggests close matches (edit distance ≤ 2) and shows the category menu so
+ * the user can pick from defined commands instead of being routed to the LLM.
+ */
+export function cmdUnknown(input: string, platform: CommandPlatform = 'telegram'): BotResponse {
+  const cmdName = input.replace(/^\/([a-zA-Z0-9_]+).*/, '$1');
+  const available = getCommandsForPlatform(platform).map(c => c.name);
+  const suggestions = available
+    .map(n => ({ n, d: _editDistance(n.toLowerCase(), cmdName.toLowerCase()) }))
+    .filter(s => s.d <= 2)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 5)
+    .map(s => s.n);
+
+  const lines = [`⚠️ Unknown command \`/${cmdName}\`.`];
+  if (suggestions.length) {
+    lines.push('', `Did you mean: ${suggestions.map(s => `\`/${s}\``).join(', ')}?`);
+  }
+  lines.push('', 'Pick a category below or send /help for the full list.');
+
+  return menu(lines.join('\n'), [
+    [{ label: '📊 Monitoring', callbackData: 'menu:cat:monitoring' }],
+    [{ label: '📝 Plans & AI', callbackData: 'menu:cat:plans' }],
+    [{ label: '🧠 Skills & Roles', callbackData: 'menu:cat:skills' }],
+    [{ label: '⚙️ System', callbackData: 'menu:cat:system' }],
+  ]);
+}
+
 function cmdSubmenuMonitoring(): BotResponse {
   return menu('📊 *Monitoring*\nReal-time War-Room insights:', [
     [{ label: '📊 Dashboard', callbackData: 'cmd:dashboard' }],
     [{ label: '📈 Progress', callbackData: 'cmd:progress' }],
     [{ label: '💻 Status', callbackData: 'cmd:status' }],
-    [{ label: '💬 Compact View', callbackData: 'cmd:compact' }],
     [{ label: '⚠️ Errors', callbackData: 'cmd:errors' }],
     [{ label: '📜 Logs', callbackData: 'cmd:logs' }],
     [{ label: '🏥 Health', callbackData: 'cmd:health' }],
@@ -151,7 +234,6 @@ function cmdSubmenuMonitoring(): BotResponse {
 function cmdSubmenuPlans(): BotResponse {
   return menu('📝 *Plans & AI*\nDraft, view, edit, and launch plans:', [
     [{ label: '✨ Draft New Plan', callbackData: 'cmd:draft_prompt' }],
-    [{ label: '🎙 Transcribe Recording', callbackData: 'cmd:transcribe' }],
     [{ label: '👁 View Plan', callbackData: 'cmd:viewplan' }],
     [{ label: '✏️ Edit Plan', callbackData: 'cmd:edit' }],
     [{ label: '🖼 Assets', callbackData: 'cmd:assets' }],
@@ -174,9 +256,7 @@ function cmdSubmenuSkills(): BotResponse {
 
 function cmdSubmenuSystem(): BotResponse {
   return menu('⚙️ *System*\nSystem operations & resources:', [
-    [{ label: '📈 Token Usage', callbackData: 'cmd:usage' }],
     [{ label: '🏥 Health', callbackData: 'cmd:health' }],
-    [{ label: '⚙️ Config', callbackData: 'cmd:config' }],
     [{ label: '🔔 Notifications', callbackData: 'cmd:preferences' }],
     [{ label: '🧹 Clear Plans', callbackData: 'cmd:clearplans' }],
     [{ label: '⬅️ Back', callbackData: 'menu:main' }],
@@ -191,7 +271,10 @@ async function cmdDashboard(): Promise<BotResponse> {
     api.getBaseUrl(),
   ]);
   const total = summary.total || 0;
-  const active = (summary.pending || 0) + (summary.engineering || 0) + (summary.qa_review || 0) + (summary.fixing || 0);
+  const active = (summary.pending || 0)
+    + (summary.developing || 0) + (summary.engineering || 0)
+    + (summary.review || 0) + (summary.qa_review || 0)
+    + (summary.fixing || 0);
   const passed = summary.passed || 0;
   const failed = summary.failed_final || 0;
 
@@ -232,7 +315,7 @@ async function cmdStatus(): Promise<BotResponse> {
   if (error) return text(`⚠️ ${error}`);
   if (!rooms.length) return text('ℹ️ No War-Rooms found.');
 
-  const emoji: Record<string, string> = { passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', pending: '⏳', review: '👀', fixing: '🔧', 'failed-final': '❌' };
+  const emoji: Record<string, string> = { passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', developing: '🏃‍♂️', pending: '⏳', review: '👀', qa_review: '👀', fixing: '🔧', 'failed-final': '❌' };
   const lines = ['📋 *War-Rooms Status:*', '`─────────────────────────────`'];
   for (const r of rooms) {
     const e = r.status.includes('fail') ? '❌' : (emoji[r.status] || '❓');
@@ -240,26 +323,6 @@ async function cmdStatus(): Promise<BotResponse> {
   }
   lines.push('`─────────────────────────────`');
   return text(lines.join('\n'));
-}
-
-async function cmdCompact(): Promise<BotResponse> {
-  const { rooms, error } = await api.getRooms();
-  if (error) return text(`⚠️ ${error}`);
-  const active = rooms.filter(r => !['passed', 'failed-final'].includes(r.status));
-  if (!active.length) return text('ℹ️ No active agents right now.');
-
-  const lines = ['💬 *Latest Agent Messages:*'];
-  for (const r of active.slice(0, 8)) {
-    const ch = await api.getRoomChannel(r.room_id, 1);
-    const msgs = ch?.messages || ch || [];
-    if (Array.isArray(msgs) && msgs.length) {
-      const m = msgs[0];
-      let body = (m.body || '').slice(0, 100).replace(/\n/g, ' ');
-      body = body.replace(/[*_`]/g, '');
-      lines.push(`*${r.room_id}* (${m.from || 'Unknown'}): \`${body}...\``);
-    }
-  }
-  return text(lines.length === 1 ? 'ℹ️ No active agents right now.' : lines.join('\n'));
 }
 
 async function cmdErrors(): Promise<BotResponse> {
@@ -375,28 +438,6 @@ async function cmdHealth(): Promise<BotResponse> {
 \`─────────────────────────────\``);
 }
 
-async function cmdConfig(args: string): Promise<BotResponse> {
-  const key = args.trim();
-  if (!key) {
-    const cfg = await api.getConfig();
-    if (cfg?._error) return text(`⚠️ ${cfg._error}`);
-    const preview = JSON.stringify(cfg, null, 2);
-    const truncated = preview.length > 3000 ? preview.slice(0, 3000) + '\n...[truncated]' : preview;
-    return text(`⚙️ *Configuration:*\n\`\`\`json\n${truncated}\n\`\`\``);
-  }
-  // Show a specific key from the config
-  const cfg = await api.getConfig();
-  if (cfg?._error) return text(`⚠️ ${cfg._error}`);
-  const parts = key.split('.');
-  let val: any = cfg;
-  for (const p of parts) {
-    val = val?.[p];
-    if (val === undefined) return text(`⚠️ Config key \`${key}\` not found.`);
-  }
-  const display = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
-  return text(`⚙️ \`${key}\` = \`\`\`\n${display}\n\`\`\``);
-}
-
 // ── Tier 2: Skills management ────────────────────────────────────
 
 async function cmdSkillSearch(args: string): Promise<BotResponse> {
@@ -476,17 +517,6 @@ async function cmdTriage(args: string): Promise<BotResponse> {
   return text(`🔧 *Triage initiated for \`${roomId}\`*\nAction: resume\nThe room will be re-evaluated by the manager.`);
 }
 
-async function cmdCloneRole(args: string): Promise<BotResponse> {
-  const role = args.trim();
-  if (!role) return text('⚠️ Usage: `/clonerole <role>`\nExample: `/clonerole engineer`');
-  if (!/^[a-zA-Z0-9_-]+$/.test(role)) return text('⚠️ Invalid role name. Use only letters, numbers, hyphens, and underscores.');
-
-  const result = await api.shellCommand(`ostwin clone-role ${role}`);
-  if (result?._error) return text(`❌ Failed to clone role \`${role}\`: ${result._error}`);
-  const output = result?.stdout || '';
-  return text(`✅ *Role cloned:* \`${role}\`\n${output ? `\`\`\`\n${output.slice(0, 500)}\n\`\`\`` : 'Role is now available for project-local override.'}`);
-}
-
 async function cmdLaunchDashboard(): Promise<BotResponse> {
   const [baseUrl, botStatus] = await Promise.all([
     api.getBaseUrl(),
@@ -540,24 +570,6 @@ async function cmdSkills(): Promise<BotResponse> {
   return text(lines.join('\n'));
 }
 
-async function cmdUsage(): Promise<BotResponse> {
-  const stats = await api.getStats();
-  if (stats?._error) return text(`⚠️ ${stats._error}`);
-
-  const completion = stats?.completion_rate?.value ?? 0;
-  const epics = stats?.active_epics?.value ?? 0;
-  const plans = stats?.total_plans?.value ?? 0;
-  const escalations = stats?.escalations_pending?.value ?? 0;
-
-  return text(`📈 *STATS REPORT*
-\`─────────────────────────────\`
-📋 *Total Plans:*      \`${plans}\`
-🏃‍♂️ *Active Epics:*     \`${epics}\`
-📊 *Completion Rate:*  \`${completion.toFixed(1)}%\`
-⚠️ *Escalations:*      \`${escalations}\`
-\`─────────────────────────────\``);
-}
-
 export function cmdHelp(): BotResponse {
   return text(`*OS Twin Command Center — Help Menu*
 \`─────────────────────────────\`
@@ -570,14 +582,12 @@ export function cmdHelp(): BotResponse {
   /startplan — Select and launch a plan.
   /resume — Resume a failed or stopped plan.
   /assets — List assets attached to the active or selected plan.
-  /transcribe — Transcribe a voice recording with AI.
   /setdir <path> — Set the target project directory.
   /cancel — Exit current editing/drafting session.
 
 *Monitoring & Insights*
   /dashboard — Visual UI with real-time progress bars.
   /status — Detailed breakdown of every active War-Room.
-  /compact — Latest messages from agents.
   /errors — Root cause of any failed War-Rooms.
   /logs [room_id] — View war-room channel messages.
   /health — System health check.
@@ -590,12 +600,9 @@ export function cmdHelp(): BotResponse {
   /skillremove <name> — Remove an installed skill.
   /skillsync — Sync skills with dashboard.
   /roles — List all agent roles.
-  /clonerole <role> — Clone a role for project override.
 
 *System Operations*
   /plans — List all project plans.
-  /usage — Stats report.
-  /config [key] — View system configuration.
   /triage [room_id] — Triage a failed war-room.
   /clearplans — Wipe all plan data.
   /new — Wipe old War-Room data to start fresh.
@@ -795,14 +802,35 @@ async function cmdAssetsMenu(userId: string, platform: string): Promise<BotRespo
 async function cmdViewPlan(planId: string): Promise<BotResponse> {
   const data = await api.getPlan(planId);
   if (data?._error) return text(`❌ Plan \`${planId}\` not found.`);
-  let content: string = data.content || '';
+  let content: string = data.plan?.content || data.content || '';
+  if (!content) return text(`📄 *Plan: ${planId}*\n_(no markdown content found)_`);
   if (content.length > 3500) content = content.slice(0, 3500) + '\n...[truncated]';
   return text(`📄 *Plan: ${planId}*\n\`\`\`markdown\n${content}\n\`\`\``);
 }
 
-function cmdStartEditing(userId: string, platform: string, planId: string): BotResponse {
+async function cmdStartEditing(userId: string, platform: string, planId: string): Promise<BotResponse> {
   setPlan(userId, platform, planId);
-  return text(`✏️ *Active plan set to \`${planId}\`*\n\n@mention me with instructions to refine this plan, or ask about its status.\nType /cancel to deselect.`);
+
+  const convId = `connector:${platform}:${userId}`;
+  const result = await api.askOpenCodeCommand({
+    command: 'edit',
+    arguments: planId,
+    conversation_id: convId,
+    user_id: userId,
+    platform,
+  });
+
+  if ((result as any)._error) {
+    return text(`✏️ *Active plan set to \`${planId}\`*\n\n⚠️ OpenCode error: ${(result as any)._error}\nType /cancel to deselect.`);
+  }
+
+  for (const action of result.actions || []) {
+    if (action.type === 'plan_created' && action.plan_id) {
+      setPlan(userId, platform, action.plan_id);
+    }
+  }
+
+  return text(result.text || `✏️ *Editing plan \`${planId}\`*\n\nSend your instructions to refine this plan.`);
 }
 
 function cmdPromptLaunch(planId: string): BotResponse {
@@ -824,7 +852,7 @@ async function cmdLaunchPlan(planId: string): Promise<BotResponse[]> {
 // ── AI draft / refine ─────────────────────────────────────────────
 
 // processDraft and handleStatefulText removed — all plan creation
-// and refinement now goes through askAgent() with create_plan / refine_plan tools.
+// and refinement now goes through askAgent() (OpenCode-backed) with create_plan / refine_plan tools.
 
 // ── EPIC-003: File attachment handling during plan conversations ──
 
@@ -865,65 +893,6 @@ export async function handleFileAttachments(
   }
 
   return responses;
-}
-
-// ── Audio transcription ───────────────────────────────────────────
-
-async function cmdTranscribe(userId: string, platform: string): Promise<BotResponse[]> {
-  const files = listRecordings();
-  if (!files.length) return [text('ℹ️ No recordings found. Use `/join` in a voice channel first.')];
-
-  // If multiple recordings, show selection buttons
-  if (files.length > 1) {
-    const buttons = files.slice(0, 8).map(f => {
-      const label = f.length > 30 ? f.slice(0, 27) + '...' : f;
-      return [{ label: `🎙 ${label}`, callbackData: `menu:transcribe:${f}` }];
-    });
-    return [menu('🎙 *Select a recording to transcribe:*', buttons)];
-  }
-
-  // Single recording — transcribe directly
-  return transcribeFile(userId, platform, files[0]);
-}
-
-async function transcribeFile(userId: string, platform: string, filename: string): Promise<BotResponse[]> {
-  const responses: BotResponse[] = [text(`⏳ *Transcribing* \`${filename}\`...\nThis may take a moment.`)];
-
-  try {
-    const result = await transcribeAudio(filename);
-    const mins = Math.floor(result.durationSecs / 60);
-    const secs = Math.round(result.durationSecs % 60);
-
-    const session = getSession(userId, platform);
-    session.lastTranscription = result.text;
-    session.lastActivity = Date.now();
-
-    let transcriptDisplay = result.text;
-    if (transcriptDisplay.length > 3000) {
-      transcriptDisplay = transcriptDisplay.slice(0, 3000) + '\n...[truncated]';
-    }
-
-    responses.push(text(`🎙 *Transcription* (${mins}m ${secs}s)\n\n${transcriptDisplay}`));
-    responses.push(menu('What would you like to do with this transcription?', [
-      [{ label: '📝 Draft Plan from Recording', callbackData: 'cmd:transcribe_plan' }],
-      [{ label: '🔄 Transcribe Another', callbackData: 'cmd:transcribe' }],
-    ]));
-  } catch (err: any) {
-    responses.push(text(`❌ Transcription failed: ${err.message}`));
-  }
-
-  return responses;
-}
-
-async function cmdTranscribePlan(userId: string, platform: string): Promise<BotResponse[]> {
-  const session = getSession(userId, platform);
-  if (!session.lastTranscription) {
-    return [text('⚠️ No transcription available. Run /transcribe first.')];
-  }
-
-  const idea = `Plan based on voice discussion:\n\n${session.lastTranscription}`;
-  const result = await askAgent(`Create a plan for: ${idea}`, { userId, platform });
-  return [text(result.text)];
 }
 
 function _generateSlug(idea: string): string {
@@ -1049,26 +1018,55 @@ async function handleToggleEvent(userId: string, platform: string, eventId: stri
 
 // ── Unified router ────────────────────────────────────────────────
 
+// Commands whose execution already flows through the OpenCode session
+// (either via askAgent or via api.askOpenCodeCommand). Their results live
+// in the server-side session history already, so pushing them to
+// pendingContext would replay the same content as a fake user message on
+// the next askAgent() call and the model would see it as a duplicate.
+const OPENCODE_BACKED_COMMANDS = new Set(['draft', 'edit']);
+
 export async function routeCommand(userId: string, platform: string, command: string, args = ''): Promise<BotResponse[]> {
+  const responses = await _routeCommandInner(userId, platform, command, args);
+
+  // Store result in pendingContext so the next askAgent() call can inject
+  // it as context for the OpenCode session. Skip for OpenCode-backed
+  // commands and session-resetting commands.
+  const session = getSession(userId, platform);
+  const resultText = responses.map(r => r.text).join('\n').slice(0, 500);
+  const skip = command === 'clear' || command === 'cancel' || OPENCODE_BACKED_COMMANDS.has(command);
+  if (resultText && !skip) {
+    session.pendingContext.push({
+      command: `${command} ${args}`.trim(),
+      result: resultText,
+      timestamp: Date.now(),
+    });
+    if (session.pendingContext.length > 5) session.pendingContext.shift();
+  }
+
+  return responses;
+}
+
+async function _routeCommandInner(userId: string, platform: string, command: string, args = ''): Promise<BotResponse[]> {
   switch (command) {
     case 'menu':        return [cmdMenu()];
-    case 'help':
-    case 'start':       return [cmdHelp()];
+    case 'help':        return [cmdHelp()];
     case 'dashboard':   return [await cmdDashboard()];
     case 'status':      return [await cmdStatus()];
-    case 'compact':     return [await cmdCompact()];
     case 'plans':       return [await cmdPlans()];
     case 'errors':      return [await cmdErrors()];
     case 'skills':      return [await cmdSkills()];
-    case 'usage':       return [await cmdUsage()];
     case 'new':         return [await cmdNew()];
     case 'restart':     return [await cmdRestart()];
     case 'cancel':
       clearSession(userId, platform);
       return [text('🛑 Session cleared. Active plan deselected.')];
-    case 'clear':
-      clearChatHistory(userId, platform);
+    case 'clear': {
+      const session = getSession(userId, platform);
+      session.pendingContext = [];
+      const convId = `connector:${platform}:${userId}`;
+      api.endConversation(convId).catch(err => console.warn('[CLEAR] Failed to end OpenCode session:', err));
       return [text('🧹 Conversation history cleared. The AI will start fresh.')];
+    }
     case 'setdir': {
       const dir = args.trim();
       if (!dir) {
@@ -1088,13 +1086,29 @@ export async function routeCommand(userId: string, platform: string, command: st
       if (!idea) {
         return [text('✨ Usage: `/draft <your idea>`\nExample: `/draft build a todo app with authentication`\n\nOr just `@os-twin build me a todo app` — the AI will handle it.')];
       }
-      // Route through askAgent — Gemini will call create_plan tool
-      // which sets activePlanId via setPlan() inside executeTool()
-      const result = await askAgent(`Create a plan for: ${idea}`, { userId, platform });
-      return [text(result.text)];
+      // Run /draft as a real OpenCode slash command. The server resolves
+      // .opencode/commands/draft.md (with $ARGUMENTS = idea) and invokes
+      // the ostwin agent, which calls ostwin_create_plan. No fabricated
+      // user message is injected into the session history.
+      const convId = `connector:${platform}:${userId}`;
+      const result = await api.askOpenCodeCommand({
+        command: 'draft',
+        arguments: idea,
+        conversation_id: convId,
+        user_id: userId,
+        platform,
+      });
+      if ((result as any)._error) {
+        return [text(`⚠️ OpenCode command error: ${(result as any)._error}`)];
+      }
+      // Mirror askAgent's action handling so activePlanId gets set.
+      for (const action of result.actions || []) {
+        if (action.type === 'plan_created' && action.plan_id) {
+          setPlan(userId, platform, action.plan_id);
+        }
+      }
+      return [text(result.text || 'No response.')];
     }
-    case 'transcribe':  return cmdTranscribe(userId, platform);
-    case 'transcribe_plan': return cmdTranscribePlan(userId, platform);
     case 'edit':        return [await cmdEditMenu()];
     case 'assets':      return [await cmdAssetsMenu(userId, platform)];
     case 'startplan':   return [await cmdStartplanMenu()];
@@ -1109,7 +1123,6 @@ export async function routeCommand(userId: string, platform: string, command: st
     case 'clearplans':      return [await cmdClearPlans()];
     case 'logs':            return [await cmdLogs(args)];
     case 'health':          return [await cmdHealth()];
-    case 'config':          return [await cmdConfig(args)];
     // ── Tier 2 commands ─────────────────────────────────────────
     case 'skillsearch':     return [await cmdSkillSearch(args)];
     case 'skillinstall':    return [await cmdSkillInstall(args)];
@@ -1117,7 +1130,6 @@ export async function routeCommand(userId: string, platform: string, command: st
     case 'skillsync':       return [await cmdSkillSync()];
     case 'roles':           return [await cmdRoles()];
     case 'triage':          return [await cmdTriage(args)];
-    case 'clonerole':       return [await cmdCloneRole(args)];
     case 'launchdashboard': return [await cmdLaunchDashboard()];
 
     default:            return [text('⚠️ Unknown command. Type /help for a list of commands.')];
@@ -1144,10 +1156,6 @@ export async function routeCallback(userId: string, platform: string, callbackDa
     return routeCommand(userId, platform, cmd);
   }
 
-  if (callbackData.startsWith('menu:transcribe:')) {
-    const filename = callbackData.slice('menu:transcribe:'.length);
-    return transcribeFile(userId, platform, filename);
-  }
   if (callbackData.startsWith('menu:view:')) {
     const planId = callbackData.split(':')[2];
     return [await cmdViewPlan(planId)];
@@ -1158,7 +1166,7 @@ export async function routeCallback(userId: string, platform: string, callbackDa
   }
   if (callbackData.startsWith('menu:edit:')) {
     const planId = callbackData.split(':')[2];
-    return [cmdStartEditing(userId, platform, planId)];
+    return [await cmdStartEditing(userId, platform, planId)];
   }
   if (callbackData.startsWith('menu:launch_prompt:')) {
     const planId = callbackData.split(':')[2];

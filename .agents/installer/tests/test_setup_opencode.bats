@@ -18,7 +18,7 @@ setup() {
   declare -f setup_opencode_permissions > /dev/null
 }
 
-@test "patch_opencode_permissions.py adds permission.read rules" {
+@test "patch_opencode_permissions.py adds file-read permissions" {
   TEST_DIR="$(mktemp -d)"
 
   cat > "$TEST_DIR/opencode.json" <<'JSONEOF'
@@ -32,6 +32,7 @@ JSONEOF
   [ "$status" -eq 0 ]
   grep -q '"read"' "$TEST_DIR/opencode.json"
   grep -Fq '"*.env.example": "allow"' "$TEST_DIR/opencode.json"
+  grep -q '"external_directory"' "$TEST_DIR/opencode.json"
 
   rm -rf "$TEST_DIR"
 }
@@ -48,6 +49,9 @@ JSONEOF
       "*.env": "allow",
       "*.env.*": "allow",
       "*.env.example": "allow"
+    },
+    "external_directory": {
+      "*": "allow"
     }
   }
 }

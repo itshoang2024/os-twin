@@ -1,12 +1,11 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
+import { ChatInputCommandInteraction, TextChannel } from 'discord.js';
 import { getVoiceConnection } from '@discordjs/voice';
 import path from 'node:path';
 import { cleanupSession } from './join';
 import { transcribeAndLaunch } from '../audio-transcript';
+import { buildDiscordSlashCommand, requireCommandDef } from '../commands';
 
-export const data = new SlashCommandBuilder()
-  .setName('leave')
-  .setDescription('Disconnects the bot from the voice channel and saves all recordings.');
+export const data = buildDiscordSlashCommand(requireCommandDef('leave'));
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<any> {
   const guildId = interaction.guildId!;

@@ -28,6 +28,13 @@ from dashboard.llm_client import (
     _get_base_url,
     load_provider_urls,
     PROVIDER_URLS,
+    _sanitize_gemini_schema,
+    _GEMINI_SCHEMA_ALLOWED_KEYS,
+    _detect_embedding_provider_from_model,
+    create_embedding_client,
+    OllamaEmbeddingClient,
+    OpenAICompatibleEmbeddingClient,
+    GeminiEmbeddingClient,
 )
 
 
@@ -68,7 +75,7 @@ class TestChatMessage:
 class TestLLMConfig:
     def test_default_config(self):
         config = LLMConfig()
-        assert config.max_tokens == 4096
+        assert config.max_tokens is None
         assert config.temperature is None
         assert config.top_p is None
         assert config.stop is None
@@ -500,3 +507,284 @@ class TestTruncateMessagesThinWrapper:
         with patch("dashboard.lib.settings.models_dev_loader.truncate_messages_for_model", side_effect=RuntimeError("boom")):
             result = client._truncate_messages(msgs)
         assert result == msgs
+
+
+class TestSanitizeGeminiSchema:
+    """``_sanitize_gemini_schema`` strips JSON-Schema fields that Gemini's
+    Schema proto rejects (``additionalProperties``, ``$schema``, ``strict``,
+    ``$ref``, ``oneOf``, ``definitions``, …) while preserving every key
+    that lives inside ``properties`` (those are user-defined field names)
+    and the literal entries of ``required``.
+    """
+
+    def test_strips_additional_properties(self):
+        schema = {"type": "object", "additionalProperties": False, "properties": {"x": {"type": "string"}}}
+        out = _sanitize_gemini_schema(schema)
+        assert "additionalProperties" not in out
+        assert out["type"] == "object"
+        assert out["properties"] == {"x": {"type": "string"}}
+
+    def test_strips_unknown_top_level_keys(self):
+        schema = {
+            "type": "object",
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "strict": True,
+            "$ref": "#/definitions/Foo",
+            "oneOf": [{"type": "string"}],
+            "definitions": {"Foo": {"type": "string"}},
+            "properties": {"x": {"type": "string"}},
+        }
+        out = _sanitize_gemini_schema(schema)
+        for forbidden in ("$schema", "strict", "$ref", "oneOf", "definitions"):
+            assert forbidden not in out
+        assert out["type"] == "object"
+        assert "properties" in out
+
+    def test_preserves_property_keys_verbatim(self):
+        # Property names must NOT be filtered by the allowlist — they are
+        # user-defined field identifiers (could be anything like "additionalProperties"
+        # as a field name) and their values are recursively sanitized.
+        schema = {
+            "type": "object",
+            "properties": {
+                "additionalProperties": {"type": "string"},  # property literally named that
+                "strict": {"type": "boolean", "additionalProperties": False},
+                "normal_field": {"type": "integer"},
+            },
+        }
+        out = _sanitize_gemini_schema(schema)
+        assert set(out["properties"].keys()) == {"additionalProperties", "strict", "normal_field"}
+        # The value for "strict" is itself a schema — its additionalProperties must be stripped.
+        assert "additionalProperties" not in out["properties"]["strict"]
+        assert out["properties"]["strict"]["type"] == "boolean"
+
+    def test_preserves_required_list_verbatim(self):
+        schema = {
+            "type": "object",
+            "required": ["name", "age", "additionalProperties"],
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+                "additionalProperties": {"type": "string"},
+            },
+        }
+        out = _sanitize_gemini_schema(schema)
+        # required is a list of strings — preserved as-is (even if a string
+        # happens to collide with a disallowed key name).
+        assert out["required"] == ["name", "age", "additionalProperties"]
+
+    def test_recurses_into_items(self):
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"x": {"type": "string"}},
+            },
+        }
+        out = _sanitize_gemini_schema(schema)
+        assert "additionalProperties" not in out["items"]
+        assert out["items"]["type"] == "object"
+
+    def test_recurses_into_anyof(self):
+        schema = {
+            "anyOf": [
+                {"type": "string", "strict": True},
+                {"type": "object", "additionalProperties": False, "properties": {"x": {"type": "string"}}},
+            ],
+        }
+        out = _sanitize_gemini_schema(schema)
+        assert isinstance(out["anyOf"], list)
+        assert "strict" not in out["anyOf"][0]
+        assert "additionalProperties" not in out["anyOf"][1]
+
+    def test_passthrough_for_scalar_inputs(self):
+        assert _sanitize_gemini_schema("string") == "string"
+        assert _sanitize_gemini_schema(42) == 42
+        assert _sanitize_gemini_schema(True) is True
+        assert _sanitize_gemini_schema(None) is None
+
+    def test_list_of_scalars_preserved(self):
+        # required: ["a", "b"] is the common case — list of strings.
+        assert _sanitize_gemini_schema(["a", "b", "c"]) == ["a", "b", "c"]
+
+    def test_nested_object_array_combo(self):
+        # Realistic shape: object → array → object, with stray keys at every level.
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "string", "$ref": "ignored"},
+                        },
+                        "required": ["id"],
+                    },
+                },
+            },
+            "required": ["items"],
+        }
+        out = _sanitize_gemini_schema(schema)
+        assert "additionalProperties" not in out
+        item_schema = out["properties"]["items"]["items"]
+        assert "additionalProperties" not in item_schema
+        assert "$ref" not in item_schema["properties"]["id"]
+        assert item_schema["required"] == ["id"]
+
+    def test_allowed_keys_set_contains_core_schema_fields(self):
+        # Smoke-check the allowlist contents to flag accidental removals.
+        for k in ("type", "properties", "required", "items", "anyOf", "enum", "description"):
+            assert k in _GEMINI_SCHEMA_ALLOWED_KEYS
+
+
+class TestDetectEmbeddingProvider:
+    """``_detect_embedding_provider_from_model`` routes bare model names to
+    the right backend.  Crucially, sentence-transformers names no longer
+    receive special-casing — they fall through to the ``ollama`` default
+    (since ST support was removed from the codebase)."""
+
+    def test_empty_model_defaults_to_ollama(self):
+        assert _detect_embedding_provider_from_model("") == "ollama"
+
+    def test_gemini_routes_to_google(self):
+        assert _detect_embedding_provider_from_model("gemini-embedding-001") == "google"
+
+    def test_vertex_in_name_routes_to_vertex(self):
+        assert _detect_embedding_provider_from_model("vertex-gemini-embedding") == "google-vertex"
+
+    def test_text_embedding_matches_google_branch_first(self):
+        # Implementation order: "text-embedding" substring is checked in the
+        # google branch before the openai-compatible branch.  This pins the
+        # current behaviour so a refactor that reorders branches surfaces a
+        # diff.
+        assert _detect_embedding_provider_from_model("text-embedding-3-small") == "google"
+
+    def test_gpt_prefix_routes_to_openai_compatible(self):
+        assert _detect_embedding_provider_from_model("gpt-embedding") == "openai-compatible"
+
+    def test_ollama_model_falls_through_to_ollama(self):
+        assert _detect_embedding_provider_from_model("qwen3-embedding:0.6b") == "ollama"
+        assert _detect_embedding_provider_from_model("nomic-embed-text") == "ollama"
+
+    @pytest.mark.parametrize("model", ["all-MiniLM-L6-v2", "BAAI/bge-small-en-v1.5"])
+    def test_legacy_sentence_transformer_names_are_rejected(self, model):
+        with pytest.raises(ValueError, match="legacy sentence-transformer embedding models are no longer supported"):
+            _detect_embedding_provider_from_model(model)
+
+
+class TestCreateEmbeddingClient:
+    """``create_embedding_client`` factory branches.  Tests bypass the
+    singleton cache via ``shared=False`` so they don't pollute global state.
+    """
+
+    def test_ollama_branch_for_default_model(self):
+        client = create_embedding_client(
+            model="qwen3-embedding:0.6b",
+            provider="ollama",
+            shared=False,
+        )
+        assert isinstance(client, OllamaEmbeddingClient)
+        assert client.model == "qwen3-embedding:0.6b"
+
+    def test_ollama_branch_auto_detected(self):
+        # No provider/ prefix and no explicit provider → defaults to ollama.
+        client = create_embedding_client(model="qwen3-embedding:0.6b", shared=False)
+        assert isinstance(client, OllamaEmbeddingClient)
+
+    def test_openai_compatible_branch(self):
+        # Use an "openai/" prefix so _CHAT_TO_EMBED_PROVIDER remaps
+        # "openai" → "openai-compatible".  The factory only routes to
+        # OpenAICompatibleEmbeddingClient when the remapped embed_provider
+        # differs from the explicit model_provider (preventing a literal
+        # "openai-compatible/" prefix from short-circuiting through here).
+        client = create_embedding_client(
+            model="openai/text-embedding-3-small",
+            shared=False,
+            base_url="http://localhost:9000",
+            api_key="fake-key",
+        )
+        assert isinstance(client, OpenAICompatibleEmbeddingClient)
+        # provider/ prefix must be stripped from the model name.
+        assert client.model == "text-embedding-3-small"
+
+    def test_google_branch_uses_gemini_client(self):
+        # Need to patch google.genai.Client because GeminiEmbeddingClient
+        # constructs one eagerly in __init__.
+        with patch("dashboard.llm_client.GeminiEmbeddingClient") as MockGEC:
+            MockGEC.return_value = MagicMock(spec=GeminiEmbeddingClient)
+            client = create_embedding_client(
+                model="google/gemini-embedding-001",
+                shared=False,
+                api_key="fake-key",
+            )
+            MockGEC.assert_called_once()
+            # clean_model passed should have the provider prefix stripped.
+            kwargs = MockGEC.call_args.kwargs
+            assert kwargs["model"] == "gemini-embedding-001"
+            assert kwargs["vertexai"] is False
+
+    def test_google_vertex_branch_sets_vertexai_flag(self):
+        with patch("dashboard.llm_client.GeminiEmbeddingClient") as MockGEC:
+            MockGEC.return_value = MagicMock(spec=GeminiEmbeddingClient)
+            create_embedding_client(
+                model="google-vertex/gemini-embedding-001",
+                shared=False,
+                api_key="fake-key",
+            )
+            kwargs = MockGEC.call_args.kwargs
+            assert kwargs["vertexai"] is True
+            assert kwargs["model"] == "gemini-embedding-001"
+
+    def test_unknown_provider_falls_back_to_ollama(self):
+        client = create_embedding_client(
+            model="some-model",
+            provider="totally-unknown-provider",
+            shared=False,
+        )
+        assert isinstance(client, OllamaEmbeddingClient)
+
+    @pytest.mark.parametrize("provider", ["sentence-transformer", "sentence-transformers", "sentence_transformers"])
+    def test_sentence_transformers_provider_is_rejected(self, provider):
+        with pytest.raises(ValueError, match="sentence-transformers embeddings are no longer supported"):
+            create_embedding_client(
+                model="all-MiniLM-L6-v2",
+                provider=provider,
+                shared=False,
+            )
+
+    @pytest.mark.parametrize("model", [
+        "sentence-transformer/all-MiniLM-L6-v2",
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "sentence_transformers/all-MiniLM-L6-v2",
+    ])
+    def test_sentence_transformers_model_prefix_is_rejected(self, model):
+        with pytest.raises(ValueError, match="sentence-transformers embeddings are no longer supported"):
+            create_embedding_client(model=model, shared=False)
+
+    @pytest.mark.parametrize("model", ["all-MiniLM-L6-v2", "BAAI/bge-small-en-v1.5"])
+    def test_legacy_sentence_transformer_model_ids_are_rejected(self, model):
+        with pytest.raises(ValueError, match="legacy sentence-transformer embedding models are no longer supported"):
+            create_embedding_client(model=model, shared=False)
+
+    def test_shared_cache_returns_same_instance(self):
+        # The factory caches by (provider, model, dimension); two shared
+        # lookups with identical keys must return the same object.
+        from dashboard.llm_client import _embedding_cache
+        _embedding_cache.clear()
+        c1 = create_embedding_client(model="qwen3-embedding:0.6b", provider="ollama", dimension=512)
+        c2 = create_embedding_client(model="qwen3-embedding:0.6b", provider="ollama", dimension=512)
+        assert c1 is c2
+
+    def test_shared_false_returns_new_instance(self):
+        c1 = create_embedding_client(model="qwen3-embedding:0.6b", provider="ollama", shared=False)
+        c2 = create_embedding_client(model="qwen3-embedding:0.6b", provider="ollama", shared=False)
+        assert c1 is not c2
+
+    def test_sentence_transformers_class_no_longer_exists(self):
+        # Compile-time assertion: the ST embedding client class was removed.
+        import dashboard.llm_client as llm_client_mod
+        assert not hasattr(llm_client_mod, "SentenceTransformersEmbeddingClient")

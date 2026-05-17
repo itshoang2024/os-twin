@@ -2,7 +2,7 @@
 
 The :class:`Ingestor` walks a directory, parses each supported file with
 MarkItDown, chunks the markdown, optionally extracts entities + relations via
-Anthropic, embeds the chunks with sentence-transformers, and writes everything
+Anthropic, embeds the chunks through the configured embedding provider, and writes everything
 into the namespace's Kuzu graph + zvec vector store.
 
 Design points:
@@ -25,9 +25,8 @@ Design points:
   :class:`NamespaceManager` instance's path methods, so a manager constructed
   with a custom ``base_dir`` writes vectors + graph under that directory
   (Defect 1 in EPIC-003 QA).
-- **Lazy heavy imports.** ``markitdown``, ``zvec``, ``kuzu`` and
-  ``sentence_transformers`` are not imported until the worker thread actually
-  needs them (``Ingestor.__init__`` is cheap).
+- **Lazy heavy imports.** ``markitdown``, ``zvec`` and ``kuzu`` are not imported
+  until the worker thread actually needs them (``Ingestor.__init__`` is cheap).
 
 The Ingestor is normally driven by :class:`dashboard.knowledge.jobs.JobManager`
 through :meth:`KnowledgeService.import_folder`.

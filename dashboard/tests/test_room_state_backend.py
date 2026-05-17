@@ -1,13 +1,22 @@
-import sys
+"""Tests for ``dashboard.api_utils.read_room``.
+
+Covers the basic shape plus two recently-added fields the bot/OpenCode
+slash-command clients rely on:
+
+* ``plan_id``  — surfaced from the room's ``config.json``.
+* ``epic_ref`` — alias of ``task_ref`` so callers spelling it either way
+  pick up the same value.
+"""
+
+from __future__ import annotations
+
+import json
 import os
+import sys
 from pathlib import Path
 
 _dashboard_dir = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_dashboard_dir)
-
-# Override WARROOMS_DIR for this test
-WARROOMS_DIR_OVERRIDE = Path(_dashboard_dir) / ".war-rooms"
-
 if _root not in sys.path:
     sys.path.insert(0, _root)
 if _dashboard_dir not in sys.path:
@@ -15,38 +24,73 @@ if _dashboard_dir not in sys.path:
 
 from dashboard.api_utils import read_room
 
-def test_read_room_extended():
-    room_dir = WARROOMS_DIR_OVERRIDE / "room-003"
-    if not room_dir.exists():
-        print(f"Room {room_dir} not found, skipping test.")
-        return
 
-    print(f"Reading room: {room_dir}")
-    room_data = read_room(room_dir, include_metadata=True)
-    
-    print(f"Room ID: {room_data.get('room_id')}")
-    print(f"Lifecycle keys: {list(room_data.get('lifecycle', {}).keys())}")
-    print(f"Roles count: {len(room_data.get('roles', []))}")
-    print(f"Artifacts count: {len(room_data.get('artifact_files', []))}")
-    print(f"Audit tail count: {len(room_data.get('audit_tail', []))}")
+def _make_room(tmp: Path, *, room_id: str = "room-007", plan_id: str | None = "plan-abc",
+               task_ref: str = "EPIC-007", status: str = "developing") -> Path:
+    room = tmp / room_id
+    room.mkdir(parents=True)
+    (room / "status").write_text(status)
+    (room / "task-ref").write_text(task_ref)
+    if plan_id is not None:
+        (room / "config.json").write_text(json.dumps({"plan_id": plan_id}))
+    return room
 
-    assert "lifecycle" in room_data
-    assert "roles" in room_data
-    assert "artifact_files" in room_data
-    assert "audit_tail" in room_data
-    
-    # Check lifecycle content
-    lifecycle = room_data["lifecycle"]
-    assert "initial_state" in lifecycle
-    assert "states" in lifecycle
-    assert "developing" in lifecycle["states"]
-    
-    # Check roles content
-    roles = room_data["roles"]
-    assert len(roles) > 0
-    assert roles[0]["role"] == "e"
-    
-    print("SUCCESS: read_room returns expected extended metadata.")
+
+def test_read_room_returns_plan_id_and_epic_ref_alias(tmp_path):
+    """OpenCode `/logs` and `/status` need both fields exposed."""
+    room = _make_room(tmp_path)
+    data = read_room(room)
+
+    assert data["room_id"] == "room-007"
+    assert data["task_ref"] == "EPIC-007"
+    assert data["epic_ref"] == "EPIC-007", "epic_ref must alias task_ref"
+    assert data["plan_id"] == "plan-abc"
+    assert data["status"] == "developing"
+
+
+def test_read_room_plan_id_is_none_when_no_config(tmp_path):
+    room = _make_room(tmp_path, plan_id=None)
+    data = read_room(room)
+    assert data["plan_id"] is None
+    assert data["epic_ref"] == "EPIC-007"
+
+
+def test_read_room_plan_id_is_none_for_malformed_config(tmp_path):
+    room = _make_room(tmp_path, plan_id=None)
+    (room / "config.json").write_text("{not json")
+    data = read_room(room)
+    assert data["plan_id"] is None
+
+
+def test_read_room_extended_metadata(tmp_path):
+    """``include_metadata=True`` should still surface lifecycle/roles/etc.
+
+    Regression guard: the new ``plan_id`` plumbing must coexist with the
+    existing extended-metadata block.
+    """
+    room = _make_room(tmp_path)
+    (room / "lifecycle.json").write_text(json.dumps({
+        "initial_state": "pending",
+        "states": {"developing": {}, "review": {}},
+    }))
+    (room / "engineer_001.json").write_text(json.dumps({
+        "role": "engineer", "instance_id": "001",
+    }))
+    artifacts = room / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "out.txt").write_text("hello")
+
+    data = read_room(room, include_metadata=True)
+
+    assert data["plan_id"] == "plan-abc"
+    assert data["epic_ref"] == "EPIC-007"
+    assert data["lifecycle"]["initial_state"] == "pending"
+    assert "developing" in data["lifecycle"]["states"]
+    assert len(data["roles"]) == 1
+    assert data["roles"][0]["role"] == "engineer"
+    assert "out.txt" in data["artifact_files"]
+
 
 if __name__ == "__main__":
-    test_read_room_extended()
+    import pytest
+    raise SystemExit(pytest.main([__file__, "-v"]))

@@ -182,9 +182,26 @@ def read_room(
             except json.JSONDecodeError:
                 pass
 
+    # Surface plan_id from config.json so callers (slash commands, OpenCode
+    # tools) can route /api/plans/{plan_id}/rooms/{room_id}/channel without
+    # an extra metadata fetch. epic_ref is exposed as an alias of task_ref
+    # because both bot and OpenCode tool consumers spell it that way.
+    plan_id: Optional[str] = None
+    config_file = room_dir / "config.json"
+    if config_file.exists():
+        try:
+            cfg = json.loads(config_file.read_text())
+            pid = cfg.get("plan_id")
+            if isinstance(pid, str) and pid:
+                plan_id = pid
+        except (json.JSONDecodeError, OSError):
+            pass
+
     result = {
         "room_id": room_id,
         "task_ref": task_ref,
+        "epic_ref": task_ref,
+        "plan_id": plan_id,
         "status": status,
         "retries": retries,
         "message_count": message_count,

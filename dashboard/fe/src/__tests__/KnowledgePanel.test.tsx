@@ -39,7 +39,8 @@ describe('KnowledgePanel', () => {
     expect(screen.getByText(/Knowledge Models/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Processing Model/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Model$/i).length).toBeGreaterThan(0); // The "Model" labels
-    expect(screen.getByText(/Embedding Dimension/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Embedding Dimension/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/HuggingFace \(Local\)/i)).not.toBeInTheDocument();
   });
 
   it('shows the selected model label in the trigger when an LLM is set', () => {
@@ -142,7 +143,7 @@ describe('KnowledgePanel', () => {
 
     const elements = screen.getAllByText('768');
     expect(elements.length).toBeGreaterThan(0);
-    expect(screen.getByText(/dimensions \(fixed\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/dimensions \(from env\)/i)).toBeInTheDocument();
   });
 
   it('hides provider dropdown when no models are configured', () => {

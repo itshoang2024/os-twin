@@ -102,18 +102,39 @@ async def get_thread(thread_id: str, user: dict = Depends(get_current_user)):
     return {"thread": thread, "messages": messages}
 
 async def auto_generate_title(thread_id: str, first_message: str):
-    from dashboard.plan_agent import _resolve_model
+    """Reuse the title OpenCode already generates for the thread's session.
+
+    OpenCode auto-titles every session from its own conversation content, so
+    we just read it back instead of spending a second LLM round-trip on a
+    title-only prompt.  The dashboard maps each planning thread to one
+    OpenCode session under conversation_id ``thread-{thread_id}``; we poll
+    that session until the placeholder ``"New session - …"`` title is
+    replaced with the real one.
+    """
     try:
-        chat_model = _resolve_model()
-        from langchain_core.messages import HumanMessage
-        prompt = f"Generate a 4-8 word title for this conversation: {first_message}"
-        result = await chat_model.ainvoke([HumanMessage(content=prompt)])
-        
-        title = result.content
-        if isinstance(title, list):
-            title = "".join([b["text"] if isinstance(b, dict) and "text" in b else str(b) for b in title])
-        
-        title = title.strip().strip('"').strip("'")
+        from dashboard.master_agent import _session_registry, get_opencode_client
+
+        session_id = _session_registry.get(f"thread-{thread_id}")
+        if not session_id:
+            logger.warning("Auto-title skipped: no opencode session for thread %s", thread_id)
+            return
+
+        client = get_opencode_client()
+        title: str | None = None
+        for _ in range(15):
+            session = await client.get(f"/session/{session_id}", cast_to=object)
+            candidate = (session.get("title") if isinstance(session, dict) else getattr(session, "title", "")) or ""
+            candidate = candidate.strip()
+            if candidate and not candidate.startswith("New session"):
+                title = candidate
+                break
+            await asyncio.sleep(2)
+
+        if not title:
+            logger.warning("Auto-title skipped: opencode session %s not titled yet", session_id)
+            return
+
+        title = title.strip('"').strip("'")
         store = global_state.planning_store
         if store:
             store.update_title(thread_id, title)
@@ -176,7 +197,12 @@ async def stream_thread_message(thread_id: str, request: ThreadMessageRequest, u
     async def event_generator():
         full_response = ""
         try:
-            async for token in brainstorm_stream(user_message=request.message, chat_history=chat_history, images=images_data):
+            async for token in brainstorm_stream(
+                user_message=request.message,
+                chat_history=chat_history,
+                images=images_data,
+                conversation_id=f"thread-{thread_id}",
+            ):
                 if "[Error:" in token:
                     yield f'data: {{"error": {json.dumps(token)}}}\n\n'
                 else:
@@ -247,7 +273,8 @@ async def promote_thread(thread_id: str, request: PromoteRequest, user: dict = D
             user_message=user_msg, 
             plan_content="", 
             chat_history=chat_history,
-            plans_dir=PLANS_DIR
+            plans_dir=PLANS_DIR,
+            conversation_id=f"thread-{thread_id}",
         )
         
         if "error" in result:

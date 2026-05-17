@@ -1,9 +1,10 @@
-import { SlashCommandBuilder, PermissionsBitField, ChatInputCommandInteraction, GuildMember } from 'discord.js';
+import { PermissionsBitField, ChatInputCommandInteraction, GuildMember } from 'discord.js';
 import { joinVoiceChannel, EndBehaviorType, getVoiceConnection, VoiceConnection } from '@discordjs/voice';
 import { pipeline, PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import path from 'node:path';
 import prism from 'prism-media';
+import { buildDiscordSlashCommand, requireCommandDef } from '../commands';
 
 // ── Recordings directory ────────────────────────────────────────────
 const RECORDINGS_DIR = path.resolve(__dirname, '../../recordings');
@@ -77,9 +78,7 @@ export async function cleanupSession(guildId: string): Promise<{ saved: string[]
 
 // ── Command ─────────────────────────────────────────────────────────
 
-export const data = new SlashCommandBuilder()
-  .setName('join')
-  .setDescription('Joins your voice channel and streams live audio.');
+export const data = buildDiscordSlashCommand(requireCommandDef('join'));
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<any> {
   const member = interaction.member as GuildMember;

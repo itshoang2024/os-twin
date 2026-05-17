@@ -124,6 +124,25 @@ describe('api', () => {
       expect(result.summary.total).to.equal(2);
     });
 
+    it('exposes both new (developing/review) and legacy (engineering/qa_review) keys on summary', async () => {
+      // The /api/rooms response shape mixes legacy and new keys during the
+      // transition. The RoomsSummary type must keep both passthrough so
+      // dashboard counts don't lose rooms.
+      mockFetch({
+        rooms: [],
+        summary: {
+          total: 6, passed: 1, failed_final: 0, pending: 1,
+          developing: 1, review: 1, engineering: 1, qa_review: 1, fixing: 0,
+        },
+      });
+
+      const result = await api.getRooms();
+      expect(result.summary.developing).to.equal(1);
+      expect(result.summary.review).to.equal(1);
+      expect(result.summary.engineering).to.equal(1);
+      expect(result.summary.qa_review).to.equal(1);
+    });
+
     it('returns empty on error', async () => {
       mockFetchError('timeout');
 
@@ -169,6 +188,16 @@ describe('api', () => {
       const body = JSON.parse(opts.body);
       expect(body.plan).to.equal('# Plan content');
       expect(body.plan_id).to.equal('p1');
+    });
+
+    it('passes through the runner_pid the dashboard returns', async () => {
+      // /api/run now spawns the runner, records its PID, and echoes it
+      // back so the bot can show the user a live process handle.
+      mockFetch({ status: 'launched', plan_id: 'p1', runner_pid: 4242 });
+
+      const result = await api.launchPlan('p1', '# Plan');
+      expect((result as any).runner_pid).to.equal(4242);
+      expect((result as any).status).to.equal('launched');
     });
   });
 

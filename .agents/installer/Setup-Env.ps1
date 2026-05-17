@@ -67,9 +67,9 @@ MEMORY_LLM_BACKEND=huggingface
 MEMORY_LLM_MODEL=LiquidAI/LFM2-1.2B-Extract
 
 # Embedding — converts text into vectors for similarity search.
-# Backend: sentence-transformer | gemini
-MEMORY_EMBEDDING_BACKEND=sentence-transformer
-MEMORY_EMBEDDING_MODEL=microsoft/harrier-oss-v1-0.6b
+# Backend: ollama | gemini | google-vertex | openai-compatible
+MEMORY_EMBEDDING_BACKEND=ollama
+MEMORY_EMBEDDING_MODEL=leoipulsar/harrier-0.6b
 
 # Vector store: zvec (recommended) | chroma
 MEMORY_VECTOR_BACKEND=zvec

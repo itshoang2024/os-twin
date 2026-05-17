@@ -64,7 +64,7 @@ def mock_service() -> MagicMock:
             self.updated_at = datetime.now(timezone.utc)
             self.language = language
             self.description = description
-            self.embedding_model = "BAAI/bge-small-en-v1.5"
+            self.embedding_model = "qwen3-embedding:0.6b"
             self.embedding_dimension = 1024
             self.stats = stats
             self.imports = []
@@ -662,7 +662,7 @@ class TestLazyImport:
     def test_import_does_not_load_heavy_deps(self) -> None:
         """Importing the routes module does not load kuzu/zvec/transformers."""
         # Clear any cached imports
-        heavy_modules = ["kuzu", "zvec", "sentence_transformers", "anthropic"]
+        heavy_modules = ["kuzu", "zvec", "anthropic"]
         for mod in heavy_modules:
             if mod in sys.modules:
                 del sys.modules[mod]

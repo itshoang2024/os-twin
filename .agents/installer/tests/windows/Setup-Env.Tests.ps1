@@ -35,7 +35,7 @@ Describe "Setup-Env" {
         $envFile = Join-Path $testDir ".env"
         $content = Get-Content $envFile -Raw
         $content | Should -Match 'MEMORY_LLM_BACKEND=huggingface'
-        $content | Should -Match 'MEMORY_EMBEDDING_BACKEND=sentence-transformer'
+        $content | Should -Match 'MEMORY_EMBEDDING_BACKEND=ollama'
         $content | Should -Match 'MEMORY_VECTOR_BACKEND=zvec'
     }
 
@@ -156,4 +156,3 @@ Describe "Migrate-EnvKeys" {
         }
     }
 }
-

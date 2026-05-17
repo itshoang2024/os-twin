@@ -237,12 +237,11 @@ class KnowledgeService:
 
         Provider resolution: ``MasterSettings.knowledge.embedding_backend``
         > ``OSTWIN_KNOWLEDGE_EMBED_PROVIDER`` env var > ``EMBEDDING_PROVIDER``
-        (default: ``sentence-transformers`` — works offline with no server).
+        (default: ``ollama``). Supported providers: ``ollama`` and
+        ``openai-compatible`` (plus Gemini for cloud).
 
-        When provider is ``ollama`` but the server is unreachable, the
-        embedder will return empty vectors and log errors. Users who want
-        a true offline fallback should set
-        ``OSTWIN_KNOWLEDGE_EMBED_PROVIDER=sentence-transformers`` explicitly.
+        When the chosen backend is unreachable, the embedder will return
+        empty vectors and log errors.
         """
         # Test/programmatic injection takes priority — mirrors the pattern used
         # for _jm_override and _ingestor_override.

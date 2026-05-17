@@ -35,6 +35,30 @@ RUNTIME_MANAGER_KEYS = (
 )
 RUNTIME_RUNTIME_KEYS = ("master_agent_model",)
 
+
+def _default_config_path() -> Path:
+    """Resolve the active settings file at runtime.
+
+    The source checkout contains a project-local ``.agents/config.json`` used
+    by tests and fixtures, but the dashboard's user-facing settings live under
+    ``~/.ostwin/.agents/config.json`` unless a project dir/config path is
+    explicitly supplied.
+    """
+    explicit_config = os.environ.get("OSTWIN_CONFIG_PATH")
+    if explicit_config:
+        return Path(explicit_config).expanduser()
+
+    explicit_project = os.environ.get("OSTWIN_PROJECT_DIR")
+    if explicit_project:
+        return Path(explicit_project).expanduser() / ".agents" / "config.json"
+
+    global_config = Path.home() / ".ostwin" / ".agents" / "config.json"
+    if global_config.exists():
+        return global_config
+
+    return AGENTS_DIR / "config.json"
+
+
 class SettingsResolver:
     """Unified settings resolver with vault integration and role overrides.
     
@@ -48,7 +72,7 @@ class SettingsResolver:
     """
     
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or (AGENTS_DIR / "config.json")
+        self.config_path = config_path or _default_config_path()
         self.vault = get_vault()
         self._cache: Optional[Dict[str, Any]] = None
     

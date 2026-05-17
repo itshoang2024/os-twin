@@ -1,8 +1,7 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { ChatInputCommandInteraction } from 'discord.js';
+import { buildDiscordSlashCommand, requireCommandDef } from '../commands';
 
-export const data = new SlashCommandBuilder()
-  .setName('ping')
-  .setDescription('Replies with Pong! Health check command.');
+export const data = buildDiscordSlashCommand(requireCommandDef('ping'));
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });

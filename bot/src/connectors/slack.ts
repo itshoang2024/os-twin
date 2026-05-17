@@ -1,6 +1,12 @@
 import { App, SayFn, RespondFn } from '@slack/bolt';
 import { Platform, Connector, ConnectorConfig, ConnectorStatus, HealthCheckResult, SetupStep, ValidationResult } from './base';
-import { routeCommand, routeCallback, BotResponse, COMMANDS_NO_ARGS, COMMANDS_WITH_ARGS } from '../commands';
+import {
+  routeCommand,
+  routeCallback,
+  BotResponse,
+  getCommandsWithArgsForPlatform,
+  getCommandsWithoutArgsForPlatform,
+} from '../commands';
 import { askAgent } from '../agent-bridge';
 import { getSession } from '../sessions';
 import { chunk } from './utils';
@@ -102,7 +108,7 @@ export class SlackConnector implements Connector {
     });
 
     // Commands with arguments — driven by COMMAND_REGISTRY
-    for (const def of COMMANDS_WITH_ARGS) {
+    for (const def of getCommandsWithArgsForPlatform(this.platform)) {
       this.app.command(`/${def.name}`, async ({ command, ack, say, respond }) => {
         await ack();
         const userId = command.user_id;
@@ -117,7 +123,7 @@ export class SlackConnector implements Connector {
     }
 
     // Commands without arguments — driven by COMMAND_REGISTRY
-    for (const def of COMMANDS_NO_ARGS) {
+    for (const def of getCommandsWithoutArgsForPlatform(this.platform)) {
       this.app.command(`/${def.name}`, async ({ command, ack, say, respond }) => {
         await ack();
         const userId = command.user_id;
@@ -167,7 +173,7 @@ export class SlackConnector implements Connector {
 
       const session = getSession(userId, 'slack');
       
-      // Route all app mentions through askAgent
+      // Route all free-text through OpenCode-backed agent
       const threadTs = (message as any).thread_ts || (message as any).ts;
       
       const result = await askAgent(text, { userId, platform: 'slack' });

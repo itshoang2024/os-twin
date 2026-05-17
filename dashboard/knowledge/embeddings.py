@@ -55,8 +55,8 @@ class KnowledgeEmbedder:
             master_model = ""
             master_provider = ""
 
-        self.model_name: str = model_name or master_model or EMBEDDING_MODEL or "all-MiniLM-L6-v2"
-        self.provider: str = (provider or master_provider or EMBEDDING_PROVIDER or "sentence-transformers").lower()
+        self.model_name: str = model_name or master_model or EMBEDDING_MODEL or "qwen3-embedding:0.6b"
+        self.provider: str = (provider or master_provider or EMBEDDING_PROVIDER or "ollama").lower()
         # Dimension is fixed system-wide from OSTWIN_EMBEDDING_DIM env var.
         # Not configurable via MasterSettings to prevent dimension conflicts.
         self._dimension: int = EMBEDDING_DIMENSION

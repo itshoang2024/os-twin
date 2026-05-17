@@ -268,6 +268,15 @@ def test_patch_namespace(resolver, temp_project):
     assert "max_concurrent_rooms" not in cfg.get("runtime", {})
 
 
+def test_default_config_path_honors_ostwin_project_dir(tmp_path, monkeypatch):
+    project_dir = tmp_path / "project"
+    monkeypatch.setenv("OSTWIN_PROJECT_DIR", str(project_dir))
+
+    resolver = SettingsResolver()
+
+    assert resolver.config_path == project_dir / ".agents" / "config.json"
+
+
 def test_patch_namespace_rejects_legacy_poll_interval(resolver):
     with pytest.raises(ValidationError):
         resolver.patch_namespace("runtime", {"poll_interval": 42})

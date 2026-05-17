@@ -2,8 +2,8 @@
 
 Validates:
 
-1. ``mcp_server`` module imports cheaply (no kuzu / zvec / sentence_transformers
-   / markitdown / anthropic loaded eagerly).
+1. ``mcp_server`` module imports cheaply (no kuzu / zvec / markitdown /
+   anthropic loaded eagerly).
 2. All 6 tools are registered on the FastMCP instance.
 3. The ``/api/knowledge/mcp`` endpoint is mounted on the FastAPI app.
 4. Each tool's body works when invoked directly (bypassing the JSON-RPC
@@ -64,7 +64,7 @@ def test_mcp_server_module_imports_cheaply() -> None:
     code = (
         "import sys\n"
         "from dashboard.knowledge.mcp_server import mcp\n"
-        "heavy = ['kuzu', 'zvec', 'sentence_transformers', 'markitdown', 'anthropic', 'chromadb']\n"
+        "heavy = ['kuzu', 'zvec', 'markitdown', 'anthropic', 'chromadb']\n"
         "loaded = [m for m in heavy if m in sys.modules]\n"
         "print('LOADED:' + ','.join(loaded))\n"
     )
@@ -358,9 +358,11 @@ def test_mcp_full_lifecycle_via_real_client(
 
 def test_invoke_list_namespaces_directly(fresh_kb) -> None:
     """Direct Python call of the decorated tool returns a well-formed dict."""
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_list_namespaces
 
-    result = knowledge_list_namespaces()
+    result = asyncio.run(knowledge_list_namespaces())
     assert isinstance(result, dict)
     # Either {namespaces: []} or {error, code} — both are well-formed
     # responses (the tool body never raises).
@@ -369,15 +371,17 @@ def test_invoke_list_namespaces_directly(fresh_kb) -> None:
 
 def test_invoke_create_then_list(fresh_kb) -> None:
     """Create a namespace then list it back."""
+    import asyncio
+
     from dashboard.knowledge.mcp_server import (
         knowledge_create_namespace,
         knowledge_list_namespaces,
     )
 
-    r = knowledge_create_namespace("direct-create-test")
+    r = asyncio.run(knowledge_create_namespace("direct-create-test"))
     assert r.get("name") == "direct-create-test", f"unexpected: {r}"
 
-    listing = knowledge_list_namespaces()
+    listing = asyncio.run(knowledge_list_namespaces())
     names = [n["name"] for n in listing.get("namespaces", [])]
     assert "direct-create-test" in names
 
@@ -388,72 +392,88 @@ def test_invoke_create_then_list(fresh_kb) -> None:
 
 
 def test_create_namespace_invalid_name_returns_structured_error(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_create_namespace
 
-    result = knowledge_create_namespace("Bad Name!")
+    result = asyncio.run(knowledge_create_namespace("Bad Name!"))
     assert "error" in result
     assert result["code"] == "INVALID_NAMESPACE_ID"
 
 
 def test_create_namespace_duplicate_returns_structured_error(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_create_namespace
 
-    knowledge_create_namespace("dup-test")
-    result = knowledge_create_namespace("dup-test")
+    asyncio.run(knowledge_create_namespace("dup-test"))
+    result = asyncio.run(knowledge_create_namespace("dup-test"))
     assert "error" in result
     assert result["code"] == "NAMESPACE_EXISTS"
 
 
 def test_import_folder_rejects_relative_path(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_import_folder
 
-    result = knowledge_import_folder("test-ns", "relative/path")
+    result = asyncio.run(knowledge_import_folder("test-ns", "relative/path"))
     assert "error" in result
     assert result["code"] == "INVALID_FOLDER_PATH"
 
 
 def test_import_folder_rejects_missing_folder(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_import_folder
 
-    result = knowledge_import_folder("test-ns", "/tmp/nonexistent-12345-mcp-test")
+    result = asyncio.run(knowledge_import_folder("test-ns", "/tmp/nonexistent-12345-mcp-test"))
     assert "error" in result
     assert result["code"] == "FOLDER_NOT_FOUND"
 
 
 def test_import_folder_rejects_file_instead_of_dir(fresh_kb, tmp_path: Path) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_import_folder
 
     f = tmp_path / "not-a-dir.txt"
     f.write_text("hi")
-    result = knowledge_import_folder("test-ns", str(f))
+    result = asyncio.run(knowledge_import_folder("test-ns", str(f)))
     assert "error" in result
     assert result["code"] == "NOT_A_DIRECTORY"
 
 
 def test_query_unknown_namespace_returns_structured_error(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_query
 
-    result = knowledge_query("never-created-mcp-12345", "x")
+    result = asyncio.run(knowledge_query("never-created-mcp-12345", "x"))
     assert "error" in result
     assert result["code"] == "NAMESPACE_NOT_FOUND"
 
 
 def test_query_invalid_mode_returns_structured_error(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import (
         knowledge_create_namespace,
         knowledge_query,
     )
 
-    knowledge_create_namespace("mode-test")
-    result = knowledge_query("mode-test", "x", mode="bogus")
+    asyncio.run(knowledge_create_namespace("mode-test"))
+    result = asyncio.run(knowledge_query("mode-test", "x", mode="bogus"))
     assert "error" in result
     assert result["code"] == "BAD_REQUEST"
 
 
 def test_get_status_unknown_job_returns_structured_error(fresh_kb) -> None:
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_get_import_status
 
-    result = knowledge_get_import_status("any-ns", "fake-job-uuid")
+    result = asyncio.run(knowledge_get_import_status("any-ns", "fake-job-uuid"))
     assert "error" in result
     assert result["code"] == "JOB_NOT_FOUND"
 
@@ -462,9 +482,11 @@ def test_get_status_unknown_job_returns_structured_error(fresh_kb) -> None:
 
 def test_delete_nonexistent_namespace_returns_false(fresh_kb) -> None:
     """Deleting a missing namespace returns ``{deleted: False}`` (NOT an error)."""
+    import asyncio
+
     from dashboard.knowledge.mcp_server import knowledge_delete_namespace
 
-    result = knowledge_delete_namespace("never-existed-12345")
+    result = asyncio.run(knowledge_delete_namespace("never-existed-12345"))
     assert result == {"deleted": False}
 
 
@@ -475,6 +497,8 @@ def test_delete_nonexistent_namespace_returns_false(fresh_kb) -> None:
 
 def test_full_import_query_lifecycle(fresh_kb) -> None:
     """End-to-end: create → import (real fixture folder) → poll → query → delete."""
+    import asyncio
+
     from dashboard.knowledge.mcp_server import (
         knowledge_create_namespace,
         knowledge_delete_namespace,
@@ -484,10 +508,10 @@ def test_full_import_query_lifecycle(fresh_kb) -> None:
     )
 
     ns = "lifecycle-test"
-    r = knowledge_create_namespace(ns)
+    r = asyncio.run(knowledge_create_namespace(ns))
     assert r.get("name") == ns, f"unexpected: {r}"
 
-    r = knowledge_import_folder(ns, str(FIXTURES.resolve()))
+    r = asyncio.run(knowledge_import_folder(ns, str(FIXTURES.resolve())))
     assert r.get("job_id"), f"unexpected: {r}"
     job_id = r["job_id"]
     assert r.get("status") == "submitted"
@@ -496,7 +520,7 @@ def test_full_import_query_lifecycle(fresh_kb) -> None:
     deadline = time.time() + 90
     status = None
     while time.time() < deadline:
-        status = knowledge_get_import_status(ns, job_id)
+        status = asyncio.run(knowledge_get_import_status(ns, job_id))
         if status.get("state") in ("completed", "failed", "cancelled", "interrupted"):
             break
         time.sleep(0.3)
@@ -504,12 +528,12 @@ def test_full_import_query_lifecycle(fresh_kb) -> None:
     assert status.get("state") == "completed", f"job didn't finish cleanly: {status}"
 
     # Query the freshly-ingested namespace.
-    qr = knowledge_query(ns, "test", mode="raw", top_k=3)
+    qr = asyncio.run(knowledge_query(ns, "test", mode="raw", top_k=3))
     assert "chunks" in qr, f"unexpected: {qr}"
     assert isinstance(qr["chunks"], list)
 
     # Cleanup.
-    rd = knowledge_delete_namespace(ns)
+    rd = asyncio.run(knowledge_delete_namespace(ns))
     assert rd.get("deleted") is True
 
 
@@ -517,6 +541,8 @@ def test_summarized_mode_graceful_without_anthropic_key(
     fresh_kb, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``mode="summarized"`` without ANTHROPIC_API_KEY → warnings, no crash."""
+    import asyncio
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     from dashboard.knowledge.mcp_server import (
         knowledge_create_namespace,
@@ -524,8 +550,8 @@ def test_summarized_mode_graceful_without_anthropic_key(
     )
 
     ns = "summ-graceful"
-    knowledge_create_namespace(ns)
-    qr = knowledge_query(ns, "anything", mode="summarized", top_k=3)
+    asyncio.run(knowledge_create_namespace(ns))
+    qr = asyncio.run(knowledge_query(ns, "anything", mode="summarized", top_k=3))
     # Empty namespace + no LLM → still a valid result, never an error.
     assert "chunks" in qr, f"unexpected: {qr}"
     # Result includes warnings array; either llm_unavailable or empty-ns-related warnings.

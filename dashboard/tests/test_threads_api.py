@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from dashboard.api import app
 import dashboard.global_state as global_state
 from dashboard.planning_thread_store import PlanningThreadStore
-from unittest.mock import patch, AsyncMock
+from unittest.mock import MagicMock, patch, AsyncMock
 
 @pytest.fixture
 def client(tmp_path):
@@ -108,3 +108,64 @@ def test_stream_thread_message(mock_stream, client):
     assert len(messages) == 3 # 1 user (create), 1 user (stream), 1 assistant (stream)
     assert messages[1]["content"] == "What tech stack should I use?"
     assert messages[2]["content"] == "Thinking... Here is an idea."
+
+
+@pytest.mark.asyncio
+async def test_auto_generate_title_uses_opencode_session_title(tmp_path):
+    from dashboard.routes.threads import auto_generate_title
+    from dashboard.master_agent import _session_registry
+
+    old_store = global_state.planning_store
+    store = PlanningThreadStore(base_dir=tmp_path)
+    global_state.planning_store = store
+    thread = store.create(title="New Idea")
+
+    _session_registry._sessions[f"thread-{thread.id}"] = "ses_test"
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value={"id": "ses_test", "title": "Todo App Builder"})
+
+    try:
+        with patch("dashboard.routes.threads.asyncio.sleep", new_callable=AsyncMock), \
+             patch("dashboard.master_agent.get_opencode_client", return_value=mock_client):
+            await auto_generate_title(thread.id, "Build a todo app")
+    finally:
+        global_state.planning_store = old_store
+        _session_registry.remove(f"thread-{thread.id}")
+
+    mock_client.get.assert_awaited()
+    call_args = mock_client.get.call_args
+    assert call_args[0][0] == "/session/ses_test"
+
+    updated = store.get(thread.id)
+    assert updated.title == "Todo App Builder"
+
+
+@pytest.mark.asyncio
+async def test_auto_generate_title_skips_placeholder_then_uses_real_title(tmp_path):
+    from dashboard.routes.threads import auto_generate_title
+    from dashboard.master_agent import _session_registry
+
+    old_store = global_state.planning_store
+    store = PlanningThreadStore(base_dir=tmp_path)
+    global_state.planning_store = store
+    thread = store.create(title="New Idea")
+
+    _session_registry._sessions[f"thread-{thread.id}"] = "ses_pending"
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=[
+        {"id": "ses_pending", "title": "New session - 2026-05-13T09:00:00.000Z"},
+        {"id": "ses_pending", "title": "Plan a beach trip"},
+    ])
+
+    try:
+        with patch("dashboard.routes.threads.asyncio.sleep", new_callable=AsyncMock), \
+             patch("dashboard.master_agent.get_opencode_client", return_value=mock_client):
+            await auto_generate_title(thread.id, "Plan a beach trip")
+    finally:
+        global_state.planning_store = old_store
+        _session_registry.remove(f"thread-{thread.id}")
+
+    assert store.get(thread.id).title == "Plan a beach trip"
+    assert mock_client.get.await_count == 2

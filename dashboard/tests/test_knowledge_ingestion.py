@@ -1,10 +1,10 @@
 """EPIC-003 — ingestion + jobs tests (post v2 — chromadb → zvec migration).
 
-Heavy deps (kuzu, sentence-transformers, markitdown, anthropic) are NEVER
+Heavy deps (kuzu, zvec, markitdown, anthropic) are NEVER
 instantiated by the bulk of these tests. We:
 
 - Inject a ``fake_embedder`` (MagicMock with deterministic 1024-dim output) so
-  the real sentence-transformers model is never loaded.
+  the real embedding provider is never called.
 - Inject a ``KnowledgeLLM`` that's just a MagicMock — by default
   ``is_available()`` returns False so the ingestor takes the no-LLM path.
 - Replace ``Ingestor._stores`` with a per-namespace ``_FakeStore`` that records
@@ -1408,11 +1408,11 @@ class TestForceNoDoubleCount:
 # via -m "not slow" if needed.
 @pytest.mark.slow
 class TestRealE2E:
-    """End-to-end with REAL zvec + REAL sentence-transformers, no mocks.
+    """End-to-end with REAL zvec + REAL KnowledgeEmbedder, no mocks.
 
     This is the regression-killer: chromadb-mock-only suites historically
     missed both Defect 1 and Defect 2. Running the entire pipeline against
-    real backends — even with the cheap 1024-dim BGE model — is the only way
+    real backends — even with a local 1024-dim embedding model — is the only way
     to catch path-leak and stats-drift bugs ahead of integration testing.
     """
 

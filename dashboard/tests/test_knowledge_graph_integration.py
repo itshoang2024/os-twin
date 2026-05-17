@@ -1860,11 +1860,11 @@ class TestEmbedderAdapter:
         from dashboard.knowledge.graph.core.llama_adapters import EmbedderAdapter
 
         fake_embedder = mock.MagicMock()
-        fake_embedder.model_name = "BAAI/bge-small-en-v1.5"
+        fake_embedder.model_name = "qwen3-embedding:0.6b"
         fake_embedder.embed_one.return_value = [0.0]
 
         adapter = EmbedderAdapter(knowledge_embedder=fake_embedder)
-        assert adapter.model_name == "BAAI/bge-small-en-v1.5"
+        assert adapter.model_name == "qwen3-embedding:0.6b"
 
 
 # ---------------------------------------------------------------------------

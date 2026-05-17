@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ArchitectTab from '../components/plan/ArchitectTab';
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
 const mockPlanContext: Record<string, unknown> = {};
-const mockSeedHistory = vi.fn();
 let mockChatHistory: { role: string; content: string }[] = [];
 
 vi.mock('../components/plan/PlanWorkspace', () => ({
@@ -21,17 +20,6 @@ vi.mock('../hooks/use-plan-refine', () => ({
     refine: vi.fn(),
     cancelRefine: vi.fn(),
     clearHistory: vi.fn(),
-    seedHistory: mockSeedHistory,
-  }),
-}));
-
-// SWR mock — returns threadData based on key
-let mockSwrData: unknown = undefined;
-vi.mock('swr', () => ({
-  default: (key: string | null) => ({
-    data: key ? mockSwrData : undefined,
-    error: undefined,
-    isLoading: false,
   }),
 }));
 
@@ -67,9 +55,7 @@ describe('ArchitectTab', () => {
     // jsdom doesn't implement scrollIntoView
     Element.prototype.scrollIntoView = vi.fn();
 
-    mockSeedHistory.mockClear();
     mockChatHistory = [];
-    mockSwrData = undefined;
 
     // Default plan context: a plan with no thread_id
     Object.assign(mockPlanContext, {
@@ -116,34 +102,6 @@ describe('ArchitectTab', () => {
     // RefineChat shows REFINE_PROMPTS chips
     expect(screen.getByText('Break this into epics')).toBeDefined();
     expect(screen.getByText('Add acceptance criteria')).toBeDefined();
-  });
-
-  it('seeds chat history from brainstorm thread when thread_id exists', async () => {
-    mockPlanContext.plan = {
-      plan_id: 'promoted-plan',
-      title: 'Promoted',
-      thread_id: 'thread-abc-123',
-    };
-    mockSwrData = {
-      messages: [
-        { id: '1', role: 'user', content: 'I want to build a snake game', created_at: '' },
-        { id: '2', role: 'assistant', content: 'Great idea! What language?', created_at: '' },
-      ],
-    };
-
-    render(<ArchitectTab />);
-
-    await waitFor(() => {
-      expect(mockSeedHistory).toHaveBeenCalledWith([
-        { role: 'user', content: 'I want to build a snake game' },
-        { role: 'assistant', content: 'Great idea! What language?' },
-      ]);
-    });
-  });
-
-  it('does not call seedHistory when plan has no thread_id', () => {
-    render(<ArchitectTab />);
-    expect(mockSeedHistory).not.toHaveBeenCalled();
   });
 
   it('renders seeded thread messages as chat bubbles', () => {

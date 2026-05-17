@@ -1,10 +1,24 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
-import fs from 'fs';
 import api from '../src/api';
 import { registry } from '../src/connectors/registry';
 import * as sessions from '../src/sessions';
-import { routeCommand, routeCallback, cmdHelp, COMMAND_REGISTRY, COMMANDS_NO_ARGS, COMMANDS_WITH_ARGS, ALL_PLATFORM_COMMANDS, DEFERRED_COMMANDS } from '../src/commands';
+import {
+  routeCommand,
+  routeCallback,
+  cmdHelp,
+  cmdUnknown,
+  COMMAND_REGISTRY,
+  COMMANDS_NO_ARGS,
+  COMMANDS_WITH_ARGS,
+  ALL_PLATFORM_COMMANDS,
+  DEFERRED_COMMANDS,
+  buildDiscordSlashCommands,
+  getCommandDef,
+  getCommandsForPlatform,
+  getCommandsWithArgsForPlatform,
+  getCommandsWithoutArgsForPlatform,
+} from '../src/commands';
 
 describe('commands', () => {
   let sandbox: sinon.SinonSandbox;
@@ -40,13 +54,6 @@ describe('commands', () => {
     count: 2,
   };
 
-  const MOCK_STATS = {
-    total_plans: { value: 2 },
-    active_epics: { value: 5 },
-    completion_rate: { value: 33.3 },
-    escalations_pending: { value: 0 },
-  };
-
   // ── Menu commands (pure, no API) ─────────────────────────────
 
   describe('routeCommand — menu', () => {
@@ -69,17 +76,83 @@ describe('commands', () => {
       expect(resp.text).to.include('/dashboard');
       expect(resp.text).to.include('/status');
     });
-
-    it('start also returns help', async () => {
-      const [resp] = await routeCommand('u1', 'telegram', 'start');
-      expect(resp.text).to.include('/menu');
-    });
   });
 
   describe('routeCommand — unknown', () => {
     it('returns unknown command message', async () => {
       const [resp] = await routeCommand('u1', 'telegram', 'nonexistent');
       expect(resp.text).to.include('Unknown command');
+    });
+  });
+
+  describe('cmdUnknown — typo fallback', () => {
+    it('suggests the closest registered command for a 1-char typo', () => {
+      // /drafft → /draft (edit distance 1)
+      const resp = cmdUnknown('/drafft hello world', 'telegram');
+      expect(resp.text).to.include('Unknown command');
+      expect(resp.text).to.include('/drafft');
+      expect(resp.text).to.include('Did you mean');
+      expect(resp.text).to.include('/draft');
+    });
+
+    it('strips arguments and the leading slash when echoing the typo', () => {
+      const resp = cmdUnknown('/healt now please', 'telegram');
+      expect(resp.text).to.include('`/healt`');
+      // The whole command-with-args should NOT appear inside the backticks.
+      expect(resp.text).to.not.include('healt now please');
+    });
+
+    it('omits "Did you mean" when no command is within edit distance 2', () => {
+      // 7 chars different from every command — no suggestions.
+      const resp = cmdUnknown('/zzzzzzzzzz', 'telegram');
+      expect(resp.text).to.include('Unknown command');
+      expect(resp.text).to.not.include('Did you mean');
+      expect(resp.text).to.include('/help');
+    });
+
+    it('always renders the 4-category menu buttons', () => {
+      const resp = cmdUnknown('/whatever', 'telegram');
+      const labels = (resp.buttons || []).flat().map(b => b.label);
+      expect(labels).to.include('📊 Monitoring');
+      expect(labels).to.include('📝 Plans & AI');
+      expect(labels).to.include('🧠 Skills & Roles');
+      expect(labels).to.include('⚙️ System');
+      const callbacks = (resp.buttons || []).flat().map(b => b.callbackData);
+      expect(callbacks).to.deep.equal([
+        'menu:cat:monitoring',
+        'menu:cat:plans',
+        'menu:cat:skills',
+        'menu:cat:system',
+      ]);
+    });
+
+    it('matches case-insensitively (/MENU → /menu)', () => {
+      const resp = cmdUnknown('/MENU', 'telegram');
+      expect(resp.text).to.include('Did you mean');
+      expect(resp.text).to.include('/menu');
+    });
+
+    it('respects the platform filter when suggesting (discord-only commands not offered to telegram)', () => {
+      // /pingg is one char off /ping, which is discordOnly — telegram should
+      // not surface it as a suggestion. Inspect the "Did you mean" line only
+      // since `/pingg` itself contains the substring `/ping`.
+      const suggestionLine = (text: string) =>
+        text.split('\n').find(l => l.includes('Did you mean')) || '';
+
+      const tg = cmdUnknown('/pingg', 'telegram');
+      expect(suggestionLine(tg.text)).to.not.include('`/ping`');
+
+      const dc = cmdUnknown('/pingg', 'discord');
+      expect(suggestionLine(dc.text)).to.include('`/ping`');
+    });
+
+    it('limits suggestions to at most 5 commands', () => {
+      const resp = cmdUnknown('/sk', 'telegram');
+      // Each suggestion appears as `/<name>` — count those occurrences in the
+      // "Did you mean" line only.
+      const line = resp.text.split('\n').find(l => l.includes('Did you mean')) || '';
+      const matches = line.match(/`\/[a-zA-Z0-9_]+`/g) || [];
+      expect(matches.length).to.be.at.most(5);
     });
   });
 
@@ -99,6 +172,28 @@ describe('commands', () => {
 
       const [resp] = await routeCommand('u1', 'telegram', 'dashboard');
       expect(resp.text).to.include('0');
+    });
+
+    it('counts active rooms via new keys (developing/review)', async () => {
+      // New-shape summary: dashboard 3366 reports developing/review.
+      sandbox.stub(api, 'getRooms').resolves({
+        rooms: [],
+        summary: { total: 5, passed: 1, failed_final: 0, pending: 1, developing: 2, review: 1, fixing: 0 },
+      });
+      const [resp] = await routeCommand('u1', 'telegram', 'dashboard');
+      // pending(1) + developing(2) + review(1) = 4 active
+      expect(resp.text).to.match(/Active:\*\s+`4\s/);
+    });
+
+    it('sums both new and legacy keys without double-counting', async () => {
+      // Mixed shape — older callers may still publish engineering/qa_review.
+      sandbox.stub(api, 'getRooms').resolves({
+        rooms: [],
+        summary: { total: 4, passed: 0, failed_final: 0, pending: 0, developing: 1, review: 1, engineering: 1, qa_review: 1, fixing: 0 },
+      });
+      const [resp] = await routeCommand('u1', 'telegram', 'dashboard');
+      // developing(1) + engineering(1) + review(1) + qa_review(1) = 4
+      expect(resp.text).to.match(/Active:\*\s+`4\s/);
     });
   });
 
@@ -201,6 +296,24 @@ describe('commands', () => {
       const [resp] = await routeCommand('u1', 'telegram', 'status');
       expect(resp.text).to.include('connection refused');
     });
+
+    it('renders proper emojis for both legacy and new status keys', async () => {
+      // Mix old and new — slash-command output must look sane in both
+      // deployments without the unknown ❓ fallback.
+      sandbox.stub(api, 'getRooms').resolves({
+        rooms: [
+          { room_id: 'r-dev', status: 'developing', message_count: 1, epic_ref: 'E-D' },
+          { room_id: 'r-eng', status: 'engineering', message_count: 1, epic_ref: 'E-E' },
+          { room_id: 'r-rev', status: 'review', message_count: 1, epic_ref: 'E-R' },
+          { room_id: 'r-qa',  status: 'qa_review', message_count: 1, epic_ref: 'E-Q' },
+        ],
+        summary: {},
+      });
+      const [resp] = await routeCommand('u1', 'telegram', 'status');
+      expect(resp.text).to.not.include('❓');
+      expect(resp.text).to.include('🏃‍♂️');  // developing + engineering
+      expect(resp.text).to.include('👀');     // review + qa_review
+    });
   });
 
   describe('routeCommand — errors', () => {
@@ -220,19 +333,6 @@ describe('commands', () => {
 
       const [resp] = await routeCommand('u1', 'telegram', 'errors');
       expect(resp.text).to.include('stable');
-    });
-  });
-
-  describe('routeCommand — compact', () => {
-    it('shows latest messages from active rooms', async () => {
-      sandbox.stub(api, 'getRooms').resolves(MOCK_ROOMS);
-      sandbox.stub(api, 'getRoomChannel').resolves([
-        { from: 'engineer', body: 'Working on feature X' },
-      ]);
-
-      const [resp] = await routeCommand('u1', 'telegram', 'compact');
-      expect(resp.text).to.include('room-2');
-      expect(resp.text).to.include('Working on feature X');
     });
   });
 
@@ -267,16 +367,6 @@ describe('commands', () => {
       expect(resp.text).to.include('code-review');
       expect(resp.text).to.include('qa, review');
       expect(resp.text).to.include('General');
-    });
-  });
-
-  describe('routeCommand — usage', () => {
-    it('returns stats report', async () => {
-      sandbox.stub(api, 'getStats').resolves(MOCK_STATS);
-
-      const [resp] = await routeCommand('u1', 'telegram', 'usage');
-      expect(resp.text).to.include('STATS REPORT');
-      expect(resp.text).to.include('33.3%');
     });
   });
 
@@ -337,6 +427,39 @@ describe('commands', () => {
       expect(resp.buttons).to.be.an('array');
       const data = resp.buttons!.flat().map(b => b.callbackData);
       expect(data[0]).to.match(/^menu:view:/);
+    });
+  });
+
+  describe('cmdViewPlan (via menu:view callback)', () => {
+    // /api/plans/{id} returns { plan: { content }, epics }. cmdViewPlan
+    // must read from data.plan.content; the legacy data.content path is
+    // kept only for older dashboards.
+
+    it('renders content from the nested plan.content field (new shape)', async () => {
+      sandbox.stub(api, 'getPlan').resolves({
+        plan: { plan_id: 'p1', content: '# Nested Plan Body' },
+        epics: [],
+      });
+      const [resp] = await routeCallback('u1', 'telegram', 'menu:view:p1');
+      expect(resp.text).to.include('Nested Plan Body');
+    });
+
+    it('falls back to top-level data.content (legacy shape)', async () => {
+      sandbox.stub(api, 'getPlan').resolves({ plan_id: 'p1', content: '# Legacy Body' });
+      const [resp] = await routeCallback('u1', 'telegram', 'menu:view:p1');
+      expect(resp.text).to.include('Legacy Body');
+    });
+
+    it('shows a no-content message when both fields are empty', async () => {
+      sandbox.stub(api, 'getPlan').resolves({ plan: { plan_id: 'p1', content: '' } });
+      const [resp] = await routeCallback('u1', 'telegram', 'menu:view:p1');
+      expect(resp.text).to.include('no markdown content found');
+    });
+
+    it('returns not-found message when API errors', async () => {
+      sandbox.stub(api, 'getPlan').resolves({ _error: 'missing' });
+      const [resp] = await routeCallback('u1', 'telegram', 'menu:view:p1');
+      expect(resp.text).to.include('not found');
     });
   });
 
@@ -529,7 +652,7 @@ describe('commands', () => {
     it('menu:cat:system returns system submenu', async () => {
       const [resp] = await routeCallback('u1', 'telegram', 'menu:cat:system');
       const data = resp.buttons!.flat().map(b => b.callbackData);
-      expect(data).to.include('cmd:usage');
+      expect(data).to.include('cmd:health');
     });
 
     it('cmd:dashboard dispatches to dashboard command', async () => {
@@ -630,19 +753,6 @@ describe('commands', () => {
     });
   });
 
-  describe('transcribe commands', () => {
-    it('routeCommand transcribe returns info if no files', async () => {
-      sandbox.stub(fs, 'readdirSync').returns([]);
-      const [resp] = await routeCommand('u1', 'telegram', 'transcribe');
-      expect(resp.text).to.include('No recordings');
-    });
-
-    it('routeCommand transcribe_plan returns error if no transcription', async () => {
-      const [resp] = await routeCommand('u1', 'telegram', 'transcribe_plan');
-      expect(resp.text).to.include('No transcription available');
-    });
-  });
-
   // ── COMMAND_REGISTRY ──────────────────────────────────────────
 
   describe('COMMAND_REGISTRY', () => {
@@ -684,27 +794,46 @@ describe('commands', () => {
       }
     });
 
+    it('platform command helpers derive from COMMAND_REGISTRY', () => {
+      expect(getCommandsForPlatform('discord').map(c => c.name)).to.deep.equal(COMMAND_REGISTRY.map(c => c.name));
+      expect(getCommandsForPlatform('telegram').map(c => c.name)).to.deep.equal(ALL_PLATFORM_COMMANDS.map(c => c.name));
+      expect(getCommandsForPlatform('slack').map(c => c.name)).to.deep.equal(ALL_PLATFORM_COMMANDS.map(c => c.name));
+      expect(getCommandsWithArgsForPlatform('telegram').map(c => c.name)).to.deep.equal(COMMANDS_WITH_ARGS.map(c => c.name));
+      expect(getCommandsWithoutArgsForPlatform('telegram').map(c => c.name)).to.deep.equal(COMMANDS_NO_ARGS.map(c => c.name));
+    });
+
     it('DEFERRED_COMMANDS is a Set of command names', () => {
       expect(DEFERRED_COMMANDS).to.be.instanceOf(Set);
       expect(DEFERRED_COMMANDS.has('health')).to.be.true;
       expect(DEFERRED_COMMANDS.has('menu')).to.be.false;
     });
 
+    it('builds Discord slash commands from COMMAND_REGISTRY', () => {
+      const slashCommands = buildDiscordSlashCommands().map(c => c.toJSON());
+      expect(slashCommands.map(c => c.name)).to.deep.equal(COMMAND_REGISTRY.map(c => c.name));
+
+      const draft = slashCommands.find(c => c.name === 'draft')!;
+      const draftDef = getCommandDef('draft')!;
+      expect(draft.description).to.equal(draftDef.description);
+      expect(draft.options?.[0].name).to.equal(draftDef.arg);
+      expect(draft.options?.[0].description).to.equal(draftDef.argDescription);
+
+      const feedback = slashCommands.find(c => c.name === 'feedback')!;
+      expect(feedback.options?.[0].required).to.equal(true);
+    });
+
     it('every routeCommand case has a matching COMMAND_REGISTRY entry', () => {
       const registeredNames = new Set(COMMAND_REGISTRY.map(c => c.name));
-      // These commands are handled by routeCommand but aren't standalone registrations
-      const internalOnly = new Set(['start', 'transcribe_plan']);
       const routerCommands = [
-        'menu', 'help', 'start', 'dashboard', 'status', 'compact', 'plans', 'errors',
-        'skills', 'usage', 'new', 'restart', 'cancel', 'setdir', 'draft',
-        'transcribe', 'transcribe_plan', 'edit', 'assets', 'startplan', 'viewplan',
+        'menu', 'help', 'dashboard', 'status', 'plans', 'errors',
+        'skills', 'new', 'restart', 'cancel', 'setdir', 'draft',
+        'edit', 'assets', 'startplan', 'viewplan',
         'feedback', 'preferences', 'subscriptions', 'progress',
-        'resume', 'clearplans', 'logs', 'health', 'config',
+        'resume', 'clearplans', 'logs', 'health',
         'skillsearch', 'skillinstall', 'skillremove', 'skillsync',
-        'roles', 'triage', 'clonerole', 'launchdashboard',
+        'roles', 'triage', 'launchdashboard',
       ];
       for (const cmd of routerCommands) {
-        if (internalOnly.has(cmd)) continue;
         expect(registeredNames.has(cmd), `${cmd} missing from COMMAND_REGISTRY`).to.be.true;
       }
     });
@@ -799,27 +928,6 @@ describe('commands', () => {
       expect(resp.text).to.include('System Health');
       expect(resp.text).to.include('Running');
       expect(resp.text).to.include('1234');
-    });
-  });
-
-  describe('routeCommand — config', () => {
-    it('shows full config when no key given', async () => {
-      sandbox.stub(api, 'getConfig').resolves({ manager: { poll: 10 } });
-      const [resp] = await routeCommand('u1', 'telegram', 'config', '');
-      expect(resp.text).to.include('Configuration');
-      expect(resp.text).to.include('poll');
-    });
-
-    it('shows specific key when key given', async () => {
-      sandbox.stub(api, 'getConfig').resolves({ manager: { poll: 10 } });
-      const [resp] = await routeCommand('u1', 'telegram', 'config', 'manager.poll');
-      expect(resp.text).to.include('10');
-    });
-
-    it('shows error for missing key', async () => {
-      sandbox.stub(api, 'getConfig').resolves({ manager: {} });
-      const [resp] = await routeCommand('u1', 'telegram', 'config', 'manager.missing');
-      expect(resp.text).to.include('not found');
     });
   });
 
@@ -928,20 +1036,6 @@ describe('commands', () => {
       const [resp] = await routeCommand('u1', 'telegram', 'triage', 'room-3');
       expect(resp.text).to.include('Triage initiated');
       expect(resp.text).to.include('room-3');
-    });
-  });
-
-  describe('routeCommand — clonerole', () => {
-    it('requires a role argument', async () => {
-      const [resp] = await routeCommand('u1', 'telegram', 'clonerole', '');
-      expect(resp.text).to.include('Usage');
-    });
-
-    it('clones and confirms', async () => {
-      sandbox.stub(api, 'shellCommand').resolves({ stdout: 'cloned to .agents/roles/engineer/' });
-      const [resp] = await routeCommand('u1', 'telegram', 'clonerole', 'engineer');
-      expect(resp.text).to.include('Role cloned');
-      expect(resp.text).to.include('engineer');
     });
   });
 

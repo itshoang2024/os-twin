@@ -274,7 +274,7 @@ def load_config() -> MemoryConfig:
     config = MemoryConfig(
         llm=LLMConfig(
             backend=llm_d.get("backend", "openai-compatible"),
-            model=llm_d.get("model", "google-vertex/gemini-3.1-flash-lite"),
+            model=llm_d.get("model", "google-vertex/gemini-3-flash-preview"),
             compatible_url=llm_d.get("compatible_url", ""),
             compatible_key=llm_d.get("compatible_key", ""),
         ),

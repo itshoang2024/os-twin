@@ -3,7 +3,7 @@
 ``GraphRAGQueryEngine`` and ``PropertyGraphIndex`` expect llama-index base
 classes (``BasePydanticVectorStore``, ``BaseEmbedding``).  Our native
 implementations (``NamespaceVectorStore`` / zvec, ``KnowledgeEmbedder`` /
-sentence-transformers) don't inherit from those bases.
+configured embedding provider) don't inherit from those bases.
 
 This module provides two lightweight adapters so the graph-RAG query path
 can reuse the *exact same* cached handles that the ingestion and raw-query

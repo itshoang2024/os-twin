@@ -129,7 +129,7 @@ function Start-Dashboard {
     }
 
     # Health-check: poll /api/status up to 180s
-    # SentenceTransformer model loading can take 60-150s on CPU
+    # First startup can spend extra time importing AI/vector-store dependencies.
     # Accept any HTTP response (including 401/403) as proof the server is up
     Write-Step "Waiting for dashboard to be healthy (up to 180s)..."
     $dashOk = $false

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import time
+import threading
 
 # Lazy imports for text processing libraries (nltk, bm25, sklearn).
 # LLM calls go through dashboard.ai gateway.
@@ -135,6 +136,12 @@ class AgenticMemorySystem:
         # last sync, so sync_to_disk() can skip no-op merges (F12).
         self._dirty = False
 
+        # TTL cache for _reload_embedding_settings to avoid redundant
+        # config reads during rapid operations (e.g. bulk import).
+        self._config_cache_ts = 0.0
+        self._config_cache_ttl = 30.0
+        self._config_lock = threading.Lock()
+
         # Set up subdirectories for persistence
         self._notes_dir = None
         self._vector_dir = None
@@ -162,39 +169,43 @@ class AgenticMemorySystem:
         if self.persist_dir:
             self._load_notes()
 
-        # Store LLM config as attributes so logging/debugging can read them.
-        self.llm_backend = llm_backend
-        self.llm_model = llm_model
-
         # LLM completion function — injected by caller or resolved via gateway.
         # Signature: completion_fn(prompt: str, response_format=None, ...) -> str
         if completion_fn is not None:
             self._completion_fn = completion_fn
         else:
-            self._completion_fn = self._resolve_completion_fn(llm_backend, llm_model, api_key, sglang_host, sglang_port)
+            self._completion_fn = self._resolve_completion_fn(_llm_model)
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
 
     @staticmethod
     def _resolve_completion_fn(
-        llm_backend: str,
         llm_model: str,
-        api_key: Optional[str],
-        sglang_host: str,
-        sglang_port: int,
     ) -> Callable[..., str]:
         """Resolve the completion function from the centralized AI gateway.
 
         All LLM calls go through ``dashboard.ai.get_completion()`` so they
         are monitored, retried, and configurable from the dashboard Settings
         page.  The dashboard must be running.
+
+        When *llm_model* is provided (resolved from ``MemoryConfig.llm.model``),
+        it is passed to the gateway so the correct model is used rather than
+        falling back to the gateway's default completion model.  Provider
+        routing is handled by ``llm_client.resolve_provider_and_model`` which
+        parses any ``provider/`` prefix in the model string.
         """
         from dashboard.ai import get_completion as _gw
 
-        def _gateway_completion(prompt, response_format=None, **kw):
-            return _gw(prompt, purpose="memory", response_format=response_format)
+        _model = llm_model or None
 
-        logger.info("Using dashboard.ai gateway for LLM completion")
+        def _gateway_completion(prompt, response_format=None, **kw):
+            kw_out: dict = {}
+            if _model:
+                kw_out["model"] = _model
+            return _gw(prompt, purpose="memory", response_format=response_format, **kw_out)
+
+        label = f"model={_model}" if _model else "default model"
+        logger.info("Using dashboard.ai gateway for LLM completion (%s)", label)
         return _gateway_completion
 
     def _create_retriever(self):
@@ -231,65 +242,72 @@ class AgenticMemorySystem:
             )
 
     def _reload_embedding_settings(self):
-        """Re-read embedding settings and refresh the embedding function.
+        """Re-read embedding settings from config and refresh the embedding function.
 
         This ensures that settings changes made via the dashboard UI take
-        effect immediately without restarting the memory system. Called at
-        the start of every public method that uses embeddings.
-
-        Reads from MasterSettings.memory first (what the user configures
-        in the dashboard), falling back to config.default.json.
+        effect without restarting the memory system. Called at the start of
+        every public method that uses embeddings.
 
         Skipped when ``_embed_fn`` was injected (caller controls embeddings)
         or when ``persist_dir`` is None (in-memory mode).
+
+        Uses a TTL cache (``_config_cache_ttl`` seconds) to avoid redundant
+        config reads during rapid operations (e.g. bulk import). Thread-safe
+        via ``_config_lock``.
         """
         if self._embed_fn is not None or not self.persist_dir:
             return
 
-        from .config import load_config
-
-        try:
-            cfg = load_config()
-        except Exception:
+        if time.monotonic() - self._config_cache_ts < self._config_cache_ttl:
             return
 
-        new_backend = cfg.embedding.backend
-        new_model = cfg.embedding.model
+        with self._config_lock:
+            if time.monotonic() - self._config_cache_ts < self._config_cache_ttl:
+                return
 
-        # MasterSettings.memory overrides config.default.json
-        try:
-            from dashboard.lib.settings.resolver import get_settings_resolver
+            from .config import load_config
 
-            mem = get_settings_resolver().get_master_settings().memory
-            if mem:
-                if getattr(mem, "embedding_backend", ""):
-                    new_backend = mem.embedding_backend
-                if getattr(mem, "embedding_model", ""):
-                    new_model = mem.embedding_model
-        except Exception:
-            pass
+            try:
+                cfg = load_config()
+            except Exception:
+                self._config_cache_ts = time.monotonic()
+                return
 
-        if new_backend != self.embedding_backend or new_model != self.model_name:
-            logger.info(
-                "Embedding settings changed: %s/%s → %s/%s, recreating retriever",
-                self.embedding_backend,
-                self.model_name,
-                new_backend,
-                new_model,
-            )
-            self.embedding_backend = new_backend
-            self.model_name = new_model
-            # Recreate the retriever with updated settings — this is the
-            # safest approach since retriever backends don't share a common
-            # reload API.
-            old_retriever = self.retriever
-            self.retriever = self._create_retriever()
-            # Migrate any in-memory data if possible
-            if hasattr(old_retriever, "collection") and hasattr(self.retriever, "add_document"):
-                try:
-                    pass  # Vector data will be rebuilt incrementally on next sync
-                except Exception:
-                    pass
+            self._config_cache_ts = time.monotonic()
+
+            new_backend = cfg.embedding.backend
+            new_model = cfg.embedding.model
+
+            # MasterSettings.memory overrides config.default.json
+            try:
+                from dashboard.lib.settings.resolver import get_settings_resolver
+
+                mem = get_settings_resolver().get_master_settings().memory
+                if mem:
+                    if getattr(mem, "embedding_backend", ""):
+                        new_backend = mem.embedding_backend
+                    if getattr(mem, "embedding_model", ""):
+                        new_model = mem.embedding_model
+            except Exception:
+                pass
+
+            if new_backend != self.embedding_backend or new_model != self.model_name:
+                logger.info(
+                    "Embedding settings changed: %s/%s → %s/%s, recreating retriever",
+                    self.embedding_backend,
+                    self.model_name,
+                    new_backend,
+                    new_model,
+                )
+                self.embedding_backend = new_backend
+                self.model_name = new_model
+                old_retriever = self.retriever
+                self.retriever = self._create_retriever()
+                if hasattr(old_retriever, "collection") and hasattr(self.retriever, "add_document"):
+                    try:
+                        pass  # Vector data will be rebuilt incrementally on next sync
+                    except Exception:
+                        pass
 
     # --- Persistence helpers ---
 
@@ -476,54 +494,6 @@ class AgenticMemorySystem:
         # Rebuild backlinks from links (backlinks are never persisted)
         self._rebuild_backlinks()
 
-        # Rebuild vector index for any notes missing from the retriever
-        self._rebuild_missing_vectors()
-
-    def _rebuild_missing_vectors(self):
-        """Re-index notes whose vectors are missing from the retriever.
-
-        When ``vectordb/`` is deleted but ``notes/`` remains, the retriever
-        is empty while ``self.memories`` has loaded notes.  This method
-        detects the gap and re-adds them so search works immediately.
-        """
-        if not self.memories or not hasattr(self.retriever, "existing_ids"):
-            return
-
-        all_ids = list(self.memories.keys())
-        try:
-            indexed = self.retriever.existing_ids(all_ids)
-        except Exception:
-            return
-
-        missing = [mid for mid in all_ids if mid not in indexed]
-        if not missing:
-            return
-
-        logger.info(
-            "Rebuilding vector index for %d notes missing from retriever",
-            len(missing),
-        )
-        for mid in missing:
-            note = self.memories[mid]
-            try:
-                self.retriever.add_document(
-                    doc_id=note.id,
-                    document=note.content,
-                    metadata={
-                        "name": note.name,
-                        "path": note.path,
-                        "keywords": note.keywords,
-                        "tags": note.tags,
-                        "context": note.context,
-                        "summary": getattr(note, "summary", None) or "",
-                        "timestamp": note.timestamp,
-                        "last_modified": note.last_modified,
-                        "content_hash": note.content_hash,
-                    },
-                )
-            except Exception as e:
-                logger.warning("Could not re-index note %s: %s", mid, e)
-
     def _rebuild_backlinks(self):
         """Derive all backlinks from forward links. Also prunes dead links."""
         # Clear all backlinks
@@ -578,11 +548,8 @@ class AgenticMemorySystem:
                                 }}
                                 """
 
-    # Approximate word count threshold for generating summary.
-    # all-MiniLM-L6-v2 supports 256 tokens; enhanced_document appends
-    # gemini embedding truncates to 512 tokens. To leave room for metadata like
-    # context/keywords/tags, so we reserve ~100 tokens for metadata
-    # and use ~250 words as the content threshold.
+    # Approximate word count threshold for generating summary. Leave room for
+    # metadata appended by enhanced_document, such as context/keywords/tags.
     SUMMARY_WORD_THRESHOLD = 250
 
     def tree(self) -> str:
@@ -617,25 +584,37 @@ class AgenticMemorySystem:
                 lines.extend(AgenticMemorySystem._render_tree(children, prefix + extension))
         return lines
 
-    def _get_existing_context(self, content: str, include_tree: bool = False) -> str:
+    def _get_existing_context(self, content: str, include_tree: bool = False, search_results=None) -> str:
         """Collect context from similar memories and existing directory structure.
 
         Args:
             content: The note content to find similar memories for.
             include_tree: If True, include full directory tree in context.
+            search_results: Pre-computed retriever results to reuse.
         """
         if not self.memories:
             return ""
 
         lines = []
-        self._append_similar_memories_context(content, lines)
+        self._append_similar_memories_context(content, lines, search_results=search_results)
         self._append_directory_context(include_tree, lines)
         return "\n            ".join(lines)
 
-    def _append_similar_memories_context(self, content: str, lines: list) -> None:
-        """Search for similar memories and append context lines."""
+    def _append_similar_memories_context(self, content: str, lines: list, search_results=None) -> None:
+        """Search for similar memories and append context lines.
+
+        Args:
+            content: Query text for vector search.
+            lines: Output list to append context strings to.
+            search_results: Pre-computed retriever results to reuse (avoids
+                redundant embedding call).  When None, a fresh search is
+                performed.
+        """
         try:
-            results = self.retriever.search(content, k=5)
+            if search_results is not None:
+                results = search_results
+            else:
+                results = self.retriever.search(content, k=5)
             ids = results.get("ids", [[]])[0]
             if not ids:
                 return
@@ -663,7 +642,7 @@ class AgenticMemorySystem:
             tree_paths = sorted({"/".join(p.split("/")[:2]) for p in all_paths})
             lines.append(f"Existing directory tree: {', '.join(tree_paths)}")
 
-    def analyze_content(self, content: str) -> Dict:
+    def analyze_content(self, content: str, search_results=None) -> Dict:
         """Analyze content using LLM to extract semantic metadata.
 
         Uses a language model to understand the content and extract:
@@ -674,6 +653,8 @@ class AgenticMemorySystem:
 
         Args:
             content (str): The text content to analyze
+            search_results: Pre-computed retriever results to reuse for
+                context-aware analysis (avoids redundant embedding call).
 
         Returns:
             Dict: Contains extracted metadata with keys:
@@ -700,7 +681,9 @@ class AgenticMemorySystem:
 
         context_section = ""
         if self.context_aware_analysis:
-            existing = self._get_existing_context(content, include_tree=self.context_aware_tree)
+            existing = self._get_existing_context(
+                content, include_tree=self.context_aware_tree, search_results=search_results
+            )
             if existing:
                 context_section = f"""
             IMPORTANT - Existing knowledge base context:
@@ -783,13 +766,19 @@ class AgenticMemorySystem:
             logger.exception("Error analyzing content")
             return {"keywords": [], "context": "General", "tags": []}
 
-    def _apply_llm_analysis(self, note: MemoryNote) -> None:
-        """Run LLM analysis on a note and fill in missing metadata."""
+    def _apply_llm_analysis(self, note: MemoryNote, search_results=None) -> None:
+        """Run LLM analysis on a note and fill in missing metadata.
+
+        Args:
+            note: The note to analyze.
+            search_results: Pre-computed retriever results to reuse for
+                context-aware analysis (avoids redundant embedding call).
+        """
         needs_analysis = not note.keywords or note.context == "General" or not note.tags
         if not needs_analysis:
             return
 
-        analysis = self.analyze_content(note.content)
+        analysis = self.analyze_content(note.content, search_results=search_results)
         if note.name is None:
             note.name = analysis.get("name")
         if note.path is None:
@@ -823,19 +812,41 @@ class AgenticMemorySystem:
             "summary": note.summary,
         }
 
-    def add_note(self, content: str, time: Optional[str] = None, **kwargs) -> str:
-        """Add a new memory note"""
+    def add_note(self, content: str, time: Optional[str] = None, skip_evolution: bool = False, **kwargs) -> str:
+        """Add a new memory note.
+
+        Args:
+            content: The text content to store.
+            time: Optional timestamp string (YYYYMMDDHHMM).
+            skip_evolution: When True, skip the evolution LLM call.
+                Useful during bulk import — run ``_batch_evolve`` after all
+                notes are indexed instead.
+            **kwargs: Additional MemoryNote fields (name, path, etc.).
+        """
         self._reload_embedding_settings()
         if time is not None:
             kwargs["timestamp"] = time
         note = MemoryNote(content=content, **kwargs)
 
-        self._apply_llm_analysis(note)
+        # Pre-compute search results (shared by context-aware analysis
+        # and evolution) to avoid redundant embedding calls.
+        search_results = None
+        if self.memories:
+            try:
+                search_results = self.retriever.search(content, k=5)
+            except Exception:
+                pass
+
+        self._apply_llm_analysis(note, search_results=search_results)
 
         # Add to memories before evolution so add_link can find it
         self.memories[note.id] = note
         self._dirty = True
-        evo_label, note = self.process_memory(note)
+
+        if not skip_evolution:
+            evo_label, note = self.process_memory(note, search_results=search_results)
+        else:
+            evo_label = False
         self._save_note(note)
 
         metadata = self._build_note_metadata(note)
@@ -850,6 +861,51 @@ class AgenticMemorySystem:
             if self.evo_cnt % self.evo_threshold == 0:
                 self.consolidate_memories()
         return note.id
+
+    # --- Batch evolution ---------------------------------------------------
+
+    def _batch_evolve(self, note_ids: List[str]) -> int:
+        """Run memory evolution on a batch of newly imported notes.
+
+        Notes must already be indexed in the vector store so that
+        ``process_memory`` can find neighbors. Uses retriever batch mode
+        to defer ``optimize()`` until all evolution writes are done.
+
+        Args:
+            note_ids: IDs of notes to evolve.
+
+        Returns:
+            Number of notes that were evolved.
+        """
+        evolved = 0
+
+        if hasattr(self.retriever, "start_batch"):
+            self.retriever.start_batch()
+
+        try:
+            for note_id in note_ids:
+                note = self.memories.get(note_id)
+                if note is None:
+                    continue
+                try:
+                    evo_label, note = self.process_memory(note)
+                    if evo_label:
+                        evolved += 1
+                        self._save_note(note)
+                        self.retriever.delete_document(note_id)
+                        metadata = self._build_note_metadata(note)
+                        self.retriever.add_document(note.content, metadata, note_id)
+                        self.evo_cnt += 1
+                except Exception:
+                    logger.exception("_batch_evolve: failed for note %s", note_id)
+        finally:
+            if hasattr(self.retriever, "end_batch"):
+                self.retriever.end_batch()
+
+        if self.evo_cnt >= self.evo_threshold:
+            self.consolidate_memories()
+
+        return evolved
 
     # --- Import docs -------------------------------------------------------
 
@@ -867,13 +923,25 @@ class AgenticMemorySystem:
         ``.docs_imported_<YYYYMMDD_HHMMSS>`` so concurrent agents won't
         re-process it.
 
+        The import uses a three-phase pipeline for performance:
+        1. **Concurrent analysis**: LLM metadata extraction runs in
+           parallel (limited to 4 workers) so the I/O-bound LLM calls
+           overlap.
+        2. **Batch insert**: Notes are added to memory + vector store in
+           batch mode (defers ``optimize()`` until the end) with evolution
+           skipped.
+        3. **Batch evolution**: Memory evolution runs on all newly
+           imported notes after they are indexed, so neighbors can be
+           found correctly.
+
         Args:
             docs_dir: Absolute path to the docs directory
                       (typically ``<persist_dir>/docs``).
 
         Returns:
-            Dict with counts: imported, skipped, failed, renamed_to.
+            Dict with counts: imported, skipped, failed, evolved, renamed_to.
         """
+        import concurrent.futures
         from datetime import datetime as _dt
 
         if not os.path.isdir(docs_dir):
@@ -893,13 +961,14 @@ class AgenticMemorySystem:
             return {"error": f"rename failed: {e}"}
         logger.info("import_docs: claimed %s → %s", docs_dir, renamed)
 
-        imported = 0
         skipped = 0
         failed = 0
 
         # Pre-build hash set for O(1) duplicate detection (F8)
         _existing_hashes = {n.content_hash for n in self.memories.values()}
 
+        # --- Phase 0: Collect all files ---
+        pending: list = []
         for dirpath, _dirnames, filenames in os.walk(renamed):
             for filename in filenames:
                 if not filename.endswith(".md"):
@@ -924,8 +993,6 @@ class AgenticMemorySystem:
                 path = rel_dir if rel_dir != "." else None
 
                 # Skip if a note with identical content already exists
-                # (prevents re-import if the user places the same docs again)
-                # Uses pre-built hash set instead of O(N) scan per file (F8).
                 candidate = MemoryNote(
                     content=content,
                     name=name,
@@ -933,42 +1000,86 @@ class AgenticMemorySystem:
                     context="General",
                 )
                 if candidate.content_hash in _existing_hashes:
-                    logger.info(
-                        "import_docs: skipping duplicate %s",
-                        filepath,
-                    )
+                    logger.info("import_docs: skipping duplicate %s", filepath)
                     skipped += 1
                     continue
 
-                # Create note with derived name/path, LLM fills the rest
+                pending.append((content, name, path, candidate.content_hash, filepath))
+
+        # --- Phase 1: Concurrent LLM analysis ---
+        # Warm the config cache so concurrent threads don't all reload config.
+        self._reload_embedding_settings()
+
+        analyzed: list = []
+        analysis_failed = 0
+
+        def _analyze_one(args):
+            content, name, path, _ch, filepath = args
+            note = MemoryNote(content=content, name=name, path=path, context="General")
+            self._apply_llm_analysis(note)
+            return (note, _ch, filepath)
+
+        max_workers = min(4, len(pending)) if pending else 1
+
+        if pending:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_args = {executor.submit(_analyze_one, args): args for args in pending}
+                for future in concurrent.futures.as_completed(future_to_args):
+                    try:
+                        result = future.result()
+                        analyzed.append(result)
+                    except Exception as e:
+                        logger.exception("import_docs: LLM analysis failed: %s", e)
+                        analysis_failed += 1
+
+        # --- Phase 2: Batch insert into memory + vector store ---
+        imported = 0
+        newly_imported_ids: list = []
+
+        if hasattr(self.retriever, "start_batch"):
+            self.retriever.start_batch()
+
+        try:
+            for note, content_hash, filepath in analyzed:
                 try:
-                    note_id = self.add_note(
-                        content=content,
-                        name=name,
-                        path=path,
-                    )
-                    # Update hash set for subsequent duplicate checks
-                    _existing_hashes.add(candidate.content_hash)
-                    logger.info(
-                        "import_docs: imported %s as %s",
-                        filepath,
-                        note_id,
-                    )
+                    self.memories[note.id] = note
+                    self._dirty = True
+                    self._save_note(note)
+
+                    metadata = self._build_note_metadata(note)
+                    self.retriever.add_document(note.content, metadata, note.id)
+
+                    _existing_hashes.add(content_hash)
+                    newly_imported_ids.append(note.id)
                     imported += 1
+
+                    logger.info("import_docs: imported %s as %s", filepath, note.id)
                 except Exception as e:
-                    logger.exception("import_docs: failed to import %s: %s", filepath, e)
+                    logger.exception("import_docs: failed to insert %s: %s", filepath, e)
                     failed += 1
+        finally:
+            if hasattr(self.retriever, "end_batch"):
+                self.retriever.end_batch()
+
+        # --- Phase 3: Batch evolution ---
+        evolved = 0
+        if newly_imported_ids:
+            evolved = self._batch_evolve(newly_imported_ids)
+
+        total_failed = failed + analysis_failed
 
         logger.info(
-            "import_docs: done — imported=%d skipped=%d failed=%d",
+            "import_docs: done — imported=%d skipped=%d failed=%d evolved=%d",
             imported,
             skipped,
-            failed,
+            total_failed,
+            evolved,
         )
         return {
             "imported": imported,
             "skipped": skipped,
-            "failed": failed,
+            "failed": total_failed,
+            "evolved": evolved,
             "renamed_to": renamed,
         }
 
@@ -1257,23 +1368,8 @@ class AgenticMemorySystem:
             return "", []
 
         try:
-            # Get results from ChromaDB
             results = self.retriever.search(query, k)
-
-            # Convert to list of memories
-            memory_str = ""
-            memory_ids = []
-
-            if "ids" in results and results["ids"] and len(results["ids"]) > 0 and len(results["ids"][0]) > 0:
-                for i, doc_id in enumerate(results["ids"][0]):
-                    # Get metadata from ChromaDB results
-                    if i < len(results["metadatas"][0]):
-                        metadata = results["metadatas"][0][i]
-                        # Format memory string with actual memory ID
-                        memory_str += f"memory_id:{doc_id}\ttalk start time:{metadata.get('timestamp', '')}\tmemory content: {metadata.get('content', '')}\tmemory context: {metadata.get('context', '')}\tmemory keywords: {str(metadata.get('keywords', []))}\tmemory tags: {str(metadata.get('tags', []))}\n"
-                        memory_ids.append(doc_id)
-
-            return memory_str, memory_ids
+            return self._format_search_as_neighbors(results)
         except Exception as e:
             logger.error(f"Error in find_related_memories: {str(e)}")
             return "", []
@@ -1725,11 +1821,37 @@ class AgenticMemorySystem:
         },
     }
 
-    def process_memory(self, note: MemoryNote) -> Tuple[bool, MemoryNote]:
+    def _format_search_as_neighbors(self, results) -> Tuple[str, List[str]]:
+        """Format raw retriever results into the neighbor text used by evolution.
+
+        This extracts the same formatting logic as ``find_related_memories``
+        so that pre-computed search results can be reused without a second
+        vector search.
+        """
+        memory_str = ""
+        memory_ids = []
+        if self._has_valid_ids(results):
+            for i, doc_id in enumerate(results["ids"][0]):
+                if i < len(results["metadatas"][0]):
+                    metadata = results["metadatas"][0][i]
+                    memory_str += (
+                        f"memory_id:{doc_id}\t"
+                        f"talk start time:{metadata.get('timestamp', '')}\t"
+                        f"memory content: {metadata.get('content', '')}\t"
+                        f"memory context: {metadata.get('context', '')}\t"
+                        f"memory keywords: {str(metadata.get('keywords', []))}\t"
+                        f"memory tags: {str(metadata.get('tags', []))}\n"
+                    )
+                    memory_ids.append(doc_id)
+        return memory_str, memory_ids
+
+    def process_memory(self, note: MemoryNote, search_results=None) -> Tuple[bool, MemoryNote]:
         """Process a memory note and determine if it should evolve.
 
         Args:
             note: The memory note to process
+            search_results: Pre-computed retriever results to reuse for
+                finding neighbors (avoids redundant embedding call).
 
         Returns:
             Tuple[bool, MemoryNote]: (should_evolve, processed_note)
@@ -1738,7 +1860,10 @@ class AgenticMemorySystem:
             return False, note
 
         try:
-            neighbors_text, memory_ids = self.find_related_memories(note.content, k=5)
+            if search_results is not None:
+                neighbors_text, memory_ids = self._format_search_as_neighbors(search_results)
+            else:
+                neighbors_text, memory_ids = self.find_related_memories(note.content, k=5)
             if not neighbors_text or not memory_ids:
                 return False, note
 

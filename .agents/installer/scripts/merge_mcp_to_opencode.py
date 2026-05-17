@@ -164,7 +164,7 @@ def main(mcp_source: str, opencode_file: str, mcp_module_dir: str) -> None:
         f.write("\n")
 
     core_count = len(
-        [n for n in validated_mcp if n in {"channel", "warroom", "memory"}]
+        [n for n in validated_mcp if n in {"channel", "warroom", "memory", "ostwin"}]
     )
     print(f"    Merged {len(validated_mcp)} MCP server(s) into {opencode_file}")
     if skipped_names:

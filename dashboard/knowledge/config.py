@@ -22,7 +22,7 @@ KNOWLEDGE_DIR: Path = Path(
 # --- Model defaults ---------------------------------------------------------
 
 EMBEDDING_MODEL: str = os.environ.get(
-    "OSTWIN_KNOWLEDGE_EMBED_MODEL", "BAAI/bge-base-en-v1.5"
+    "OSTWIN_KNOWLEDGE_EMBED_MODEL", "qwen3-embedding:0.6b"
 )
 # Embedding dimension is a system-wide constant fixed at startup.
 # OSTWIN_EMBEDDING_DIM is the single source of truth — shared by both
@@ -39,7 +39,7 @@ LLM_MODEL: str = os.environ.get("OSTWIN_KNOWLEDGE_LLM_MODEL", "llama3.2")
 # Valid values mirror MemorySettings: "ollama", "openai-compatible", etc.
 LLM_PROVIDER: str = os.environ.get("OSTWIN_KNOWLEDGE_LLM_PROVIDER", "ollama")
 EMBEDDING_PROVIDER: str = os.environ.get(
-    "OSTWIN_KNOWLEDGE_EMBED_PROVIDER", "sentence-transformers"
+    "OSTWIN_KNOWLEDGE_EMBED_PROVIDER", "ollama"
 )
 
 # --- Retrieval / graph tunables --------------------------------------------

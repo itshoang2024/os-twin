@@ -91,7 +91,7 @@ class NamespaceVectorStore:
         be writable; the parent is created on construction so the underlying
         zvec ``create_and_open`` call doesn't fail on a missing tree.
     dimension:
-        Embedding dimension (e.g. 1024 for ``BAAI/bge-base-en-v1.5``). Frozen
+        Embedding dimension (e.g. 1024 for ``qwen3-embedding:0.6b``). Frozen
         at construction time — do NOT change between calls on the same path
         or zvec will reject the open.
     schema_name:

@@ -347,6 +347,44 @@ class OpenAIClient(LLMClient):
 
 
 
+# Fields accepted by Gemini's Schema proto. Anything else (notably
+# ``additionalProperties``, ``$schema``, ``strict``, ``definitions``,
+# ``$ref``, ``oneOf``) must be stripped or the API returns 400.
+_GEMINI_SCHEMA_ALLOWED_KEYS = frozenset({
+    "type", "format", "description", "nullable", "enum", "title", "default",
+    "example", "anyOf",
+    "items", "minItems", "maxItems",
+    "properties", "required", "propertyOrdering",
+    "minProperties", "maxProperties",
+    "pattern", "minLength", "maxLength",
+    "minimum", "maximum",
+})
+
+
+def _sanitize_gemini_schema(node: Any) -> Any:
+    """Recursively strip JSON-Schema fields Gemini's response_schema rejects.
+
+    Filters dict keys by the Gemini allowlist, except inside ``properties``
+    where the keys are user-defined field names that must be kept verbatim
+    (only their schema values are sanitized).
+    """
+    if isinstance(node, dict):
+        cleaned: dict = {}
+        for k, v in node.items():
+            if k not in _GEMINI_SCHEMA_ALLOWED_KEYS:
+                continue
+            if k == "properties" and isinstance(v, dict):
+                cleaned[k] = {pk: _sanitize_gemini_schema(pv) for pk, pv in v.items()}
+            elif k == "required" and isinstance(v, list):
+                cleaned[k] = list(v)
+            else:
+                cleaned[k] = _sanitize_gemini_schema(v)
+        return cleaned
+    if isinstance(node, list):
+        return [_sanitize_gemini_schema(v) for v in node]
+    return node
+
+
 class GoogleClient(LLMClient):
     # Gemini AI (consumer) OpenAI-compatible endpoint.
     # Vertex AI uses a separate region-scoped URL resolved by create_client.
@@ -455,7 +493,7 @@ class GoogleClient(LLMClient):
                 schema = response_format.get("json_schema", {}).get("schema", {})
                 config_kwargs["response_mime_type"] = "application/json"
                 if schema:
-                    config_kwargs["response_schema"] = schema
+                    config_kwargs["response_schema"] = _sanitize_gemini_schema(schema)
             if config_kwargs:
                 kwargs["config"] = types.GenerateContentConfig(**config_kwargs)
 
@@ -507,7 +545,7 @@ class GoogleClient(LLMClient):
             schema = response_format.get("json_schema", {}).get("schema", {})
             config_kwargs["response_mime_type"] = "application/json"
             if schema:
-                config_kwargs["response_schema"] = schema
+                config_kwargs["response_schema"] = _sanitize_gemini_schema(schema)
         if config_kwargs:
             kwargs["config"] = types.GenerateContentConfig(**config_kwargs)
 
@@ -735,9 +773,60 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "google_gemini": "google",
 }
 
+_UNSUPPORTED_EMBEDDING_PROVIDERS = frozenset({
+    "sentence-transformer",
+    "sentence-transformers",
+})
+
+_LEGACY_SENTENCE_TRANSFORMER_MODELS = frozenset({
+    "all-minilm-l6-v2",
+    "all-minilm-l12-v2",
+    "all-mpnet-base-v2",
+    "paraphrase-minilm-l6-v2",
+    "paraphrase-multilingual-minilm-l12-v2",
+    "baai/bge-small-en-v1.5",
+    "baai/bge-base-en-v1.5",
+    "baai/bge-large-en-v1.5",
+})
+
 
 def _normalize_provider(provider: str) -> str:
     return _PROVIDER_ALIASES.get(provider, provider)
+
+
+def _is_sentence_transformer_provider(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    return value.lower().replace("_", "-") in _UNSUPPORTED_EMBEDDING_PROVIDERS
+
+
+def _is_legacy_sentence_transformer_model(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    model = value.lower().replace("_", "-")
+    return model in _LEGACY_SENTENCE_TRANSFORMER_MODELS
+
+
+def _reject_sentence_transformer_embeddings(model: str, provider: Optional[str]) -> None:
+    if _is_sentence_transformer_provider(provider):
+        raise ValueError(
+            "sentence-transformers embeddings are no longer supported; "
+            "use ollama, google, google-vertex, or openai-compatible instead."
+        )
+
+    if "/" in model:
+        prefix = model.split("/", 1)[0]
+        if _is_sentence_transformer_provider(prefix):
+            raise ValueError(
+                "sentence-transformers embeddings are no longer supported; "
+                "use ollama, google, google-vertex, or openai-compatible instead."
+            )
+
+    if _is_legacy_sentence_transformer_model(model):
+        raise ValueError(
+            "legacy sentence-transformer embedding models are no longer supported; "
+            "use an Ollama, Google, Vertex, or OpenAI-compatible embedding model instead."
+        )
 
 
 def _detect_provider_from_model(model: str) -> str:
@@ -799,12 +888,19 @@ def resolve_provider_and_model(
       3. If neither (1) nor (2) applies, auto-detect the provider from the
          model name.
     """
+    _KNOWN_PROVIDERS = frozenset({
+        "openai", "anthropic", "google", "google-genai", "google_gemini",
+        "google-vertex", "deepseek", "mistral", "groq", "cerebras",
+        "perplexity", "together", "togetherai", "fireworks", "xai",
+        "cohere", "alibaba", "ollama", "openai-compatible",
+    })
+
     model_provider: Optional[str] = None
     rest: str = model
 
     if "/" in model:
         prefix, rest = model.split("/", 1)
-        if prefix:
+        if prefix and _normalize_provider(prefix) in _KNOWN_PROVIDERS:
             model_provider = _normalize_provider(prefix)
 
     if provider is not None:
@@ -985,20 +1081,11 @@ DEFAULT_EMBEDDING_DIMENSION: int = int(
 
 # Known native model dimensions — avoids a test-embedding probe on first use.
 _KNOWN_EMBEDDING_DIMENSIONS: dict[str, int] = {
-    "all-MiniLM-L6-v2": DEFAULT_EMBEDDING_DIMENSION,
-    "all-MiniLM-L12-v2": DEFAULT_EMBEDDING_DIMENSION,
-    "all-mpnet-base-v2": DEFAULT_EMBEDDING_DIMENSION,
-    "paraphrase-MiniLM-L6-v2": DEFAULT_EMBEDDING_DIMENSION,
-    "paraphrase-multilingual-MiniLM-L12-v2": DEFAULT_EMBEDDING_DIMENSION,
-    "BAAI/bge-base-en-v1.5": DEFAULT_EMBEDDING_DIMENSION,
-    "BAAI/bge-small-en-v1.5": DEFAULT_EMBEDDING_DIMENSION,
-    "BAAI/bge-large-en-v1.5": DEFAULT_EMBEDDING_DIMENSION,
     "gemini-embedding-001": DEFAULT_EMBEDDING_DIMENSION,
     "text-embedding-004": DEFAULT_EMBEDDING_DIMENSION,
     "text-embedding-005": DEFAULT_EMBEDDING_DIMENSION,
     "text-embedding-3-small": DEFAULT_EMBEDDING_DIMENSION,
     "text-embedding-3-large": DEFAULT_EMBEDDING_DIMENSION,
-    # Ollama embedding models
     "leoipulsar/harrier-0.6b": DEFAULT_EMBEDDING_DIMENSION,
     "embeddinggemma": DEFAULT_EMBEDDING_DIMENSION,
     "qwen3-embedding:0.6b": DEFAULT_EMBEDDING_DIMENSION,
@@ -1065,12 +1152,6 @@ class OllamaEmbeddingClient(EmbeddingClient):
 
     No litellm dependency.  Output is truncated to the configured dimension
     (default: 1024) for cross-backend consistency.
-
-    When the Ollama server is unreachable (connection refused, timeout),
-    the client falls back to ``SentenceTransformersEmbeddingClient`` with
-    ``all-MiniLM-L6-v2`` so the knowledge pipeline doesn't hard-fail on
-    an offline machine.  The fallback is tried once and cached; subsequent
-    calls reuse the local model.
     """
 
     def __init__(
@@ -1081,30 +1162,6 @@ class OllamaEmbeddingClient(EmbeddingClient):
     ):
         super().__init__(model, dimension)
         self._base_url = base_url  # None → ollama default (localhost:11434)
-        self._fallback: Any = None
-        self._fallback_attempted = False
-
-    def _try_fallback(self) -> Any:
-        """Return a cached sentence-transformers fallback, or None if already tried."""
-        if self._fallback_attempted:
-            return self._fallback
-        self._fallback_attempted = True
-        try:
-            self._fallback = SentenceTransformersEmbeddingClient(
-                model="all-MiniLM-L6-v2",
-                dimension=self._dimension,
-            )
-            logger.info(
-                "Ollama unavailable; falling back to sentence-transformers "
-                "(all-MiniLM-L6-v2) for embedding. Set "
-                "OSTWIN_KNOWLEDGE_EMBED_PROVIDER=sentence-transformers to "
-                "suppress this fallback."
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "Ollama fallback to sentence-transformers also failed: %s", exc
-            )
-        return self._fallback
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import ollama as _ollama  # noqa: WPS433
@@ -1119,13 +1176,6 @@ class OllamaEmbeddingClient(EmbeddingClient):
             result = response["embeddings"]
         except Exception as exc:
             logger.error("Ollama embedding failed: %s", exc)
-            # Try sentence-transformers fallback before returning empty
-            fb = self._try_fallback()
-            if fb is not None:
-                try:
-                    return fb.embed(texts)
-                except Exception as fb_exc:  # noqa: BLE001
-                    logger.error("Sentence-transformers fallback also failed: %s", fb_exc)
             return [[] for _ in texts]
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
@@ -1233,40 +1283,6 @@ class GeminiEmbeddingClient(EmbeddingClient):
         return self._truncate_to_dim(embeddings, target_dim)
 
 
-class SentenceTransformersEmbeddingClient(EmbeddingClient):
-    """Embedding via local sentence-transformers model.
-
-    Loads the model lazily on first use.
-    """
-
-    def __init__(
-        self,
-        model: str = "all-MiniLM-L6-v2",
-        dimension: Optional[int] = None,
-    ):
-        if not model:
-            model = "all-MiniLM-L6-v2"
-        super().__init__(model, dimension)
-        self._st_model = None
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        if self._st_model is None:
-            from sentence_transformers import SentenceTransformer
-            self._st_model = SentenceTransformer(self.model)
-
-        try:
-            embeddings = self._st_model.encode(texts, convert_to_numpy=True)
-            result = embeddings.tolist()
-        except Exception as exc:
-            logger.error("Sentence-transformers embedding failed: %s", exc)
-            return [[] for _ in texts]
-
-        target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
-        return self._truncate_to_dim(result, target_dim)
-
-
 # Embedding-client singleton cache: keyed by (provider, model, dimension)
 _embedding_cache: dict[str, Any] = {}
 _embedding_cache_lock = threading.Lock()
@@ -1279,7 +1295,12 @@ def _detect_embedding_provider_from_model(model: str) -> str:
     specific provider identifiers (e.g. ``"ollama"`` instead of ``"openai"``).
     """
     if not model:
-        return "sentence-transformers"
+        return "ollama"
+    if _is_legacy_sentence_transformer_model(model):
+        raise ValueError(
+            "legacy sentence-transformer embedding models are no longer supported; "
+            "use an Ollama, Google, Vertex, or OpenAI-compatible embedding model instead."
+        )
     model_lower = model.lower()
     if "gemini" in model_lower or "text-embedding" in model_lower:
         if "vertex" in model_lower:
@@ -1287,8 +1308,6 @@ def _detect_embedding_provider_from_model(model: str) -> str:
         return "google"
     if any(x in model_lower for x in ["gpt-", "text-embedding-3"]):
         return "openai-compatible"
-    if "bge-" in model_lower or "minilm" in model_lower or model_lower.startswith("all-"):
-        return "sentence-transformers"
     return "ollama"
 
 
@@ -1312,8 +1331,7 @@ def create_embedding_client(
         model: Embedding model identifier.  May include a ``provider/`` prefix
             (e.g. ``"google-vertex/gemini-embedding-001"``).
         provider: Backend: ``"ollama"``, ``"google"``, ``"google-vertex"``,
-            ``"openai-compatible"``, ``"sentence-transformers"``.
-            Auto-detected from model name when ``None``.
+            or ``"openai-compatible"``. Auto-detected from model name when ``None``.
         api_key: API key (provider-specific).
         base_url: Override base URL for the provider.
         dimension: Output vector dimension.  ``None`` means use the model's
@@ -1325,12 +1343,20 @@ def create_embedding_client(
     Returns:
         An ``EmbeddingClient`` instance.
     """
+    _reject_sentence_transformer_embeddings(model, provider)
     effective_provider, clean_model, model_provider = resolve_provider_and_model(model, provider)
 
     # model_provider (from "provider/model" prefix) is the strongest signal —
     # the user explicitly chose this provider for this model.  Fall back to
     # effective_provider only when no prefix was present.
     embed_provider = model_provider if model_provider is not None else effective_provider
+
+    # Use the embedding-specific provider detector for models without an
+    # explicit provider prefix.  The chat-oriented _detect_provider_from_model
+    # misroutes Ollama models (e.g. "leoipulsar/harrier-0.6b" → "openai")
+    # because Ollama model names don't follow chat model naming conventions.
+    if model_provider is None and provider is None:
+        embed_provider = _detect_embedding_provider_from_model(clean_model)
 
     _CHAT_TO_EMBED_PROVIDER: dict[str, str] = {
         "openai": "openai-compatible",
@@ -1355,8 +1381,6 @@ def create_embedding_client(
     elif embed_provider in ("google", "google-vertex"):
         pass
     elif embed_provider == "openai-compatible":
-        pass
-    elif embed_provider == "sentence-transformers":
         pass
     else:
         embed_provider = _detect_embedding_provider_from_model(clean_model)
@@ -1403,11 +1427,6 @@ def create_embedding_client(
             model=clean_model,
             base_url=resolved_base,
             api_key=resolved_key,
-            dimension=dimension,
-        )
-    elif embed_provider == "sentence-transformers":
-        client = SentenceTransformersEmbeddingClient(
-            model=clean_model,
             dimension=dimension,
         )
     elif embed_provider == "ollama" or provider == "ollama":

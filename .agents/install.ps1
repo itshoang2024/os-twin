@@ -170,16 +170,9 @@ else {
 Invoke-DependencyOrchestration
 Write-Host ""
 
-# Step 3: Build frontends
-if (-not $script:DashboardOnly) {
-    Write-Header "3. Building dashboards (sequential)"
-    Build-Frontend -SubDir "dashboard\nextjs" -Label "Next.js dashboard"
-    Build-Frontend -SubDir "dashboard\fe" -Label "Dashboard FE"
-}
-else {
-    Write-Header "3. Building dashboard frontend (fe)"
-    Build-Frontend -SubDir "dashboard\fe" -Label "Dashboard FE"
-}
+# Step 3: Build frontend
+Write-Header "3. Building dashboard frontend (fe)"
+Build-Frontend -SubDir "dashboard\fe" -Label "Dashboard FE" -Required
 
 # Step 4: Install files
 Write-Header "4. Installing Agent OS"

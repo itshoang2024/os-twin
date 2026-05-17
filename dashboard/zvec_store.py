@@ -686,7 +686,7 @@ class OSTwinStore:
             logger.info("Loading embedding model via KnowledgeEmbedder: %s", embedder.model_name)
 
             class _EmbedProxy:
-                """Wraps KnowledgeEmbedder to match SentenceTransformer API."""
+                """Wraps KnowledgeEmbedder for zvec's encode/dimension API."""
 
                 def __init__(self, ke):
                     self._ke = ke
@@ -734,7 +734,7 @@ class OSTwinStore:
         # Truncate very long messages for embedding
         truncated = text[:2000] if len(text) > 2000 else text
         try:
-            # SentenceTransformer.encode returns numpy array by default
+            # zvec's embedding adapter expects an array-like result here.
             embedding = fn.encode(truncated, convert_to_numpy=True)
             return embedding.tolist()
         except Exception as e:

@@ -204,7 +204,11 @@ export default function FileViewer({ planId, path }: FileViewerProps) {
         ) : fileType === 'docx' ? (
           <DocxViewer base64Data={content.content as string} />
         ) : fileType === 'excel' ? (
-          <ExcelViewer data={content.content as string} encoding={(content.encoding as 'utf-8' | 'base64') || 'base64'} />
+          <ExcelViewer
+            data={content.content as string}
+            encoding={(content.encoding as 'utf-8' | 'base64') || 'base64'}
+            extension={path.split('.').pop()?.toLowerCase() || ''}
+          />
         ) : (
           <BinaryFallback mimeType={content.mime_type} path={path} downloadUrl={content.download_url} />
         )}

@@ -11,7 +11,6 @@ import {
   TextChannel,
   REST,
   Routes,
-  SlashCommandBuilder,
 } from 'discord.js';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -19,7 +18,16 @@ import path from 'path';
 import { EOL } from 'os';
 
 import { Platform, Connector, ConnectorConfig, ConnectorStatus, HealthCheckResult, SetupStep, ValidationResult } from './base';
-import { routeCommand, routeCallback, BotResponse, Button, COMMAND_REGISTRY, DEFERRED_COMMANDS } from '../commands';
+import {
+  routeCommand,
+  routeCallback,
+  BotResponse,
+  Button,
+  buildDiscordSlashCommands,
+  getCommandDef,
+  isDeferredCommand,
+  requireCommandDef,
+} from '../commands';
 import { askAgent } from '../agent-bridge';
 import { getSession } from '../sessions';
 import { transcribeAndLaunch } from '../audio-transcript';
@@ -62,9 +70,17 @@ export class DiscordConnector implements Connector {
   constructor() {
     if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
     
-    const vCmds: VoiceCommand[] = [pingCommand, joinCommand, leaveCommand];
-    for (const cmd of vCmds) {
-      this.voiceCommands.set(cmd.data.name, cmd);
+    const vCmds: Array<{ name: string; command: VoiceCommand }> = [
+      { name: 'ping', command: pingCommand },
+      { name: 'join', command: joinCommand },
+      { name: 'leave', command: leaveCommand },
+    ];
+    for (const { name, command } of vCmds) {
+      const def = requireCommandDef(name);
+      if (!def.discordOnly) {
+        throw new Error(`Voice command "${name}" must be marked discordOnly in COMMAND_REGISTRY`);
+      }
+      this.voiceCommands.set(def.name, command);
     }
   }
 
@@ -149,10 +165,10 @@ export class DiscordConnector implements Connector {
       }
 
       const userId = String(interaction.user.id);
-      if (DEFERRED_COMMANDS.has(commandName)) await interaction.deferReply();
+      if (isDeferredCommand(commandName)) await interaction.deferReply();
 
       // Extract args from the registry-defined option name
-      const cmdDef = COMMAND_REGISTRY.find(c => c.name === commandName);
+      const cmdDef = getCommandDef(commandName);
       let args = '';
       if (cmdDef?.arg) {
         args = interaction.options.getString(cmdDef.arg) || '';
@@ -253,8 +269,6 @@ export class DiscordConnector implements Connector {
 
         // All @mentions go through askAgent() — the AI decides whether to
         // refine a plan, check status, or take other actions via tool-calling.
-
-        // Otherwise: AI agent with tool-calling (can create plans, check status, etc.)
         // Trigger if there's text OR attachments (attachment-only = user wants assets processed)
         if (question || hasAttachments) {
           (message.channel as TextChannel).sendTyping().catch(() => {});
@@ -597,19 +611,7 @@ export class DiscordConnector implements Connector {
 
   private async deployCommands(token: string, clientId: string, guildId?: string): Promise<void> {
     // Build slash commands from the centralized COMMAND_REGISTRY
-    const commands = COMMAND_REGISTRY.map(def => {
-      const builder = new SlashCommandBuilder()
-        .setName(def.name)
-        .setDescription(def.description);
-      if (def.arg) {
-        builder.addStringOption(opt =>
-          opt.setName(def.arg!)
-            .setDescription(def.argDescription || def.arg!)
-            .setRequired(def.argRequired ?? false),
-        );
-      }
-      return builder;
-    });
+    const commands = buildDiscordSlashCommands();
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {

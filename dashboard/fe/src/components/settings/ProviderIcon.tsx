@@ -22,7 +22,6 @@ const LOCAL_ICON_MAP: Record<string, string> = {
   vertex:              'vertex',
   ollama:              'ollama',
   huggingface:         'hf',
-  'sentence-transformer': 'hf',
   // Explicit overrides for clarity
   hf:                  'hf',
 };

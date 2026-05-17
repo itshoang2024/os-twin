@@ -6,10 +6,9 @@ import { usePlanningThread } from '@/hooks/use-planning-thread';
 import { usePlanRefine } from '@/hooks/use-plan-refine';
 import { AgentResponse } from '@/components/chat/AgentResponse';
 import { Button } from '@/components/ui/Button';
-import type { ImageAttachment, PlanningMessage } from '@/types';
+import type { ImageAttachment } from '@/types';
 import { processImages, MAX_IMAGES, type ProcessedImage } from '@/lib/image-utils';
 import { extractPlan } from '@/lib/extract-plan';
-import useSWR from 'swr';
 
 const IDEA_PROMPTS = [
   'What are the main risks?',
@@ -385,25 +384,10 @@ function ThreadChat({ threadId }: { threadId: string }) {
 // ── Plan-refine chat (no thread linked) ─────────────────────────────
 
 function RefineChat() {
-  const { planContent, planId, setPlanContent, setActiveTab, plan } = usePlanContext();
-  const threadId = plan?.thread_id ?? (plan?.meta?.thread_id as string | undefined) ?? '';
+  const { planContent, planId, setPlanContent, setActiveTab } = usePlanContext();
 
-  // Fetch brainstorm thread messages if the plan was promoted from an idea
-  const { data: threadData } = useSWR<{ messages: PlanningMessage[] }>(
-    threadId ? `/plans/threads/${threadId}` : null
-  );
-
-  const { chatHistory, isRefining, streamedResponse, error, refine, cancelRefine, clearHistory, seedHistory } =
+  const { chatHistory, isRefining, streamedResponse, error, refine, cancelRefine, clearHistory } =
     usePlanRefine();
-
-  // Seed chat history with brainstorm conversation once loaded
-  useEffect(() => {
-    if (threadData?.messages && threadData.messages.length > 0) {
-      seedHistory(
-        threadData.messages.map((m) => ({ role: m.role, content: m.content }))
-      );
-    }
-  }, [threadData, seedHistory]);
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);

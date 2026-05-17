@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
 
 from dashboard.llm_client import ChatMessage, ToolCall
-from dashboard.master_agent import get_master_client, create_client_for_model, get_master_config, is_master_model_explicit
+from dashboard.master_agent import get_master_client, create_client_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ def get_system_prompt(
     plans_dir: Optional[Path] = None,
     agents_dir: Optional[Path] = None,
     working_dir: Optional[str] = None,
+    mode: str = "refine",
 ) -> str:
     plan_format_spec = "Error: Template not found."
     if plans_dir:
@@ -121,20 +122,32 @@ def get_system_prompt(
     if working_dir:
         project_dir = working_dir
     else:
-        env_project = os.environ.get("OSTWIN_PROJECT_DIR")
-        if env_project:
-            project_dir = str(Path(env_project) / "projects")
-        else:
-            from dashboard.api_utils import PROJECT_ROOT
+        project_dir = str(Path.home() / ".ostwin" / "projects")
 
-            project_dir = str(PROJECT_ROOT / "projects")
+    if mode == "worker":
+        output_section = f"""\
+## OUTPUT FORMAT AND INSTRUCTIONS
 
-    return f"""\
-You are a **Plan Architect** for OS Twin — an AI-powered development orchestration system.
+You are running as a file-writing worker. You MUST write the complete plan markdown directly
+to the plan file path specified in your task message. Do NOT use the # EXPLANATION / # ACTIONS /
+# PLAN three-section output format — that format is for the dashboard's Python-side refine flow.
 
-Your job is to take the user's rough idea and refine it into a structured plan that can be
-executed by autonomous agents inside **war-rooms**.
+Instead:
+1. Read the current skeleton plan file at the path given in the task message.
+2. Generate a fully structured plan following the PLAN TEMPLATE below.
+3. Use the `write` tool to write the COMPLETE plan markdown to the same file path, overwriting the skeleton.
+4. Call `ostwin_register_plan` with the correct plan_id so the dashboard re-indexes the file.
+5. Return a short 2-3 sentence summary of what you drafted.
 
+## RULES
+1. Write ONLY valid plan markdown to the file — no # EXPLANATION or # ACTIONS wrappers.
+2. Use SHORT, descriptive titles for the plan and each epic — never paste the raw user idea as a title.
+3. Create multiple epics (3-8) that break the project into logical phases with meaningful short names.
+4. Each epic MUST have: Roles, Objective, Lifecycle, Definition of Done, Acceptance Criteria, and Tasks.
+5. Include proper `depends_on` chains between epics.
+6. The plan title should be a concise 3-8 word summary, not the full user prompt."""
+    else:
+        output_section = f"""\
 ## OUTPUT FORMAT AND INSTRUCTIONS
 
 You MUST separate your output into the following three labeled sections in this exact order:
@@ -158,7 +171,15 @@ The full, updated plan content strictly following the template format below.
 2. Each section MUST start with its corresponding '#' header on a new line.
 3. The `# ACTIONS` section MUST list one action per line for all files created or modified.
 4. The `# PLAN` section MUST contain the full, valid Markdown content of the plan, starting from its title.
-5. Maintain consistency and accuracy in all file paths.
+5. Maintain consistency and accuracy in all file paths."""
+
+    return f"""\
+You are a **Plan Architect** for OS Twin — an AI-powered development orchestration system.
+
+Your job is to take the user's rough idea and refine it into a structured plan that can be
+executed by autonomous agents inside **war-rooms**.
+
+{output_section}
 
 ## PLAN TEMPLATE
 Strictly follow the structure and rules defined in the template below.
@@ -191,7 +212,7 @@ Do NOT invent arbitrary paths — always use `{project_dir}/<short-name>`.
 ## IMAGE AND DESIGN REFERENCE HANDLING
 
 When the user provides images or design mockups:
-1. **Analyze each image carefully** — describe what you see in the # EXPLANATION section.
+1. **Analyze each image carefully** — describe what you see in your output.
 2. **Reference images in relevant epics** — add a `> Design Reference:` line under each epic that should use the image.
 3. **Include asset notes** — in the Config section, add `> Design Assets: <descriptive list of provided images>`.
 4. **Extract UI/layout details** — if images show UI designs, include specific component names, colors, layout structure in epic descriptions.
@@ -200,6 +221,9 @@ When the user provides images or design mockups:
 """
 
 def _resolve_model(model_str: str = "", has_images: bool = False) -> tuple[str, str]:
+    if not model_str:
+        from dashboard.master_agent import get_model_and_provider
+        return get_model_and_provider()
 
     if "/" in model_str:
         provider, model_name = model_str.split("/", 1)
@@ -287,6 +311,7 @@ async def refine_plan(
     plans_dir: Optional[Path] = None,
     working_dir: Optional[str] = None,
     images: Optional[list[dict]] = None,
+    conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     plan_logger.info("=" * 80)
     plan_logger.info("REFINE_PLAN called")
@@ -294,12 +319,13 @@ async def refine_plan(
     plan_logger.info("  plan_content: %d chars", len(plan_content) if plan_content else 0)
     plan_logger.info("  chat_history: %d turns", len(chat_history) if chat_history else 0)
     plan_logger.info("  images: %d", len(images) if images else 0)
+    plan_logger.info("  conversation_id: %s", conversation_id)
 
     if model:
         model_name, provider = _resolve_model(model, has_images=bool(images))
-        client = create_client_for_model(model_name, provider)
+        client = create_client_for_model(model_name, provider, conversation_id=conversation_id)
     else:
-        client = get_master_client()
+        client = get_master_client(conversation_id=conversation_id)
 
     agents_dir = plans_dir.parent if plans_dir else None
     system_prompt = get_system_prompt(plans_dir, agents_dir=agents_dir, working_dir=working_dir)
@@ -349,12 +375,13 @@ async def refine_plan_stream(
     plans_dir: Optional[Path] = None,
     working_dir: Optional[str] = None,
     images: Optional[list[dict]] = None,
+    conversation_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
     if model:
         model_name, provider = _resolve_model(model, has_images=bool(images))
-        client = create_client_for_model(model_name, provider)
+        client = create_client_for_model(model_name, provider, conversation_id=conversation_id)
     else:
-        client = get_master_client()
+        client = get_master_client(conversation_id=conversation_id)
 
     agents_dir = plans_dir.parent if plans_dir else None
     system_prompt = get_system_prompt(plans_dir, agents_dir=agents_dir, working_dir=working_dir)
@@ -378,12 +405,13 @@ async def summarize_plan(
     plan_content: str,
     model: str = "",
     plans_dir: Optional[Path] = None,
+    conversation_id: Optional[str] = None,
 ) -> str:
     if model:
         model_name, provider = _resolve_model(model)
-        client = create_client_for_model(model_name, provider)
+        client = create_client_for_model(model_name, provider, conversation_id=conversation_id)
     else:
-        client = get_master_client()
+        client = get_master_client(conversation_id=conversation_id)
 
     prompt = (
         "You are an AI assistant. Please provide a concise summary (3-5 bullet points) "
@@ -442,21 +470,22 @@ async def brainstorm_stream(
     chat_history: Optional[list[dict]] = None,
     model: str = "",
     images: Optional[list[dict]] = None,
+    conversation_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
     plan_logger.info("=" * 80)
     plan_logger.info("BRAINSTORM_STREAM started")
     plan_logger.info("  user_message: %s", user_message[:300].replace("\n", "\\n"))
     plan_logger.info("  chat_history turns: %d", len(chat_history) if chat_history else 0)
     plan_logger.info("  model: %s", model or "(master)")
+    plan_logger.info("  conversation_id: %s", conversation_id)
 
-    if model:
-        model_name, provider = _resolve_model(model)
-        client = create_client_for_model(model_name, provider)
-        plan_logger.info("BRAINSTORM_STREAM using model: %s (provider: %s)", model_name, provider)
-    else:
-        client = get_master_client()
-        plan_logger.info("BRAINSTORM_STREAM using master client")
-
+    if not model:
+        plan_logger.info("BRAINSTORM_STREAM falling back to master model (conv: %s)", conversation_id)
+    
+    model_name, provider = _resolve_model(model)
+    client = create_client_for_model(model_name, provider, conversation_id=conversation_id)
+    plan_logger.info("BRAINSTORM_STREAM using _chat_stream client: %s (provider: %s)", model_name, provider)
+    
     messages = build_messages(user_message, plan_content="", chat_history=chat_history, images=images, system_prompt=BRAINSTORM_SYSTEM_PROMPT)
 
     token_count = 0

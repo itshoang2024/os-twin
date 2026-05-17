@@ -7,6 +7,11 @@ import pytest
 # This ensures the MetricsRegistry uses in-memory backend from the start of the test session
 os.environ["OSTWIN_KNOWLEDGE_METRICS_BACKEND"] = "memory"
 
+# Disable request timeout middleware in tests — TestClient's synchronous
+# async bridge doesn't interact well with asyncio.wait_for(), and tests
+# don't need the production safety net.
+os.environ["OSTWIN_REQUEST_TIMEOUT_S"] = "0"
+
 # Add project root to PYTHONPATH for imports like `from dashboard.api import app`
 project_root = Path(__file__).parent.parent.parent.resolve()
 if str(project_root) not in sys.path:

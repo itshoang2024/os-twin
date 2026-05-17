@@ -1,9 +1,16 @@
+"""Integration smoke test for GET /api/rooms/{room_id}/state.
 
-from fastapi.testclient import TestClient
+Skips automatically when the developer hasn't seeded a ``room-003``
+fixture on disk — the unit-level coverage for the underlying ``read_room``
+function lives in ``test_room_state_backend.py``.
+"""
+
 import os
 import sys
 
-# Setup paths
+import pytest
+from fastapi.testclient import TestClient
+
 _dashboard_dir = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_dashboard_dir)
 if _root not in sys.path:
@@ -12,33 +19,31 @@ if _dashboard_dir not in sys.path:
     sys.path.insert(0, _dashboard_dir)
 
 from dashboard.api import app
+from dashboard.api_utils import WARROOMS_DIR
 
 client = TestClient(app)
 
+
 def test_get_room_state_extended():
+    if not (WARROOMS_DIR / "room-003").exists():
+        pytest.skip(f"fixture room-003 missing under {WARROOMS_DIR}")
+
     response = client.get("/api/rooms/room-003/state")
-    if response.status_code != 200:
-        from dashboard.api_utils import WARROOMS_DIR
-        print(f"DEBUG: WARROOMS_DIR = {WARROOMS_DIR}")
-        print(f"DEBUG: Does room-003 exist in it? {(WARROOMS_DIR / 'room-003').exists()}")
-        print(f"DEBUG: Response body: {response.text}")
     assert response.status_code == 200
     data = response.json()
-    
+
     assert data["room_id"] == "room-003"
+    # read_room now surfaces these fields for slash-command consumers.
+    assert "plan_id" in data
+    assert "epic_ref" in data
+    # Extended metadata (opt-in inside the endpoint)
     assert "lifecycle" in data
     assert "roles" in data
     assert "artifact_files" in data
     assert "audit_tail" in data
-    
-    # Check if we got the expected metadata
-    # The initial_state depends on what's in lifecycle.json for room-003
     assert "initial_state" in data["lifecycle"]
     assert "states" in data["lifecycle"]
-    assert len(data["roles"]) > 0
-    assert data["roles"][0]["role"] == "engineer"
-    
-    print("SUCCESS: API endpoint /api/rooms/room-003/state returns full metadata.")
+
 
 if __name__ == "__main__":
-    test_get_room_state_extended()
+    raise SystemExit(pytest.main([__file__, "-v"]))

@@ -9,13 +9,19 @@ All tools return JSON-serialisable dicts. Errors come back as
 exception, so the MCP transport always sees a well-formed response.
 
 Lazy-import discipline: importing this module must NOT pull in
-``kuzu``/``zvec``/``sentence_transformers``/``markitdown``/``anthropic``.
+``kuzu``/``zvec``/``markitdown``/``anthropic``.
 The :class:`KnowledgeService` is constructed on the first tool call (or
 the first call to :func:`get_mcp_app`), so dashboard cold-boot stays fast.
+
+Performance: all tools are declared ``async`` and wrap the synchronous
+KnowledgeService calls in ``asyncio.to_thread()``. This prevents the
+streamable-HTTP transport from blocking the event loop while a long-running
+embedding, graph query, or LLM call is in progress.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from typing import Any, Optional
@@ -26,7 +32,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 logger = logging.getLogger(__name__)
 
 # Singleton KnowledgeService — lazy-init on first tool call so module
-# import stays cheap (no kuzu / zvec / sentence-transformers / markitdown /
+# import stays cheap (no kuzu / zvec / markitdown /
 # anthropic loaded at startup).
 _service: Optional[Any] = None
 _service_lock = threading.Lock()
@@ -136,7 +142,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def knowledge_list_namespaces() -> dict:
+async def knowledge_list_namespaces() -> dict:
     """List all knowledge namespaces with their stats.
 
     Returns a dict with key ``namespaces`` containing one entry per
@@ -150,7 +156,7 @@ def knowledge_list_namespaces() -> dict:
     """
     try:
         ks = _get_service()
-        items = ks.list_namespaces()
+        items = await asyncio.to_thread(ks.list_namespaces)
         return {"namespaces": [m.model_dump(mode="json") for m in items]}
     except Exception as exc:  # noqa: BLE001
         logger.exception("knowledge_list_namespaces failed")
@@ -163,7 +169,7 @@ def knowledge_list_namespaces() -> dict:
 
 
 @mcp.tool()
-def knowledge_create_namespace(
+async def knowledge_create_namespace(
     name: str,
     language: str = "English",
     description: str = "",
@@ -171,7 +177,7 @@ def knowledge_create_namespace(
     """Create a new knowledge namespace.
 
     Args:
-        name: lowercase alphanumeric + dashes/underscores, 1–64 chars.
+        name: lowercase alphanumeric + dashes/underscores, 1-64 chars.
             Must start with a letter or digit. Examples: ``project_docs``,
             ``api-reference``, ``client-handbook-2024``.
         language: human language of expected content (default ``"English"``).
@@ -190,7 +196,9 @@ def knowledge_create_namespace(
     """
     try:
         ks = _get_service()
-        meta = ks.create_namespace(name, language=language, description=description or None, actor="anonymous")
+        meta = await asyncio.to_thread(
+            ks.create_namespace, name, language=language, description=description or None, actor="anonymous"
+        )
         return meta.model_dump(mode="json")
     except Exception as exc:  # noqa: BLE001
         from dashboard.knowledge.namespace import (  # noqa: WPS433
@@ -220,7 +228,7 @@ def knowledge_create_namespace(
 
 
 @mcp.tool()
-def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
+async def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
     """Delete a knowledge namespace and all its data permanently.
 
     Args:
@@ -247,7 +255,8 @@ def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
             )
         
         ks = _get_service()
-        return {"deleted": ks.delete_namespace(name, actor="anonymous")}
+        deleted = await asyncio.to_thread(ks.delete_namespace, name, actor="anonymous")
+        return {"deleted": deleted}
     except Exception as exc:  # noqa: BLE001
         logger.exception("knowledge_delete_namespace failed")
         return _err("INTERNAL_ERROR", str(exc))
@@ -259,7 +268,7 @@ def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
 
 
 @mcp.tool()
-def knowledge_import_folder(
+async def knowledge_import_folder(
     namespace: str,
     folder_path: str,
     force: bool = False,
@@ -304,7 +313,9 @@ def knowledge_import_folder(
         if not p.is_dir():
             return _err("NOT_A_DIRECTORY", f"path is not a directory: {folder_path}")
         ks = _get_service()
-        job_id = ks.import_folder(namespace, str(p), options={"force": force}, actor="anonymous")
+        job_id = await asyncio.to_thread(
+            ks.import_folder, namespace, str(p), options={"force": force}, actor="anonymous"
+        )
         return {
             "job_id": job_id,
             "status": "submitted",
@@ -332,7 +343,7 @@ def knowledge_import_folder(
 
 
 @mcp.tool()
-def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
+async def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
     """Get the status of a knowledge import job.
 
     Args:
@@ -352,7 +363,7 @@ def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
     """
     try:
         ks = _get_service()
-        status = ks.get_job(job_id)
+        status = await asyncio.to_thread(ks.get_job, job_id)
         if status is None:
             return _err("JOB_NOT_FOUND", f"no job with id {job_id}")
         return status.model_dump(mode="json")
@@ -367,7 +378,7 @@ def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
 
 
 @mcp.tool()
-def knowledge_import_text(
+async def knowledge_import_text(
     namespace: str,
     text: str,
     source_label: str = "inline",
@@ -378,7 +389,7 @@ def knowledge_import_text(
     Unlike ``knowledge_import_folder`` (which runs as a background job),
     this tool ingests text **synchronously** and returns the result
     immediately — no job polling needed. Perfect for pasting notes,
-    chat excerpts, meeting summaries, or any short-form text.
+    chat excerpts, meeting summaries, or other short-form text.
 
     The text is chunked, embedded, and processed for entity extraction
     exactly like file-based imports. Duplicate text (same content hash)
@@ -412,7 +423,8 @@ def knowledge_import_text(
             )
 
         ks = _get_service()
-        result = ks.import_text(
+        result = await asyncio.to_thread(
+            ks.import_text,
             namespace,
             text,
             source_label=source_label,
@@ -433,7 +445,7 @@ def knowledge_import_text(
 
 
 @mcp.tool()
-def knowledge_query(
+async def knowledge_query(
     namespace: str,
     query: str,
     mode: str = "raw",
@@ -470,7 +482,7 @@ def knowledge_query(
     """
     try:
         ks = _get_service()
-        result = ks.query(namespace, query, mode=mode, top_k=top_k, actor="anonymous")
+        result = await asyncio.to_thread(ks.query, namespace, query, mode=mode, top_k=top_k, actor="anonymous")
         return result.model_dump(mode="json")
     except Exception as exc:  # noqa: BLE001
         from dashboard.knowledge.namespace import NamespaceNotFoundError  # noqa: WPS433
@@ -485,7 +497,7 @@ def knowledge_query(
 
 
 @mcp.tool()
-def find_notes_by_knowledge_link(
+async def find_notes_by_knowledge_link(
     namespace: str,
     file_hash: str,
     chunk_idx: Optional[int] = None,
@@ -528,15 +540,19 @@ def find_notes_by_knowledge_link(
                 "Set OSTWIN_KNOWLEDGE_MEMORY_BRIDGE=1 to enable.",
             )
         
-        # Create bridge index instance
-        config = BridgeConfig.from_env()
-        bridge = BridgeIndex(config=config)
-        
-        # Perform lookup
-        note_ids = bridge.lookup(namespace, file_hash, chunk_idx)
-        
-        # Close the bridge connection
-        bridge.close()
+        def _do_lookup():
+            # Create bridge index instance
+            config = BridgeConfig.from_env()
+            bridge = BridgeIndex(config=config)
+            
+            # Perform lookup
+            note_ids = bridge.lookup(namespace, file_hash, chunk_idx)
+            
+            # Close the bridge connection
+            bridge.close()
+            return note_ids
+
+        note_ids = await asyncio.to_thread(_do_lookup)
         
         return {
             "note_ids": note_ids,

@@ -12,7 +12,7 @@ class instantiation. They guarantee:
 4. ``KnowledgeLLM`` degrades gracefully when no model or API key is configured.
 5. ``KnowledgeEmbedder`` instantiates without triggering a model download.
 6. Importing ``dashboard.knowledge`` does NOT pull in the heavy deps
-   (kuzu, zvec, sentence_transformers, markitdown).
+   (kuzu, zvec, markitdown).
 """
 
 from __future__ import annotations
@@ -261,19 +261,18 @@ def test_aggregate_answers_concatenates_when_no_key(monkeypatch: pytest.MonkeyPa
 
 
 def test_embedder_instantiates_without_loading_model() -> None:
-    """KnowledgeEmbedder() must NOT trigger a model download.
+    """KnowledgeEmbedder() must NOT eagerly instantiate the backend client.
 
-    We verify by checking the cache stays empty after construction; the heavy
-    sentence-transformers load only happens on first .embed()/.embed_one() call.
+    The centralized factory (dashboard.llm_client.create_embedding_client) is
+    only called on first ``.embed()``/``.embed_one()``/``.dimension()`` call,
+    so construction stays cheap even when no backend is reachable.
     """
     from dashboard.knowledge import KnowledgeEmbedder
 
-    pre_cache_keys = set(KnowledgeEmbedder._model_cache.keys())
     embedder = KnowledgeEmbedder()
-    post_cache_keys = set(KnowledgeEmbedder._model_cache.keys())
     assert embedder.model_name  # truthy (default model)
-    # No new model loaded by mere construction.
-    assert pre_cache_keys == post_cache_keys
+    assert embedder.provider  # truthy (default provider)
+    assert embedder._client is None  # lazy: no backend client created yet
 
 
 def test_embedder_accepts_explicit_model_name() -> None:
@@ -289,7 +288,7 @@ def test_embedder_accepts_explicit_model_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-_HEAVY_DEPS = ("kuzu", "zvec", "sentence_transformers", "markitdown")
+_HEAVY_DEPS = ("kuzu", "zvec", "markitdown")
 
 
 def test_lazy_imports_via_subprocess() -> None:

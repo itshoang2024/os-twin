@@ -324,7 +324,7 @@ def build_opencode_config(validated_mcp, core_servers=None, privileged_agents=No
                            for each privileged agent.
     """
     if core_servers is None:
-        core_servers = {"channel", "warroom", "memory"}
+        core_servers = {"channel", "warroom", "memory", "ostwin"}
     if privileged_agents is None:
         privileged_agents = [
             "manager", "architect", "qa", "audit", "reporter"

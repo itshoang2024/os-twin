@@ -11,6 +11,7 @@
 #   ./install.sh --channel        # Also install & start the channel connectors (Telegram + Discord + Slack)
 #   ./install.sh --dashboard-only  # Install dashboard API + frontend only
 #   ./install.sh --no-opencode-config  # Skip writing to ~/.config/opencode/opencode.json
+#   ./install.sh --no-start       # Install only; do not start OpenCode/dashboard services
 #   ./install.sh --help        # Show this help
 #
 # What gets installed:
@@ -33,7 +34,7 @@ INSTALL_DIR="${HOME}/.ostwin"
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")"
 # shellcheck disable=SC2034
 AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false
-START_CHANNEL=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false
+START_CHANNEL=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
 # shellcheck disable=SC2034
 PYTHON_VERSION=""
 # shellcheck disable=SC2034
@@ -50,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --dashboard-only) DASHBOARD_ONLY=true; AUTO_YES=true; shift ;;
     --channel)        START_CHANNEL=true; shift ;;
     --no-opencode-config) SKIP_OPENCODE_CONFIG=true; shift ;;
+    --no-start|--skip-start) START_SERVICES=false; shift ;;
     --help|-h)        head -23 "$0" | tail -21; exit 0 ;;
     *)  echo "[ERROR] Unknown option: $1" >&2
         echo "Run './install.sh --help' for usage." >&2; exit 1 ;;
@@ -68,7 +70,7 @@ fi
 for _mod in lib.sh versions.conf detect-os.sh check-deps.sh install-deps.sh \
             install-files.sh setup-venv.sh setup-env.sh setup-models.sh patch-mcp.sh \
             build-frontend.sh setup-path.sh setup-opencode.sh sync-agents.sh \
-            start-dashboard.sh start-channels.sh verify.sh; do
+            start-opencode-server.sh start-dashboard.sh start-channels.sh verify.sh; do
   # shellcheck disable=SC1090
   source "$INSTALLER_DIR/$_mod"
 done
@@ -99,18 +101,8 @@ esac
 source "$INSTALLER_DIR/_orchestrate-deps.sh"
 echo ""
 
-if ! $DASHBOARD_ONLY; then
-  header "3. Building dashboards (parallel)"
-  build_frontend "dashboard/nextjs" "Next.js dashboard" & pid_nextjs=$!
-  build_frontend "dashboard/fe" "Dashboard FE" & pid_fe=$!
-  # shellcheck disable=SC2015  # intentional: ok() is side-effect-free
-  wait "$pid_nextjs" 2>/dev/null && ok "Next.js build finished" || warn "Next.js build had issues"
-  # shellcheck disable=SC2015
-  wait "$pid_fe"     2>/dev/null && ok "FE build finished"      || warn "FE build had issues"
-else
-  header "3. Building dashboard frontend (fe)"
-  build_frontend "dashboard/fe" "Dashboard FE"
-fi
+header "3. Building dashboard frontend (fe)"
+build_frontend "dashboard/fe" "Dashboard FE" true
 
 header "4. Installing Agent OS"
 install_files
@@ -158,9 +150,18 @@ fi
 
 header "8. Verification"
 verify_components
-header "9. Starting dashboard"
+header "8a. Generating OpenCode tools"
+generate_opencode_tools
 section_9_start=$(get_now)
-start_dashboard; publish_skills
+if $START_SERVICES; then
+  header "9. Starting OpenCode server"
+  start_opencode_server
+  header "9a. Starting dashboard"
+  start_dashboard; publish_skills
+else
+  header "9. Runtime services (skipped)"
+  info "Skipping OpenCode/dashboard startup (--no-start). Start services from the runtime entrypoint."
+fi
 header "9c. Installing channel dependencies (Telegram + Discord + Slack)"
 install_channels
 ok_time "Section 9 complete" "$(print_duration "$section_9_start")"

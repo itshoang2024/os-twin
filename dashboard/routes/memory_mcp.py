@@ -28,6 +28,7 @@ to work for agents that prefer the legacy per-process model.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import logging
@@ -168,7 +169,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def save_memory(
+async def save_memory(
     content: str,
     name: Optional[str] = None,
     path: Optional[str] = None,
@@ -221,7 +222,8 @@ def save_memory(
         len(content),
     )
     try:
-        mem.add_note(content, **kwargs)
+        # add_note does LLM analysis + vector DB + file I/O — must not block event loop
+        await asyncio.to_thread(mem.add_note, content, **kwargs)
         logger.info("save_memory [HTTP]: completed id=%s", memory_id)
     except Exception:
         logger.exception("save_memory [HTTP]: failed id=%s", memory_id)
@@ -241,7 +243,7 @@ def save_memory(
 
 
 @mcp.tool()
-def search_memory(query: str, k: int = 5) -> str:
+async def search_memory(query: str, k: int = 5) -> str:
     """Search the knowledge base using natural language.
 
     Returns the most semantically relevant memories for the query.
@@ -255,38 +257,44 @@ def search_memory(query: str, k: int = 5) -> str:
     """
     mem = _get_memory_for_plan()
     logger.info("search_memory [HTTP]: query=%r k=%d plan_id=%s", query, k, _plan_id_ctx.get() or DEFAULT_NAMESPACE)
-    results = mem.search(query, k=k)
+    # Vector search + file reads are CPU/IO-bound — offload to thread pool
+    results = await asyncio.to_thread(mem.search, query, k=k)
 
-    output = []
-    for r in results:
-        note = mem.read(r["id"])
-        output.append(
-            {
-                "id": r["id"],
-                "name": note.name if note else None,
-                "path": note.path if note else None,
-                "content": r["content"],
-                "tags": r.get("tags", []),
-                "keywords": r.get("keywords", []),
-                "links": note.links if note else [],
-                "backlinks": note.backlinks if note else [],
-            }
-        )
+    # Read full notes for each result — also I/O bound
+    def _read_results(results):
+        output = []
+        for r in results:
+            note = mem.read(r["id"])
+            output.append(
+                {
+                    "id": r["id"],
+                    "name": note.name if note else None,
+                    "path": note.path if note else None,
+                    "content": r["content"],
+                    "tags": r.get("tags", []),
+                    "keywords": r.get("keywords", []),
+                    "links": note.links if note else [],
+                    "backlinks": note.backlinks if note else [],
+                }
+            )
+        return output
+
+    output = await asyncio.to_thread(_read_results, results)
     return json.dumps(output, ensure_ascii=False)
 
 
 @mcp.tool()
-def memory_tree() -> str:
+async def memory_tree() -> str:
     """Show the full directory tree of all memories.
 
     Returns:
         Tree-formatted string of the memory directory structure.
     """
-    return _get_memory_for_plan().tree()
+    return await asyncio.to_thread(_get_memory_for_plan().tree)
 
 
 @mcp.tool()
-def delete_memory(memory_id: str) -> str:
+async def delete_memory(memory_id: str) -> str:
     """Delete a specific memory note by its ID.
 
     Use search_memory or memory_tree first to find the ID of the note
@@ -299,7 +307,7 @@ def delete_memory(memory_id: str) -> str:
         JSON with the deleted note's id and status.
     """
     mem = _get_memory_for_plan()
-    success = mem.delete(memory_id)
+    success = await asyncio.to_thread(mem.delete, memory_id)
     if success:
         logger.info("delete_memory [HTTP]: deleted id=%s", memory_id)
         return json.dumps({"id": memory_id, "status": "deleted"})
@@ -309,7 +317,7 @@ def delete_memory(memory_id: str) -> str:
 
 
 @mcp.tool()
-def grep_memory(pattern: str, flags: Optional[str] = None) -> str:
+async def grep_memory(pattern: str, flags: Optional[str] = None) -> str:
     """Search memory files using grep (full CLI grep).
 
     Runs grep on all markdown files in the memory notes directory.
@@ -337,21 +345,25 @@ def grep_memory(pattern: str, flags: Optional[str] = None) -> str:
         # Reuse mcp_server's sanitization logic if available, otherwise basic split
         cmd.extend(flags.split())
     cmd.extend(["-e", pattern, "--", notes_dir])
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if not result.stdout and result.returncode == 1:
-            return "No matches found."
-        if result.returncode > 1:
-            return f"Error: {result.stderr.strip()}"
-        return result.stdout.replace(notes_dir + "/", "")
-    except subprocess.TimeoutExpired:
-        return "Error: grep timed out after 30 seconds."
-    except FileNotFoundError:
-        return "Error: grep command not found on this system."
+
+    def _run_grep():
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if not result.stdout and result.returncode == 1:
+                return "No matches found."
+            if result.returncode > 1:
+                return f"Error: {result.stderr.strip()}"
+            return result.stdout.replace(notes_dir + "/", "")
+        except subprocess.TimeoutExpired:
+            return "Error: grep timed out after 30 seconds."
+        except FileNotFoundError:
+            return "Error: grep command not found on this system."
+
+    return await asyncio.to_thread(_run_grep)
 
 
 @mcp.tool()
-def find_memory(args: Optional[str] = None) -> str:
+async def find_memory(args: Optional[str] = None) -> str:
     """Search memory files using find (full CLI find).
 
     Runs find on the memory notes directory.
@@ -377,17 +389,21 @@ def find_memory(args: Optional[str] = None) -> str:
     cmd = ["find", notes_dir]
     if args:
         cmd.extend(shlex.split(args))
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0 and result.stderr:
-            return f"Error: {result.stderr.strip()}"
-        if not result.stdout.strip():
-            return "No results found."
-        return result.stdout.replace(notes_dir + "/", "").replace(notes_dir, ".")
-    except subprocess.TimeoutExpired:
-        return "Error: find timed out after 30 seconds."
-    except FileNotFoundError:
-        return "Error: find command not found on this system."
+
+    def _run_find():
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0 and result.stderr:
+                return f"Error: {result.stderr.strip()}"
+            if not result.stdout.strip():
+                return "No results found."
+            return result.stdout.replace(notes_dir + "/", "").replace(notes_dir, ".")
+        except subprocess.TimeoutExpired:
+            return "Error: find timed out after 30 seconds."
+        except FileNotFoundError:
+            return "Error: find command not found on this system."
+
+    return await asyncio.to_thread(_run_find)
 
 
 # ---------------------------------------------------------------------------

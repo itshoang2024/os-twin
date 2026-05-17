@@ -2,8 +2,8 @@
   "_comment": "Default configuration for the Agentic Memory system. All values can be overridden by environment variables prefixed with MEMORY_.",
 
   "llm": {
-    "backend": "gemini",
-    "model": "gemini-3-flash-preview"
+    "backend": "openai-compatible",
+    "model": "google-vertex/gemini-3-flash-preview"
   },
 
   "embedding": {

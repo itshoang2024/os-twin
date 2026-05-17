@@ -349,10 +349,9 @@ class TestQueryEngineEnrichment:
         mock_bridge.lookup.return_value = ["note-1", "note-2"]
         mock_get_bridge.return_value = mock_bridge
 
-        # Create engine with mocked deps
+        # Create engine with mocked deps (constructor: namespace, kuzu_graph, embedder, llm)
         engine = KnowledgeQueryEngine(
             namespace="docs",
-            vector_store=MagicMock(),
             kuzu_graph=MagicMock(),
             embedder=MagicMock(),
             llm=MagicMock(),
@@ -379,7 +378,6 @@ class TestQueryEngineEnrichment:
 
         engine = KnowledgeQueryEngine(
             namespace="docs",
-            vector_store=MagicMock(),
             kuzu_graph=MagicMock(),
             embedder=MagicMock(),
             llm=MagicMock(),

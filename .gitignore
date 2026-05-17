@@ -118,6 +118,7 @@ CLAUDE.md
 
 # ── Dev tooling / IDE config (auto-generated, never commit) ───────────────────
 **/.opencode/
+opencode.json
 **/scratch/
 test_extless
 test_extless.ps1
@@ -136,7 +137,4 @@ docs/plan
 docs/plan/
 docs/plan/**
 
-# Ostwin generated
-.agents/*
-!.agents/memory/
 .memory

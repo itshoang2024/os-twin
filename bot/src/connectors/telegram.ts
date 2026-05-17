@@ -1,7 +1,15 @@
 import https from 'https';
 import { Telegraf, Markup, Context } from 'telegraf';
 import { Platform, Connector, ConnectorConfig, ConnectorStatus, HealthCheckResult, SetupStep, ValidationResult } from './base';
-import { routeCommand, routeCallback, BotResponse, COMMANDS_NO_ARGS, COMMANDS_WITH_ARGS, ALL_PLATFORM_COMMANDS } from '../commands';
+import {
+  routeCommand,
+  routeCallback,
+  BotResponse,
+  cmdUnknown,
+  getCommandsForPlatform,
+  getCommandsWithArgsForPlatform,
+  getCommandsWithoutArgsForPlatform,
+} from '../commands';
 import { getSession, getStagedFiles } from '../sessions';
 import { askAgent } from '../agent-bridge';
 import { flushStagedAttachments, getStagedCount } from '../asset-staging';
@@ -77,7 +85,7 @@ export class TelegramConnector implements Connector {
     });
 
     // ── Slash commands (no arguments) — driven by COMMAND_REGISTRY
-    for (const def of COMMANDS_NO_ARGS) {
+    for (const def of getCommandsWithoutArgsForPlatform(this.platform)) {
       this.bot.command(def.name, async (ctx) => {
         const userId = String(ctx.chat.id);
         const responses = await routeCommand(userId, 'telegram', def.name);
@@ -86,7 +94,7 @@ export class TelegramConnector implements Connector {
     }
 
     // Commands with inline arguments — driven by COMMAND_REGISTRY
-    for (const def of COMMANDS_WITH_ARGS) {
+    for (const def of getCommandsWithArgsForPlatform(this.platform)) {
       const cmdName = def.name;
       this.bot.command(cmdName, async (ctx) => {
         const userId = String(ctx.chat.id);
@@ -103,20 +111,27 @@ export class TelegramConnector implements Connector {
       const data = (cbQuery as any).data as string | undefined;
       if (!userId || !data) return;
 
-      await ctx.answerCbQuery(); // stop loading spinner
+      await ctx.answerCbQuery();
 
       const responses = await routeCallback(userId, 'telegram', data);
       await this.sendResponsesChat(userId, responses);
     });
 
-    // ── Free text (stateful editing OR agent Q&A with tool-calling) ──
+    // ── Free text ──
     this.bot.on('text', async (ctx) => {
       const userId = String(ctx.chat.id);
       const msgText = ctx.message.text.trim();
 
-      // Skip if it's a command
-      if (msgText.startsWith('/')) return;
+      // Skip if it's a registered command (already handled by command handlers above)
+      const registeredCmds = new Set(getCommandsForPlatform(this.platform).map(c => c.name));
+      const cmdName = msgText.replace(/^\/([a-zA-Z0-9_]+).*/, '$1');
+      if (msgText.startsWith('/') && registeredCmds.has(cmdName)) return;
 
+      // Unknown slash command — show fallback menu instead of routing to the LLM
+      if (msgText.startsWith('/')) {
+        await this.sendResponses(ctx, [cmdUnknown(msgText, 'telegram')]);
+        return;
+      }
       {
         // Idle: use AI agent with tool-calling (can create plans, check status, etc.)
         try {
@@ -153,7 +168,6 @@ export class TelegramConnector implements Connector {
       }
     });
 
-    // ── EPIC-005: File/Document handling (with staging support) ────
     const handleTelegramFiles = async (ctx: Context) => {
       if (!ctx.chat) return;
       const userId = String(ctx.chat.id);
@@ -257,7 +271,7 @@ export class TelegramConnector implements Connector {
     // ── Register command menu with Telegram ───────────────────────
     // Register ALL platform commands with Telegram's autocomplete menu
     await this.bot.telegram.setMyCommands(
-      ALL_PLATFORM_COMMANDS.map(def => ({
+      getCommandsForPlatform(this.platform).map(def => ({
         command: def.name,
         description: def.telegramMenu || def.description,
       })),

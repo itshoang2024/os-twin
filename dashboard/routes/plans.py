@@ -1442,17 +1442,17 @@ async def list_plans(
                 except Exception as e:
                     logger.warning("Failed to backfill plan %s into zvec: %s", plan_id, e)
 
-        # Enrich status from zvec epics
-        if store:
-            try:
-                epics = store.get_epics_for_plan(plan_id)
-                if epics and all(e.get("status") == "passed" for e in epics):
-                    p["status"] = "completed"
-            except Exception:
-                pass
-
         # Merge meta.json for working_dir etc.
         _merge_plan_meta(p, plans_dir)
+
+        # Derive lifecycle from runner PID + progress.json heartbeat. This is
+        # the single source of truth for "is this plan running?" — the
+        # zvec-derived status was a fallback heuristic that only ever produced
+        # "completed".
+        from dashboard.plan_lifecycle import derive_lifecycle
+        lifecycle = derive_lifecycle(plan_id)
+        p["lifecycle"] = lifecycle
+        p["status"] = lifecycle["state"]
 
         # Enrich from progress.json if available
         warrooms_dir = p.get("warrooms_dir")
@@ -1496,12 +1496,12 @@ async def list_plans(
                 except (json.JSONDecodeError, OSError, ValueError):
                     pass
 
-        # Add mock jitter if enabled
-        if os.environ.get("NEXT_PUBLIC_ENABLE_MOCK_REALTIME") == "true":
-            import random
-            p["pct_complete"] = min(100, max(0, random.randint(30, 95)))
-            p["active_epics"] = random.randint(1, max(1, p.get("epic_count", 5)))
-            p["completed_epics"] = random.randint(0, max(0, p.get("epic_count", 5) - p["active_epics"]))
+        # When no progress.json exists yet, leave the counters at zero rather
+        # than inventing fake values. Slash commands should render "0%" for
+        # a draft plan, not random motion.
+        p.setdefault("pct_complete", 0)
+        p.setdefault("active_epics", 0)
+        p.setdefault("completed_epics", 0)
 
         plans.append(p)
 
@@ -1553,11 +1553,20 @@ def _save_stats_snapshot(current_stats: Dict):
 
 @router.get("/api/stats")
 async def get_stats(user: dict = Depends(get_current_user)):
-    """Aggregate stats across all plans from progress.json files."""
+    """Aggregate stats across all plans.
+
+    Per-plan status is derived from :mod:`dashboard.plan_lifecycle` (runner
+    PID liveness + progress.json heartbeat) so a crashed plan flips from
+    ``running`` to ``stopped`` automatically. Epic counters are still summed
+    from each plan's progress.json — that file is truth for room outcomes.
+    """
     from datetime import timedelta
+    from dashboard.plan_lifecycle import derive_lifecycle
     plans_dir = PLANS_DIR
     total_plans = 0
-    plan_status_counts = {"active": 0, "completed": 0, "draft": 0}
+    plan_status_counts = {
+        "draft": 0, "running": 0, "stopped": 0, "completed": 0, "failed": 0,
+    }
     active_epics = 0
     total_epics = 0
     passed_epics = 0
@@ -1572,9 +1581,11 @@ async def get_stats(user: dict = Depends(get_current_user)):
             total_plans += 1
 
             plan_id = f.stem
-            meta_file = plans_dir / f"{plan_id}.meta.json"
-            plan_status = "draft"
+            lifecycle = derive_lifecycle(plan_id)
+            state = lifecycle["state"]
+            plan_status_counts[state] = plan_status_counts.get(state, 0) + 1
 
+            meta_file = plans_dir / f"{plan_id}.meta.json"
             if meta_file.exists():
                 try:
                     meta = json.loads(meta_file.read_text())
@@ -1583,21 +1594,8 @@ async def get_stats(user: dict = Depends(get_current_user)):
                         prog_file = Path(warrooms_dir) / "progress.json"
                         if prog_file.exists():
                             seen_progress_files.add(str(prog_file))
-                            prog = json.loads(prog_file.read_text())
-                            pct = prog.get("pct_complete", 0)
-                            active = prog.get("active", 0)
-                            passed = prog.get("passed", 0)
-
-                            if pct >= 100:
-                                plan_status = "completed"
-                            elif active > 0 or passed > 0:
-                                plan_status = "active"
-                            else:
-                                plan_status = "draft"
                 except (json.JSONDecodeError, OSError):
                     pass
-
-            plan_status_counts[plan_status] += 1
 
     # Aggregate from unique progress files to avoid double-counting
     for pf_path in seen_progress_files:
@@ -1664,24 +1662,11 @@ async def get_stats(user: dict = Depends(get_current_user)):
     if not history:
         _save_stats_snapshot(current_stats)
 
-    # Add mock jitter if enabled
-    is_mock = os.environ.get("NEXT_PUBLIC_ENABLE_MOCK_REALTIME") == "true"
-    if is_mock:
-        import random
-        active_epics += random.randint(-1, 1)
-        completion_rate = min(100, max(0, completion_rate + random.uniform(-0.5, 0.5)))
-        if random.random() > 0.8:
-            escalations += random.randint(0, 1)
-
     return {
         "total_plans": {
             "value": total_plans,
             "trend": get_trend("total_plans", 7),
-            "distribution": {
-                "active": plan_status_counts["active"],
-                "completed": plan_status_counts["completed"],
-                "draft": plan_status_counts["draft"]
-            }
+            "distribution": plan_status_counts,
         },
         "active_epics": {
             "value": active_epics,
@@ -1782,12 +1767,12 @@ def create_plan_on_disk(title: str, content: Optional[str], working_dir: Optiona
     plans_dir.mkdir(exist_ok=True)
     plan_file = plans_dir / f"{plan_id}.md"
 
-    # Auto-create project subfolder under PROJECT_ROOT/projects/ if no dir specified
+    # Auto-create project subfolder under ~/.ostwin/projects/ if no dir specified
     if not working_dir or working_dir == '.':
         slug = _re_mod.sub(r'[^a-zA-Z0-9]+', '-', title.lower()).strip('-')[:40]
         if not slug:
             slug = plan_id
-        project_dir = PROJECT_ROOT / "projects" / slug
+        project_dir = Path.home() / ".ostwin" / "projects" / slug
         project_dir.mkdir(parents=True, exist_ok=True)
         working_dir = str(project_dir)
 
@@ -1797,7 +1782,8 @@ def create_plan_on_disk(title: str, content: Optional[str], working_dir: Optiona
         plan_file.write_text(content)
     else:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        plan_file.write_text(f"# Plan: {title}\n\n> Created: {now}\n> Status: draft\n\n## Config\n\nworking_dir: {working_dir}\n\n---\n\n## Goal\n\n{title}\n\n## Epics\n\n### EPIC-001 — {title}\n\n#### Definition of Done\n- [ ] Core functionality implemented\n\n#### Tasks\n- [ ] TASK-001 — Design and plan implementation\n\ndepends_on: []\n")
+        short_title = _re_mod.sub(r'[^a-zA-Z0-9]+', ' ', title).strip().title()[:60]
+        plan_file.write_text(f"# Plan: {short_title}\n\n> Created: {now}\n> Status: draft\n\n## Config\n\nworking_dir: {working_dir}\n\n---\n\n## Goal\n\n{title}\n\n## Epics\n\n> AI worker is drafting the plan structure. This placeholder will be replaced.\n\ndepends_on: []\n")
 
     # Bug 3 Fix: Initialize assets and epic_assets in meta.json
     meta_file = plans_dir / f"{plan_id}.meta.json"
@@ -1878,7 +1864,7 @@ def create_plan_on_disk(title: str, content: Optional[str], working_dir: Optiona
         try:
             store.index_plan(
                 plan_id=plan_id, title=title, content=plan_file.read_text(),
-                epic_count=1, filename=f"{plan_id}.md", status="draft",
+                epic_count=0, filename=f"{plan_id}.md", status="draft",
                 created_at=meta["created_at"], file_mtime=plan_file.stat().st_mtime
             )
         except Exception as e:
@@ -1922,6 +1908,14 @@ async def get_plan(plan_id: str, user: dict = Depends(get_current_user)):
 
     # --- Merge meta.json for full project context ---
     _merge_plan_meta(plan, PLANS_DIR)
+
+    # Derive lifecycle (running / stopped / completed / failed / draft) from
+    # the runner PID + heartbeat instead of trusting meta.json.status, which
+    # is only written on launch and never updated on exit.
+    from dashboard.plan_lifecycle import derive_lifecycle
+    lifecycle = derive_lifecycle(plan_id)
+    plan["lifecycle"] = lifecycle
+    plan["status"] = lifecycle["state"]
 
     return {"plan": plan, "epics": epics}
 
@@ -2249,12 +2243,14 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
     if wd_match:
         working_dir = wd_match.group(1).strip()
     if not working_dir or working_dir == '.':
-        working_dir = str(PROJECT_ROOT)
+        slug = _re_mod.sub(r'[^a-zA-Z0-9]+', '-', title.lower()).strip('-')[:40] if title else plan_id
+        if not slug:
+            slug = plan_id
+        working_dir = str(Path.home() / ".ostwin" / "projects" / slug)
 
-    # If working_dir is relative, resolve under PROJECT_ROOT/projects/
     wd_path = Path(working_dir)
     if not wd_path.is_absolute():
-        wd_path = PROJECT_ROOT / "projects" / working_dir
+        wd_path = Path.home() / ".ostwin" / "projects" / working_dir
     # Create the directory if it doesn't exist
     wd_path.mkdir(parents=True, exist_ok=True)
     working_dir = str(wd_path)
@@ -2392,15 +2388,28 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
 
     # Spawn OS Twin in background (capture output to log file)
     # Run from working_dir - ostwin will auto-detect project context
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [str(ostwin_bin), "run", str(launch_plan_path), "--non-interactive"],
         cwd=str(wd_path),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
-    logger.info(f"run_plan: launched ostwin run for {plan_id}, logs: {log_file}")
+    logger.info(f"run_plan: launched ostwin run for {plan_id}, pid={proc.pid}, logs: {log_file}")
 
-    return {"status": "launched", "plan_file": plan_filename, "plan_id": plan_id}
+    # Record the runner PID so /api/plans, /api/stats, and the slash commands
+    # can derive a truthful lifecycle (running/stopped/completed/failed) on
+    # each request instead of guessing from stale meta.json status.
+    from dashboard.plan_lifecycle import record_launch, register_runner
+    try:
+        record_launch(plan_id, proc.pid)
+        # Keep the Popen handle so derive_lifecycle can poll() it and reap
+        # zombies — otherwise a crashed runner stays "alive" until the
+        # dashboard restarts.
+        register_runner(proc.pid, proc)
+    except Exception as e:
+        logger.warning("run_plan: failed to record launch lifecycle for %s: %s", plan_id, e)
+
+    return {"status": "launched", "plan_file": plan_filename, "plan_id": plan_id, "runner_pid": proc.pid}
 
 @router.post("/api/plans/{plan_id}/status")
 async def update_plan_status(plan_id: str, request: dict):
@@ -2864,7 +2873,7 @@ async def refine_plan_endpoint(request: RefineRequest):
             # Persist these images to the plan's assets!
             if request.plan_id:
                 _persist_plan_images_from_data_uris(request.plan_id, [img.model_dump() for img in request.images])
-        result = await refine_plan(user_message=user_message, plan_content=plan_content, chat_history=request.chat_history, model=request.model, plans_dir=plans_dir if plans_dir.exists() else None, working_dir=request.working_dir or None, images=images)
+        result = await refine_plan(user_message=user_message, plan_content=plan_content, chat_history=request.chat_history, model=request.model, plans_dir=plans_dir if plans_dir.exists() else None, working_dir=request.working_dir or None, images=images, conversation_id=f"plan-{request.plan_id}" if request.plan_id else None)
         if isinstance(result, dict):
             # Backward compatible: refined_plan is a string. Rich info is also available.
             return {
@@ -2902,7 +2911,7 @@ async def refine_plan_stream_endpoint(request: RefineRequest):
             try:
                 from plan_agent import parse_structured_response
                 full_response = ""
-                async for chunk in refine_plan_stream(user_message=request.message, plan_content=plan_content, chat_history=request.chat_history, model=request.model, plans_dir=plans_dir if plans_dir.exists() else None, working_dir=request.working_dir or None, images=images):
+                async for chunk in refine_plan_stream(user_message=request.message, plan_content=plan_content, chat_history=request.chat_history, model=request.model, plans_dir=plans_dir if plans_dir.exists() else None, working_dir=request.working_dir or None, images=images, conversation_id=f"plan-{request.plan_id}" if request.plan_id else None):
                     if isinstance(chunk, dict):
                         # If a dictionary is yielded, treat it as a rich event and accumulate if it has a 'token'
                         token = chunk.get("token", "")
@@ -2921,6 +2930,28 @@ async def refine_plan_stream_endpoint(request: RefineRequest):
         return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
     except ImportError as e:
         raise HTTPException(status_code=503, detail=f"LLM SDK not available: {e}. Install with: pip install openai google-genai")
+
+
+@router.get("/api/plan-refine-prompt")
+async def refine_prompt(mode: str = "refine"):
+    """Return the plan-architect system prompt used by /api/plans/refine.
+
+    Consumed by the ``ostwin-worker`` OpenCode subagent, which runs in the
+    OpenCode runtime (TS/Bun) and therefore cannot call Python's
+    ``plan_agent.get_system_prompt`` directly.  Keeping the prompt
+    materialization on the dashboard side means the worker always uses the
+    same template + roles-registry-rendered prompt the dashboard UI uses,
+    even when the roles registry changes at runtime.
+
+    mode: "refine" for the 3-section output format (dashboard refine endpoint)
+          "worker" for direct file-writing format (ostwin-worker subagent)
+    """
+    from dashboard.plan_agent import get_system_prompt
+    plans_dir = PLANS_DIR if PLANS_DIR.exists() else None
+    agents_dir = plans_dir.parent if plans_dir else None
+    prompt = get_system_prompt(plans_dir, agents_dir=agents_dir, working_dir=None, mode=mode)
+    return {"system_prompt": prompt}
+
 
 @router.get("/api/plans/{plan_id}/epics")
 async def get_plan_epics(plan_id: str):

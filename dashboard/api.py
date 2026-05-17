@@ -19,9 +19,10 @@ import time
 import json
 import uvicorn
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -74,7 +75,7 @@ from dashboard.tasks import startup_all
 from dashboard.routes import (
     ai, agent_costs, auth, system, mcp, threads, plans, rooms, skills,
     roles, memory, amem, channels, command, tunnel,
-    files, settings, engagement, knowledge, memory_mcp
+    files, settings, engagement, knowledge, memory_mcp, chat
 )
 
 # Configure logging — file + console
@@ -141,9 +142,25 @@ def _register_mcp_lifespan(mcp_app) -> None:
 @asynccontextmanager
 async def app_lifespan(_app):
     # --- Startup ---
+    # Install the dedicated heavy-ops thread pool as the default executor
+    # so asyncio.to_thread() routes CPU/IO-heavy work here instead of the
+    # tiny default pool. Must happen after the event loop is running.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(_heavy_executor)
+    logger.info("Heavy-ops thread pool installed (size=%d)", _HEAVY_POOL_SIZE)
+
     # Migrated from the legacy @app.on_event("startup") handler. Using
     # create_task so the lifecycle doesn't block the server from accepting
     # connections.
+    # Load the persisted master model but do NOT initialize the OpenCode client yet.
+    # The client will be lazily initialized on the first brainstorm or chat call.
+    try:
+        from dashboard.master_agent import load_persisted_master_model
+
+        load_persisted_master_model()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load persisted master model: %s", exc)
+
     asyncio.create_task(startup_all())
     
     # Start knowledge service background tasks (retention sweeper)
@@ -326,8 +343,23 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
 
+# --- Performance: Dedicated thread pool for CPU/IO-heavy operations --------
+# The default asyncio executor has limited threads (min(32, cpu+4)).
+# Knowledge/memory operations (embedding, graph queries, LLM calls, file I/O)
+# are both CPU-bound and IO-bound. A larger dedicated pool prevents saturation
+# that would block the event loop and starve other request handlers.
+_HEAVY_POOL_SIZE = int(os.environ.get("OSTWIN_HEAVY_POOL_SIZE", "16"))
+_heavy_executor = ThreadPoolExecutor(
+    max_workers=_HEAVY_POOL_SIZE,
+    thread_name_prefix="heavy-ops",
+)
+# The executor is installed as the default in app_lifespan() after the
+# event loop starts. We cannot call asyncio.get_event_loop() here at
+# module-import time because no loop exists yet.
+
+
 # P1-10: Rate limiter disabled by default.
-# To enable, set RATE_LIMIT_MAX to a positive integer (e.g., 100 requests per window).
+# To enable, set RATE_LIMIT_ENABLED=1 (e.g., 100 requests per window).
 _RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "").lower() in ("1", "true", "yes")
 _RATE_LIMIT_WINDOW = 60
 _RATE_LIMIT_MAX = 100
@@ -353,19 +385,61 @@ if _RATE_LIMIT_ENABLED:
         _rate_limit_store[client_ip].append(now)
         response = await call_next(request)
         return response
-_cors_origin_regex = (
-    r"https?://(localhost|127\.0\.0\.1)(:\d+)?$"
-    if is_dev
-    else None  # Production: no cross-origin access
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_origin_regex=_cors_origin_regex,
-    allow_credentials=is_dev,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
-)
+
+
+# --- Request Timeout Middleware -----------------------------------------------
+# Prevents a single hung LLM/embedding call from occupying a handler forever.
+# Default: 120 seconds (enough for long imports, but prevents infinite hangs).
+# Set to 0 to disable.
+_REQUEST_TIMEOUT_S = int(os.environ.get("OSTWIN_REQUEST_TIMEOUT_S", "120"))
+
+
+@app.middleware("http")
+async def request_timeout_middleware(request: Request, call_next):
+    """Enforce a per-request timeout to prevent indefinite hangs.
+
+    Long-running operations (knowledge import, embedding, LLM calls) should
+    run in thread executors so they don't block the event loop. This middleware
+    is a safety net that returns 504 if a handler exceeds the timeout.
+
+    Set OSTWIN_REQUEST_TIMEOUT_S=0 to disable.
+    """
+    if _REQUEST_TIMEOUT_S <= 0:
+        return await call_next(request)
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=_REQUEST_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=504,
+            content={"detail": f"Request timed out after {_REQUEST_TIMEOUT_S}s"},
+        )
+
+
+# --- Concurrency Limiter Middleware -------------------------------------------
+# Limits in-flight heavy requests to prevent resource exhaustion under load.
+# When the limit is reached, new requests get 503 immediately rather than
+# queuing and consuming memory.
+_MAX_CONCURRENT_REQUESTS = int(os.environ.get("OSTWIN_MAX_CONCURRENT", "50"))
+_concurrency_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_REQUESTS)
+
+
+@app.middleware("http")
+async def concurrency_limit_middleware(request: Request, call_next):
+    """Limit concurrent in-flight requests to prevent resource exhaustion."""
+    # Skip lightweight endpoints (health checks, static assets)
+    path = request.url.path
+    if path.startswith("/_next") or path in ("/api/health", "/api/ws"):
+        return await call_next(request)
+
+    if _concurrency_semaphore.locked():
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Server is at capacity. Please retry later."},
+        )
+    async with _concurrency_semaphore:
+        return await call_next(request)
 
 # --- Routes ---
 # (removed importlib logic for ws_router)
@@ -388,6 +462,7 @@ app.include_router(settings.router)
 app.include_router(knowledge.router)  # EPIC-001: /api/knowledge/* REST API
 app.include_router(ai.router)         # Plan 006: /api/ai/* unified gateway
 app.include_router(agent_costs.router) # Plan 015: /api/ai/agent-costs
+app.include_router(chat.router)         # /api/chat — OpenCode session-backed chat
 
 # --- MCP endpoint (knowledge) -------------------------------------------
 # Mounted as a sub-app at /api/knowledge/mcp via FastMCP's streamable-HTTP
@@ -395,7 +470,7 @@ app.include_router(agent_costs.router) # Plan 015: /api/ai/agent-costs
 # REST API namespace, freeing the bare /mcp path for the frontend SPA page
 # (the MCP server registry UI at fe/src/app/mcp/page.tsx).
 # Lazy: importing dashboard.knowledge.mcp_server does NOT pull kuzu / zvec /
-# sentence_transformers / anthropic — those load on the first tool call.
+# anthropic — those load on the first tool call.
 # Auth: when OSTWIN_API_KEY is set AND OSTWIN_DEV_MODE != "1", a Starlette
 # middleware enforces ``Authorization: Bearer <key>``. Otherwise (dev mode,
 # or no key configured) anonymous access is allowed — the MCP transport's
@@ -511,6 +586,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reindex", action="store_true", help="Force full re-index of vector store"
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.environ.get("OSTWIN_WORKERS", "1")),
+        help="Number of uvicorn worker processes (default: 1, env: OSTWIN_WORKERS)",
+    )
     args = parser.parse_args()
 
     if args.project_dir:
@@ -527,20 +608,44 @@ if __name__ == "__main__":
     print("⬡ OS Twin Command Center (Modular)")
     print(f"  Project:   {args.project_dir or PROJECT_ROOT}")
     print(f"  War-rooms: {WARROOMS_DIR}")
-    
+    print(f"  Workers:   {args.workers}")
+    print(f"  Heavy pool: {_HEAVY_POOL_SIZE} threads")
+    print(f"  Timeout:   {_REQUEST_TIMEOUT_S}s")
+    print(f"  Max concurrent: {_MAX_CONCURRENT_REQUESTS}")
+
     # --- Debug / Reload logic for PyCharm ---
     # log_level = "debug" if we are in dev mode OR a debugger is attached
     log_level = "info"
     if is_dev or sys.gettrace() is not None:
         log_level = "debug"
-        
+
     # Hot reload is great for dev, but bad for PyCharm Debugger (spawns workers)
     # We only enable it if in dev mode AND no debugger is attached.
     use_reload = is_dev and sys.gettrace() is None
-    
-    if use_reload:
+
+    # Multi-worker mode: use gunicorn-style prefork for production scaling.
+    # Workers > 1 requires the import-string form so uvicorn can fork.
+    # Note: with >1 worker, in-memory state (rate limits, semaphores) is
+    # per-process. For shared state, use Redis or an external store.
+    if args.workers > 1 and not use_reload:
+        uvicorn.run(
+            "api:app",
+            host=args.host,
+            port=args.port,
+            workers=args.workers,
+            log_level=log_level,
+            timeout_keep_alive=30,  # Close idle connections after 30s
+            limit_concurrency=_MAX_CONCURRENT_REQUESTS,
+        )
+    elif use_reload:
         # Use import string for reload support
         uvicorn.run("api:app", host=args.host, port=args.port, reload=True, log_level=log_level)
     else:
         # Use app object for direct process debugging (best for PyCharm)
-        uvicorn.run(app, host=args.host, port=args.port, log_level=log_level)
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            log_level=log_level,
+            timeout_keep_alive=30,
+        )

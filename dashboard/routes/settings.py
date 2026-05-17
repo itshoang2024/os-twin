@@ -159,11 +159,34 @@ async def set_master_model(
     request: MasterModelRequest,
     user: dict = Depends(get_current_user),
 ):
-    """Set the master agent model configuration."""
-    from dashboard.master_agent import set_master_model as _set_model, get_master_config
+    """Set the master agent model configuration.
+
+    Persists the choice to ``.agents/config.json`` under
+    ``runtime.master_agent_model`` (combined ``provider/model`` format, which
+    ``set_master_model`` re-parses on next startup) so the selection survives
+    a dashboard restart.
+    """
+    from dashboard.master_agent import (
+        format_master_model,
+        get_master_config,
+        set_master_model as _set_model,
+    )
 
     _set_model(request.model, request.provider)
     config = get_master_config()
+
+    # Persist via the shared SettingsResolver so the value re-appears after a
+    # process restart. Use the canonical "provider/model" form when a provider
+    # is known, otherwise the bare model id -- both shapes are accepted by
+    # set_master_model() on the load side.
+    persisted_value = format_master_model(config.model, config.provider)
+    try:
+        get_settings_resolver().patch_namespace(
+            "runtime", {"master_agent_model": persisted_value}
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[SETTINGS] Failed to persist master_agent_model: %s", exc)
+
     return MasterModelResponse(model=config.model, provider=config.provider)
 
 
@@ -412,11 +435,24 @@ async def patch_global_namespace(
             detail=f"Invalid namespace '{namespace}'. Must be one of: {sorted(_VALID_NAMESPACES)}",
         )
 
+    if namespace == "runtime" and "master_agent_model" in value:
+        from dashboard.master_agent import format_master_model
+
+        value = dict(value)
+        if value["master_agent_model"]:
+            value["master_agent_model"] = format_master_model(value["master_agent_model"])
+
     resolver = get_settings_resolver()
     try:
         resolver.patch_namespace(namespace, value)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    if namespace == "runtime" and "master_agent_model" in value:
+        from dashboard.master_agent import set_master_model
+
+        if value["master_agent_model"]:
+            set_master_model(value["master_agent_model"])
 
     # Restart the bot process when channel config changes so it
     # picks up the new credentials / enabled flags on next boot.
