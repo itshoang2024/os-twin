@@ -82,7 +82,7 @@ _master_config = MasterAgentConfig()
 # Legacy direct-LLM provider IDs that OpenCode does not recognise. If one of
 # these slips through (e.g. from a stale persisted runtime setting), we
 # re-infer the OpenCode-style ID from the model name.
-_LEGACY_PROVIDER_IDS: frozenset[str] = frozenset({"google-vertex", "google-genai", "google_gemini"})
+_LEGACY_PROVIDER_IDS: frozenset[str] = frozenset({"google-genai", "google_gemini"})
 
 
 def _infer_provider_for_model(model: str) -> str | None:
