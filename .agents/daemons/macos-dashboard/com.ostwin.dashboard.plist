@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ostwin.dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>OSTWIN_HOME/.agents/daemons/macos-dashboard/dashboard-daemon.sh</string>
+  </array>
+
+  <!-- Run immediately on login and keep alive if it exits -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Throttle restarts: wait 5s between crashes, max 10 retries within 60s -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- Log files (OSTWIN_HOME is substituted by install.sh) -->
+  <key>StandardOutPath</key>
+  <string>OSTWIN_HOME/logs/dashboard-autostart.log</string>
+  <key>StandardErrorPath</key>
+  <string>OSTWIN_HOME/logs/dashboard-autostart-err.log</string>
+
+  <!-- Environment available to the daemon process -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OSTWIN_HOME</key>
+    <string>OSTWIN_HOME</string>
+    <key>PATH</key>
+    <string>OSTWIN_HOME/.agents/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

@@ -40,6 +40,10 @@
 .PARAMETER SkipOptional
     Skip optional components (Pester, etc.)
 
+.PARAMETER NoStart
+    Install only; do not start dashboard/channel services.
+    Auto-start is still registered so services launch on next login.
+
 .PARAMETER Help
     Show this help text.
 
@@ -72,6 +76,8 @@ param(
     [switch]$Channel,
 
     [switch]$SkipOptional,
+
+    [switch]$NoStart,
 
     [switch]$Help
 )
@@ -106,6 +112,7 @@ $script:PwshCurrentVersion = ""
 $script:PythonCmd = ""
 $script:TunnelUrl = ""
 $script:OstwinApiKey = ""
+$script:StartServices = -not $NoStart.IsPresent
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SOURCE ALL MODULES
@@ -128,6 +135,7 @@ $modules = @(
     "Sync-Agents.ps1",
     "Start-Dashboard.ps1",
     "Start-Channels.ps1",
+    "Setup-Autostart.ps1",
     "Verify.ps1",
     "Orchestrate-Deps.ps1"
 )
@@ -230,15 +238,21 @@ Write-Header "8. Verification"
 Verify-Components
 
 # Step 9: Dashboard
-Write-Header "9. Starting dashboard"
-Start-Dashboard
-Publish-Skills
+if ($script:StartServices) {
+    Write-Header "9. Starting dashboard"
+    Start-Dashboard
+    Publish-Skills
+}
+else {
+    Write-Header "9. Dashboard (skipped — -NoStart)"
+    Write-Info "Skipping dashboard startup (-NoStart). Start manually: ostwin dashboard start"
+}
 
 # Step 9c: Channels
 Write-Header "9c. Installing channel dependencies (Telegram + Discord + Slack)"
 Install-Channels
 
-if ($script:StartChannel -and $script:ChanDir) {
+if ($script:StartServices -and $script:StartChannel -and $script:ChanDir) {
     Write-Header "9d. Starting channel connectors"
     try {
         Start-Channels
@@ -247,6 +261,10 @@ if ($script:StartChannel -and $script:ChanDir) {
         Write-Warn "Channel connectors failed to start (non-critical): $_"
     }
 }
+
+# Step 10: Auto-start registration (always — even with -NoStart, register for next login)
+Write-Header "10. Registering dashboard auto-start"
+Setup-Autostart -SkipStart:$(-not $script:StartServices)
 
 # Final banner
 Print-CompletionBanner

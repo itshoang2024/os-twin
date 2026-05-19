@@ -1,0 +1,27 @@
+[Unit]
+Description=Ostwin Dashboard — Multi-Agent War-Room Orchestrator
+After=network.target
+Documentation=https://github.com/ostwin/agent-os
+
+[Service]
+Type=simple
+ExecStart=%h/.ostwin/.agents/daemons/linux-dashboard/dashboard-daemon.sh
+Restart=on-failure
+RestartSec=5
+
+# Environment — PATH must include ostwin bin dir and .local/bin
+Environment=OSTWIN_HOME=%h/.ostwin
+Environment=PATH=%h/.ostwin/.agents/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# Hardening
+ProtectSystem=strict
+ReadWritePaths=%h/.ostwin
+NoNewPrivileges=true
+
+# Logging — journalctl --user -u ostwin-dashboard
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ostwin-dashboard
+
+[Install]
+WantedBy=default.target

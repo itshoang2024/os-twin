@@ -142,7 +142,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-async def knowledge_list_namespaces() -> dict:
+async def list_namespaces() -> dict:
     """List all knowledge namespaces with their stats.
 
     Returns a dict with key ``namespaces`` containing one entry per
@@ -169,7 +169,7 @@ async def knowledge_list_namespaces() -> dict:
 
 
 @mcp.tool()
-async def knowledge_create_namespace(
+async def create_namespace(
     name: str,
     language: str = "English",
     description: str = "",
@@ -228,7 +228,7 @@ async def knowledge_create_namespace(
 
 
 @mcp.tool()
-async def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
+async def delete_namespace(name: str, confirm: bool = False) -> dict:
     """Delete a knowledge namespace and all its data permanently.
 
     Args:
@@ -268,7 +268,7 @@ async def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
 
 
 @mcp.tool()
-async def knowledge_import_folder(
+async def import_folder(
     namespace: str,
     folder_path: str,
     force: bool = False,
@@ -343,7 +343,7 @@ async def knowledge_import_folder(
 
 
 @mcp.tool()
-async def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
+async def get_import_status(namespace: str, job_id: str) -> dict:
     """Get the status of a knowledge import job.
 
     Args:
@@ -378,7 +378,7 @@ async def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
 
 
 @mcp.tool()
-async def knowledge_import_text(
+async def import_text(
     namespace: str,
     text: str,
     source_label: str = "inline",
@@ -445,7 +445,7 @@ async def knowledge_import_text(
 
 
 @mcp.tool()
-async def knowledge_query(
+async def query(
     namespace: str,
     query: str,
     mode: str = "raw",
