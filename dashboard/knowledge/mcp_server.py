@@ -75,20 +75,21 @@ def _err(code: str, msg: str) -> dict:
 
 def _get_mcp_actor() -> str | None:
     """Get the current MCP actor from environment or session context.
-    
+
     The actor is set via:
     - OSTWIN_MCP_ACTOR environment variable (set by the agent runtime)
     - Session header (for HTTP-based MCP clients)
-    
+
     Returns None if no actor is identified (non-curator session).
     """
     import os
+
     return os.environ.get("OSTWIN_MCP_ACTOR")
 
 
 def _requires_confirmation() -> bool:
     """Check if the current session requires confirmation for destructive ops.
-    
+
     Returns True if OSTWIN_MCP_ACTOR is set to "knowledge-curator".
     Other actors and anonymous sessions do NOT require confirmation.
     """
@@ -137,7 +138,7 @@ mcp = FastMCP(
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_list_namespaces
+# Tool: list_namespaces
 # ---------------------------------------------------------------------------
 
 
@@ -152,19 +153,19 @@ async def list_namespaces() -> dict:
     Use when: the user asks "what knowledge bases are available?", or to
     discover namespace ids before querying or importing.
 
-    Example: ``knowledge_list_namespaces()``
+    Example: ``list_namespaces()``
     """
     try:
         ks = _get_service()
         items = await asyncio.to_thread(ks.list_namespaces)
         return {"namespaces": [m.model_dump(mode="json") for m in items]}
     except Exception as exc:  # noqa: BLE001
-        logger.exception("knowledge_list_namespaces failed")
+        logger.exception("list_namespaces failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_create_namespace
+# Tool: create_namespace
 # ---------------------------------------------------------------------------
 
 
@@ -189,9 +190,9 @@ async def create_namespace(
     ``NAMESPACE_EXISTS``, ``MAX_NAMESPACES_REACHED``, ``INTERNAL_ERROR``).
 
     Use when: starting a new knowledge base. NOT needed before
-    ``knowledge_import_folder`` — that auto-creates the namespace if missing.
+    ``import_folder`` — that auto-creates the namespace if missing.
 
-    Example: ``knowledge_create_namespace("project_docs", "English",
+    Example: ``create_namespace("project_docs", "English",
     "Internal product handbook v3")``
     """
     try:
@@ -218,12 +219,12 @@ async def create_namespace(
             return _err("MAX_NAMESPACES_REACHED", str(exc))
         if isinstance(exc, ImportInProgressError):
             return _err("IMPORT_IN_PROGRESS", str(exc))
-        logger.exception("knowledge_create_namespace failed")
+        logger.exception("create_namespace failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_delete_namespace
+# Tool: delete_namespace
 # ---------------------------------------------------------------------------
 
 
@@ -242,28 +243,28 @@ async def delete_namespace(name: str, confirm: bool = False) -> dict:
 
     DANGEROUS: this is irreversible. Confirm with the user before calling.
 
-    Example: ``knowledge_delete_namespace("temp_test_kb")``
-    Example (curator): ``knowledge_delete_namespace("temp_test_kb", confirm=True)``
+    Example: ``delete_namespace("temp_test_kb")``
+    Example (curator): ``delete_namespace("temp_test_kb", confirm=True)``
     """
     try:
         # EPIC-006: Confirmation gate for knowledge-curator sessions
         if _requires_confirmation() and not confirm:
             return _err(
                 "CONFIRMATION_REQUIRED",
-                f"knowledge_delete_namespace requires confirm=True when called by knowledge-curator. "
-                f"Explicitly set confirm=True to proceed with deleting namespace '{name}'."
+                f"delete_namespace requires confirm=True when called by knowledge-curator. "
+                f"Explicitly set confirm=True to proceed with deleting namespace '{name}'.",
             )
-        
+
         ks = _get_service()
         deleted = await asyncio.to_thread(ks.delete_namespace, name, actor="anonymous")
         return {"deleted": deleted}
     except Exception as exc:  # noqa: BLE001
-        logger.exception("knowledge_delete_namespace failed")
+        logger.exception("delete_namespace failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_import_folder
+# Tool: import_folder
 # ---------------------------------------------------------------------------
 
 
@@ -294,10 +295,10 @@ async def import_folder(
     ``INVALID_NAMESPACE_ID``, ``IMPORT_IN_PROGRESS``, ``INTERNAL_ERROR``).
 
     The import runs in the background — poll
-    ``knowledge_get_import_status`` with the returned ``job_id`` to track
+    ``get_import_status`` with the returned ``job_id`` to track
     progress through ``pending → running → completed | failed | cancelled``.
 
-    Example: ``knowledge_import_folder("project_docs", "/Users/me/projects/docs")``
+    Example: ``import_folder("project_docs", "/Users/me/projects/docs")``
     """
     try:
         from pathlib import Path
@@ -333,12 +334,12 @@ async def import_folder(
             return _err("FOLDER_NOT_FOUND", str(exc))
         if isinstance(exc, NotADirectoryError):
             return _err("NOT_A_DIRECTORY", str(exc))
-        logger.exception("knowledge_import_folder failed")
+        logger.exception("import_folder failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_get_import_status
+# Tool: get_import_status
 # ---------------------------------------------------------------------------
 
 
@@ -350,16 +351,16 @@ async def get_import_status(namespace: str, job_id: str) -> dict:
         namespace: namespace where the import was started (informational —
             kept for symmetry with the REST API; the job is looked up by
             ``job_id`` alone).
-        job_id: the id returned by :func:`knowledge_import_folder`.
+        job_id: the id returned by :func:`import_folder`.
 
     Returns the JobStatus as a dict (``state``, ``progress_current``,
     ``progress_total``, ``message``, ``errors``, ``result``). ``state`` is
     one of ``pending | running | completed | failed | interrupted |
     cancelled``. On unknown job: ``{"error", "code": "JOB_NOT_FOUND"}``.
 
-    Use after :func:`knowledge_import_folder` to poll progress.
+    Use after :func:`import_folder` to poll progress.
 
-    Example: ``knowledge_get_import_status("project_docs", "abc-123-uuid")``
+    Example: ``get_import_status("project_docs", "abc-123-uuid")``
     """
     try:
         ks = _get_service()
@@ -368,12 +369,12 @@ async def get_import_status(namespace: str, job_id: str) -> dict:
             return _err("JOB_NOT_FOUND", f"no job with id {job_id}")
         return status.model_dump(mode="json")
     except Exception as exc:  # noqa: BLE001
-        logger.exception("knowledge_get_import_status failed")
+        logger.exception("get_import_status failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
 # ---------------------------------------------------------------------------
-# Tool: knowledge_query
+# Tool: import_text
 # ---------------------------------------------------------------------------
 
 
@@ -386,7 +387,7 @@ async def import_text(
 ) -> dict:
     """Ingest plain text directly into a knowledge namespace (synchronous).
 
-    Unlike ``knowledge_import_folder`` (which runs as a background job),
+    Unlike ``import_folder`` (which runs as a background job),
     this tool ingests text **synchronously** and returns the result
     immediately — no job polling needed. Perfect for pasting notes,
     chat excerpts, meeting summaries, or other short-form text.
@@ -410,7 +411,7 @@ async def import_text(
     ``TEXT_TOO_LONG``, ``INVALID_NAMESPACE_ID``, ``IMPORT_IN_PROGRESS``,
     ``INTERNAL_ERROR``).
 
-    Example: ``knowledge_import_text("project_docs", "The authentication
+    Example: ``import_text("project_docs", "The authentication
     system uses JWT tokens with 24-hour expiry...", source_label="auth-design")``
     """
     try:
@@ -440,7 +441,7 @@ async def import_text(
             return _err("INVALID_NAMESPACE_ID", str(exc))
         if isinstance(exc, ImportInProgressError):
             return _err("IMPORT_IN_PROGRESS", str(exc))
-        logger.exception("knowledge_import_text failed")
+        logger.exception("import_text failed")
         return _err("INTERNAL_ERROR", str(exc))
 
 
@@ -477,7 +478,7 @@ async def query(
     Use ``"raw"`` when you just need relevant snippets; ``"summarized"``
     when you want a synthesised answer with citations.
 
-    Example: ``knowledge_query("project_docs", "How does auth work?",
+    Example: ``query("project_docs", "How does auth work?",
     mode="summarized", top_k=5)``
     """
     try:
@@ -491,9 +492,8 @@ async def query(
             return _err("NAMESPACE_NOT_FOUND", str(exc))
         if isinstance(exc, ValueError):
             return _err("BAD_REQUEST", str(exc))
-        logger.exception("knowledge_query failed")
+        logger.exception("query failed")
         return _err("INTERNAL_ERROR", str(exc))
-
 
 
 @mcp.tool()
@@ -532,28 +532,27 @@ async def find_notes_by_knowledge_link(
             BridgeConfig,
             is_bridge_enabled,
         )
-        
+
         if not is_bridge_enabled():
             return _err(
                 "BRIDGE_DISABLED",
-                "Memory-Knowledge bridge is not enabled. "
-                "Set OSTWIN_KNOWLEDGE_MEMORY_BRIDGE=1 to enable.",
+                "Memory-Knowledge bridge is not enabled. Set OSTWIN_KNOWLEDGE_MEMORY_BRIDGE=1 to enable.",
             )
-        
+
         def _do_lookup():
             # Create bridge index instance
             config = BridgeConfig.from_env()
             bridge = BridgeIndex(config=config)
-            
+
             # Perform lookup
             note_ids = bridge.lookup(namespace, file_hash, chunk_idx)
-            
+
             # Close the bridge connection
             bridge.close()
             return note_ids
 
         note_ids = await asyncio.to_thread(_do_lookup)
-        
+
         return {
             "note_ids": note_ids,
             "count": len(note_ids),
@@ -603,13 +602,13 @@ def reset_mcp_session_manager() -> None:
 __all__ = [
     "mcp",
     "get_mcp_app",
-    "knowledge_list_namespaces",
-    "knowledge_create_namespace",
-    "knowledge_delete_namespace",
-    "knowledge_import_folder",
-    "knowledge_import_text",
-    "knowledge_get_import_status",
-    "knowledge_query",
+    "list_namespaces",
+    "create_namespace",
+    "delete_namespace",
+    "import_folder",
+    "import_text",
+    "get_import_status",
+    "query",
     # EPIC-007
     "find_notes_by_knowledge_link",
 ]
