@@ -53,8 +53,8 @@ setup_path() {
       path_line="export PATH=\"$INSTALL_DIR/.agents/bin:$HOME/.local/bin:\$PATH\""
     fi
 
-    # Add PATH if not present
-    if grep -qF "ostwin" "$shell_rc" 2>/dev/null; then
+    # Add PATH if not present (match the actual bin path, not just "ostwin" string)
+    if grep -qF "$INSTALL_DIR/.agents/bin" "$shell_rc" 2>/dev/null; then
       ok "PATH already in $rc_name"
     else
       {

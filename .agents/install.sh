@@ -70,7 +70,8 @@ fi
 for _mod in lib.sh versions.conf detect-os.sh check-deps.sh install-deps.sh \
             install-files.sh setup-venv.sh setup-env.sh setup-models.sh patch-mcp.sh \
             build-frontend.sh setup-path.sh setup-opencode.sh sync-agents.sh \
-            start-opencode-server.sh start-dashboard.sh start-channels.sh verify.sh; do
+            start-opencode-server.sh start-dashboard.sh start-channels.sh \
+            setup-autostart.sh verify.sh; do
   # shellcheck disable=SC1090
   source "$INSTALLER_DIR/$_mod"
 done
@@ -106,7 +107,7 @@ build_frontend "dashboard/fe" "Dashboard FE" true
 
 header "4. Installing Agent OS"
 install_files
-if [[ "$OS" == "..." ]]; then
+if [[ "$OS" == "macos" ]]; then
   DAEMON_INSTALL="$INSTALL_DIR/.agents/daemons/macos-host/install.sh"
   # shellcheck disable=SC2015
   [[ -f "$DAEMON_INSTALL" ]] && {
@@ -168,4 +169,6 @@ ok_time "Section 9 complete" "$(print_duration "$section_9_start")"
 # if $START_CHANNEL && [[ -n "${CHAN_DIR:-}" ]]; then
 #   header "9d. Starting channel connectors"; start_channels
 # fi
+header "10. Registering dashboard auto-start"
+setup_autostart
 print_completion_banner
