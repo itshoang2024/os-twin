@@ -2,15 +2,9 @@ name: Agent OS — Pester Tests
 
 on:
   push:
-    branches: [main, hotfix/*, feature/*]
-    paths:
-      - '.agents/**'
-      - '.github/workflows/pester-tests.yml'
+    branches: [main, release-*, hotfix/*, feature/*, fix/*]
   pull_request:
-    branches: [main]
-    paths:
-      - '.agents/**'
-      - '.github/workflows/pester-tests.yml'
+    branches: [main, release-*]
   workflow_dispatch:
 
 permissions:
