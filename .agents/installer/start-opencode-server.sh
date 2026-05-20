@@ -3,15 +3,16 @@
 # start-opencode-server.sh — Launch the OpenCode HTTP server
 #
 # The dashboard master agent (dashboard/master_agent.py) routes all LLM calls
-# through this server via the opencode-ai Python SDK.  We start it from a
-# dedicated workdir so any project-level state opencode persists (auth,
-# session storage) lives under ~/.ostwin and not in the user's cwd.
+# through this server via the opencode-ai Python SDK.  We start it from
+# OSTWIN_PROJECT_DIR when one is configured, otherwise from the managed
+# ~/.ostwin/opencode_server fallback.
 #
 # Provides: start_opencode_server
 #
-# Requires: lib.sh, globals: INSTALL_DIR
-# Env:      OPENCODE_BASE_URL (read from .env if present, defaults to
-#           http://127.0.0.1:4096).  OPENCODE_SERVER_PASSWORD is honored if set.
+# Requires: lib.sh, globals: INSTALL_DIR, optional SOURCE_DIR / PROJECT_ROOT
+# Env:      Loads ~/.ostwin/.env, ~/.ostwin/.env.sh, and project .env files
+#           before spawning opencode serve. OPENCODE_BASE_URL defaults to
+#           http://127.0.0.1:4096. OPENCODE_SERVER_PASSWORD is honored if set.
 # ──────────────────────────────────────────────────────────────────────────────
 
 [[ -n "${_START_OPENCODE_SERVER_SH_LOADED:-}" ]] && return 0
@@ -41,6 +42,37 @@ _opencode_host_port() {
   fi
 }
 
+_source_opencode_env_file() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+}
+
+_load_opencode_global_env() {
+  _source_opencode_env_file "$INSTALL_DIR/.env"
+  _source_opencode_env_file "$INSTALL_DIR/.env.sh"
+}
+
+_load_opencode_project_env() {
+  local project_dir="$1"
+
+  if [[ -n "$project_dir" ]]; then
+    _source_opencode_env_file "$project_dir/.env"
+    _source_opencode_env_file "$project_dir/.env.sh"
+    _source_opencode_env_file "$project_dir/.agents/.env"
+    _source_opencode_env_file "$project_dir/.agents/.env.sh"
+  fi
+}
+
+_load_opencode_service_env() {
+  local project_dir="$1"
+  _load_opencode_global_env
+  _load_opencode_project_env "$project_dir"
+}
+
 start_opencode_server() {
   if ! command -v opencode &>/dev/null; then
     warn "opencode CLI not on PATH — skipping server start"
@@ -48,20 +80,20 @@ start_opencode_server() {
     return
   fi
 
-  # Pick up OPENCODE_* from .env so host/port/password match what the dashboard uses
-  local env_file="$INSTALL_DIR/.env"
-  if [[ -f "$env_file" ]]; then
-    set -a
-    # shellcheck source=/dev/null
-    source "$env_file"
-    set +a
-  fi
+  local server_dir="$INSTALL_DIR/opencode_server"
+  mkdir -p "$server_dir"
+
+  _load_opencode_global_env
+  local project_dir="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-${SOURCE_DIR:-$server_dir}}}"
+  _load_opencode_project_env "$project_dir"
+
+  project_dir="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$project_dir}}"
+  export OSTWIN_PROJECT_DIR="$project_dir"
+  mkdir -p "$project_dir"
 
   local host port
   read -r host port < <(_opencode_host_port)
 
-  local server_dir="$INSTALL_DIR/opencode_server"
-  mkdir -p "$server_dir"
   mkdir -p "$INSTALL_DIR/logs"
 
   # Stop any existing opencode serve on the port.  Only kill opencode
@@ -83,7 +115,6 @@ start_opencode_server() {
     fi
   fi
 
-  local project_dir="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$server_dir}}"
   step "Generating OpenCode tools in ${project_dir}..."
   if [[ -x "$INSTALL_DIR/.venv/bin/python" ]]; then
     "$INSTALL_DIR/.venv/bin/python" -m dashboard.opencode_tools \
@@ -96,9 +127,9 @@ start_opencode_server() {
       --dashboard-port "${DASHBOARD_PORT:-3366}" \
       2>/dev/null || true
   fi
-  step "Starting opencode server (workdir: $server_dir, listen: $host:$port)..."
+  step "Starting opencode server (workdir: $project_dir, listen: $host:$port)..."
   (
-    cd "$server_dir"
+    cd "$project_dir"
     nohup opencode serve --hostname "$host" --port "$port" \
       > "$INSTALL_DIR/logs/opencode-server.log" 2>&1 &
     echo $! > "$INSTALL_DIR/opencode.pid"
@@ -127,6 +158,6 @@ start_opencode_server() {
   else
     warn "OpenCode server did not respond on http://${host}:${port} in 30s"
     info "Check logs: $INSTALL_DIR/logs/opencode-server.log"
-    info "Start manually: cd $server_dir && opencode serve --hostname $host --port $port"
+    info "Start manually: cd $project_dir && opencode serve --hostname $host --port $port"
   fi
 }

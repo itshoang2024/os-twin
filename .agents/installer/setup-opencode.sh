@@ -4,7 +4,7 @@
 #
 # Provides: setup_opencode_permissions, generate_opencode_tools
 #
-# Requires: lib.sh, globals: VENV_DIR, INSTALL_DIR
+# Requires: lib.sh, globals: VENV_DIR, INSTALL_DIR, optional SOURCE_DIR / PROJECT_ROOT
 #           Python script: installer/scripts/patch_opencode_permissions.py
 #           Python module: dashboard.opencode_tools
 # ──────────────────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ setup_opencode_permissions() {
 }
 
 generate_opencode_tools() {
-  local project_root="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$INSTALL_DIR/opencode_server}}"
+  local project_root="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-${SOURCE_DIR:-$INSTALL_DIR/opencode_server}}}"
   local dashboard_port="${DASHBOARD_PORT:-3366}"
 
   if ! command -v python3 &>/dev/null && ! [[ -x "$VENV_DIR/bin/python" ]]; then

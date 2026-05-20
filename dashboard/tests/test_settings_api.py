@@ -533,6 +533,129 @@ def test_opencode_sync_endpoint_with_error(client, temp_config):
     assert data["error"] == "Permission denied"
 
 
+def test_sync_shell_profile_env_writes_managed_zshrc_block(tmp_path):
+    """Vertex env sync should expose non-secret selectors to standalone shells."""
+    from dashboard.routes import settings as settings_routes
+
+    zshrc = tmp_path / ".zshrc"
+    zshrc.write_text("# user config\n")
+
+    with patch.object(settings_routes, "_ZSHRC_FILE", zshrc):
+        settings_routes._sync_shell_profile_env(
+            {
+                "GOOGLE_CLOUD_PROJECT": "igot studio",
+                "VERTEX_LOCATION": "global",
+                "UNRELATED": "ignored",
+            }
+        )
+
+    text = zshrc.read_text()
+    assert "# user config" in text
+    assert settings_routes._ZSHRC_BEGIN in text
+    assert "export GOOGLE_CLOUD_PROJECT='igot studio'" in text
+    assert "export VERTEX_LOCATION=global" in text
+    assert "UNRELATED" not in text
+
+
+def test_sync_shell_profile_env_removes_managed_zshrc_block(tmp_path):
+    """Switching away from Vertex removes only the dashboard-owned block."""
+    from dashboard.routes import settings as settings_routes
+
+    zshrc = tmp_path / ".zshrc"
+    zshrc.write_text(
+        "before\n"
+        f"{settings_routes._ZSHRC_BEGIN}\n"
+        "export GOOGLE_CLOUD_PROJECT=old\n"
+        f"{settings_routes._ZSHRC_END}\n"
+        "after\n"
+    )
+
+    with patch.object(settings_routes, "_ZSHRC_FILE", zshrc):
+        settings_routes._sync_shell_profile_env({})
+
+    assert zshrc.read_text() == "before\nafter\n"
+
+
+def test_sync_shell_profile_env_replaces_legacy_unmarked_vertex_block(tmp_path):
+    """Dashboard sync should not leave duplicate Vertex exports in ~/.zshrc."""
+    from dashboard.routes import settings as settings_routes
+
+    zshrc = tmp_path / ".zshrc"
+    zshrc.write_text(
+        "# Ostwin environment (API keys, config)\n"
+        f"{settings_routes._ZSHRC_NOTE}\n"
+        "export GOOGLE_CLOUD_PROJECT=old-project\n"
+        "export VERTEX_LOCATION=us-central1\n"
+        "\n"
+        "# user config\n"
+    )
+
+    with patch.object(settings_routes, "_ZSHRC_FILE", zshrc):
+        settings_routes._sync_shell_profile_env(
+            {
+                "GOOGLE_CLOUD_PROJECT": "igot-studio",
+                "VERTEX_LOCATION": "global",
+            }
+        )
+
+    text = zshrc.read_text()
+    assert text.count(settings_routes._ZSHRC_NOTE) == 1
+    assert text.count("export GOOGLE_CLOUD_PROJECT=") == 1
+    assert "export GOOGLE_CLOUD_PROJECT=igot-studio" in text
+    assert "old-project" not in text
+
+
+def test_sync_shell_profile_env_removes_empty_ostwin_env_headers(tmp_path):
+    """Repeated setup runs should not leave detached Ostwin env headings."""
+    from dashboard.routes import settings as settings_routes
+
+    zshrc = tmp_path / ".zshrc"
+    zshrc.write_text(
+        f"{settings_routes._ZSHRC_ENV_HEADER}\n\n"
+        f"{settings_routes._ZSHRC_ENV_HEADER}\n\n"
+        "# Ostwin CLI (Agent OS)\n"
+        "export PATH=/tmp/bin:$PATH\n\n"
+        f"{settings_routes._ZSHRC_ENV_HEADER}\n"
+        "[[ -f /Users/test/.ostwin/.env ]] && source /Users/test/.ostwin/.env\n"
+    )
+
+    with patch.object(settings_routes, "_ZSHRC_FILE", zshrc):
+        settings_routes._sync_shell_profile_env(
+            {
+                "GOOGLE_CLOUD_PROJECT": "igot-studio",
+                "VERTEX_LOCATION": "global",
+            }
+        )
+
+    text = zshrc.read_text()
+    assert text.count(settings_routes._ZSHRC_ENV_HEADER) == 1
+    assert "[[ -f /Users/test/.ostwin/.env ]] && source /Users/test/.ostwin/.env" in text
+    assert "# Ostwin CLI (Agent OS)" in text
+    assert "export GOOGLE_CLOUD_PROJECT=" not in text
+    assert settings_routes._ZSHRC_BEGIN not in text
+
+
+def test_sync_shell_profile_env_skips_exports_when_zshrc_sources_env(tmp_path):
+    """If ~/.ostwin/.env is already sourced, avoid duplicate shell exports."""
+    from dashboard.routes import settings as settings_routes
+
+    zshrc = tmp_path / ".zshrc"
+    zshrc.write_text("[[ -f /Users/test/.ostwin/.env ]] && source /Users/test/.ostwin/.env\n")
+
+    with patch.object(settings_routes, "_ZSHRC_FILE", zshrc):
+        settings_routes._sync_shell_profile_env(
+            {
+                "GOOGLE_CLOUD_PROJECT": "igot-studio",
+                "VERTEX_LOCATION": "global",
+            }
+    )
+
+    text = zshrc.read_text()
+    assert "[[ -f /Users/test/.ostwin/.env ]] && source /Users/test/.ostwin/.env" in text
+    assert "export GOOGLE_CLOUD_PROJECT=" not in text
+    assert "export VERTEX_LOCATION=" not in text
+
+
 # ── Models registry endpoint (config-driven) ──────────────────────────
 
 def test_models_registry_returns_all_when_settings_fail(client, temp_config):

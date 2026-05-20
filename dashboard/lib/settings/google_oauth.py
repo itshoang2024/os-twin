@@ -244,23 +244,27 @@ def get_oauth_status() -> Dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         return {"authenticated": False, "adc_path": str(_ADC_FILE), "error": "corrupt"}
 
-    adc_type = adc.get("type", "unknown")
-    has_refresh = bool(adc.get("refresh_token"))
-
     result: Dict[str, Any] = {
-        "authenticated": has_refresh or adc_type == "service_account",
+        "authenticated": False,
         "adc_path": str(_ADC_FILE),
-        "type": adc_type,
+        "type": adc.get("type", "unknown"),
     }
-
-    # Try to get email from a quick token refresh
-    if has_refresh and adc_type == "authorized_user":
-        email = _get_email_from_adc(adc)
-        if email:
-            result["email"] = email
 
     if adc.get("quota_project_id"):
         result["project_id"] = adc["quota_project_id"]
+
+    adc_type = adc.get("type", "unknown")
+    if adc_type == "service_account":
+        result["authenticated"] = True
+        return result
+
+    if adc_type == "authorized_user":
+        authenticated, email, error = _refresh_adc(adc)
+        result["authenticated"] = authenticated
+        if email:
+            result["email"] = email
+        if error:
+            result["error"] = error
 
     return result
 
@@ -310,19 +314,52 @@ def _extract_email(id_token: str) -> Optional[str]:
         return None
 
 
-def _get_email_from_adc(adc: Dict[str, Any]) -> Optional[str]:
-    """Try a token refresh to get the associated email."""
+def _refresh_adc(adc: Dict[str, Any]) -> tuple[bool, Optional[str], Optional[str]]:
+    """Refresh authorized-user ADC and return validity plus display metadata."""
+    refresh_token = adc.get("refresh_token")
+    if not refresh_token:
+        return False, None, "missing_refresh_token"
+
     try:
         with httpx.Client(timeout=10) as client:
             resp = client.post(_TOKEN_URL, data={
                 "client_id": adc.get("client_id", _CLIENT_ID),
                 "client_secret": adc.get("client_secret", _CLIENT_SECRET),
-                "refresh_token": adc["refresh_token"],
+                "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             })
-        if resp.status_code == 200:
-            tokens = resp.json()
-            return _extract_email(tokens.get("id_token", ""))
+    except Exception as exc:
+        logger.warning("[GOOGLE_OAUTH] ADC refresh failed: %s", exc)
+        return False, None, "refresh_failed"
+
+    if resp.status_code != 200:
+        error = _token_refresh_error(resp)
+        logger.warning(
+            "[GOOGLE_OAUTH] ADC refresh rejected (status=%s, error=%s)",
+            resp.status_code,
+            error,
+        )
+        return False, None, error
+
+    try:
+        tokens = resp.json()
     except Exception:
-        pass
-    return None
+        return False, None, "invalid_token_response"
+
+    if not tokens.get("access_token"):
+        return False, None, "missing_access_token"
+
+    return True, _extract_email(tokens.get("id_token", "")), None
+
+
+def _token_refresh_error(resp: httpx.Response) -> str:
+    """Return a stable, non-secret error code for a failed token refresh."""
+    try:
+        payload = resp.json()
+    except Exception:
+        return "refresh_failed"
+
+    error = str(payload.get("error") or "").strip()
+    if error == "invalid_grant":
+        return "reauth_required"
+    return error or "refresh_failed"

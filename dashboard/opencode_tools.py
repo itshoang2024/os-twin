@@ -840,8 +840,8 @@ def _opencode_config(model: str = "google/gemini-2.5-pro") -> dict:
     # land in ~/.ostwin/.agents/plans and metadata is indexed in zvec.
     # The ostwin-worker subagent has its own permission block that re-grants
     # filesystem tools. external_directory is pre-approved because the
-    # OpenCode server runs from ~/.ostwin/opencode_server while workers read
-    # and write ~/.ostwin/.agents/plans.
+    # OpenCode server may run from a project workdir while workers read and
+    # write ~/.ostwin/.agents/plans.
     return {
         "$schema": "https://opencode.ai/config.json",
         "agent": {

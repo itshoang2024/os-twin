@@ -30,3 +30,14 @@ def test_runtime_entrypoint_starts_and_supervises_services():
     assert "opencode serve" in entrypoint
     assert "uvicorn dashboard.api:app" in entrypoint
     assert "wait -n" in entrypoint
+
+
+def test_runtime_entrypoint_loads_project_env_before_services():
+    entrypoint = (ROOT / ".agents" / "docker-entrypoint.sh").read_text()
+
+    assert 'load_env_defaults "$INSTALL_DIR/.env"' in entrypoint
+    assert 'load_env_defaults "$APP_DIR/.env"' in entrypoint
+    assert 'load_env_defaults "$APP_DIR/.agents/.env"' in entrypoint
+    assert 'source_env_hook "$INSTALL_DIR/.env.sh"' in entrypoint
+    assert 'PROJECT_DIR="${OSTWIN_PROJECT_DIR:-$APP_DIR}"' in entrypoint
+    assert 'cd "$PROJECT_DIR"' in entrypoint

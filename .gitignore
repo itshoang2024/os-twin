@@ -128,9 +128,6 @@ test_extless.ps1
 lint_output.txt
 test_results.txt
 
-# Ostwin generated
-.opencode/opencode.json
-.war-rooms/
 test-results/
 
 docs/plan

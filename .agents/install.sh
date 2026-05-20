@@ -169,6 +169,11 @@ ok_time "Section 9 complete" "$(print_duration "$section_9_start")"
 # if $START_CHANNEL && [[ -n "${CHAN_DIR:-}" ]]; then
 #   header "9d. Starting channel connectors"; start_channels
 # fi
-header "10. Registering dashboard auto-start"
-setup_autostart
+if $START_SERVICES; then
+  header "10. Registering dashboard auto-start"
+  setup_autostart
+else
+  header "10. Dashboard auto-start (skipped)"
+  info "Skipping auto-start registration (--no-start). Register manually later via setup_autostart."
+fi
 print_completion_banner
