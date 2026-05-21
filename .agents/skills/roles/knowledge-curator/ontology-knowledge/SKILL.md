@@ -23,8 +23,8 @@ All tools are executed via the `mcporter` CLI following `brain-ops` standards:
 | Tool | Purpose |
 |------|---------|
 | `memory.search_memory` | Check for recent retrieval complaints or "promote-to-knowledge" tags |
-| `knowledge.knowledge_list_namespaces` | Get baseline stats per namespace |
-| `knowledge.knowledge_query` | Run probe queries in `raw`, `graph`, `summarized` modes |
+| `knowledge.list_namespaces` | Get baseline stats per namespace |
+| `knowledge.query` | Run probe queries in `raw`, `graph`, `summarized` modes |
 | `memory.save_memory` | Record the audit findings and health scores |
 
 ## Instructions
@@ -40,7 +40,7 @@ Record any specific namespaces or domains that have been flagged by the team.
 ### 2. Establish Baseline Knowledge Stats
 
 ```bash
-npx mcporter call knowledge.knowledge_list_namespaces
+npx mcporter call knowledge.list_namespaces
 ```
 Record per-namespace: `files_indexed`, `chunks`, `entities`, `relations`. Flag:
 - Files > 0 but chunks = 0 → ingestion failure
@@ -59,9 +59,9 @@ For each namespace, construct 3–5 probes based on the content (and any Memory 
 
 Test the resilience of the Knowledge namespace across all retrieval strategies:
 ```bash
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'raw' top_k:5
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'graph' top_k:5
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'summarized' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'raw' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'graph' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'summarized' top_k:5
 ```
 Record: `chunks` count, `entities`, `answer`, `latency_ms`, `warnings`.
 

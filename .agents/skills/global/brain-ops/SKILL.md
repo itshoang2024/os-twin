@@ -87,7 +87,7 @@ List all knowledge namespaces with their stats.
 knowledge_list_namespaces()
 
 # CLI
-npx mcporter call knowledge.knowledge_list_namespaces
+npx mcporter call knowledge.list_namespaces
 ```
 
 ### `knowledge_create_namespace`
@@ -111,7 +111,7 @@ Create a new knowledge namespace.
 knowledge_create_namespace("project_docs", "English", "Internal product handbook v3")
 
 # CLI
-npx mcporter call knowledge.knowledge_create_namespace name:'project_docs' language:'English' description:'Internal product handbook v3'
+npx mcporter call knowledge.create_namespace name:'project_docs' language:'English' description:'Internal product handbook v3'
 ```
 
 ### `knowledge_delete_namespace`
@@ -134,7 +134,7 @@ Delete a knowledge namespace and ALL its data permanently. **IRREVERSIBLE.**
 knowledge_delete_namespace("temp_test_kb", true)
 
 # CLI
-npx mcporter call knowledge.knowledge_delete_namespace name:'temp_test_kb' confirm:true
+npx mcporter call knowledge.delete_namespace name:'temp_test_kb' confirm:true
 ```
 
 ### `knowledge_import_folder`
@@ -163,8 +163,8 @@ knowledge_import_folder("project_docs", "/Users/me/projects/docs")
 knowledge_import_folder("project_docs", "/Users/me/projects/docs", true)  # force re-import
 
 # CLI
-npx mcporter call knowledge.knowledge_import_folder namespace:'project_docs' folder_path:'/Users/me/projects/docs'
-npx mcporter call knowledge.knowledge_import_folder namespace:'project_docs' folder_path:'/Users/me/projects/docs' force:true
+npx mcporter call knowledge.import_folder namespace:'project_docs' folder_path:'/Users/me/projects/docs'
+npx mcporter call knowledge.import_folder namespace:'project_docs' folder_path:'/Users/me/projects/docs' force:true
 ```
 
 ### `knowledge_import_text`
@@ -191,7 +191,7 @@ Ingest plain text directly into a namespace — **synchronous**, no job polling 
 knowledge_import_text("project_docs", "The authentication system uses JWT tokens with 24-hour expiry...", source_label="auth-design")
 
 # CLI
-npx mcporter call knowledge.knowledge_import_text \
+npx mcporter call knowledge.import_text \
   namespace:'project_docs' \
   text:'The authentication system uses JWT tokens with 24-hour expiry and refresh token rotation. Access tokens are validated via middleware on every request.' \
   source_label:'auth-design'
@@ -222,7 +222,7 @@ Poll the status of a background import job.
 knowledge_get_import_status("project_docs", "abc-123-uuid")
 
 # CLI
-npx mcporter call knowledge.knowledge_get_import_status namespace:'project_docs' job_id:'abc-123-uuid'
+npx mcporter call knowledge.get_import_status namespace:'project_docs' job_id:'abc-123-uuid'
 ```
 
 ### `knowledge_query`
@@ -252,7 +252,7 @@ Query a knowledge namespace using natural language.
 knowledge_query("project_docs", "How does auth work?", "summarized", 5)
 
 # CLI
-npx mcporter call knowledge.knowledge_query namespace:'project_docs' query:'How does auth work?' mode:'summarized' top_k:5
+npx mcporter call knowledge.query namespace:'project_docs' query:'How does auth work?' mode:'summarized' top_k:5
 ```
 
 ### `find_notes_by_knowledge_link`
@@ -473,7 +473,7 @@ npx mcporter call memory.save_memory \
   tags:'models,user,sqlalchemy'
 
 # After producing project docs (Knowledge — source of truth)
-npx mcporter call knowledge.knowledge_import_folder \
+npx mcporter call knowledge.import_folder \
   namespace:'project-api-docs' \
   folder_path:'/Users/me/projects/generated-docs'
 ```
@@ -513,13 +513,13 @@ team-wide convention or when documentation needs updating:
 
 ```bash
 # For a single finding — use knowledge_import_text (synchronous, no files needed)
-npx mcporter call knowledge.knowledge_import_text \
+npx mcporter call knowledge.import_text \
   namespace:'coding-conventions' \
   text:'Rate limiting is mandatory on all public endpoints. The middleware (src/middleware/rate_limit.py) must be applied opt-out, not opt-in. Default: 5 req/min for auth endpoints, 100 req/min for general API. This was decided after recurring gaps in EPIC-001, EPIC-003, and EPIC-005.' \
   source_label:'convention-rate-limiting'
 
 # For bulk docs — use knowledge_import_folder (async, for folders of files)
-npx mcporter call knowledge.knowledge_import_folder \
+npx mcporter call knowledge.import_folder \
   namespace:'coding-conventions' \
   folder_path:'/path/to/updated/conventions'
 ```
@@ -556,7 +556,7 @@ Shows how memories are organized — helps you place new memories correctly and 
 ### Step 3: Knowledge Query (What does the project believe?)
 
 ```bash
-npx mcporter call knowledge.knowledge_query \
+npx mcporter call knowledge.query \
   namespace:'project-docs' \
   query:'How does authentication work?' \
   mode:'summarized'
