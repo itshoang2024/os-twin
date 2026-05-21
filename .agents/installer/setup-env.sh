@@ -100,7 +100,7 @@ _create_env_sh_hook() {
 # The OpenAI-compatible Vertex endpoint expects this as a Bearer token,
 # and access tokens expire ~1h, so re-mint per agent launch.
 if command -v gcloud >/dev/null 2>&1; then
-  VERTEX_API_KEY="$(gcloud auth print-access-token 2>/dev/null)"
+  VERTEX_API_KEY="$(gcloud auth print-access-token 2>/dev/null || true)"
   export VERTEX_API_KEY
 fi
 

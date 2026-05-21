@@ -47,7 +47,7 @@ _source_opencode_env_file() {
   [[ -f "$env_file" ]] || return 0
   set -a
   # shellcheck source=/dev/null
-  source "$env_file"
+  source "$env_file" || true
   set +a
 }
 
