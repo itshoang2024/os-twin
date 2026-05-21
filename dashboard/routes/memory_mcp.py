@@ -169,7 +169,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-async def save_memory(
+async def save(
     content: str,
     name: Optional[str] = None,
     path: Optional[str] = None,
@@ -243,7 +243,7 @@ async def save_memory(
 
 
 @mcp.tool()
-async def search_memory(query: str, k: int = 5) -> str:
+async def search(query: str, k: int = 5) -> str:
     """Search the knowledge base using natural language.
 
     Returns the most semantically relevant memories for the query.
@@ -284,7 +284,7 @@ async def search_memory(query: str, k: int = 5) -> str:
 
 
 @mcp.tool()
-async def memory_tree() -> str:
+async def tree() -> str:
     """Show the full directory tree of all memories.
 
     Returns:
@@ -294,7 +294,7 @@ async def memory_tree() -> str:
 
 
 @mcp.tool()
-async def delete_memory(memory_id: str) -> str:
+async def delete(memory_id: str) -> str:
     """Delete a specific memory note by its ID.
 
     Use search_memory or memory_tree first to find the ID of the note
@@ -317,7 +317,7 @@ async def delete_memory(memory_id: str) -> str:
 
 
 @mcp.tool()
-async def grep_memory(pattern: str, flags: Optional[str] = None) -> str:
+async def grep(pattern: str, flags: Optional[str] = None) -> str:
     """Search memory files using grep (full CLI grep).
 
     Runs grep on all markdown files in the memory notes directory.
@@ -363,7 +363,7 @@ async def grep_memory(pattern: str, flags: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-async def find_memory(args: Optional[str] = None) -> str:
+async def find(args: Optional[str] = None) -> str:
     """Search memory files using find (full CLI find).
 
     Runs find on the memory notes directory.
