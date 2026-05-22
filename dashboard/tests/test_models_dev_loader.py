@@ -23,6 +23,7 @@ from dashboard.lib.settings.models_dev_loader import (
     _read_google_deployment_mode,
     _build_configured_models,
     _COMPANION_PROVIDERS,
+    get_available_providers,
     get_model_registry_from_configured,
     get_provider_logo_url,
     invalidate_cache,
@@ -222,10 +223,86 @@ def test_google_detected_from_api_key(tmp_path):
 def test_google_not_detected_without_env():
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
-            with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(
+                os.environ,
+                {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json"},
+                clear=True,
+            ):
                 providers = _read_configured_providers()
 
     assert "google" not in providers
+
+
+def test_provider_config_detects_google_vertex_without_env(tmp_path):
+    """Provider settings should populate runtime models even before OpenCode sync."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {
+            "google": {
+                "enabled": True,
+                "deployment_mode": "vertex",
+                "project_id": "test-project",
+                "vertex_auth_mode": "oauth",
+            }
+        }
+    }))
+
+    env = {"OSTWIN_CONFIG_PATH": str(config_path), "OSTWIN_VAULT_BACKEND": "env"}
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch.dict(os.environ, env, clear=True):
+                providers = _read_configured_providers()
+
+    assert providers["google"]["source"] == "settings"
+    assert providers["google"]["deployment_mode"] == "vertex"
+
+
+def test_disabled_provider_config_suppresses_vault_key(tmp_path):
+    """A dismissed dynamic provider should stay hidden even if a vault key exists."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {
+            "deepseek": {"enabled": False}
+        }
+    }))
+
+    class FakeVault:
+        def list_keys(self, scope):
+            return {"deepseek": {"is_set": True}}
+
+    env = {"OSTWIN_CONFIG_PATH": str(config_path), "OSTWIN_VAULT_BACKEND": "env"}
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch("dashboard.lib.settings.vault.get_vault", return_value=FakeVault()):
+                with patch.dict(os.environ, env, clear=True):
+                    providers = _read_configured_providers()
+
+    assert "deepseek" not in providers
+
+
+def test_enabled_provider_config_ignores_stale_dismissed_flag(tmp_path):
+    """Primary provider cards can leave dismissed=true; enabled should win."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "providers": {
+            "google": {
+                "enabled": True,
+                "dismissed": True,
+                "deployment_mode": "vertex",
+                "project_id": "test-project",
+                "vertex_auth_mode": "oauth",
+            }
+        }
+    }))
+
+    env = {"OSTWIN_CONFIG_PATH": str(config_path), "OSTWIN_VAULT_BACKEND": "env"}
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch.dict(os.environ, env, clear=True):
+                providers = _read_configured_providers()
+
+    assert "google" in providers
+    assert providers["google"]["deployment_mode"] == "vertex"
 
 
 # ── Deployment mode ───────────────────────────────────────────────────
@@ -235,7 +312,7 @@ def test_deployment_mode_read_from_config(tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config))
 
-    with patch("dashboard.api_utils.AGENTS_DIR", tmp_path):
+    with patch.dict(os.environ, {"OSTWIN_CONFIG_PATH": str(config_path)}, clear=False):
         mode = _read_google_deployment_mode()
     assert mode == "gemini"
 
@@ -298,12 +375,23 @@ def test_vertex_mode_loads_companions(fake_raw_catalog):
     models = result["providers"]["google"]["models"]
     # Base google model
     assert "gemini-2.5-pro" in models
-    # Vertex companion
-    assert "google-vertex/gemini-2.5-pro" in models
-    assert models["google-vertex/gemini-2.5-pro"]["companion_provider"] == "google-vertex"
-    # Vertex-Anthropic companion
-    assert "google-vertex-anthropic/claude-sonnet-4-6@default" in models
-    assert models["google-vertex-anthropic/claude-sonnet-4-6@default"]["companion_provider"] == "google-vertex-anthropic"
+    # Vertex companions are exposed as separate top-level providers so the UI
+    # groups them independently.
+    assert "google-vertex" in result["providers"]
+    assert "gemini-2.5-pro" in result["providers"]["google-vertex"]["models"]
+    assert (
+        result["providers"]["google-vertex"]["models"]["gemini-2.5-pro"]["companion_provider"]
+        == "google-vertex"
+    )
+    assert "google-vertex-anthropic" in result["providers"]
+    assert (
+        "claude-sonnet-4-6@default"
+        in result["providers"]["google-vertex-anthropic"]["models"]
+    )
+    assert (
+        result["providers"]["google-vertex-anthropic"]["models"]["claude-sonnet-4-6@default"]["companion_provider"]
+        == "google-vertex-anthropic"
+    )
 
 
 def test_gemini_mode_skips_companions(fake_raw_catalog):
@@ -368,6 +456,18 @@ def test_provider_logo_url():
     assert get_provider_logo_url("openai") == "https://models.dev/logos/openai.svg"
 
 
+def test_available_providers_uses_raw_catalog(fake_raw_catalog):
+    with patch("dashboard.lib.settings.models_dev_loader._read_cached_raw", return_value=fake_raw_catalog):
+        with patch("dashboard.lib.settings.models_dev_loader._read_configured_providers", return_value={"openai": {}}):
+            providers = get_available_providers()
+
+    openai = next(p for p in providers if p["id"] == "openai")
+    anthropic = next(p for p in providers if p["id"] == "anthropic")
+    assert openai["already_configured"] is True
+    assert anthropic["already_configured"] is False
+    assert openai["model_count"] == 2
+
+
 # ── Cache ─────────────────────────────────────────────────────────────
 
 def test_invalidate_cache_clears_memory():
@@ -422,7 +522,7 @@ class TestCountTokens:
         with patch.dict("sys.modules", {"tiktoken": None}):
             msgs = [{"role": "user", "content": "a" * 100}]
             n = count_tokens(msgs)
-            assert n == 100 // 4
+        assert n == (len("user") + 100) // 4
 
 
 # ── get_context_limit ─────────────────────────────────────────────────

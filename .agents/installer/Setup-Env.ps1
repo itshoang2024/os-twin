@@ -17,6 +17,7 @@ function Setup-Env {
 
     if (Test-Path $envFile) {
         Write-Ok ".env already exists at $envFile"
+        Create-EnvPs1Hook
         return
     }
 
@@ -129,10 +130,9 @@ function Create-EnvPs1Hook {
 # Use this for env vars that require shell logic (subshells, conditionals,
 # token refresh, etc.). Static KEY=VALUE pairs belong in ~/.ostwin/.env.
 
-# Refresh a Vertex AI access token from the active gcloud account.
-if (Get-Command gcloud -ErrorAction SilentlyContinue) {
-    $env:VERTEX_API_KEY = (& gcloud auth print-access-token 2>$null)
-}
+# Vertex AI authentication is configured from Settings using browser OAuth
+# or a service-account JSON file. This hook intentionally never shells out
+# to the Cloud SDK CLI.
 
 # Auto-promote memory backend to Gemini when a Google API key is available
 # and the user hasn't explicitly overridden the LLM backend.
@@ -144,8 +144,42 @@ if ($env:GOOGLE_API_KEY -and ($env:MEMORY_LLM_BACKEND -eq 'huggingface' -or -not
 }
 '@
         Set-Content -Path $envPs1 -Value $hookContent -Encoding UTF8
-        Write-Ok ".env.ps1 created — add dynamic env hooks (e.g. token refresh) here"
+        Write-Ok ".env.ps1 created — add dynamic env hooks here"
     }
+    else {
+        Remove-LegacyCloudSdkEnvHook -HookPath $envPs1
+        Write-Ok ".env.ps1 verified — no Cloud SDK CLI auth hook"
+    }
+}
+
+function Remove-LegacyCloudSdkEnvHook {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$HookPath)
+
+    if (-not (Test-Path $HookPath)) { return }
+
+    $content = Get-Content $HookPath -Raw
+    if ($content -notmatch 'g[c]loud auth print-access-token|active g[c]loud account') {
+        return
+    }
+
+    $lines = $content -split "\r?\n"
+    $kept = New-Object System.Collections.Generic.List[string]
+    $skip = $false
+    foreach ($line in $lines) {
+        if ($line -match 'Refresh a Vertex AI access token from the active g[c]loud account\.') {
+            $skip = $true
+            continue
+        }
+        if ($skip) {
+            if ($line -match '^\s*}\s*$') {
+                $skip = $false
+            }
+            continue
+        }
+        $kept.Add($line)
+    }
+    Set-Content -Path $HookPath -Value ($kept -join [Environment]::NewLine) -Encoding UTF8
 }
 
 function Migrate-EnvKeys {

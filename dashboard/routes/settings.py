@@ -30,6 +30,7 @@ from dashboard.lib.settings.google_oauth import (
     start_oauth,
     exchange_code,
     get_oauth_status,
+    get_adc_path,
     OAuthSession,
 )
 
@@ -945,7 +946,9 @@ _ZSHRC_ENV_HEADER = "# Ostwin environment (API keys, config)"
 # Env vars managed by this sync — never conflate with vault-managed keys.
 _VERTEX_ENV_KEYS = {
     "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_VERTEX_PROJECT",
     "VERTEX_LOCATION",
+    "GOOGLE_VERTEX_LOCATION",
     "GOOGLE_APPLICATION_CREDENTIALS",
 }
 
@@ -971,15 +974,13 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
 
     * **service_account** (default) — writes the service-account JSON to
       disk and sets ``GOOGLE_APPLICATION_CREDENTIALS`` in ``.env``.
-    * **oauth** — relies on Application Default Credentials (ADC) at
-      ``~/.config/gcloud/application_default_credentials.json``.
-      ``GOOGLE_APPLICATION_CREDENTIALS`` is *removed* from ``.env`` so
-      the SDK falls through to ADC auto-discovery.
+    * **oauth** — points ``GOOGLE_APPLICATION_CREDENTIALS`` at the
+      Ostwin-managed browser OAuth ADC file when it exists.
 
-    In both modes ``GOOGLE_CLOUD_PROJECT`` and ``VERTEX_LOCATION`` are
-    always written.
+    In both modes the dashboard-compatible env names and OpenCode's native
+    Vertex aliases are always written.
 
-    When Google is switched away from vertex mode, all three env vars
+    When Google is switched away from vertex mode, all Vertex env vars
     are commented out and the on-disk service-account file is deleted.
     """
     try:
@@ -997,18 +998,25 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
             # skips empty values, which is fine as a guard).
             if project_id:
                 env_updates["GOOGLE_CLOUD_PROJECT"] = project_id
+                env_updates["GOOGLE_VERTEX_PROJECT"] = project_id
             if location:
                 env_updates["VERTEX_LOCATION"] = location
+                env_updates["GOOGLE_VERTEX_LOCATION"] = location
 
             if auth_mode == "oauth":
-                # OAuth / ADC mode — do NOT set GOOGLE_APPLICATION_CREDENTIALS.
-                # The Google SDK auto-discovers ADC from the well-known path.
-                _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
-                os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+                # OAuth / ADC mode — use the ADC file written by the
+                # dashboard browser OAuth flow. This does not depend on the
+                # Cloud SDK CLI being installed or authenticated.
+                adc_file = get_adc_path()
+                if adc_file.exists():
+                    env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_file)
+                else:
+                    _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
+                    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
                 # Clean up on-disk SA file if leftover from a previous mode
                 if _SA_FILE.exists():
                     _SA_FILE.unlink()
-                logger.info("[SETTINGS] Vertex auth_mode=oauth — using ADC auto-discovery")
+                logger.info("[SETTINGS] Vertex auth_mode=oauth — using Ostwin-managed ADC")
             else:
                 # service_account mode — write SA file + env var
                 wrote_service_account = False
@@ -1038,7 +1046,7 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
             _sync_shell_profile_env(
                 env_updates,
                 remove={"GOOGLE_APPLICATION_CREDENTIALS"}
-                if auth_mode == "oauth" or "GOOGLE_APPLICATION_CREDENTIALS" not in env_updates
+                if "GOOGLE_APPLICATION_CREDENTIALS" not in env_updates
                 else set(),
             )
 
@@ -1176,8 +1184,8 @@ def _sync_shell_profile_env(
     ``~/.ostwin/.env`` is loaded by dashboard and plan wrappers, but an
     ordinary terminal running ``opencode`` directly does not read it.  This
     marked zsh block exports only the non-secret Vertex selectors needed by
-    OpenCode's native google-vertex provider, plus the service-account path
-    when service-account auth is selected.
+    OpenCode's native google-vertex provider, plus the active credentials
+    file path.
     """
     remove = remove or set()
     managed_updates = {

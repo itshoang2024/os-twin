@@ -8,7 +8,8 @@ class AIError(Exception):
 class AIAuthError(AIError):
     """Authentication failed. Check API keys or ADC setup.
 
-    For Vertex AI: run ``gcloud auth application-default login``
+    For Vertex AI: use Settings to complete browser OAuth or upload a
+    service-account JSON file.
     For AI Studio: set ``GOOGLE_API_KEY``
     """
 

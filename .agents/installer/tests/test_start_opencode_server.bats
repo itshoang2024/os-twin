@@ -15,8 +15,9 @@ setup() {
   declare -f start_opencode_server > /dev/null
 }
 
-@test "start_opencode_server uses SOURCE_DIR before standalone fallback" {
-  grep -Fq 'SOURCE_DIR:-$server_dir' "$INSTALLER_DIR/start-opencode-server.sh"
+@test "start_opencode_server uses the managed opencode_server workdir" {
+  grep -Fq 'local project_dir="$server_dir"' "$INSTALLER_DIR/start-opencode-server.sh"
+  ! grep -Fq 'SOURCE_DIR:-$server_dir' "$INSTALLER_DIR/start-opencode-server.sh"
 }
 
 @test "_is_opencode_serve_process matches serve process even with truncated comm" {

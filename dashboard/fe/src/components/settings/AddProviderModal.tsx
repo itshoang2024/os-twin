@@ -18,6 +18,8 @@ interface AvailableProvider {
  * These are hidden entirely from the "Add Provider" browser to avoid duplicates.
  */
 const EXCLUDED_PROVIDER_IDS = new Set([
+  'google',
+  'openai',
   'anthropic',
   'byteplus',
 ]);

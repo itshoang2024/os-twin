@@ -242,6 +242,8 @@ class ProviderSettings(BaseModel):
 
 
 class ProvidersNamespace(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     openai: Optional[ProviderSettings] = None
     anthropic: Optional[ProviderSettings] = None
     google: Optional[ProviderSettings] = None

@@ -116,6 +116,27 @@ if _console_handler not in _root.handlers:
 logger = logging.getLogger(__name__)
 logger.info("Dashboard log file: %s", _log_file)
 
+
+def _valid_project_dir_arg(raw_project_dir: str | None) -> Path | None:
+    """Return a usable project dir, ignoring common documentation placeholders."""
+    if not raw_project_dir:
+        return None
+    project_dir = Path(raw_project_dir).expanduser()
+    normalized = str(project_dir)
+    placeholder_fragments = (
+        "/path/to/",
+        "\\path\\to\\",
+        "path/to/project",
+        "path\\to\\project",
+    )
+    if any(fragment in normalized for fragment in placeholder_fragments):
+        logger.warning(
+            "Ignoring placeholder --project-dir value %r; using default settings path",
+            raw_project_dir,
+        )
+        return None
+    return project_dir.resolve()
+
 # --- App + lifespan ----------------------------------------------------
 is_dev = (
     os.environ.get("NODE_ENV") == "development"
@@ -594,10 +615,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.project_dir:
-        os.environ["OSTWIN_PROJECT_DIR"] = os.path.abspath(args.project_dir)
+    project_dir = _valid_project_dir_arg(args.project_dir)
+    if project_dir:
+        os.environ["OSTWIN_PROJECT_DIR"] = str(project_dir)
         # We need to manually update these for the print statements since they were imported early
-        PROJECT_ROOT = Path(args.project_dir)
+        PROJECT_ROOT = project_dir
         WARROOMS_DIR = PROJECT_ROOT / ".war-rooms"
 
     if args.reindex:
@@ -606,7 +628,7 @@ if __name__ == "__main__":
     os.environ.setdefault("DASHBOARD_PORT", str(args.port))
 
     print("⬡ OS Twin Command Center (Modular)")
-    print(f"  Project:   {args.project_dir or PROJECT_ROOT}")
+    print(f"  Project:   {project_dir or PROJECT_ROOT}")
     print(f"  War-rooms: {WARROOMS_DIR}")
     print(f"  Workers:   {args.workers}")
     print(f"  Heavy pool: {_HEAVY_POOL_SIZE} threads")

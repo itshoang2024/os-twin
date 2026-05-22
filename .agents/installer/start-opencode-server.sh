@@ -3,13 +3,13 @@
 # start-opencode-server.sh — Launch the OpenCode HTTP server
 #
 # The dashboard master agent (dashboard/master_agent.py) routes all LLM calls
-# through this server via the opencode-ai Python SDK.  We start it from
-# OSTWIN_PROJECT_DIR when one is configured, otherwise from the managed
-# ~/.ostwin/opencode_server fallback.
+# through this server via the opencode-ai Python SDK. We start it from the
+# managed ~/.ostwin/opencode_server directory so the HTTP server's tools and
+# state do not depend on whichever source checkout launched the installer.
 #
 # Provides: start_opencode_server
 #
-# Requires: lib.sh, globals: INSTALL_DIR, optional SOURCE_DIR / PROJECT_ROOT
+# Requires: lib.sh, globals: INSTALL_DIR
 # Env:      Loads ~/.ostwin/.env, ~/.ostwin/.env.sh, and project .env files
 #           before spawning opencode serve. OPENCODE_BASE_URL defaults to
 #           http://127.0.0.1:4096. OPENCODE_SERVER_PASSWORD is honored if set.
@@ -71,6 +71,22 @@ _load_opencode_service_env() {
   local project_dir="$1"
   _load_opencode_global_env
   _load_opencode_project_env "$project_dir"
+  _normalize_vertex_env_aliases
+}
+
+_normalize_vertex_env_aliases() {
+  if [[ -n "${GOOGLE_CLOUD_PROJECT:-}" && -z "${GOOGLE_VERTEX_PROJECT:-}" ]]; then
+    export GOOGLE_VERTEX_PROJECT="$GOOGLE_CLOUD_PROJECT"
+  fi
+  if [[ -n "${GOOGLE_VERTEX_PROJECT:-}" && -z "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
+    export GOOGLE_CLOUD_PROJECT="$GOOGLE_VERTEX_PROJECT"
+  fi
+  if [[ -n "${VERTEX_LOCATION:-}" && -z "${GOOGLE_VERTEX_LOCATION:-}" ]]; then
+    export GOOGLE_VERTEX_LOCATION="$VERTEX_LOCATION"
+  fi
+  if [[ -n "${GOOGLE_VERTEX_LOCATION:-}" && -z "${VERTEX_LOCATION:-}" ]]; then
+    export VERTEX_LOCATION="$GOOGLE_VERTEX_LOCATION"
+  fi
 }
 
 start_opencode_server() {
@@ -84,10 +100,10 @@ start_opencode_server() {
   mkdir -p "$server_dir"
 
   _load_opencode_global_env
-  local project_dir="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-${SOURCE_DIR:-$server_dir}}}"
+  local project_dir="$server_dir"
   _load_opencode_project_env "$project_dir"
+  _normalize_vertex_env_aliases
 
-  project_dir="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$project_dir}}"
   export OSTWIN_PROJECT_DIR="$project_dir"
   mkdir -p "$project_dir"
 
@@ -130,8 +146,13 @@ start_opencode_server() {
   step "Starting opencode server (workdir: $project_dir, listen: $host:$port)..."
   (
     cd "$project_dir"
-    nohup opencode serve --hostname "$host" --port "$port" \
-      > "$INSTALL_DIR/logs/opencode-server.log" 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+      setsid opencode serve --hostname "$host" --port "$port" \
+        </dev/null > "$INSTALL_DIR/logs/opencode-server.log" 2>&1 &
+    else
+      nohup opencode serve --hostname "$host" --port "$port" \
+        </dev/null > "$INSTALL_DIR/logs/opencode-server.log" 2>&1 &
+    fi
     echo $! > "$INSTALL_DIR/opencode.pid"
   )
   local pid

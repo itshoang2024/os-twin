@@ -84,6 +84,10 @@ start_dashboard() {
 
   # Read OSTWIN_API_KEY for auth headers
   OSTWIN_API_KEY="${OSTWIN_API_KEY:-}"
+  local curl_log="$INSTALL_DIR/logs/dashboard-health-curl.log"
+  if ! : > "$curl_log" 2>/dev/null; then
+    curl_log=$(mktemp "${TMPDIR:-/tmp}/ostwin-curl-${UID:-$(id -u)}.XXXXXX")
+  fi
 
   # Health-check: poll /api/status up to 60s
   step "Waiting for dashboard to be healthy (up to 60s)..."
@@ -92,12 +96,12 @@ start_dashboard() {
   DASH_OK=false
   for _i in $(seq 1 60); do
     if [[ -n "$OSTWIN_API_KEY" ]]; then
-      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >/tmp/ostwin_curl.log 2>&1 && DASH_OK=true
+      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >"$curl_log" 2>&1 && DASH_OK=true
     else
-      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >/tmp/ostwin_curl.log 2>&1 && DASH_OK=true
+      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >"$curl_log" 2>&1 && DASH_OK=true
     fi
     if $DASH_OK; then break; fi
-    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 /tmp/ostwin_curl.log)"
+    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 "$curl_log")"
     sleep 1
   done
 

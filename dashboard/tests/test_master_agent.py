@@ -6,6 +6,8 @@ _OpenCodeLLMClient, and master_complete. All tests are mock-based —
 no real OpenCode server calls.
 """
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -84,16 +86,27 @@ class TestResolveModelProvider:
         assert model == ma.DEFAULT_MODEL
         assert provider == "google"
 
-    def test_legacy_google_vertex_is_re_inferred(self):
-        """A stale ``google-vertex`` persisted from the old direct-LLM path
-        must be re-inferred to the OpenCode-style ``google`` rather than
-        forwarded verbatim into the OpenCode chat body."""
+    def test_google_vertex_is_preserved(self):
+        """``google-vertex`` is a real OpenCode provider for Vertex AI."""
         from dashboard import master_agent as ma
 
         ma._master_config.model = "gemini-3.1-pro-preview"
         ma._master_config.provider = "google-vertex"
 
         _, provider = ma.get_model_and_provider()
+        assert provider == "google-vertex"
+
+    def test_google_customtools_suffix_is_not_sent_to_opencode(self):
+        """models.dev can expose Gemini ``-customtools`` ids that OpenCode 1.15
+        does not accept via /session/{id}/message."""
+        from dashboard import master_agent as ma
+
+        model, provider = ma._resolve_model_provider(
+            model="gemini-3.1-pro-preview-customtools",
+            provider="google",
+        )
+
+        assert model == "gemini-3.1-pro-preview"
         assert provider == "google"
 
     def test_legacy_google_genai_is_re_inferred(self):
@@ -389,6 +402,62 @@ class TestDeltaMessaging:
 
             assert _session_registry._sessions["conv-A"] == "sess-A"
             assert _session_registry._sessions["conv-B"] == "sess-B"
+
+    @pytest.mark.asyncio
+    async def test_stream_deltas_ignore_user_text_parts(self):
+        """OpenCode emits text updates for submitted user parts too; only
+        assistant text should be forwarded to the dashboard transcript."""
+        from dashboard.master_agent import _stream_session_deltas
+
+        class FakeStream:
+            def __init__(self, events):
+                self._events = iter(events)
+                self.closed = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._events)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+            async def close(self):
+                self.closed = True
+
+        def event(event_type, payload):
+            return SimpleNamespace(type=event_type, properties=payload)
+
+        def part(message_id, part_id, text):
+            return SimpleNamespace(
+                sessionID="sess-stream",
+                messageID=message_id,
+                id=part_id,
+                type="text",
+                text=text,
+            )
+
+        events = [
+            event("message.part.updated", SimpleNamespace(part=part("msg-user", "part-user", "hello"))),
+            event("message.part.updated", SimpleNamespace(part=part("msg-assistant", "part-assistant", "reply"))),
+            event("message.part.updated", SimpleNamespace(part=part("msg-assistant", "part-assistant", "reply more"))),
+            event("session.idle", SimpleNamespace(sessionID="sess-stream")),
+        ]
+
+        user_message = SimpleNamespace(info=SimpleNamespace(id="msg-user", role="user"))
+        assistant_message = SimpleNamespace(info=SimpleNamespace(id="msg-assistant", role="assistant"))
+        mock_client = MagicMock()
+        mock_client.event.list = AsyncMock(return_value=FakeStream(events))
+        mock_client.session.messages = AsyncMock(return_value=[user_message, assistant_message])
+
+        async def chat():
+            await asyncio.sleep(0)
+
+        with patch("dashboard.master_agent.get_opencode_client", return_value=mock_client):
+            deltas = [delta async for delta in _stream_session_deltas("sess-stream", chat())]
+
+        assert deltas == ["reply", " more"]
 
 
 class TestEndConversation:

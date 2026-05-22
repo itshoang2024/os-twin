@@ -829,7 +829,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             }
         if any(k in combined for k in ("unauthenticated", "api key", "api_key", "401", "403", "invalid credentials")):
             provider = resolved_version.split("/")[0] if "/" in resolved_version else "unknown"
-            fix = "Run: gcloud auth application-default login\nVerify GOOGLE_CLOUD_PROJECT is set." if "vertex" in resolved_version.lower() or "google" in resolved_version.lower() \
+            fix = "Use Settings -> Provider Config to sign in with Google or upload a service-account JSON file, then verify GOOGLE_CLOUD_PROJECT is set." if "vertex" in resolved_version.lower() or "google" in resolved_version.lower() \
                 else f"Check Settings → Providers → {provider}: ensure your API key is saved and valid."
             return {"category": "auth", "error": "Authentication failed", "fix": fix, "raw_output": raw_snippet}
         if "not found" in combined and ("model" in combined or "404" in combined):
@@ -877,4 +877,3 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
         latency = int((time.time() - start) * 1000)
         logger.warning("test_model_connection error: version=%r resolved=%r error=%r", version, resolved_version, str(exc))
         return {"status": "fail", "latency_ms": latency, "category": "unknown", "error": str(exc), "fix": "Check the dashboard server logs for the full stack trace."}
-
