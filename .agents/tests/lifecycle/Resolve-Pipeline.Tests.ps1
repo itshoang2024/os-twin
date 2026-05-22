@@ -151,4 +151,21 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Evaluator error signal (review, position-based naming)
         $lc.states.'review'.signals.error.target | Should -Be 'failed'
     }
+
+    It "Routes security capability review to security-specialist while keeping assigned role as worker" {
+        $lifecycleFile = Join-Path $TestDrive "security-lifecycle.json"
+
+        & $script:ResolvePipeline `
+            -RequiredCapabilities @("security") `
+            -AssignedRole "security-engineer" `
+            -OutputPath $lifecycleFile `
+            -AgentsDir $script:agentsDir
+
+        $lc = Get-Content $lifecycleFile -Raw | ConvertFrom-Json
+
+        $lc.states.developing.role | Should -Be "security-engineer"
+        $lc.states.developing.type | Should -Be "work"
+        $lc.states.review.role | Should -Be "security-specialist"
+        $lc.states.review.type | Should -Be "review"
+    }
 }

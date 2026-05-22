@@ -113,6 +113,14 @@ $roleMapping = @{
     'testing'        = 'test-engineer'
 }
 
+$reviewRoleMapping = @{
+    'security'       = 'security-specialist'
+    'database'       = 'database-architect'
+    'infrastructure' = 'devops-engineer'
+    'architecture'   = 'architect'
+    'accessibility'  = 'accessibility-specialist'
+}
+
 if ($detectedCapabilities.Count -gt 0) {
     # Pick the role for the most-matched capability
     $primaryCap = $detectedCapabilities | Sort-Object { $capHits[$_] } -Descending | Select-Object -First 1
@@ -124,8 +132,8 @@ if ($detectedCapabilities.Count -gt 0) {
 # --- Suggest pipeline ---
 $pipelineStages = @($result.SuggestedRole)
 foreach ($cap in $detectedCapabilities) {
-    if ($cap -in @('security', 'database', 'architecture', 'infrastructure', 'accessibility')) {
-        $reviewRole = $roleMapping[$cap]
+    if ($reviewRoleMapping.ContainsKey($cap)) {
+        $reviewRole = $reviewRoleMapping[$cap]
         if ($reviewRole -ne $result.SuggestedRole) {
             $pipelineStages += $reviewRole
         }
