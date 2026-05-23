@@ -12,17 +12,95 @@
 [[ -n "${_START_DASHBOARD_SH_LOADED:-}" ]] && return 0
 _START_DASHBOARD_SH_LOADED=1
 
-_is_dashboard_process_for_port() {
-  local pid="$1"
-  local port="$2"
-  local comm
-  comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
-  local args
-  args=$(ps -p "$pid" -o args= 2>/dev/null || true)
-  case "$comm $args" in
-    *uvicorn*|*api.py*"--port $port"*) return 0 ;;
-    *) return 1 ;;
+_dashboard_port_listeners() {
+  local port="$1"
+  lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+}
+
+# Detect an OS-level supervisor (LaunchAgent / systemd user unit) that
+# would auto-respawn the dashboard. When one is active, we MUST restart via
+# the supervisor — otherwise launchd/systemd races our manual start, both
+# fight for the port, and the loser's exit leaves a stale PID file.
+_dashboard_supervisor() {
+  case "${OS:-}" in
+    macos)
+      if launchctl list 2>/dev/null | awk '{print $3}' | grep -qx "com.ostwin.dashboard"; then
+        echo "launchd"
+        return 0
+      fi
+      ;;
+    linux)
+      if command -v systemctl >/dev/null 2>&1 \
+         && systemctl --user is-enabled ostwin-dashboard.service >/dev/null 2>&1; then
+        echo "systemd"
+        return 0
+      fi
+      ;;
   esac
+  echo ""
+  return 1
+}
+
+_restart_dashboard_via_supervisor() {
+  local supervisor="$1"
+  local port="$2"
+  case "$supervisor" in
+    launchd)
+      local uid
+      uid="$(id -u)"
+      step "Restarting dashboard via launchctl (com.ostwin.dashboard)..."
+      # kickstart -k stops and restarts the job atomically; launchd remains
+      # the sole owner of the process, so there is no race for the port.
+      if launchctl kickstart -k "gui/${uid}/com.ostwin.dashboard" 2>/dev/null; then
+        return 0
+      fi
+      # Older launchctl (pre-10.10) doesn't know kickstart. Fall back to
+      # unload + load using the installed plist.
+      local plist="$HOME/Library/LaunchAgents/com.ostwin.dashboard.plist"
+      if [[ -f "$plist" ]]; then
+        launchctl unload "$plist" 2>/dev/null || true
+        launchctl load -w "$plist" 2>/dev/null && return 0
+      fi
+      return 1
+      ;;
+    systemd)
+      step "Restarting dashboard via systemctl (ostwin-dashboard)..."
+      systemctl --user restart ostwin-dashboard.service && return 0
+      return 1
+      ;;
+  esac
+  return 1
+}
+
+# Kill every local process listening on $port so a fresh install can replace
+# the dashboard cleanly. Restrict to LISTEN sockets to avoid touching clients.
+_kill_dashboard_port_listeners() {
+  local port="$1"
+  local listener_pids
+  listener_pids="$(_dashboard_port_listeners "$port")"
+  [[ -n "$listener_pids" ]] || return 0
+
+  step "Stopping processes listening on :$port..."
+  echo "$listener_pids" | xargs kill 2>/dev/null || true
+  # Wait up to 10s for graceful shutdown before SIGKILL.
+  for _i in $(seq 1 10); do
+    local still_alive=""
+    for p in $listener_pids; do
+      kill -0 "$p" 2>/dev/null && still_alive="$still_alive $p"
+    done
+    [[ -z "$still_alive" ]] && break
+    sleep 1
+  done
+  for p in $listener_pids; do
+    kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
+  done
+  # Confirm the port is actually free before returning.
+  for _i in $(seq 1 5); do
+    [[ -z "$(_dashboard_port_listeners "$port")" ]] && return 0
+    sleep 1
+  done
+  warn "Port :$port is still occupied after stop attempts"
+  return 1
 }
 
 start_dashboard() {
@@ -31,33 +109,6 @@ start_dashboard() {
     warn "Dashboard not found — skipping auto-start"
     info "Re-run: ./install.sh --source-dir /path/to/agent-os"
     return
-  fi
-
-  # ╔══════════════════════════════════════════════════════════════════╗
-  # ║  DO NOT simplify this to "lsof | xargs kill" !                 ║
-  # ║                                                                ║
-  # ║  lsof returns ALL processes on the port — including SSH        ║
-  # ║  tunnels and VS Code port forwards (ESTABLISHED connections).  ║
-  # ║  Killing those drops the developer's SSH session.              ║
-  # ║                                                                ║
-  # ║  We MUST filter by process name (python/uvicorn) to only       ║
-  # ║  kill the old dashboard, not the developer's IDE connection.   ║
-  # ╚══════════════════════════════════════════════════════════════════╝
-  local local_pids
-  local_pids=$(lsof -ti:"$DASHBOARD_PORT" 2>/dev/null || true)
-  if [[ -n "$local_pids" ]]; then
-    local py_pids=""
-    for p in $local_pids; do
-      _is_dashboard_process_for_port "$p" "$DASHBOARD_PORT" && py_pids="$py_pids $p"
-    done
-    if [[ -n "$py_pids" ]]; then
-      step "Stopping existing dashboard on :$DASHBOARD_PORT..."
-      echo "$py_pids" | xargs kill 2>/dev/null || true
-      sleep 2
-      for p in $py_pids; do
-        kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
-      done
-    fi
   fi
 
   # Source .env so the dashboard process inherits API keys
@@ -70,38 +121,68 @@ start_dashboard() {
   fi
 
   mkdir -p "$INSTALL_DIR/logs"
-  step "Starting dashboard on http://localhost:${DASHBOARD_PORT}..."
-  echo "[$(date +%H:%M:%S)] VERBAL: Launching dashboard.sh with --skip-build..."
-  # Pin --project-dir to $INSTALL_DIR
-  nohup bash "$dashboard_script" \
-    --background --port "$DASHBOARD_PORT" \
-    --project-dir "$INSTALL_DIR" \
-    --skip-build \
-    > "$INSTALL_DIR/logs/dashboard.log" 2>&1 &
-  DASHBOARD_PID=$!
-  echo "[$(date +%H:%M:%S)] VERBAL: dashboard.sh launched (PID: $DASHBOARD_PID)"
-  echo "$DASHBOARD_PID" > "$INSTALL_DIR/dashboard.pid"
+  local runtime_pid_file="$INSTALL_DIR/.agents/dashboard.pid"
 
-  # Read OSTWIN_API_KEY for auth headers
+  local supervisor
+  supervisor="$(_dashboard_supervisor || true)"
+
+  if [[ -n "$supervisor" ]]; then
+    # Supervisor is responsible for the process lifecycle — let it handle
+    # the restart so launchd/systemd does not race a manual kill/start.
+    _restart_dashboard_via_supervisor "$supervisor" "$DASHBOARD_PORT" \
+      || {
+        warn "Supervisor restart failed; new dashboard may not load"
+        return 1
+      }
+  else
+    if ! _kill_dashboard_port_listeners "$DASHBOARD_PORT"; then
+      warn "Dashboard port :$DASHBOARD_PORT is still occupied; refusing to start over an unknown listener"
+      return 1
+    fi
+
+    rm -f "$runtime_pid_file"
+    step "Starting dashboard on http://localhost:${DASHBOARD_PORT}..."
+    echo "[$(date +%H:%M:%S)] VERBAL: Launching dashboard.sh with --skip-build..."
+    nohup bash "$dashboard_script" \
+      --background --port "$DASHBOARD_PORT" \
+      --project-dir "$INSTALL_DIR" \
+      --skip-build \
+      > "$INSTALL_DIR/logs/dashboard.log" 2>&1 &
+    DASHBOARD_WRAPPER_PID=$!
+    echo "[$(date +%H:%M:%S)] VERBAL: dashboard.sh launched (PID: $DASHBOARD_WRAPPER_PID)"
+    echo "$DASHBOARD_WRAPPER_PID" > "$INSTALL_DIR/dashboard.pid"
+  fi
+
   OSTWIN_API_KEY="${OSTWIN_API_KEY:-}"
   local curl_log="$INSTALL_DIR/logs/dashboard-health-curl.log"
   if ! : > "$curl_log" 2>/dev/null; then
     curl_log=$(mktemp "${TMPDIR:-/tmp}/ostwin-curl-${UID:-$(id -u)}.XXXXXX")
   fi
 
-  # Health-check: poll /api/status up to 60s
+  # Health check: the only reliable signal is "something is listening on the
+  # port AND /api/status responds". Under a supervisor we don't own the PID
+  # file, so checking it is unsafe — go straight to the socket.
   step "Waiting for dashboard to be healthy (up to 60s)..."
   local start_time
   start_time=$(get_now)
   DASH_OK=false
+  DASHBOARD_PID=""
   for _i in $(seq 1 60); do
-    if [[ -n "$OSTWIN_API_KEY" ]]; then
-      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >"$curl_log" 2>&1 && DASH_OK=true
-    else
-      curl -v -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >"$curl_log" 2>&1 && DASH_OK=true
+    if [[ -f "$runtime_pid_file" ]]; then
+      DASHBOARD_PID="$(cat "$runtime_pid_file" 2>/dev/null || true)"
     fi
-    if $DASH_OK; then break; fi
-    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 "$curl_log")"
+    local listener
+    listener="$(_dashboard_port_listeners "$DASHBOARD_PORT" | head -n1 || true)"
+    if [[ -n "$listener" ]]; then
+      if curl -sf "http://127.0.0.1:${DASHBOARD_PORT}/api/status" >"$curl_log" 2>&1; then
+        DASH_OK=true
+        [[ -z "$DASHBOARD_PID" ]] && DASHBOARD_PID="$listener"
+        break
+      fi
+    else
+      printf 'Nothing listening on port %s yet\n' "$DASHBOARD_PORT" > "$curl_log"
+    fi
+    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 "$curl_log" 2>/dev/null || true)"
     sleep 1
   done
 

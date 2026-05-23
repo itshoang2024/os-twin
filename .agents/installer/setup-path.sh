@@ -113,8 +113,10 @@ setup_path() {
 
   # Source .env for current session (immediate availability without restart)
   if [[ -f "$INSTALL_DIR/.env" ]]; then
+    local path_before_env="$PATH"
     # shellcheck disable=SC1090
     source "$INSTALL_DIR/.env"
+    export PATH="$path_before_env"
     ok "Sourced .env for current session"
   fi
 

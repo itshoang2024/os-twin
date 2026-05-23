@@ -506,6 +506,54 @@ class TestPlanResolution:
         resp = client.get("/api/amem/this-plan-does-not-exist/graph")
         assert resp.status_code == 404
 
+    def test_resolve_memory_dir_accepts_memory_prefixed_plan_id(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        current = memory_base / "memory-4ae61a301661"
+        current.mkdir(parents=True)
+
+        assert amem._resolve_memory_dir("memory-4ae61a301661") == current
+
+    def test_resolve_memory_dir_prefers_current_over_legacy(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        legacy = memory_base / "4ae61a301661"
+        current = memory_base / "memory-4ae61a301661"
+        legacy.mkdir(parents=True)
+        current.mkdir(parents=True)
+
+        assert amem._resolve_memory_dir("4ae61a301661") == current
+
+    def test_resolve_memory_dir_falls_back_to_working_dir_memory(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        plans_dir = tmp_path / "plans"
+        working_dir = tmp_path / "project"
+        project_memory = working_dir / ".memory"
+        memory_base.mkdir()
+        plans_dir.mkdir()
+        project_memory.mkdir(parents=True)
+        plan_id = "4ae61a301661"
+        (plans_dir / f"{plan_id}.meta.json").write_text(
+            json.dumps({"working_dir": str(working_dir)}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        monkeypatch.setattr(amem, "PLANS_DIR", plans_dir)
+
+        assert amem._resolve_memory_dir(plan_id) == project_memory.resolve()
+
 
 # ── Note parsing edge cases ──────────────────────────────────────────
 

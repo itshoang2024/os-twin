@@ -130,10 +130,6 @@ function Create-EnvPs1Hook {
 # Use this for env vars that require shell logic (subshells, conditionals,
 # token refresh, etc.). Static KEY=VALUE pairs belong in ~/.ostwin/.env.
 
-# Vertex AI authentication is configured from Settings using browser OAuth
-# or a service-account JSON file. This hook intentionally never shells out
-# to the Cloud SDK CLI.
-
 # Auto-promote memory backend to Gemini when a Google API key is available
 # and the user hasn't explicitly overridden the LLM backend.
 if ($env:GOOGLE_API_KEY -and ($env:MEMORY_LLM_BACKEND -eq 'huggingface' -or -not $env:MEMORY_LLM_BACKEND)) {
@@ -147,19 +143,19 @@ if ($env:GOOGLE_API_KEY -and ($env:MEMORY_LLM_BACKEND -eq 'huggingface' -or -not
         Write-Ok ".env.ps1 created — add dynamic env hooks here"
     }
     else {
-        Remove-LegacyCloudSdkEnvHook -HookPath $envPs1
-        Write-Ok ".env.ps1 verified — no Cloud SDK CLI auth hook"
+        Remove-LegacyVertexCliHook -HookPath $envPs1
+        Write-Ok ".env.ps1 verified at $envPs1"
     }
 }
 
-function Remove-LegacyCloudSdkEnvHook {
+function Remove-LegacyVertexCliHook {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$HookPath)
 
     if (-not (Test-Path $HookPath)) { return }
 
     $content = Get-Content $HookPath -Raw
-    if ($content -notmatch 'g[c]loud auth print-access-token|active g[c]loud account') {
+    if ($content -notmatch 'Refresh a Vertex AI access token|VERTEX_API_KEY|print-access-token') {
         return
     }
 
@@ -167,7 +163,7 @@ function Remove-LegacyCloudSdkEnvHook {
     $kept = New-Object System.Collections.Generic.List[string]
     $skip = $false
     foreach ($line in $lines) {
-        if ($line -match 'Refresh a Vertex AI access token from the active g[c]loud account\.') {
+        if ($line -match 'Refresh a Vertex AI access token') {
             $skip = $true
             continue
         }

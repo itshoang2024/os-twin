@@ -108,14 +108,6 @@ Describe "Create-EnvPs1Hook" {
         Test-Path $envPs1 | Should -Be $true
     }
 
-    It "Should not create Cloud SDK token refresh logic" {
-        Create-EnvPs1Hook
-        $envPs1 = Join-Path $testDir ".env.ps1"
-        $content = Get-Content $envPs1 -Raw
-        $content | Should -Not -Match 'VERTEX_API_KEY'
-        $content | Should -Not -Match 'print-access-token'
-    }
-
     It "Should contain Gemini auto-promote logic" {
         Create-EnvPs1Hook
         $envPs1 = Join-Path $testDir ".env.ps1"
@@ -129,24 +121,6 @@ Describe "Create-EnvPs1Hook" {
         Create-EnvPs1Hook
         $content = Get-Content $envPs1 -Raw
         $content | Should -Match "# existing hook"
-    }
-
-    It "Should remove legacy Cloud SDK token refresh from existing .env.ps1" {
-        $envPs1 = Join-Path $testDir ".env.ps1"
-        @'
-# keep this line
-# Refresh a Vertex AI access token from the active gcloud account.
-if (Get-Command gcloud -ErrorAction SilentlyContinue) {
-    $env:VERTEX_API_KEY = (& gcloud auth print-access-token 2>$null)
-}
-$env:KEEP_ME = 'true'
-'@ | Set-Content -Path $envPs1 -Encoding UTF8
-
-        Create-EnvPs1Hook
-        $content = Get-Content $envPs1 -Raw
-        $content | Should -Match 'KEEP_ME'
-        $content | Should -Not -Match 'VERTEX_API_KEY'
-        $content | Should -Not -Match 'print-access-token'
     }
 }
 

@@ -30,6 +30,21 @@ _is_opencode_serve_process() {
   esac
 }
 
+_opencode_listen_pids() {
+  local port="$1"
+  lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+}
+
+_opencode_has_live_listener() {
+  local port="$1"
+  local listeners
+  listeners=$(_opencode_listen_pids "$port")
+  for p in $listeners; do
+    _is_opencode_serve_process "$p" && return 0
+  done
+  return 1
+}
+
 # Parse host:port out of OPENCODE_BASE_URL; default 127.0.0.1:4096
 _opencode_host_port() {
   local url="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
@@ -72,6 +87,7 @@ _load_opencode_service_env() {
   _load_opencode_global_env
   _load_opencode_project_env "$project_dir"
   _normalize_vertex_env_aliases
+  _isolate_external_google_adc_fallback
 }
 
 _normalize_vertex_env_aliases() {
@@ -89,6 +105,12 @@ _normalize_vertex_env_aliases() {
   fi
 }
 
+_isolate_external_google_adc_fallback() {
+  local isolated_config="$INSTALL_DIR/google/empty-sdk-config"
+  mkdir -p "$isolated_config"
+  export CLOUDSDK_CONFIG="$isolated_config"
+}
+
 start_opencode_server() {
   if ! command -v opencode &>/dev/null; then
     warn "opencode CLI not on PATH — skipping server start"
@@ -99,10 +121,8 @@ start_opencode_server() {
   local server_dir="$INSTALL_DIR/opencode_server"
   mkdir -p "$server_dir"
 
-  _load_opencode_global_env
   local project_dir="$server_dir"
-  _load_opencode_project_env "$project_dir"
-  _normalize_vertex_env_aliases
+  _load_opencode_service_env "$project_dir"
 
   export OSTWIN_PROJECT_DIR="$project_dir"
   mkdir -p "$project_dir"
@@ -115,7 +135,7 @@ start_opencode_server() {
   # Stop any existing opencode serve on the port.  Only kill opencode
   # processes — don't touch other listeners (SSH tunnels, etc.).
   local existing
-  existing=$(lsof -ti:"$port" 2>/dev/null || true)
+  existing=$(_opencode_listen_pids "$port")
   if [[ -n "$existing" ]]; then
     local oc_pids=""
     for p in $existing; do
@@ -127,6 +147,10 @@ start_opencode_server() {
       sleep 1
       for p in $oc_pids; do
         kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
+      done
+      for _i in $(seq 1 5); do
+        _opencode_has_live_listener "$port" || break
+        sleep 1
       done
     fi
   fi
@@ -168,7 +192,11 @@ start_opencode_server() {
   fi
   local ok=false
   for _i in $(seq 1 30); do
-    if curl -sf ${auth_args[@]+"${auth_args[@]}"} "http://${host}:${port}/global/health" >/dev/null 2>&1; then
+    if ! kill -0 "$pid" 2>/dev/null && ! _opencode_has_live_listener "$port"; then
+      break
+    fi
+    if curl -sf ${auth_args[@]+"${auth_args[@]}"} "http://${host}:${port}/global/health" >/dev/null 2>&1 \
+      && _opencode_has_live_listener "$port"; then
       ok=true; break
     fi
     sleep 1

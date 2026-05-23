@@ -68,13 +68,16 @@ ENVEOF
   chmod 600 "$env_file"   # Protect API keys
   ok ".env created — edit $env_file to add your API keys"
 
-  # Create a companion .env.sh hook for dynamic env logic (subshells,
-  # token refresh, etc.) that .env can't express. Sourced by every
+  # Create a companion .env.sh hook for dynamic env logic that .env can't
+  # express. Sourced by every
   # generated run-agent.sh wrapper before the agent execs.
   _create_env_sh_hook
 
   # Migrate any existing exported key from the current shell environment
   _migrate_env_keys "$env_file"
+
+  # Detect available AI auth and configure memory provider
+  _configure_memory_provider
 
   # Prompt for ngrok tunnel token (optional)
   if ! ${AUTO_YES:-false} && [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
@@ -111,11 +114,63 @@ _ensure_vault_key() {
   ok "Added OSTWIN_VAULT_KEY to $env_file"
 }
 
+_configure_memory_provider() {
+  local config_file="$INSTALL_DIR/.agents/config.json"
+  local env_file="$INSTALL_DIR/.env"
+
+  local provider="none"
+  local llm_model=""
+  local embed_model=""
+  local embed_backend=""
+
+  # Priority 1: Gemini API key
+  if [[ "$provider" == "none" ]]; then
+    local api_key=""
+    api_key=$(grep -E "^GOOGLE_API_KEY=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    if [[ -n "$api_key" ]]; then
+      provider="google"
+      llm_model="google/gemini-3-flash-preview"
+      embed_model="google/gemini-embedding-001"
+      embed_backend="gemini"
+      info "Detected Gemini API key — using google/ provider"
+    fi
+  fi
+
+  # Priority 2: Nothing
+  if [[ "$provider" == "none" ]]; then
+    warn "No Google AI credentials detected — memory analysis will be limited"
+    info "Set GOOGLE_API_KEY in ~/.ostwin/.env, or configure Vertex in Settings with browser OAuth or a service-account JSON file."
+    return
+  fi
+
+  # Write memory config to config.json
+  "$VENV_DIR/bin/python" -c "
+import json, os
+
+config_path = '$config_file'
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        config = json.load(f)
+else:
+    config = {}
+
+config.setdefault('memory', {})
+config['memory']['llm_model'] = '$llm_model'
+config['memory']['embedding_model'] = '$embed_model'
+config['memory']['embedding_backend'] = '$embed_backend'
+
+with open(config_path, 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null || warn "Failed to write memory provider config"
+
+  ok "Memory provider: $provider (model: $llm_model)"
+}
+
 _create_env_sh_hook() {
   local env_sh="$INSTALL_DIR/.env.sh"
   if [[ -f "$env_sh" ]]; then
-    _remove_legacy_cloudsdk_env_hook "$env_sh"
-    ok ".env.sh verified — no Cloud SDK CLI auth hook"
+    _remove_legacy_vertex_cli_hook "$env_sh"
+    ok ".env.sh verified at $env_sh"
     return
   fi
 
@@ -124,10 +179,6 @@ _create_env_sh_hook() {
 # Sourced by every generated run-agent.sh wrapper before the agent execs.
 # Use this for env vars that require shell logic (subshells, conditionals,
 # token refresh, etc.). Static KEY=VALUE pairs belong in ~/.ostwin/.env.
-
-# Vertex AI authentication is configured from Settings using browser OAuth
-# or a service-account JSON file. This hook intentionally never shells out
-# to the Cloud SDK CLI.
 
 # Auto-promote memory backend to Gemini when a Google API key is available
 # and the user hasn't explicitly overridden the LLM backend.
@@ -144,17 +195,17 @@ ENVSHEOF
   ok ".env.sh created — add dynamic env hooks here"
 }
 
-_remove_legacy_cloudsdk_env_hook() {
+_remove_legacy_vertex_cli_hook() {
   local env_sh="$1"
   [[ -f "$env_sh" ]] || return 0
-  if ! grep -qE 'g[c]loud auth print-access-token|active g[c]loud account' "$env_sh" 2>/dev/null; then
+  if ! grep -qE 'Refresh a Vertex AI access token|VERTEX_API_KEY|print-access-token' "$env_sh" 2>/dev/null; then
     return 0
   fi
 
   local tmp
   tmp="${env_sh}.tmp.$$"
   awk '
-    /Refresh a Vertex AI access token from the active g[c]loud account\./ { skip = 1; next }
+    /Refresh a Vertex AI access token/ { skip = 1; next }
     skip && /^fi[[:space:]]*$/ { skip = 0; next }
     !skip { print }
   ' "$env_sh" > "$tmp"

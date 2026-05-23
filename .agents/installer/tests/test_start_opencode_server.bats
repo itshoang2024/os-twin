@@ -72,3 +72,23 @@ EOF
   [[ "$AGENTS_ONLY" == "agents" ]]
   [[ "$SHARED_VALUE" == "project" ]]
 }
+
+@test "_load_opencode_service_env isolates external Google ADC fallback" {
+  INSTALL_DIR="$BATS_TEST_TMPDIR/install"
+  local project_dir="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$INSTALL_DIR" "$project_dir"
+
+  _load_opencode_service_env "$project_dir"
+
+  [[ "$CLOUDSDK_CONFIG" == "$INSTALL_DIR/google/empty-sdk-config" ]]
+  [[ -d "$CLOUDSDK_CONFIG" ]]
+}
+
+@test "start_opencode_server uses the isolated service env loader" {
+  local body
+  body="$(sed -n '/^start_opencode_server()/,/^}/p' "$INSTALLER_DIR/start-opencode-server.sh")"
+
+  [[ "$body" == *'_load_opencode_service_env "$project_dir"'* ]]
+  [[ "$body" != *'_load_opencode_global_env'* ]]
+  [[ "$body" != *'_load_opencode_project_env "$project_dir"'* ]]
+}

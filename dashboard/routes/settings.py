@@ -1005,8 +1005,7 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
 
             if auth_mode == "oauth":
                 # OAuth / ADC mode — use the ADC file written by the
-                # dashboard browser OAuth flow. This does not depend on the
-                # Cloud SDK CLI being installed or authenticated.
+                # dashboard browser OAuth flow.
                 adc_file = get_adc_path()
                 if adc_file.exists():
                     env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_file)

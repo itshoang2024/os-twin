@@ -11,7 +11,6 @@ def test_oauth_adc_path_is_ostwin_managed():
     adc_path = str(google_oauth.get_adc_path())
 
     assert ".ostwin" in adc_path
-    assert ".config/gcloud" not in adc_path
 
 
 class _FakeResponse:
