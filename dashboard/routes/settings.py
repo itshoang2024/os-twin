@@ -731,6 +731,44 @@ async def sync_opencode(
     )
 
 
+class OpenCodeRestartResponse(BaseModel):
+    """Result of bouncing the opencode-serve subprocess."""
+
+    pid: Optional[int] = None
+    healthy: bool
+    message: str
+
+
+@router.post("/opencode/restart", response_model=OpenCodeRestartResponse)
+async def restart_opencode(
+    user: dict = Depends(get_current_user),
+):
+    """Bounce opencode-serve so it picks up updated credentials / env.
+
+    Used after a manual credential change or when the auto-restart trigger
+    is suppressed.  Synchronous: waits up to 15s for the new process to
+    report healthy.
+    """
+    from dashboard.lib.opencode_service import (
+        restart as _restart_opencode_sync,
+        wait_for_health,
+    )
+
+    pid = _restart_opencode_sync(health_timeout=15.0)
+    if pid is None:
+        return OpenCodeRestartResponse(
+            pid=None,
+            healthy=False,
+            message="opencode CLI not on PATH; cannot start",
+        )
+    healthy = wait_for_health(timeout=2.0)
+    return OpenCodeRestartResponse(
+        pid=pid,
+        healthy=healthy,
+        message="restarted" if healthy else "started but health check timed out",
+    )
+
+
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────
 
 
@@ -1073,6 +1111,20 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
 
     except Exception as exc:
         logger.warning("[SETTINGS] Vertex env sync failed: %s", exc)
+        return
+
+    # opencode-serve was spawned with its env locked in at install time.
+    # POSIX env vars are immutable from outside the process, so the only
+    # way for the running daemon to see the new GOOGLE_APPLICATION_CREDENTIALS
+    # / project / location is to bounce it.  Fire-and-forget on a background
+    # thread so the user's request doesn't block.
+    try:
+        from dashboard.lib.opencode_service import restart_async
+
+        restart_async()
+        logger.info("[SETTINGS] Scheduled opencode-serve restart after vertex env sync")
+    except Exception as exc:
+        logger.warning("[SETTINGS] Failed to schedule opencode-serve restart: %s", exc)
 
 
 def _parse_env_file() -> list[dict]:

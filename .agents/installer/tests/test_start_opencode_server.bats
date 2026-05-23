@@ -1,5 +1,10 @@
 #!/usr/bin/env bats
 # Tests for start-opencode-server.sh
+#
+# The script is now a thin wrapper that delegates all lifecycle work to
+# ``dashboard.lib.opencode_service``.  These tests verify the delegation
+# contract (how the Python module is invoked) rather than reimplementing
+# the supervisor logic in bash.
 
 setup() {
   INSTALLER_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
@@ -15,80 +20,61 @@ setup() {
   declare -f start_opencode_server > /dev/null
 }
 
-@test "start_opencode_server uses the managed opencode_server workdir" {
-  grep -Fq 'local project_dir="$server_dir"' "$INSTALLER_DIR/start-opencode-server.sh"
-  ! grep -Fq 'SOURCE_DIR:-$server_dir' "$INSTALLER_DIR/start-opencode-server.sh"
+@test "start_opencode_server delegates to dashboard.lib.opencode_service" {
+  grep -Fq 'dashboard.lib.opencode_service' "$INSTALLER_DIR/start-opencode-server.sh"
 }
 
-@test "_is_opencode_serve_process matches serve process even with truncated comm" {
-  ps() {
-    case "$*" in
-      "-p 123 -o comm=") echo "opencode" ;;
-      "-p 123 -o args=") echo "opencode serve --hostname 127.0.0.1 --port 4096" ;;
-    esac
-  }
-
-  _is_opencode_serve_process 123
-  unset -f ps
+@test "wrapper no longer reimplements env loading in bash" {
+  ! grep -Fq '_load_opencode_service_env' "$INSTALLER_DIR/start-opencode-server.sh"
+  ! grep -Fq '_normalize_vertex_env_aliases' "$INSTALLER_DIR/start-opencode-server.sh"
+  ! grep -Fq '_isolate_external_google_adc_fallback' "$INSTALLER_DIR/start-opencode-server.sh"
 }
 
-@test "_is_opencode_serve_process rejects non-server opencode commands" {
-  ps() {
-    case "$*" in
-      "-p 123 -o comm=") echo "opencode" ;;
-      "-p 123 -o args=") echo "opencode auth login" ;;
-    esac
-  }
-
-  ! _is_opencode_serve_process 123
-  unset -f ps
+@test "wrapper no longer spawns opencode serve directly" {
+  ! grep -E 'opencode serve --hostname' "$INSTALLER_DIR/start-opencode-server.sh"
 }
 
-@test "_load_opencode_service_env sources global and project env files" {
+@test "_opencode_service_python prefers the install venv interpreter" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/install"
-  local project_dir="$BATS_TEST_TMPDIR/project"
-  mkdir -p "$INSTALL_DIR" "$project_dir/.agents"
+  mkdir -p "$INSTALL_DIR/.venv/bin"
+  printf '#!/usr/bin/env bash\n' > "$INSTALL_DIR/.venv/bin/python"
+  chmod +x "$INSTALL_DIR/.venv/bin/python"
 
-  cat > "$INSTALL_DIR/.env" <<'EOF'
-GLOBAL_ONLY=global
-SHARED_VALUE=global
-EOF
-  cat > "$INSTALL_DIR/.env.sh" <<'EOF'
-GLOBAL_HOOK=global-hook
-EOF
-  cat > "$project_dir/.env" <<'EOF'
-PROJECT_ONLY=project
-SHARED_VALUE=project
-EOF
-  cat > "$project_dir/.agents/.env" <<'EOF'
-AGENTS_ONLY=agents
-EOF
-
-  _load_opencode_service_env "$project_dir"
-
-  [[ "$GLOBAL_ONLY" == "global" ]]
-  [[ "$GLOBAL_HOOK" == "global-hook" ]]
-  [[ "$PROJECT_ONLY" == "project" ]]
-  [[ "$AGENTS_ONLY" == "agents" ]]
-  [[ "$SHARED_VALUE" == "project" ]]
+  run _opencode_service_python
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == "$INSTALL_DIR/.venv/bin/python" ]]
 }
 
-@test "_load_opencode_service_env isolates external Google ADC fallback" {
+@test "_opencode_service_python falls back to python3 when venv is absent" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/install"
-  local project_dir="$BATS_TEST_TMPDIR/project"
-  mkdir -p "$INSTALL_DIR" "$project_dir"
+  mkdir -p "$INSTALL_DIR"
 
-  _load_opencode_service_env "$project_dir"
+  if ! command -v python3 &>/dev/null; then
+    skip "python3 not available on this system"
+  fi
 
-  [[ "$CLOUDSDK_CONFIG" == "$INSTALL_DIR/google/empty-sdk-config" ]]
-  [[ -d "$CLOUDSDK_CONFIG" ]]
+  run _opencode_service_python
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == "$(command -v python3)" ]]
 }
 
-@test "start_opencode_server uses the isolated service env loader" {
-  local body
-  body="$(sed -n '/^start_opencode_server()/,/^}/p' "$INSTALLER_DIR/start-opencode-server.sh")"
+@test "_opencode_service_invoke passes OSTWIN_HOME and PYTHONPATH to python" {
+  INSTALL_DIR="$BATS_TEST_TMPDIR/install"
+  mkdir -p "$INSTALL_DIR/.venv/bin"
 
-  [[ "$body" == *'_load_opencode_service_env "$project_dir"'* ]]
-  [[ "$body" != *'_load_opencode_global_env'* ]]
-  [[ "$body" != *'_load_opencode_project_env "$project_dir"'* ]]
+  # Stub the interpreter — echo the env values we care about so the test
+  # can assert on them, then exit successfully.
+  cat > "$INSTALL_DIR/.venv/bin/python" <<'EOF'
+#!/usr/bin/env bash
+echo "argv=$*"
+echo "OSTWIN_HOME=$OSTWIN_HOME"
+echo "PYTHONPATH=$PYTHONPATH"
+EOF
+  chmod +x "$INSTALL_DIR/.venv/bin/python"
+
+  run _opencode_service_invoke start
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"argv=-m dashboard.lib.opencode_service start"* ]]
+  [[ "$output" == *"OSTWIN_HOME=$INSTALL_DIR"* ]]
+  [[ "$output" == *"PYTHONPATH=$INSTALL_DIR"* ]]
 }
