@@ -37,7 +37,7 @@ if _env_file.is_file():
     try:
         from dotenv import load_dotenv
 
-        load_dotenv(_env_file, override=False)
+        load_dotenv(_env_file, override=True)
     except ImportError:
         # Manual fallback — only set vars not already in the environment
         with _env_file.open() as _f:
@@ -49,7 +49,7 @@ if _env_file.is_file():
                     _k, _, _v = _line.partition("=")
                     _k = _k.strip()
                     _v = _v.strip().strip("\"'")
-                    if _k and _k not in os.environ:
+                    if _k:
                         os.environ[_k] = _v
 
 # Add the project root and dashboard dir to sys.path
@@ -518,10 +518,9 @@ try:
         from starlette.responses import JSONResponse
         from starlette.routing import Mount
 
-        _expected_token = f"Bearer {os.environ.get('OSTWIN_API_KEY')}"
-
         class _MCPBearerAuth(BaseHTTPMiddleware):
             async def dispatch(self, request, call_next):  # type: ignore[override]
+                _expected_token = f"Bearer {os.environ.get('OSTWIN_API_KEY', '')}"
                 if request.headers.get("authorization") != _expected_token:
                     return JSONResponse(
                         {"error": "unauthorized", "code": "UNAUTHORIZED"},
