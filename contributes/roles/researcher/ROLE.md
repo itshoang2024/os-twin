@@ -17,7 +17,7 @@ When assigned a Task (TASK-XXX), you execute a specific, targeted investigation.
 ### Phase 0 — Context (ALWAYS DO THIS FIRST)
 Before beginning your research, load existing context from both layers to avoid duplicating effort:
 `
-search_memory(query="<terms from your research brief>")
+memory_search(query="<terms from your research brief>")
 memory_tree()
 knowledge_query("project-docs", "What previous research exists for <topic>?", mode="summarized")
 `

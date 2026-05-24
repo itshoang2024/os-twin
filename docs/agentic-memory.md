@@ -617,7 +617,7 @@ DISABLED_TOOLS = {
 | Tool | Location | Description |
 |------|----------|-------------|
 | `save_memory` | 552-656 | Save a new memory with full LLM analysis |
-| `search_memory` | 659-695 | Semantic vector search |
+| `memory_search` | 659-695 | Semantic vector search |
 | `memory_tree` | 866-877 | Directory tree visualization |
 | `grep_memory` | 1062-1101 | Grep across note .md files |
 | `find_memory` | 1151-1190 | Find notes by filename patterns |
@@ -669,11 +669,11 @@ def save_memory(
     """
 ```
 
-### `search_memory` Tool Details
+### `memory_search` Tool Details
 
 ```python
-@optional_tool("search_memory")
-def search_memory(query: str, k: int = 5) -> str:
+@optional_tool("memory_search")
+def memory_search(query: str, k: int = 5) -> str:
     """Search the knowledge base using natural language.
 
     Returns the most semantically relevant memories for the query. Results include
