@@ -18,6 +18,11 @@ setup_env() {
     ok ".env already exists at $env_file"
     _ensure_vault_key "$env_file"
     _create_env_sh_hook
+    # Sync the install shell with .env so OSTWIN_API_KEY (and friends) match
+    # the file even if the parent shell exported a stale value from a prior
+    # install. Without this, the completion banner can print one key while
+    # the dashboard accepts another.
+    _export_env_from_file "$env_file"
     return
   fi
 
@@ -93,9 +98,27 @@ ENVEOF
       ok "Saved NGROK_AUTHTOKEN — tunnel will auto-start with dashboard"
     fi
   fi
+
+  # Mirror the freshly-written file into the install shell so the rest of
+  # the script (banner, dashboard launch, etc.) sees the same values that
+  # were just persisted.
+  _export_env_from_file "$env_file"
 }
 
 # ─── Internal helpers ────────────────────────────────────────────────────────
+
+# Source $1 into the current shell with auto-export so every assignment in
+# the file becomes an exported variable, overwriting any stale value the
+# parent shell may have had. Used to keep ``.env`` the single source of
+# truth for OSTWIN_API_KEY and friends during the install.
+_export_env_from_file() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file" || true
+  set +a
+}
 
 _ensure_vault_key() {
   local env_file="$1"
