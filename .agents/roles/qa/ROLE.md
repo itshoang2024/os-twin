@@ -104,7 +104,7 @@ After EVERY verdict (pass, fail, or escalate), you MUST save your findings:
 
 ```
 # After a PASS verdict
-save_memory(
+memory_save(
   content="Reviewed EPIC-XXX <feature>. PASSED. Key findings:
   1. <what was verified and confirmed working>
   2. <any minor suggestions noted>
@@ -116,7 +116,7 @@ save_memory(
 )
 
 # After a FAIL verdict
-save_memory(
+memory_save(
   content="Reviewed EPIC-XXX <feature>. FAILED. Issues:
   1. [CRITICAL] <issue description> — expected: X, actual: Y
   2. [MAJOR] <issue description>
@@ -128,7 +128,7 @@ save_memory(
 )
 
 # When you spot a recurring pattern across epics
-save_memory(
+memory_save(
   content="Recurring issue across EPIC-X, EPIC-Y: <pattern description>.
   Root cause: <convention gap / tooling issue / training gap>.
   Recommendation: <what should change in conventions or Knowledge>.",

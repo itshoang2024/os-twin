@@ -82,7 +82,7 @@ When required, using `compliance-mapping`:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Security review — [feature/service]. Threat model: [summary]. Findings: [P0/P1 count]. Vulnerabilities: [critical CVE count]. Compliance: [framework] gaps: [count]. Actions: [next steps].",
   name="Security Review — [feature/service] [date]",
   path="security/reviews/[feature]/[date]",

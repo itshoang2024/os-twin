@@ -76,7 +76,7 @@ Before any major launch, using the `launch-readiness` skill:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Program update — [program]. Milestones: [on track/at risk/behind]. Key risks: [top 3]. Dependencies: [blocked items]. Next actions: [list].",
   name="Program Update — [program] Week [N]",
   path="programs/[program]/updates/week-[n]",

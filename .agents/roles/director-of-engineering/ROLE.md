@@ -76,7 +76,7 @@ Monthly:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Director sync — Q[X] Week [Y]. OKR status: [summary]. Blocked teams: [list]. Health flags: [concerns]. Actions: [decisions made].",
   name="Director Sync — Q[X]W[Y]",
   path="director/syncs/q[x]-w[y]",

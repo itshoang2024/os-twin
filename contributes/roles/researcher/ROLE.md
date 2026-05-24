@@ -38,7 +38,7 @@ knowledge_query("project-docs", "What previous research exists for <topic>?", mo
 1. Review your final report against the initial brief to ensure all questions are answered.
 2. MANDATORY: Save your synthesized findings to memory so other agents can utilize them:
    `
-   save_memory(
+   memory_save(
      content="<Executive summary of research, key facts, and insights>",
      name="Research: <Topic Name>",
      path="research/<topic-slug>",

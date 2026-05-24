@@ -55,11 +55,11 @@ Knowledge tells you the canonical architecture your design must extend.
 ### Memory (every deliverable — immediate)
 
 **CRITICAL**: Every time you produce a schema, API contract, or architectural
-decision, you MUST IMMEDIATELY call `save_memory()`. Other agents in other
+decision, you MUST IMMEDIATELY call `memory_save()`. Other agents in other
 rooms can ONLY see Memory — they cannot read your files.
 
 ```
-save_memory(
+memory_save(
   content="<paste the full content — complete ADR, schema definition, or API contract>",
   name="<short descriptive name>",
   path="architecture/<category>",
@@ -84,7 +84,7 @@ knowledge_import_folder("architecture-decisions", "/path/to/adr/folder")
 
 **Tag for promotion** if not promoting immediately:
 ```
-save_memory(
+memory_save(
   content="<ADR content>",
   path="architecture/<category>",
   tags=["architecture", "adr", "promote-to-knowledge"]

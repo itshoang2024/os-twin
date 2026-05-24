@@ -200,7 +200,7 @@ tasks a technical-writer agent should execute.
 ### Key Flows to Document
 
 1. **Layered Memory Operations**: publish -> ledger.jsonl append -> index materialization; query -> filter by room/kind/tags; search -> BM25 + time-decay scoring
-2. **Agentic Memory save_memory Flow**: content -> LLM analysis (name/path/keywords/tags) -> vector index -> evolution (auto-linking) -> markdown file
+2. **Agentic Memory memory_save Flow**: content -> LLM analysis (name/path/keywords/tags) -> vector index -> evolution (auto-linking) -> markdown file
 3. **Agentic Memory Auto-Sync**: Background thread -> sync_to_disk() every 60s -> merge_from_disk() -> write all memories
 4. **Bridge Index Flow**: Knowledge chunk (namespace, file_hash, chunk_idx) -> SQLite lookup -> list of note_ids
 
@@ -219,7 +219,7 @@ tasks a technical-writer agent should execute.
 ### Tasks
 
 - TASK-001: Document Layered Memory operations (publish, query, search)
-- TASK-002: Document Agentic Memory save_memory flow end-to-end
+- TASK-002: Document Agentic Memory memory_save flow end-to-end
 - TASK-003: Document Agentic Memory evolution process (auto-linking)
 - TASK-004: Document concurrency model for both systems
 - TASK-005: Document Bridge index and enable it by default

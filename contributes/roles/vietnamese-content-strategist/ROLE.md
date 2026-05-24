@@ -37,7 +37,7 @@ knowledge_query("project-docs", "What are the conventions for <area>?", mode="su
 1. Ensure all checkboxes in TASKS.md are checked
 2. MANDATORY: Save to memory:
    `
-   save_memory(
+   memory_save(
      content="<key code, interfaces, decisions>",
      name="<descriptive name>",
      path="code/<module>",

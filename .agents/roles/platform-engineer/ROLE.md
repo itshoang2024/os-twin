@@ -77,7 +77,7 @@ Using the `platform-api-governance` skill:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Platform update — [component]. Changes: [what changed]. DX impact: [metrics]. Migration: [if breaking]. Users notified: [yes/no].",
   name="Platform Update — [component] [date]",
   path="platform/updates/[component]/[date]",

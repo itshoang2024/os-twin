@@ -114,7 +114,7 @@ Objective: Merge `memory.md` and `agentic-memory.md` into a coherent dual-memory
 
 #### Design Improvements Identified
 
-1. **Unify MCP tool naming** — Layered Memory exposes `publish`/`query`/`search` via `memory-server.py`. Agentic Memory exposes `save_memory`/`memory_search` via `mcp_server.py`. An agent calling `memory_search` hits Agentic Memory; calling `query` hits Layered Memory. This naming collision is confusing. Recommend: rename Layered Memory tools to `ledger_publish`/`ledger_query`/`ledger_search`.
+1. **Unify MCP tool naming** — Layered Memory exposes `publish`/`query`/`search` via `memory-server.py`. Agentic Memory exposes `memory_save`/`memory_search` via `mcp_server.py`. An agent calling `memory_search` hits Agentic Memory; calling `query` hits Layered Memory. This naming collision is confusing. Recommend: rename Layered Memory tools to `ledger_publish`/`ledger_query`/`ledger_search`.
 
 2. **Bridge index should be enabled by default** — Currently `OSTWIN_KNOWLEDGE_MEMORY_BRIDGE=0`. The bridge is the only way to trace "which knowledge backs this memory note?" Disabling it means the two systems are siloed. Recommend: enable by default, add to architecture overview.
 

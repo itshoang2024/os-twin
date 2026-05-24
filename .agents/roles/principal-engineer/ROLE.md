@@ -75,7 +75,7 @@ Define and maintain:
 After every decision or review:
 
 ```
-save_memory(
+memory_save(
   content="RFC-XXX: <title> — Decision: <chosen option>. Rationale: <why>. Impact: <affected teams>. Migration: <plan>.",
   name="Principal Decision — RFC-XXX <title>",
   path="principal-decisions/<rfc-id>",

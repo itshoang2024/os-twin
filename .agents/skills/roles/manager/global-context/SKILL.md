@@ -34,16 +34,12 @@ Use these tools when you need to:
 | `global_memory_grep` | Grep across all memory files |
 | `global_memory_read` | Read a specific memory by ID |
 
-### Global Knowledge Tools
+### Knowledge Tools
 
 | Tool | Description |
 |------|-------------|
-| `global_knowledge_query` | Query knowledge across ALL namespaces |
-| `global_knowledge_search_all` | Fast vector search across all namespaces |
-| `global_knowledge_list_namespaces` | List all knowledge namespaces |
-| `global_knowledge_get_stats` | Aggregate statistics |
-| `global_knowledge_get_namespace` | Get specific namespace details |
-| `global_knowledge_find_relevant` | Find most relevant namespace for a query |
+| `knowledge_query` | Query a specific knowledge namespace |
+| `knowledge_list_namespaces` | List all knowledge namespaces and their statistics |
 
 ## Usage Patterns
 
@@ -53,7 +49,7 @@ Before starting a new epic, query for relevant past decisions:
 
 ```
 global_memory_search("authentication decisions", k=10)
-global_knowledge_query("authentication flow", mode="summarized")
+knowledge_query("project-docs", "authentication flow", mode="summarized")
 ```
 
 ### Pattern 2: Learning from Past Issues
@@ -79,8 +75,8 @@ global_memory_stats()  # See which projects have similar memories
 When you need reference materials:
 
 ```
-global_knowledge_find_relevant("API rate limiting")
-global_knowledge_query("rate limiting implementation", mode="summarized")
+knowledge_list_namespaces()  # Find available namespaces
+knowledge_query("project-docs", "rate limiting implementation", mode="summarized")
 ```
 
 ## Important Notes
@@ -105,18 +101,17 @@ When starting a new epic:
 1. **Discover context:**
    ```
    global_memory_list_plans()  # What projects exist?
-   global_knowledge_list_namespaces()  # What knowledge bases exist?
+   knowledge_list_namespaces()  # What knowledge bases exist?
    ```
 
 2. **Find relevant patterns:**
    ```
    global_memory_search("[feature keyword]", k=5)
-   global_knowledge_find_relevant("[feature keyword]")
    ```
 
 3. **Query detailed knowledge:**
    ```
-   global_knowledge_query("[feature keyword]", mode="summarized", top_k=10)
+   knowledge_query("project-docs", "[feature keyword]", mode="summarized", top_k=10)
    ```
 
 4. **Apply learnings to current work:**

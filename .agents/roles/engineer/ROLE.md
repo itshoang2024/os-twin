@@ -48,21 +48,21 @@ Knowledge tells you the canonical standards your implementation must align with.
 
 ### Phase 3 — Reporting
 1. Ensure all checkboxes in TASKS.md are checked
-2. **MANDATORY: Save to memory (MCP)** — you MUST call `save_memory()` for EVERY file you created. Other agents CANNOT read your files — they can ONLY see memory. Do NOT skip this:
+2. **MANDATORY: Save to memory (MCP)** — you MUST call `memory_save()` for EVERY file you created. Other agents CANNOT read your files — they can ONLY see memory. Do NOT skip this:
    ```
-   save_memory(
+   memory_save(
      content="<paste the key code — full model/class definition with types and relationships>",
      name="src/models/user.py — User model",
      path="code/models",
      tags=["models", "user"]
    )
-   save_memory(
+   memory_save(
      content="POST /api/v1/users — <paste full request/response JSON shapes, status codes>",
      name="API — create user endpoint",
      path="code/api",
      tags=["api", "users"]
    )
-   save_memory(
+   memory_save(
      content="Chose PostgreSQL over MongoDB. Why: relational data, ACID transactions needed. Trade-offs: ...",
      name="Decision — PostgreSQL over MongoDB",
      path="decisions",
@@ -83,9 +83,9 @@ When assigned a Task, implement it directly:
 2. Understand the requirements and acceptance criteria
 3. Implement the solution in the project working directory
 4. Write or update tests as needed
-5. **MANDATORY: Save to memory (MCP)** — you MUST call `save_memory()` for any code, interface, or decision other rooms need. Do NOT skip:
+5. **MANDATORY: Save to memory (MCP)** — you MUST call `memory_save()` for any code, interface, or decision other rooms need. Do NOT skip:
    ```
-   save_memory(
+   memory_save(
      content="<paste key code — full function/class with types, not just a one-liner>",
      name="path/to/file.py — description",
      path="code/<module>",

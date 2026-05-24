@@ -71,7 +71,7 @@ Monthly:
 ### Phase 5 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="SRE Review — [Service]. SLO status: [X]%. Error budget: [Y]% remaining. Incidents this month: [N]. Top issue: [description]. Action: [next steps].",
   name="SRE Review — [Service] [Month]",
   path="sre/reviews/[service]/[month]",

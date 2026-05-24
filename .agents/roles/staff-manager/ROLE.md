@@ -84,7 +84,7 @@ Your verdict MUST include:
 After every review, save to memory:
 
 ```
-save_memory(
+memory_save(
   content="Reviewed EPIC-XXX — <verdict>. Key findings: <P0s and P1s>. Patterns: <recurring issues>. Cross-room notes: <dependencies discovered>.",
   name="Staff Review — EPIC-XXX <module>",
   path="staff-reviews/<epic-id>",
