@@ -462,10 +462,19 @@ async def get_available_providers(user: dict = Depends(get_current_user)):
 
 @router.post("/api/models/reload")
 async def reload_models(user: dict = Depends(get_current_user)):
-    """Force re-fetch models from models.dev and rebuild configured_models.json."""
+    """Force re-fetch models from models.dev and rebuild configured_models.json.
+
+    After a successful fetch the raw catalog is written to two locations:
+    1. ``~/.ostwin/.agents/models_dev_raw.json``  -- the home-directory cache.
+    2. ``.agents/models_dev_raw.json``            -- project-level install seed.
+
+    Both paths are reported in the response so callers can confirm the sync.
+    """
     from dashboard.lib.settings.models_dev_loader import (
         invalidate_cache,
         load_models_on_startup,
+        _HOME_RAW_PATH,
+        _project_raw_path,
     )
     invalidate_cache()
     result = load_models_on_startup()
@@ -474,11 +483,22 @@ async def reload_models(user: dict = Depends(get_current_user)):
         len(p.get("models", {}))
         for p in result.get("providers", {}).values()
     )
+
+    # Report which disk paths were populated
+    proj_path = _project_raw_path()
+    raw_paths = {
+        "home": str(_HOME_RAW_PATH),
+        "home_exists": _HOME_RAW_PATH.exists(),
+        "project": str(proj_path) if proj_path else None,
+        "project_exists": proj_path.exists() if proj_path else False,
+    }
+
     return {
         "status": "ok",
         "providers": provider_count,
         "models": model_count,
         "loaded_at": result.get("loaded_at"),
+        "raw_catalog": raw_paths,
     }
 
 
