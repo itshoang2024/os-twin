@@ -258,13 +258,12 @@ def _replace_mounted_mcp_app(parent_app, fresh_mcp_app) -> None:
     for route in parent_app.router.routes:
         if isinstance(route, Mount) and route.path == "/api/knowledge/mcp":
             existing = route.app
-            # Direct mount (dev mode, no auth) — replace and we're done.
+            # Wrapped mount: existing is a Starlette() with an inner
+            # Mount("/", app=_mcp_app) that needs to be replaced.
             if hasattr(existing, "router") and any(
                 isinstance(r, Mount)
                 for r in getattr(existing.router, "routes", [])
             ):
-                # Wrapped variant: existing is a Starlette() with a
-                # Mount("/", app=_mcp_app) inside.
                 for inner in existing.router.routes:
                     if isinstance(inner, Mount) and inner.path == "":
                         inner.app = fresh_mcp_app
@@ -522,14 +521,26 @@ try:
                 return await call_next(request)
             key = os.environ.get("OSTWIN_API_KEY", "")
             if not key:
-                # No key configured — fall back to anonymous so first-boot
-                # before install.sh writes .env doesn't 401 every probe.
-                # Log loudly so operators notice an unauthenticated MCP.
+                # Fail closed. Anonymous fallback would let env_watcher
+                # downgrade an authenticated endpoint to unauthenticated by
+                # blanking the key at runtime. OSTWIN_DEV_MODE=1 is the only
+                # supported anonymous-access escape hatch.
                 logger.warning(
-                    "MCP request received with no OSTWIN_API_KEY configured; "
-                    "allowing anonymous access. Set the key in ~/.ostwin/.env."
+                    "MCP request rejected: OSTWIN_API_KEY is not configured "
+                    "and OSTWIN_DEV_MODE is not set."
                 )
-                return await call_next(request)
+                return JSONResponse(
+                    {
+                        "error": "service_unavailable",
+                        "code": "MCP_AUTH_NOT_CONFIGURED",
+                        "detail": (
+                            "OSTWIN_API_KEY is not configured. Set it in "
+                            "~/.ostwin/.env, or set OSTWIN_DEV_MODE=1 for "
+                            "local development."
+                        ),
+                    },
+                    status_code=503,
+                )
             if request.headers.get("authorization") != f"Bearer {key}":
                 return JSONResponse(
                     {"error": "unauthorized", "code": "UNAUTHORIZED"},

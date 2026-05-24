@@ -128,9 +128,9 @@ def _captured_mcp_bearer_token() -> str | None:
 
     The wrapper now evaluates auth per request (see ``_MCPBearerAuth.dispatch``
     in ``dashboard.api``), so the "captured" value is just whatever is in
-    ``os.environ`` at call time.  Returns ``None`` when the wrapper would
-    allow anonymous access (dev mode or no key configured), matching the
-    real middleware's decision.
+    ``os.environ`` at call time. Returns a token only when the middleware
+    requires one. ``None`` means either dev mode bypasses auth, or no key is
+    configured and the middleware will fail closed with 503.
     """
     if os.environ.get("OSTWIN_DEV_MODE") == "1":
         return None
@@ -325,6 +325,58 @@ def test_mcp_dev_mode_flag_evaluated_per_request(
         r2 = client.post("/api/knowledge/mcp/", json=payload, headers=headers)
         assert r2.status_code == 401, (
             f"Clearing OSTWIN_DEV_MODE did not take effect "
+            f"(status={r2.status_code}, body={r2.text[:200]!r})"
+        )
+
+
+def test_mcp_returns_503_when_key_unset_and_not_dev_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP must fail closed when no key is configured and dev mode is off.
+
+    Regression for the anonymous-fallback bug introduced when the gate moved
+    from import time to per request. With env_watcher able to clear
+    ``OSTWIN_API_KEY`` at runtime, an anonymous fallback would silently
+    downgrade an authenticated endpoint to unauthenticated. The only
+    supported anonymous escape hatch is ``OSTWIN_DEV_MODE=1``.
+    """
+    from dashboard.api import app
+
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "fail-closed-test", "version": "0.1"},
+        },
+    }
+    headers = {"accept": "application/json, text/event-stream"}
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # No key, no dev mode, no Authorization header — must be 503.
+        r = client.post("/api/knowledge/mcp/", json=payload, headers=headers)
+        assert r.status_code == 503, (
+            f"MCP did not fail closed when key was unset "
+            f"(status={r.status_code}, body={r.text[:200]!r})"
+        )
+        body = r.json()
+        assert body.get("code") == "MCP_AUTH_NOT_CONFIGURED", (
+            f"Unexpected error code in 503 response: {body!r}"
+        )
+
+        # Even a Bearer header should not pass when no key is configured.
+        r2 = client.post(
+            "/api/knowledge/mcp/",
+            json=payload,
+            headers={**headers, "Authorization": "Bearer anything"},
+        )
+        assert r2.status_code == 503, (
+            f"MCP accepted a Bearer header when no key was configured "
             f"(status={r2.status_code}, body={r2.text[:200]!r})"
         )
 

@@ -39,9 +39,10 @@ export OSTWIN_API_KEY="your-key-from-~/.ostwin/.env"
 opencode mcp list   # should list ostwin-knowledge with 7 tools
 ```
 
-If the dashboard is in **dev mode** (`OSTWIN_DEV_MODE=1`) OR if
-`OSTWIN_API_KEY` is unset on the dashboard side, the `Authorization`
-header is not enforced — you can omit the `headers` block entirely.
+If the dashboard is in **dev mode** (`OSTWIN_DEV_MODE=1`), the
+`Authorization` header is not enforced and you can omit the `headers` block.
+Outside dev mode, `OSTWIN_API_KEY` must be configured on the dashboard side;
+when it is missing, MCP requests fail closed with `503`.
 
 ## 2) Available tools
 
@@ -55,9 +56,10 @@ header is not enforced — you can omit the `headers` block entirely.
 | `knowledge_query` | Query a namespace (`raw` / `graph` / `summarized` modes) |
 | `knowledge_get_graph` | Get the entity-relation graph for visualisation |
 
-Every tool returns a JSON object. On failure the response is
-`{"error": "<message>", "code": "<ERROR_CODE>"}` — never an exception or
-HTTP 5xx. Codes you may see:
+After the MCP request is authenticated, every tool returns a JSON object. On
+tool failure the response is `{"error": "<message>", "code": "<ERROR_CODE>"}`
+— never an exception or HTTP 5xx. Auth and service-configuration failures can
+still return HTTP-layer errors such as `401` or `503`. Codes you may see:
 
 | Code | When |
 |------|------|
@@ -153,6 +155,11 @@ Then configure opencode with the key:
 }
 ```
 
+If `OSTWIN_API_KEY` is missing and `OSTWIN_DEV_MODE` is not set, the MCP
+endpoint returns `503` with code `MCP_AUTH_NOT_CONFIGURED`. This is deliberate:
+removing the key at runtime must not silently downgrade the endpoint to
+anonymous access.
+
 ### Security Notes
 
 - **Never commit API keys** to source control
@@ -207,6 +214,16 @@ Error: Failed to connect to MCP server
 ```
 
 **Solution**: Either set `OSTWIN_DEV_MODE=1` for dev, or provide a valid `OSTWIN_API_KEY` in the Authorization header.
+
+### 503 Auth Not Configured
+
+```
+{"error": "service_unavailable", "code": "MCP_AUTH_NOT_CONFIGURED"}
+```
+
+**Solution**: Set `OSTWIN_API_KEY` in `~/.ostwin/.env` and restart or let the
+dashboard env watcher reload it. For local unauthenticated development, set
+`OSTWIN_DEV_MODE=1`.
 
 ### Tools Not Appearing
 
