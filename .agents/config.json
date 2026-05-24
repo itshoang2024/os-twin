@@ -69,31 +69,5 @@
     "custom": {},
     "openai_compatible": null,
     "ollama": null
-  },
-  "frontend-engineer": {
-    "default_model": "google-vertex/gemini-3.5-flash",
-    "timeout_seconds": 600,
-    "max_retries": 3,
-    "instance_type": "worker",
-    "skill_refs": [
-      "global",
-      "roles"
-    ]
-  },
-  "engineer": {
-    "default_model": "zai/glm-5",
-    "timeout_seconds": 3600,
-    "max_retries": 3,
-    "instance_type": "worker"
-  },
-  "backend-engineer": {
-    "default_model": "google-vertex/gemini-3.5-flash",
-    "timeout_seconds": 600,
-    "max_retries": 3,
-    "instance_type": "worker",
-    "skill_refs": [
-      "global",
-      "roles"
-    ]
   }
 }
