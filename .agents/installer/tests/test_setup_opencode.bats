@@ -18,6 +18,10 @@ setup() {
   declare -f setup_opencode_permissions > /dev/null
 }
 
+@test "generate_opencode_tools uses managed opencode_server directory" {
+  grep -Fq 'local project_root="$INSTALL_DIR/opencode_server"' "$INSTALLER_DIR/setup-opencode.sh"
+}
+
 @test "patch_opencode_permissions.py adds file-read permissions" {
   TEST_DIR="$(mktemp -d)"
 

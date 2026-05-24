@@ -27,6 +27,10 @@ dist/
 # ── Dependencies ──────────────────────────────────────────────────────────────
 node_modules/
 
+# pnpm workspace settings required for reproducible non-interactive installs
+!bot/pnpm-workspace.yaml
+!dashboard/fe/pnpm-workspace.yaml
+
 # ── Python mock artifacts ──────────────────────────────────────────────
 MagicMock/
 

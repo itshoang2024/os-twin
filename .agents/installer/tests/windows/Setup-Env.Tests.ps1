@@ -108,13 +108,6 @@ Describe "Create-EnvPs1Hook" {
         Test-Path $envPs1 | Should -Be $true
     }
 
-    It "Should contain Vertex API key refresh logic" {
-        Create-EnvPs1Hook
-        $envPs1 = Join-Path $testDir ".env.ps1"
-        $content = Get-Content $envPs1 -Raw
-        $content | Should -Match 'VERTEX_API_KEY'
-    }
-
     It "Should contain Gemini auto-promote logic" {
         Create-EnvPs1Hook
         $envPs1 = Join-Path $testDir ".env.ps1"

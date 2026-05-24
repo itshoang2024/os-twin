@@ -22,6 +22,8 @@ import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client';
 // Providers that have dedicated cards at the top of the settings page.
 // These are hidden from the Additional Providers section to avoid duplicates.
 const LEGACY_PRIMARY_PROVIDERS = new Set([
+  'google',
+  'openai',
   'anthropic',
   'byteplus',
 ]);

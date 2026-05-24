@@ -38,17 +38,15 @@ def _resolve_memory_dir(plan_id: str) -> Optional[Path]:
     """Resolve the centralized memory directory for a plan.
 
     Resolution order:
-    1. ~/.ostwin/memory/{plan_id}/          (Plan 009 format — no prefix)
-    2. ~/.ostwin/memory/memory-{plan_id}/   (legacy format)
+    1. ~/.ostwin/memory/memory-{plan_id}/   (current format)
+    2. ~/.ostwin/memory/{plan_id}/          (legacy format)
     3. Plan's working_dir/.memory/          (follows symlink)
     4. None
     """
-    # Plan 009: direct plan_id directory
-    direct = MEMORY_BASE_DIR / plan_id
-    if direct.exists():
-        return direct
-    # Legacy: memory-{plan_id} prefix
-    legacy = MEMORY_BASE_DIR / f"memory-{plan_id}"
+    current = MEMORY_BASE_DIR / f"memory-{plan_id.removeprefix('memory-')}"
+    if current.exists():
+        return current
+    legacy = MEMORY_BASE_DIR / plan_id.removeprefix("memory-")
     if legacy.exists():
         return legacy
     # Fallback: look up plan's working_dir and follow .memory symlink

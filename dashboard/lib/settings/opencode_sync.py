@@ -142,16 +142,31 @@ def _sync_opencode_json(vault, settings, target: Path) -> TargetResult:
                 skipped.append(name)
             continue
 
-        try:
-            api_key = vault.get(pdef.vault_scope, pdef.vault_key)
-        except Exception as exc:
-            logger.warning(
-                "Vault read failed for %s/%s: %s", pdef.vault_scope, pdef.vault_key, exc
-            )
-            skipped.append(name)
-            continue
+        api_key: Optional[str] = None
+        if pdef.requires_api_key:
+            try:
+                api_key = vault.get(pdef.vault_scope, pdef.vault_key)
+            except Exception as exc:
+                logger.warning(
+                    "Vault read failed for %s/%s: %s",
+                    pdef.vault_scope,
+                    pdef.vault_key,
+                    exc,
+                )
+                skipped.append(name)
+                continue
 
-        if not api_key:
+            if not api_key:
+                if name in provider_block:
+                    del provider_block[name]
+                    removed.append(name)
+                else:
+                    skipped.append(name)
+                continue
+
+        options = _resolve_options(name, pdef, settings, api_key=api_key)
+        if options is None:
+            # Required config missing (e.g. Vertex without project_id).
             if name in provider_block:
                 del provider_block[name]
                 removed.append(name)
@@ -159,15 +174,11 @@ def _sync_opencode_json(vault, settings, target: Path) -> TargetResult:
                 skipped.append(name)
             continue
 
-        base_url = _resolve_base_url(name, pdef, settings)
         enabled_models = _resolve_enabled_models(name, settings)
         models = build_opencode_models(pdef, enabled_models=enabled_models)
 
         provider_block[name] = {
-            "options": {
-                "apiKey": api_key,
-                "baseURL": base_url,
-            },
+            "options": options,
             "models": models,
         }
         synced.append(name)
@@ -308,6 +319,14 @@ def _should_sync_provider(
                 pass
         return True
 
+    if name in ("google-vertex", "google-vertex-anthropic"):
+        google = settings.providers.google
+        if google is None:
+            return False
+        if not google.enabled:
+            return False
+        return google.deployment_mode == "vertex"
+
     if name == "byteplus":
         bp = settings.providers.byteplus
         if bp is not None:
@@ -346,6 +365,43 @@ def _resolve_base_url(name: str, pdef: OpenCodeProviderDef, settings) -> str:
         if bp and bp.base_url:
             return bp.base_url
     return pdef.base_url
+
+
+def _resolve_options(
+    name: str,
+    pdef: OpenCodeProviderDef,
+    settings,
+    *,
+    api_key: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Build the options block for an opencode.json provider entry.
+
+    Returns ``None`` when required config is missing (caller will skip/remove
+    the provider). Returns a dict otherwise.
+
+    Discriminated by ``pdef.auth_strategy``:
+    * ``"api_key"`` (default) -- ``{"apiKey": ..., "baseURL": ...}``
+    * ``"vertex"``            -- ``{"project": ..., "location": ...}``
+    """
+    if pdef.auth_strategy == "vertex":
+        google = settings.providers.google
+        if google is None:
+            return None
+        project = google.project_id or ""
+        if not project:
+            # Vertex requires a project. Without one, opencode would fail at
+            # request time anyway -- skip cleanly instead.
+            return None
+        return {
+            "project": project,
+            "location": google.vertex_location or "global",
+        }
+
+    # Default: openai-compatible HTTP shim.
+    return {
+        "apiKey": api_key,
+        "baseURL": _resolve_base_url(name, pdef, settings),
+    }
 
 
 def _load_json(path: Path, *, skeleton: Dict[str, Any]) -> Dict[str, Any]:

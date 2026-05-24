@@ -39,6 +39,28 @@ CONFIGURED_MODELS_PATH = (
     Path.home() / ".ostwin" / ".agents" / "configured_models.json"
 )
 
+# Home-directory raw catalog cache (primary fallback)
+_HOME_RAW_PATH = CONFIGURED_MODELS_PATH.parent / "models_dev_raw.json"
+
+
+def _project_raw_path() -> Optional[Path]:
+    """Return the project-level .agents/models_dev_raw.json path, or None.
+
+    The project-level file ships with os-twin and acts as the install-time
+    seed so a fresh deployment can bootstrap even before the first network
+    fetch succeeds.  We resolve it via the dashboard package location.
+    """
+    try:
+        from dashboard.api_utils import AGENTS_DIR
+
+        candidate = AGENTS_DIR / "models_dev_raw.json"
+        # Only return a path whose parent actually exists
+        if candidate.parent.exists():
+            return candidate
+    except Exception:
+        pass
+    return None
+
 # In-memory cache
 _cached_models: Optional[Dict[str, Any]] = None
 _cached_timestamp: float = 0.0
@@ -103,7 +125,7 @@ def get_configured_models() -> Dict[str, Any]:
 
 
 def get_configured_providers() -> Dict[str, Any]:
-    """Return the configured providers from auth.json + opencode.json."""
+    """Return the configured providers from settings, auth.json, opencode.json, and vault."""
     return _read_configured_providers()
 
 
@@ -160,6 +182,44 @@ def get_model_registry_from_configured() -> Dict[str, List[dict]]:
             registry[display_name] = model_list
 
     return registry
+
+
+def get_available_providers() -> List[Dict[str, Any]]:
+    """Return all providers from models.dev for the Add Provider browser.
+
+    This intentionally uses the raw models.dev cache/catalog, not the
+    configured-models cache, because the picker needs to show providers before
+    they have been configured.
+    """
+    raw_catalog = _read_cached_raw()
+    if raw_catalog is None:
+        raw_catalog = _fetch_models_dev() or _read_cached_raw() or {}
+
+    configured_ids = set(_read_configured_providers())
+    result: List[Dict[str, Any]] = []
+    for provider_id, provider_data in raw_catalog.items():
+        if not isinstance(provider_data, dict):
+            continue
+        models = provider_data.get("models", {})
+        if not isinstance(models, dict):
+            models = {}
+        env = provider_data.get("env", [])
+        if not isinstance(env, list):
+            env = []
+        result.append(
+            {
+                "id": provider_id,
+                "name": provider_data.get("name") or provider_id,
+                "logo_url": get_provider_logo_url(provider_id),
+                "model_count": len(models),
+                "doc": provider_data.get("doc", ""),
+                "env": env,
+                "already_configured": provider_id in configured_ids,
+            }
+        )
+
+    result.sort(key=lambda item: str(item.get("name", "")).lower())
+    return result
 
 
 @lru_cache(maxsize=1024)
@@ -418,12 +478,30 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            # Cache the raw catalog for fallback
-            _write_json(
-                CONFIGURED_MODELS_PATH.parent / "models_dev_raw.json",
-                data,
-            )
+
+            # ── 1) Write to the home-directory cache (primary fallback) ──
+            _write_json(_HOME_RAW_PATH, data)
             logger.info("Fetched models.dev catalog: %d providers", len(data))
+
+            # ── 2) Mirror to project-level .agents/models_dev_raw.json ───
+            # This keeps the install-time seed file up-to-date so that a
+            # fresh deployment or `ostwin install` can bootstrap the catalog
+            # without a network round-trip.
+            proj_path = _project_raw_path()
+            if proj_path is not None:
+                try:
+                    _write_json(proj_path, data)
+                    logger.info(
+                        "[MODELS] Mirrored raw catalog to project path: %s",
+                        proj_path,
+                    )
+                except Exception as mirror_exc:
+                    logger.warning(
+                        "[MODELS] Could not mirror raw catalog to %s: %s",
+                        proj_path,
+                        mirror_exc,
+                    )
+
             return data
     except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to fetch models.dev/api.json: %s", exc)
@@ -431,18 +509,171 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
 
 
 def _read_cached_raw() -> Optional[Dict[str, Any]]:
-    """Read the raw models.dev cache from disk."""
-    raw_path = CONFIGURED_MODELS_PATH.parent / "models_dev_raw.json"
-    if raw_path.exists():
+    """Read the raw models.dev cache from disk.
+
+    Resolution order:
+    1. ``~/.ostwin/.agents/models_dev_raw.json``  (primary, updated on every fetch)
+    2. Project-level ``.agents/models_dev_raw.json`` (install-time seed / bootstrap)
+
+    When the home cache is missing or empty and the project-level file has
+    real data, the project file is copied to the home location so subsequent
+    lookups are fast.
+    """
+    # 1. Home-directory cache
+    if _HOME_RAW_PATH.exists():
         try:
-            return json.loads(raw_path.read_text())
+            data = json.loads(_HOME_RAW_PATH.read_text())
+            if data:  # non-empty dict is valid
+                return data
         except (json.JSONDecodeError, OSError):
             pass
+
+    # 2. Project-level seed (bootstrap for fresh installs)
+    proj_path = _project_raw_path()
+    if proj_path is not None and proj_path.exists():
+        try:
+            data = json.loads(proj_path.read_text())
+            if data:
+                logger.info(
+                    "[MODELS] Bootstrapping home raw cache from project seed: %s",
+                    proj_path,
+                )
+                # Promote to home cache so future boots skip this step
+                try:
+                    _write_json(_HOME_RAW_PATH, data)
+                except Exception:
+                    pass
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return None
 
 
+def _settings_config_paths() -> List[Path]:
+    """Return settings config candidates in the same spirit as SettingsResolver."""
+    explicit_config = os.environ.get("OSTWIN_CONFIG_PATH")
+    if explicit_config:
+        return [Path(explicit_config).expanduser()]
+
+    paths: List[Path] = []
+    explicit_project = os.environ.get("OSTWIN_PROJECT_DIR")
+    if explicit_project:
+        paths.append(Path(explicit_project).expanduser() / ".agents" / "config.json")
+    else:
+        paths.append(Path.home() / ".ostwin" / ".agents" / "config.json")
+
+    try:
+        from dashboard.api_utils import AGENTS_DIR
+
+        paths.append(AGENTS_DIR / "config.json")
+    except Exception:
+        pass
+
+    if explicit_project:
+        paths.append(Path.home() / ".ostwin" / ".agents" / "config.json")
+
+    deduped: List[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            deduped.append(path)
+            seen.add(key)
+    return deduped
+
+
+def _read_settings_config() -> Dict[str, Any]:
+    """Read the active dashboard settings config, if present."""
+    for config_path in _settings_config_paths():
+        if not config_path.exists():
+            continue
+        try:
+            data = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read settings config %s: %s", config_path, exc)
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _read_settings_provider_entries() -> Dict[str, Dict[str, Any]]:
+    """Return provider entries from .agents/config.json, including dynamic providers."""
+    providers_data = _read_settings_config().get("providers", {})
+    if not isinstance(providers_data, dict):
+        return {}
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for provider_id, provider_cfg in providers_data.items():
+        if provider_id == "custom" and isinstance(provider_cfg, dict):
+            for custom_id, custom_cfg in provider_cfg.items():
+                if isinstance(custom_cfg, dict):
+                    result[custom_id] = custom_cfg
+            continue
+        if isinstance(provider_cfg, dict):
+            result[provider_id] = provider_cfg
+    return result
+
+
+def _provider_config_disabled(provider_cfg: Dict[str, Any]) -> bool:
+    """Return whether a provider config explicitly hides/disables a provider."""
+    if provider_cfg.get("enabled") is False:
+        return True
+    # dismissed is a UI-only state for dynamically added providers. If a
+    # first-class provider is explicitly enabled, a stale dismissed flag should
+    # not remove it from the runtime model catalog.
+    return provider_cfg.get("dismissed") is True and provider_cfg.get("enabled") is not True
+
+
+def _settings_provider_info(
+    provider_id: str,
+    provider_cfg: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build discovery metadata for a provider from dashboard settings."""
+    if _provider_config_disabled(provider_cfg):
+        return None
+
+    provider_type = "local" if provider_id == "ollama" else "settings"
+    info: Dict[str, Any] = {
+        "type": provider_type,
+        "source": "settings",
+        "has_key": False,
+    }
+
+    if provider_id == "google":
+        mode = provider_cfg.get("deployment_mode") or _read_google_deployment_mode()
+        has_auth_hint = bool(
+            provider_cfg.get("api_key_ref")
+            or provider_cfg.get("project_id")
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+        if not has_auth_hint:
+            return None
+        info["has_key"] = True
+        info["deployment_mode"] = mode
+        return info
+
+    if provider_id == "ollama":
+        info["has_key"] = True
+        return info
+
+    has_auth_hint = bool(
+        provider_cfg.get("api_key_ref")
+        or provider_cfg.get("base_url")
+        or provider_cfg.get("default_model")
+        or provider_cfg.get("enabled_models")
+    )
+    if not has_auth_hint:
+        return None
+    info["has_key"] = bool(provider_cfg.get("api_key_ref"))
+    return info
+
+
 def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
-    """Read auth.json + opencode.json + env vars + vault to discover configured providers.
+    """Read settings + auth.json + opencode.json + env vars + vault providers.
 
     Returns ``{provider_id: {type, source, has_key, ...}}``.
     """
@@ -476,9 +707,35 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read opencode.json: %s", exc)
 
-    # 3. Env-based providers -- Google authenticates via env vars loaded
+    # 3. Dashboard settings -- provider cards persist here. This is the
+    #    canonical source for runtime model selection, so do not require an
+    #    opencode/auth side-effect before exposing those models.
+    settings_entries = _read_settings_provider_entries()
+    disabled_provider_ids = {
+        provider_id
+        for provider_id, provider_cfg in settings_entries.items()
+        if _provider_config_disabled(provider_cfg)
+    }
+    for provider_id in disabled_provider_ids:
+        providers.pop(provider_id, None)
+
+    for provider_id, provider_cfg in settings_entries.items():
+        if provider_id in disabled_provider_ids:
+            continue
+        info = _settings_provider_info(provider_id, provider_cfg)
+        if info is None:
+            continue
+        existing = providers.get(provider_id)
+        if existing is None:
+            providers[provider_id] = info
+        elif provider_id == "google":
+            existing["deployment_mode"] = info.get("deployment_mode") or existing.get(
+                "deployment_mode"
+            )
+
+    # 4. Env-based providers -- Google authenticates via env vars loaded
     #    from ~/.ostwin/.env, NOT via auth.json.  Detect it here.
-    if "google" not in providers:
+    if "google" not in disabled_provider_ids:
         has_gcp = bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
         has_api_key = bool(os.environ.get("GOOGLE_API_KEY"))
         has_creds = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
@@ -490,7 +747,7 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
                 "deployment_mode": _read_google_deployment_mode(),
             }
 
-    # 4. Vault -- catch any provider key stored via AddProviderModal that
+    # 5. Vault -- catch any provider key stored via AddProviderModal that
     #    hasn't been synced to auth.json yet.  Keys like
     #    ``google_service_account`` are internal vault entries, not providers.
     _VAULT_SKIP = {"google_service_account"}
@@ -500,7 +757,11 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
         vault = get_vault()
         vault_keys = vault.list_keys("providers")
         for vault_key in vault_keys:
-            if vault_key in providers or vault_key in _VAULT_SKIP:
+            if (
+                vault_key in providers
+                or vault_key in _VAULT_SKIP
+                or vault_key in disabled_provider_ids
+            ):
                 continue
             providers[vault_key] = {
                 "type": "api",
@@ -524,16 +785,12 @@ def _read_google_deployment_mode() -> str:
     Returns ``"vertex"`` or ``"gemini"`` (default).
     """
     try:
-        from dashboard.api_utils import AGENTS_DIR
-
-        config_path = AGENTS_DIR / "config.json"
-        if config_path.exists():
-            config = json.loads(config_path.read_text())
-            return (
-                config.get("providers", {})
-                .get("google", {})
-                .get("deployment_mode", "vertex")
-            )
+        config = _read_settings_config()
+        providers = config.get("providers", {})
+        if isinstance(providers, dict):
+            google = providers.get("google", {})
+            if isinstance(google, dict):
+                return google.get("deployment_mode", "vertex")
     except Exception:
         pass
     # If GOOGLE_CLOUD_PROJECT is set, assume vertex

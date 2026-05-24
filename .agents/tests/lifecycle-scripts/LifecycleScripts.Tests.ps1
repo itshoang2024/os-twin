@@ -79,6 +79,76 @@ Describe "init.ps1" {
             Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+
+    It "Should remove Ostwin MCP entries from legacy home opencode config" {
+        $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "ostwin-init-legacy-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+        $tmpHome = Join-Path ([System.IO.Path]::GetTempPath()) "ostwin-home-legacy-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+
+        $legacyDir = Join-Path $tmpHome ".opencode"
+        New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null
+        $legacyFile = Join-Path $legacyDir "opencode.json"
+        [ordered]@{
+            provider = "test-provider"
+            theme = "system"
+            mcp = [ordered]@{
+                memory = [ordered]@{
+                    type = "remote"
+                    url = "http://localhost:3366/api/memory-pool/mcp"
+                }
+                knowledge = [ordered]@{
+                    type = "remote"
+                    url = "http://localhost:3366/api/knowledge/mcp/"
+                }
+                custom = [ordered]@{
+                    type = "remote"
+                    url = "http://localhost:9999/mcp"
+                }
+            }
+            mcpServers = [ordered]@{
+                warroom = [ordered]@{
+                    command = @("python3", "warroom-server.py")
+                }
+                customServer = [ordered]@{
+                    command = @("custom-mcp")
+                }
+            }
+        } | ConvertTo-Json -Depth 8 | Set-Content -Path $legacyFile -Encoding utf8
+
+        $oldHome = $env:HOME
+        $oldUserProfile = $env:USERPROFILE
+        $oldXdgConfigHome = $env:XDG_CONFIG_HOME
+
+        try {
+            $env:HOME = $tmpHome
+            $env:USERPROFILE = $tmpHome
+            $env:XDG_CONFIG_HOME = Join-Path $tmpHome ".config"
+
+            & pwsh -NoProfile -File (Join-Path $AgentsDir "init.ps1") $tmpDir -Yes -PlanId "plan123" 2>&1 | Out-Null
+
+            $updated = Get-Content $legacyFile -Raw | ConvertFrom-Json
+            $updated.provider | Should -Be "test-provider"
+            $updated.theme | Should -Be "system"
+
+            $mcpNames = @($updated.mcp.PSObject.Properties.Name)
+            $mcpNames | Should -Contain "custom"
+            $mcpNames | Should -Not -Contain "memory"
+            $mcpNames | Should -Not -Contain "knowledge"
+
+            $legacyNames = @($updated.mcpServers.PSObject.Properties.Name)
+            $legacyNames | Should -Contain "customServer"
+            $legacyNames | Should -Not -Contain "warroom"
+
+            "$legacyFile.ostwin.bak" | Should -Exist
+        }
+        finally {
+            if ($null -eq $oldHome) { Remove-Item Env:HOME -ErrorAction SilentlyContinue } else { $env:HOME = $oldHome }
+            if ($null -eq $oldUserProfile) { Remove-Item Env:USERPROFILE -ErrorAction SilentlyContinue } else { $env:USERPROFILE = $oldUserProfile }
+            if ($null -eq $oldXdgConfigHome) { Remove-Item Env:XDG_CONFIG_HOME -ErrorAction SilentlyContinue } else { $env:XDG_CONFIG_HOME = $oldXdgConfigHome }
+            Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item $tmpHome -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 # ─── config.ps1 ──────────────────────────────────────────────────────────────
@@ -362,7 +432,6 @@ Describe "ostwin.ps1 — dispatch to .ps1 scripts" {
 
 Describe "Bash scripts unchanged (no regression)" {
     $bashScripts = @(
-        @{ Name = "init.sh";           Path = "init.sh" }
         @{ Name = "dashboard.sh";      Path = "dashboard.sh" }
         @{ Name = "stop.sh";           Path = "stop.sh" }
         @{ Name = "health.sh";         Path = "health.sh" }

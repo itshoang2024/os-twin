@@ -2,7 +2,7 @@
 Google OAuth2 flow for Vertex AI authentication.
 
 Implements the OAuth2 Authorization Code flow using Google's well-known
-desktop-app client credentials (the same ones ``gcloud auth`` uses).
+desktop-app client credentials.
 The result is an Application Default Credentials (ADC) JSON file that
 litellm and other Google SDKs pick up automatically.
 
@@ -11,7 +11,7 @@ Flow
 1. ``start_oauth()`` → returns an authorization URL for the browser.
 2. User authenticates in the browser, Google redirects to our callback.
 3. ``exchange_code()`` → exchanges the auth code for tokens.
-4. Tokens are saved as ADC at ``~/.config/gcloud/application_default_credentials.json``.
+4. Tokens are saved as an Ostwin-managed ADC file.
 
 Security
 --------
@@ -38,9 +38,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── Google's well-known desktop-app OAuth2 credentials ────────────────
-# These are the same credentials ``gcloud auth application-default login``
-# uses.  They are intentionally public (not secret) for installed/desktop
-# apps per Google's OAuth2 documentation.
+# These are intentionally public (not secret) for installed/desktop apps
+# per Google's OAuth2 documentation.
 _CLIENT_ID = "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com"
 _CLIENT_SECRET = "d-FL95Q19q7MQmFpd7hHD0Ty"
 
@@ -52,7 +51,7 @@ _SCOPES = [
     "openid",
 ]
 
-_ADC_DIR = Path.home() / ".config" / "gcloud"
+_ADC_DIR = Path.home() / ".ostwin" / "google"
 _ADC_FILE = _ADC_DIR / "application_default_credentials.json"
 
 
@@ -82,6 +81,11 @@ class OAuthSession:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
+def get_adc_path() -> Path:
+    """Return the Ostwin-managed ADC path for browser OAuth credentials."""
+    return _ADC_FILE
+
 
 def start_oauth(
     redirect_uri: str,

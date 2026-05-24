@@ -85,7 +85,11 @@ ensure_brew_paths() {
       export PATH="${brew_prefix}/bin:${brew_prefix}/sbin:$PATH"
     fi
   fi
-  # Also ensure ~/.local/bin is in PATH (for opencode official install)
+  # Also ensure user-local binary paths are in PATH.
+  # The opencode official installer currently installs to ~/.opencode/bin.
+  if [[ ":$PATH:" != *":$HOME/.opencode/bin:"* ]]; then
+    export PATH="$HOME/.opencode/bin:$PATH"
+  fi
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     export PATH="$HOME/.local/bin:$PATH"
   fi

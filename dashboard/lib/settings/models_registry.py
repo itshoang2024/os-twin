@@ -325,13 +325,23 @@ class OpenCodeProviderDef:
     opencode_key: str  # key under "provider" in opencode.json
     vault_scope: str  # vault scope for the API key
     vault_key: str  # vault key for the API key
-    base_url: str  # baseURL for the openai-compatible shim
+    base_url: str  # baseURL for the openai-compatible shim (empty for non-HTTP providers like Vertex)
     npm_package: str = "@ai-sdk/openai-compatible"
     # map of model_id -> {"npm": ..., "name": ...}
     # populated dynamically from the catalog
     registry_filter_provider: str = ""  # provider key in _CATALOG
     registry_filter_mode: Optional[str] = None  # mode filter (e.g. "gemini")
     model_name_prefix: str = ""  # prefix for model name in opencode (e.g. "gemini:")
+    # When set, only catalog entries whose id starts with this prefix are
+    # included. Lets multiple providers share one registry_filter_provider
+    # bucket (e.g. google-vertex/* vs google-vertex-anthropic/* under "Gemini").
+    id_prefix: str = ""
+    # When False, sync skips the api_key vault fetch. Used by Vertex AI,
+    # which authenticates via ADC / service account rather than an API key.
+    requires_api_key: bool = True
+    # Discriminator for the options block builder: "api_key" (default) writes
+    # {"apiKey": ..., "baseURL": ...}; "vertex" writes {"project", "location"}.
+    auth_strategy: str = "api_key"
 
 
 OPENCODE_PROVIDERS: Dict[str, OpenCodeProviderDef] = {
@@ -352,6 +362,32 @@ OPENCODE_PROVIDERS: Dict[str, OpenCodeProviderDef] = {
         registry_filter_provider="BytePlus",
         registry_filter_mode=None,
         model_name_prefix="byteplus:",
+    ),
+    "google-vertex": OpenCodeProviderDef(
+        opencode_key="google-vertex",
+        vault_scope="providers",
+        vault_key="google",
+        base_url="",
+        npm_package="@ai-sdk/google-vertex",
+        registry_filter_provider="Gemini",
+        registry_filter_mode="vertex",
+        model_name_prefix="google-vertex:",
+        id_prefix="google-vertex/",
+        requires_api_key=False,
+        auth_strategy="vertex",
+    ),
+    "google-vertex-anthropic": OpenCodeProviderDef(
+        opencode_key="google-vertex-anthropic",
+        vault_scope="providers",
+        vault_key="google",
+        base_url="",
+        npm_package="@ai-sdk/google-vertex",
+        registry_filter_provider="Gemini",
+        registry_filter_mode="vertex",
+        model_name_prefix="google-vertex-anthropic:",
+        id_prefix="google-vertex-anthropic/",
+        requires_api_key=False,
+        auth_strategy="vertex",
     ),
 }
 
@@ -452,6 +488,13 @@ def build_opencode_models(
         if (
             provider_def.registry_filter_mode
             and entry.mode != provider_def.registry_filter_mode
+        ):
+            continue
+
+        # Apply id-prefix filter if set. Lets multiple providers share one
+        # catalog bucket (e.g. google-vertex/* vs google-vertex-anthropic/*).
+        if provider_def.id_prefix and not entry.id.startswith(
+            provider_def.id_prefix
         ):
             continue
 
