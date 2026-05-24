@@ -127,8 +127,11 @@ start_dashboard() {
   supervisor="$(_dashboard_supervisor || true)"
 
   if [[ -n "$supervisor" ]]; then
-    # Supervisor is responsible for the process lifecycle — let it handle
-    # the restart so launchd/systemd does not race a manual kill/start.
+    # Kill any process holding the port BEFORE supervisor restart.
+    # The supervisor only manages processes it started — a manually
+    # started dashboard (debugging, ostwin dashboard start, etc.)
+    # won't be killed by systemctl restart.
+    _kill_dashboard_port_listeners "$DASHBOARD_PORT" || true
     _restart_dashboard_via_supervisor "$supervisor" "$DASHBOARD_PORT" \
       || {
         warn "Supervisor restart failed; new dashboard may not load"
