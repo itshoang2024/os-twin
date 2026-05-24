@@ -41,11 +41,23 @@ jobs:
           errors = []
 
           release_branch_pattern = re.compile(r"^release-\d{4}\.\d{2}\.\d{2}\.\d+$")
-          if not release_branch_pattern.fullmatch(head_ref):
+          hotfix_branch_pattern = re.compile(r"^hotfix/.+")
+          is_release_pr = bool(release_branch_pattern.fullmatch(head_ref))
+          is_hotfix_pr = bool(hotfix_branch_pattern.fullmatch(head_ref))
+
+          if not is_release_pr and not is_hotfix_pr:
               errors.append(
-                  "PRs into main must come from release-YYYY.MM.DD.N "
+                  "PRs into main must come from release-YYYY.MM.DD.N or hotfix/* "
                   f"(got {head_ref!r})."
               )
+              print("Release Guard failed:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          if is_hotfix_pr:
+              print("Release Guard passed for hotfix PR.")
+              sys.exit(0)
 
           version_match = re.search(
               r"(?im)^\s*Release version:\s*(v\d+\.\d+\.\d+)\s*$",
