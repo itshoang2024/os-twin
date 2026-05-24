@@ -255,7 +255,7 @@ knowledge_query("project_docs", "How does auth work?", "summarized", 5)
 npx mcporter call knowledge.query namespace:'project_docs' query:'How does auth work?' mode:'summarized' top_k:5
 ```
 
-### `find_notes_by_knowledge_link`
+### `knowledge_find_notes_by_knowledge_link`
 
 Find memory notes that link to a specific knowledge chunk. Part of the Memory ↔ Knowledge Bridge.
 
@@ -271,10 +271,10 @@ Find memory notes that link to a specific knowledge chunk. Part of the Memory �
 
 ```bash
 # MCP — specific chunk
-find_notes_by_knowledge_link("docs", "abc123def456", 0)
+knowledge_find_notes_by_knowledge_link("docs", "abc123def456", 0)
 
 # MCP — any chunk in file
-find_notes_by_knowledge_link("docs", "abc123def456")
+knowledge_find_notes_by_knowledge_link("docs", "abc123def456")
 
 # CLI
 npx mcporter call knowledge.find_notes_by_knowledge_link namespace:'docs' file_hash:'abc123def456' chunk_idx:0
@@ -291,7 +291,7 @@ All tools are invoked via MCP or CLI:
 npx mcporter call memory.<tool_name> [args...]
 ```
 
-### `save_memory`
+### `memory_save`
 
 Save a new memory note. Write detailed, comprehensive memories — **not one-liners**.
 
@@ -308,22 +308,22 @@ Save a new memory note. Write detailed, comprehensive memories — **not one-lin
 - Finds and links related existing memories
 - Creates a summary for long content (>150 words)
 
-**Returns:** `{ id, status: "accepted" }` — note appears in `search_memory` / `memory_tree` once background analysis completes.
+**Returns:** `{ id, status: "accepted" }` — note appears in `memory_search` / `memory_tree` once background analysis completes.
 
 **Good vs Bad memories:**
 ```bash
 # GOOD — detailed, with context, reasoning, gotchas
-npx mcporter call memory.save_memory \
+npx mcporter call memory.save \
   content:'PostgreSQL JSONB stores semi-structured data with full GIN indexing. We chose it over MongoDB because our data has relational aspects (user->orders->items) but product attributes vary per category. The GIN index on product.attributes reduced catalog search from 800ms to 12ms. Key gotcha: JSONB equality checks are exact-match, so normalize data before insertion.' \
   name:'PostgreSQL JSONB decision' \
   path:'architecture/database' \
   tags:'database,postgresql,jsonb,architecture'
 
 # BAD — one-liner, no context
-npx mcporter call memory.save_memory content:'Use PostgreSQL JSONB for products.'
+npx mcporter call memory.save content:'Use PostgreSQL JSONB for products.'
 ```
 
-### `search_memory`
+### `memory_search`
 
 Semantic search across all memories. Returns the most relevant memories ranked by vector similarity.
 
@@ -336,12 +336,12 @@ Semantic search across all memories. Returns the most relevant memories ranked b
 
 ```bash
 # MCP
-search_memory("PostgreSQL indexing strategies for JSON data")
-search_memory("authentication flow and JWT token handling", 10)
+memory_search("PostgreSQL indexing strategies for JSON data")
+memory_search("authentication flow and JWT token handling", 10)
 
 # CLI
-npx mcporter call memory.search_memory query:'PostgreSQL indexing strategies for JSON data'
-npx mcporter call memory.search_memory query:'auth flow JWT' k:10
+npx mcporter call memory.search query:'PostgreSQL indexing strategies for JSON data'
+npx mcporter call memory.search query:'auth flow JWT' k:10
 ```
 
 ### `memory_tree`
@@ -355,7 +355,7 @@ Show the full directory tree of all memories. Useful for understanding organizat
 memory_tree()
 
 # CLI
-npx mcporter call memory.memory_tree
+npx mcporter call memory.tree
 ```
 
 ### `grep_memory`
@@ -379,9 +379,9 @@ grep_memory("BEGIN", "-A 3")                 # 3 lines after match
 grep_memory("docker|kubernetes", "-E")       # extended regex OR
 
 # CLI
-npx mcporter call memory.grep_memory pattern:'PostgreSQL'
-npx mcporter call memory.grep_memory pattern:'oauth.*token' flags:'-i'
-npx mcporter call memory.grep_memory pattern:'TODO' flags:'-l'
+npx mcporter call memory.grep pattern:'PostgreSQL'
+npx mcporter call memory.grep pattern:'oauth.*token' flags:'-i'
+npx mcporter call memory.grep pattern:'TODO' flags:'-l'
 ```
 
 ### `find_memory`
@@ -404,9 +404,9 @@ find_memory("-mmin -60")                     # modified last 60 min
 find_memory("-maxdepth 2 -type d")           # directories, 2 levels
 
 # CLI
-npx mcporter call memory.find_memory
-npx mcporter call memory.find_memory args:"-name '*database*'"
-npx mcporter call memory.find_memory args:"-mmin -60"
+npx mcporter call memory.find
+npx mcporter call memory.find args:"-name '*database*'"
+npx mcporter call memory.find args:"-mmin -60"
 ```
 
 ### `find_notes_by_knowledge_link` (Memory side)
@@ -423,7 +423,7 @@ Reverse lookup: find memory notes that cite a specific knowledge chunk.
 
 ```bash
 # CLI
-npx mcporter call memory.find_notes_by_knowledge_link namespace:'docs' file_hash:'abc123def456'
+npx mcporter call knowledge.find_notes_by_knowledge_link namespace:'docs' file_hash:'abc123def456'
 ```
 
 ---
@@ -436,7 +436,7 @@ npx mcporter call memory.find_notes_by_knowledge_link namespace:'docs' file_hash
 ┌─────────────────────────────────────────────────────────────────┐
 │                        BEFORE STARTING WORK                     │
 │                                                                 │
-│  1. search_memory("terms from your brief")     ← Memory first  │
+│  1. memory_search("terms from your brief")     ← Memory first  │
 │  2. memory_tree()                              ← See structure  │
 │  3. knowledge_query(ns, "how does X work?")    ← Knowledge next │
 │                                                                 │
@@ -466,7 +466,7 @@ Workers **MUST** write to Memory after every deliverable:
 
 ```bash
 # After creating a model (Memory — working context)
-npx mcporter call memory.save_memory \
+npx mcporter call memory.save \
   content:'Created src/models/user.py — User model with fields: id (UUID), email (str, unique), hashed_password (str), created_at (datetime). Uses SQLAlchemy declarative base. Relationship: User has_many Orders. Validation: email format checked at API layer, not DB layer.' \
   name:'User model — src/models/user.py' \
   path:'code/models' \
@@ -492,14 +492,14 @@ Evaluators **MUST** write to Memory after every review:
 
 ```bash
 # After a QA review (Memory — working context)
-npx mcporter call memory.save_memory \
+npx mcporter call memory.save \
   content:'Reviewed EPIC-003 auth module. PASSED with notes: 1. JWT expiry correctly set to 24h with refresh rotation. 2. Rate limiting on /login confirmed at 5 req/min via middleware. 3. MINOR: Error messages on 401 leak whether email exists — suggest generic invalid credentials. 4. Cross-room note: Room-005 (payments) needs the User model from this room.' \
   name:'QA verdict — EPIC-003 auth' \
   path:'qa/reviews' \
   tags:'qa,auth,epic-003,passed'
 
 # After discovering a recurring pattern across epics
-npx mcporter call memory.save_memory \
+npx mcporter call memory.save \
   content:'Recurring issue across EPIC-001, EPIC-003, EPIC-005: engineers not adding rate limiting to new endpoints. The middleware exists (src/middleware/rate_limit.py) but is opt-in per route. Recommend making it opt-OUT in architecture docs. Filed as convention gap.' \
   name:'Pattern — missing rate limiting' \
   path:'qa/patterns' \
@@ -540,7 +540,7 @@ Before ANY work begins, every agent runs this sequence:
 ### Step 1: Memory Search (What have other rooms done?)
 
 ```bash
-npx mcporter call memory.search_memory query:'schema API auth conventions'
+npx mcporter call memory.search query:'schema API auth conventions'
 ```
 
 Reveals: existing code, interfaces, decisions, and gotchas from parallel or prior work.
@@ -548,7 +548,7 @@ Reveals: existing code, interfaces, decisions, and gotchas from parallel or prio
 ### Step 2: Memory Tree (What's the structure?)
 
 ```bash
-npx mcporter call memory.memory_tree
+npx mcporter call memory.tree
 ```
 
 Shows how memories are organized — helps you place new memories correctly and spot what areas have been worked on.
@@ -637,29 +637,29 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before work | `search_memory()` + `memory_tree()` | `knowledge_query(ns, question)` |
+| Before work | `memory_search()` + `memory_tree()` | `knowledge_query(ns, question)` |
 | During work | — | — |
-| After each file | `save_memory(content=full_code)` | — |
-| After each decision | `save_memory(content=decision+why)` | — |
-| After epic done | Summary `save_memory()` | `knowledge_import_folder()` if docs produced, or `knowledge_import_text()` for decisions |
+| After each file | `memory_save(content=full_code)` | — |
+| After each decision | `memory_save(content=decision+why)` | — |
+| After epic done | Summary `memory_save()` | `knowledge_import_folder()` if docs produced, or `knowledge_import_text()` for decisions |
 
 ### Evaluators (QA, Auditors, etc.)
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before review | `search_memory()` for engineer's work | `knowledge_query(ns, question)` for standards |
+| Before review | `memory_search()` for engineer's work | `knowledge_query(ns, question)` for standards |
 | During review | — | — |
-| After verdict | `save_memory(content=findings)` | — |
-| After pattern found | `save_memory(tags=["promote-to-knowledge"])` | — |
-| After convention gap | `save_memory(content=gap_description)` | Flag for Knowledge Curator |
+| After verdict | `memory_save(content=findings)` | — |
+| After pattern found | `memory_save(tags=["promote-to-knowledge"])` | — |
+| After convention gap | `memory_save(content=gap_description)` | Flag for Knowledge Curator |
 
 ### Manager
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before assignment | `search_memory()` for dependencies | `knowledge_query()` for project context |
-| After triage | `save_memory(content=triage_decision)` | — |
-| After release | `save_memory(content=release_summary)` | `knowledge_import_folder()` for release docs |
+| Before assignment | `memory_search()` for dependencies | `knowledge_query()` for project context |
+| After triage | `memory_save(content=triage_decision)` | — |
+| After release | `memory_save(content=release_summary)` | `knowledge_import_folder()` for release docs |
 
 ---
 
@@ -677,8 +677,8 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 ## Verification
 
 When auditing brain-ops compliance:
-1. Every worker's `done` message is preceded by `save_memory()` calls
-2. Every evaluator's verdict is followed by a `save_memory()` call
-3. Every agent's first action includes `search_memory()` + `knowledge_query()`
+1. Every worker's `done` message is preceded by `memory_save()` calls
+2. Every evaluator's verdict is followed by a `memory_save()` call
+3. Every agent's first action includes `memory_search()` + `knowledge_query()`
 4. No agent answers questions that Knowledge could answer without checking first
 5. Memories tagged `promote-to-knowledge` are reviewed in curation sessions

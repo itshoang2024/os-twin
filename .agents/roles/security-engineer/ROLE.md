@@ -30,7 +30,7 @@ You are not a gatekeeper. You are a **security enabler** — integrating securit
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<security, vulnerability, threat model, compliance terms>")
+memory_search(query="<security, vulnerability, threat model, compliance terms>")
 memory_tree()
 knowledge_query(namespace="<security-docs>", query="<policies, standards, past findings>", mode="summarized")
 ```
@@ -82,7 +82,7 @@ When required, using `compliance-mapping`:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Security review — [feature/service]. Threat model: [summary]. Findings: [P0/P1 count]. Vulnerabilities: [critical CVE count]. Compliance: [framework] gaps: [count]. Actions: [next steps].",
   name="Security Review — [feature/service] [date]",
   path="security/reviews/[feature]/[date]",
