@@ -28,7 +28,7 @@ Did QA check the boundaries?
 
 | Check | Should have done | Evidence in verdict |
 |-------|-----------------|-------------------|
-| Cross-room data shapes | `search_memory()` for other rooms' interfaces | Yes / No |
+| Cross-room data shapes | `memory_search()` for other rooms' interfaces | Yes / No |
 | Database migration compatibility | Checked migration files | Yes / No |
 | API contract match | Compared backend output to frontend interface | Yes / No |
 | Error path testing | Tested with invalid input, missing data, timeouts | Yes / No |

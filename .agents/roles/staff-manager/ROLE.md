@@ -33,7 +33,7 @@ Every finding MUST be classified:
 Before reviewing ANY code, load both layers of the brain:
 
 ```
-search_memory(query="<epic/task terms, module names, data shapes>")
+memory_search(query="<epic/task terms, module names, data shapes>")
 memory_tree()
 knowledge_query(namespace="<project-docs>", query="<relevant standards>", mode="summarized")
 ```

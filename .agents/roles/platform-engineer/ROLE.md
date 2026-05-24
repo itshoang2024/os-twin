@@ -29,7 +29,7 @@ You don't build features users see. You build the **platform that feature teams 
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<platform, SDK, pipeline, DX terms>")
+memory_search(query="<platform, SDK, pipeline, DX terms>")
 memory_tree()
 knowledge_query(namespace="<platform-docs>", query="<infrastructure, tooling, APIs>", mode="summarized")
 ```

@@ -28,7 +28,7 @@ You are not a people manager. You are not a technical authority. You are the **e
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<program name, milestone terms, dependency terms>")
+memory_search(query="<program name, milestone terms, dependency terms>")
 memory_tree()
 knowledge_query(namespace="<project-docs>", query="<plans, timelines, requirements>", mode="summarized")
 ```

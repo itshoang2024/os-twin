@@ -30,7 +30,7 @@ You are not a gatekeeper. You are a **security enabler** — integrating securit
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<security, vulnerability, threat model, compliance terms>")
+memory_search(query="<security, vulnerability, threat model, compliance terms>")
 memory_tree()
 knowledge_query(namespace="<security-docs>", query="<policies, standards, past findings>", mode="summarized")
 ```

@@ -20,7 +20,7 @@ trust_level: core
 Before reviewing ANY work, load context from both layers:
 ```
 # What did the engineer build? What do other rooms depend on?
-search_memory(query="<terms from the epic/task — e.g. auth, schema, API>")
+memory_search(query="<terms from the epic/task — e.g. auth, schema, API>")
 memory_tree()
 
 # What does the project expect? What are the standards?

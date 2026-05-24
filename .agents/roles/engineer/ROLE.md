@@ -14,7 +14,7 @@ When assigned an Epic, you own the full planning and implementation cycle:
 Before writing any code, load context from both layers:
 ```
 # Memory — what have other rooms built?
-search_memory(query="<terms from your brief — e.g. schema, API contract, conventions>")
+memory_search(query="<terms from your brief — e.g. schema, API contract, conventions>")
 memory_tree()
 
 # Knowledge — what does the project believe?

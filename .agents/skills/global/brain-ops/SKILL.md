@@ -308,7 +308,7 @@ Save a new memory note. Write detailed, comprehensive memories — **not one-lin
 - Finds and links related existing memories
 - Creates a summary for long content (>150 words)
 
-**Returns:** `{ id, status: "accepted" }` — note appears in `search_memory` / `memory_tree` once background analysis completes.
+**Returns:** `{ id, status: "accepted" }` — note appears in `memory_search` / `memory_tree` once background analysis completes.
 
 **Good vs Bad memories:**
 ```bash
@@ -323,7 +323,7 @@ npx mcporter call memory.save_memory \
 npx mcporter call memory.save_memory content:'Use PostgreSQL JSONB for products.'
 ```
 
-### `search_memory`
+### `memory_search`
 
 Semantic search across all memories. Returns the most relevant memories ranked by vector similarity.
 
@@ -336,12 +336,12 @@ Semantic search across all memories. Returns the most relevant memories ranked b
 
 ```bash
 # MCP
-search_memory("PostgreSQL indexing strategies for JSON data")
-search_memory("authentication flow and JWT token handling", 10)
+memory_search("PostgreSQL indexing strategies for JSON data")
+memory_search("authentication flow and JWT token handling", 10)
 
 # CLI
-npx mcporter call memory.search_memory query:'PostgreSQL indexing strategies for JSON data'
-npx mcporter call memory.search_memory query:'auth flow JWT' k:10
+npx mcporter call memory.memory_search query:'PostgreSQL indexing strategies for JSON data'
+npx mcporter call memory.memory_search query:'auth flow JWT' k:10
 ```
 
 ### `memory_tree`
@@ -436,7 +436,7 @@ npx mcporter call memory.find_notes_by_knowledge_link namespace:'docs' file_hash
 ┌─────────────────────────────────────────────────────────────────┐
 │                        BEFORE STARTING WORK                     │
 │                                                                 │
-│  1. search_memory("terms from your brief")     ← Memory first  │
+│  1. memory_search("terms from your brief")     ← Memory first  │
 │  2. memory_tree()                              ← See structure  │
 │  3. knowledge_query(ns, "how does X work?")    ← Knowledge next │
 │                                                                 │
@@ -540,7 +540,7 @@ Before ANY work begins, every agent runs this sequence:
 ### Step 1: Memory Search (What have other rooms done?)
 
 ```bash
-npx mcporter call memory.search_memory query:'schema API auth conventions'
+npx mcporter call memory.memory_search query:'schema API auth conventions'
 ```
 
 Reveals: existing code, interfaces, decisions, and gotchas from parallel or prior work.
@@ -637,7 +637,7 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before work | `search_memory()` + `memory_tree()` | `knowledge_query(ns, question)` |
+| Before work | `memory_search()` + `memory_tree()` | `knowledge_query(ns, question)` |
 | During work | — | — |
 | After each file | `save_memory(content=full_code)` | — |
 | After each decision | `save_memory(content=decision+why)` | — |
@@ -647,7 +647,7 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before review | `search_memory()` for engineer's work | `knowledge_query(ns, question)` for standards |
+| Before review | `memory_search()` for engineer's work | `knowledge_query(ns, question)` for standards |
 | During review | — | — |
 | After verdict | `save_memory(content=findings)` | — |
 | After pattern found | `save_memory(tags=["promote-to-knowledge"])` | — |
@@ -657,7 +657,7 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 
 | Phase | Memory Action | Knowledge Action |
 |-------|--------------|------------------|
-| Before assignment | `search_memory()` for dependencies | `knowledge_query()` for project context |
+| Before assignment | `memory_search()` for dependencies | `knowledge_query()` for project context |
 | After triage | `save_memory(content=triage_decision)` | — |
 | After release | `save_memory(content=release_summary)` | `knowledge_import_folder()` for release docs |
 
@@ -679,6 +679,6 @@ Sprint review: Team agrees to make it official                  → Knowledge im
 When auditing brain-ops compliance:
 1. Every worker's `done` message is preceded by `save_memory()` calls
 2. Every evaluator's verdict is followed by a `save_memory()` call
-3. Every agent's first action includes `search_memory()` + `knowledge_query()`
+3. Every agent's first action includes `memory_search()` + `knowledge_query()`
 4. No agent answers questions that Knowledge could answer without checking first
 5. Memories tagged `promote-to-knowledge` are reviewed in curation sessions

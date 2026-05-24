@@ -41,7 +41,7 @@ When reviewing:
 Before designing or reviewing ANYTHING, load context from both layers:
 ```
 # Memory — what have other rooms built and decided?
-search_memory(query="<terms from your design scope — e.g. auth, schema, data model>")
+memory_search(query="<terms from your design scope — e.g. auth, schema, data model>")
 memory_tree()
 
 # Knowledge — what are the existing architectural standards?

@@ -9,7 +9,7 @@ description: Use this skill to save, search, and manage persistent memories via 
 
 Auto-memory is a **persistent, semantic knowledge base** exposed as an MCP server over stdio. It stores knowledge as interconnected markdown notes with auto-generated tags, keywords, directory paths, and links between related memories. The system uses vector embeddings for semantic search.
 
-The MCP server name is `memory`. Tools are prefixed accordingly (e.g. `memory.save_memory`, `memory.search_memory`).
+The MCP server name is `memory`. Tools are prefixed accordingly (e.g. `memory.save_memory`, `memory.memory_search`).
 
 ## Available MCP Tools
 
@@ -43,12 +43,12 @@ save_memory(
 save_memory(content="Use PostgreSQL JSONB for product data.")
 ```
 
-### `search_memory` -- Semantic search across all memories
+### `memory_search` -- Semantic search across all memories
 
 Returns the most relevant memories ranked by vector similarity. Use specific, descriptive queries.
 
 ```
-search_memory(
+memory_search(
   query: str,   # Natural language query. Be specific.
   k: int = 5    # Max results to return.
 )
@@ -56,8 +56,8 @@ search_memory(
 
 **Examples:**
 ```
-search_memory(query="PostgreSQL indexing strategies for JSON data")
-search_memory(query="authentication flow and JWT token handling", k=10)
+memory_search(query="PostgreSQL indexing strategies for JSON data")
+memory_search(query="authentication flow and JWT token handling", k=10)
 ```
 
 Results include: id, name, path, content, tags, keywords, links, backlinks.

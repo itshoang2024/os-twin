@@ -22,7 +22,7 @@ All tools are executed via the `mcporter` CLI following `brain-ops` standards:
 
 | Tool | Purpose |
 |------|---------|
-| `memory.search_memory` | Check for recent retrieval complaints or "promote-to-knowledge" tags |
+| `memory.memory_search` | Check for recent retrieval complaints or "promote-to-knowledge" tags |
 | `knowledge.list_namespaces` | Get baseline stats per namespace |
 | `knowledge.query` | Run probe queries in `raw`, `graph`, `summarized` modes |
 | `memory.save_memory` | Record the audit findings and health scores |
@@ -33,7 +33,7 @@ All tools are executed via the `mcporter` CLI following `brain-ops` standards:
 
 Before probing, check if other agents have reported issues with the Knowledge layer:
 ```bash
-npx mcporter call memory.search_memory query:'missing knowledge OR poor retrieval OR llm_unavailable'
+npx mcporter call memory.memory_search query:'missing knowledge OR poor retrieval OR llm_unavailable'
 ```
 Record any specific namespaces or domains that have been flagged by the team.
 
@@ -100,7 +100,7 @@ Save a detailed `quality-audit.md` artifact with per-namespace probe results, he
 
 ## Verification
 
-1. `search_memory` called before probing to discover pain points.
+1. `memory_search` called before probing to discover pain points.
 2. All namespaces probed with multiple queries across all three modes via `npx mcporter`.
 3. Each namespace has a health score assigned.
 4. `save_memory` called with the final audit verdict.
