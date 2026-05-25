@@ -286,7 +286,17 @@ class NamespaceManager:
         with self._lock:
             ns_path = self.path_for(namespace)
             if ns_path.exists():
-                raise NamespaceExistsError(f"Namespace {namespace!r} already exists")
+                # Check for zombie directory: exists but no manifest.json
+                # (leftover from incomplete deletion, e.g. KuzuDB recreating graph.db)
+                manifest = ns_path / "manifest.json"
+                if manifest.exists():
+                    raise NamespaceExistsError(f"Namespace {namespace!r} already exists")
+                # Zombie directory — clean it up before creating fresh
+                logger.warning(
+                    "Removing zombie namespace directory %s (no manifest.json)",
+                    ns_path,
+                )
+                shutil.rmtree(ns_path)
             ns_path.mkdir(parents=True, exist_ok=False)
             now = _utcnow()
             meta_kwargs: dict[str, Any] = dict(
@@ -358,11 +368,27 @@ class NamespaceManager:
             # Drop any cached Kuzu handle BEFORE rmtree so the file is closed.
             self._evict_kuzu_cache_inst(namespace)
 
+            import gc
+            gc.collect()  # Force GC to release any lingering Kuzu DB refs
+
             try:
                 shutil.rmtree(ns_path)
             except OSError as exc:
                 logger.error("Failed to remove %s: %s", ns_path, exc)
                 raise
+
+            # KuzuDB may recreate graph.db via WAL flush after rmtree if a
+            # stale reference survived. Verify the directory is truly gone;
+            # if not, force a second cleanup pass.
+            if ns_path.exists():
+                logger.warning(
+                    "Namespace dir %s still exists after rmtree (likely stale KuzuDB handle); retrying cleanup",
+                    ns_path,
+                )
+                try:
+                    shutil.rmtree(ns_path)
+                except OSError as exc:
+                    logger.error("Second rmtree attempt failed for %s: %s", ns_path, exc)
 
             logger.info("Deleted namespace %r (%s)", namespace, ns_path)
             return True
@@ -391,9 +417,11 @@ class NamespaceManager:
         cache = getattr(KuzuLabelledPropertyGraph, "kuzu_database_cache", None)
         if not isinstance(cache, dict):
             return
-        # Pop both the resolved path and any matching unresolved variant —
-        # the cache key is the resolved path, but be defensive.
-        cache.pop(db_path, None)
+        # Pop the database object from cache; explicitly delete reference
+        # so KuzuDB can flush and close the file before rmtree runs.
+        db_obj = cache.pop(db_path, None)
+        if db_obj is not None:
+            del db_obj
 
     # Module-level back-compat shim. EPIC-002 callers (if any) used the
     # static method name; keep it but route through the instance method on
