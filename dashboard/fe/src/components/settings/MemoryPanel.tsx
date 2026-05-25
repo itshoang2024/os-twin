@@ -12,6 +12,8 @@ import { ModelSelect } from '@/components/settings/ModelSelect';
 import { ModelConfigSample } from './ModelConfigSample';
 import { ProviderIcon } from './ProviderIcon';
 
+import { useNotificationStore } from '@/lib/stores/notificationStore';
+
 export interface MemoryPanelProps {
   memory: MemorySettings;
   provenance?: Record<string, string>;
@@ -30,13 +32,13 @@ interface BackendOption {
 }
 
 const LLM_BACKENDS: BackendOption[] = [
-  { value: 'ollama',             label: 'Ollama (Local)',          description: 'Local Ollama server', icon: 'dns' },
-  { value: 'openai-compatible',  label: 'OpenAI-Compatible',      description: 'Any OpenAI-compatible API server', icon: 'api' },
+  { value: 'ollama',            label: 'Ollama (Local)',          description: 'Local Ollama server', icon: 'dns' },
+  { value: 'openai-compatible', label: 'OpenAI-Compatible',      description: 'Any OpenAI-compatible API server', icon: 'api' },
 ];
 
 const EMBEDDING_BACKENDS: BackendOption[] = [
-  { value: 'ollama',             label: 'Ollama (Local)',          description: 'Local Ollama embedding server', icon: 'dns' },
-  { value: 'openai-compatible',  label: 'OpenAI-Compatible',      description: 'Any OpenAI-compatible embedding API', icon: 'api' },
+  { value: 'ollama',            label: 'Ollama (Local)',          description: 'Local Ollama embedding server', icon: 'dns' },
+  { value: 'openai-compatible', label: 'OpenAI-Compatible',      description: 'Any OpenAI-compatible embedding API', icon: 'api' },
 ];
 
 const VECTOR_BACKENDS: BackendOption[] = [
@@ -97,6 +99,7 @@ const DEFAULTS: MemorySettings = {
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: MemoryPanelProps) {
+  const addToast = useNotificationStore((s) => s.addToast);
   const [poolHealth, setPoolHealth] = useState<any>(null);
 
   const effective = { ...DEFAULTS, ...memory };
@@ -132,10 +135,94 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
   };
 
   const handleSave = async () => {
+    // Check if embedding model or vector backend changed — needs reindex confirmation
+    const embeddingChanged = draft.embedding_model !== effective.embedding_model
+      && effective.embedding_model && draft.embedding_model;
+    const vectorBackendChanged = draft.vector_backend !== effective.vector_backend;
+
+    if (embeddingChanged || vectorBackendChanged) {
+      try {
+        const res = await fetch(`/api/amem/embedding-status?model=${encodeURIComponent(draft.embedding_model || "")}`);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const status = await res.json();
+        // Only show dialog if there are plans that need re-indexing
+        if (status.total_reindex_notes > 0 || status.plans?.length > 0) {
+          setReindexStatus(status);
+          setShowReindexDialog(true);
+          return; // Wait for user confirmation
+        }
+        // No plans to reindex — save directly
+        addToast({
+          type: 'info',
+          title: 'Embedding Model Updated',
+          message: 'No existing memories need re-indexing.',
+          autoDismiss: true,
+        });
+      } catch (err) {
+        const proceed = window.confirm(
+          `Could not check reindex status: ${err}\n\nSave anyway? Memories may need manual re-indexing.`
+        );
+        if (!proceed) return;
+      }
+    }
+
     setIsSaving(true);
     try {
       await onUpdate(draft);
       setHasChanges(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleConfirmReindex = async () => {
+    setShowReindexDialog(false);
+    setIsSaving(true);
+    setIsReindexing(true);
+    try {
+      // Save settings first
+      await onUpdate(draft);
+      setHasChanges(false);
+
+      // Trigger reindex
+      const res = await fetch('/api/amem/reindex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: draft.embedding_model }),
+      });
+
+      if (res.ok) {
+        addToast({
+          type: 'info',
+          title: 'Re-indexing Started',
+          message: 'Memory vector databases are being rebuilt...',
+          autoDismiss: true,
+        });
+        // Poll progress
+        const poll = setInterval(async () => {
+          try {
+            const statusRes = await fetch('/api/amem/reindex/status');
+            if (statusRes.ok) {
+              const progress = await statusRes.json();
+              setReindexProgress(progress);
+              if (progress.status === 'completed' || progress.status === 'idle') {
+                clearInterval(poll);
+                setIsReindexing(false);
+                setReindexProgress(null);
+                addToast({
+                  type: 'success',
+                  title: 'Re-index Complete',
+                  message: `${progress.plans_completed} plan(s) re-indexed in ${progress.elapsed_seconds}s`,
+                  autoDismiss: true,
+                });
+              }
+            }
+          } catch {
+            clearInterval(poll);
+            setIsReindexing(false);
+          }
+        }, 2000);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -150,6 +237,12 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
   const [embedModelInput, setEmbedModelInput] = useState(draft.embedding_model);
   const [embeddingCompatibleUrl, setEmbeddingCompatibleUrl] = useState(draft.embedding_compatible_url ?? '');
   const [embeddingCompatibleKey, setEmbeddingCompatibleKey] = useState(draft.embedding_compatible_key ?? '');
+
+  // ── Reindex state (Plan 028)
+  const [reindexStatus, setReindexStatus] = useState<any>(null);
+  const [showReindexDialog, setShowReindexDialog] = useState(false);
+  const [reindexProgress, setReindexProgress] = useState<any>(null);
+  const [isReindexing, setIsReindexing] = useState(false);
 
   // ── Ollama state ─────────────────────────────────────────────────────
   const [ollamaHealth, setOllamaHealth] = useState<Record<string, { running: boolean; model_exists: boolean; pulling: boolean; progress?: string }>>({});
@@ -561,7 +654,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               <input
                 type="text"
                 value={llmModelInput}
-                onChange={(e) => setLlmModelInput(e.target.value)}
+                onChange={(e) => { setLlmModelInput(e.target.value); setHasChanges(true); }}
                 onBlur={commitLlmModelInput}
                 onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 placeholder="e.g. llama3.2"
@@ -731,7 +824,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               <input
                 type="text"
                 value={embedModelInput}
-                onChange={(e) => setEmbedModelInput(e.target.value)}
+                onChange={(e) => { setEmbedModelInput(e.target.value); setHasChanges(true); }}
                 onBlur={commitEmbedModelInput}
                 onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 placeholder="e.g. leoipulsar/harrier-0.6b"
@@ -1061,6 +1154,58 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       />
 
       {/* ── Save Settings Button ──────────────────────────── */}
+      {/* Reindex confirmation dialog */}
+      {showReindexDialog && reindexStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-amber-500 text-xl">⚠</span>
+              <h3 className="text-lg font-bold text-slate-800">Changing embedding model</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-3">
+              Changing from <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs font-mono">{reindexStatus.current_model}</code> to{' '}
+              <code className="px-1.5 py-0.5 bg-slate-100 rounded text-xs font-mono">{reindexStatus.proposed_model}</code> requires
+              re-indexing memory for the following plans:
+            </p>
+            <div className="max-h-48 overflow-y-auto mb-4 border border-slate-200 rounded-lg">
+              {reindexStatus.plans?.map((p: any) => (
+                <div key={p.plan_id} className="flex items-center justify-between px-3 py-2 border-b border-slate-100 last:border-b-0">
+                  <div className="flex items-center gap-2">
+                    <span className={p.status === 'match' ? 'text-green-500' : 'text-amber-500'}>{p.status === 'match' ? '✓' : '✗'}</span>
+                    <span className="text-sm font-medium text-slate-700">{p.plan_name}</span>
+                  </div>
+                  <span className="text-xs text-slate-400">{p.note_count} notes</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Estimated time: ~{Math.ceil((reindexStatus.estimated_seconds || 0) / 60)} minute(s) ({reindexStatus.total_reindex_notes} notes).
+              Notes on disk are not affected.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                onClick={() => setShowReindexDialog(false)}>Cancel</button>
+              <button className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
+                onClick={handleConfirmReindex}>Re-index and Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reindex progress */}
+      {isReindexing && reindexProgress && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-semibold text-blue-800">Re-indexing memory...</span>
+          </div>
+          {reindexProgress.current_plan && (
+            <div className="text-xs text-blue-600">{reindexProgress.current_plan} — {reindexProgress.current_progress}</div>
+          )}
+          <div className="text-xs text-blue-500 mt-1">{reindexProgress.plans_completed}/{reindexProgress.plans_total} plans · {reindexProgress.elapsed_seconds}s elapsed</div>
+        </div>
+      )}
+
       {hasChanges && (
         <section className="sticky bottom-0 bg-surface-container-low border-t border-slate-200 py-4 mt-8 flex justify-end gap-3 z-10">
           <button
@@ -1075,14 +1220,14 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               setHasChanges(false);
             }}
             disabled={isSaving}
-            className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all disabled:opacity-75"
+            className="flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all disabled:opacity-75 cursor-pointer"
           >
             {isSaving && <span className="material-symbols-outlined text-sm animate-spin">progress_activity</span>}
             {isSaving ? 'Saving...' : 'Save Memory Settings'}

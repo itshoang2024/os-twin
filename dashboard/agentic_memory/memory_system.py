@@ -8,6 +8,7 @@ import logging
 import os
 import time
 import threading
+import shutil
 
 # Lazy imports for text processing libraries (nltk, bm25, sklearn).
 # LLM calls go through dashboard.ai gateway.
@@ -182,8 +183,21 @@ class AgenticMemorySystem:
         self._embed_fn = embed_fn  # injected or resolved in _create_retriever
         self.retriever = self._create_retriever()
 
+        # Track config creation time (for first-boot detection)
+        self._memory_config_created_at = datetime.now().isoformat(timespec="seconds")
+
         if self.persist_dir:
             self._load_notes()
+
+            # Per-memory config: check embedding model mismatch (Plan 028)
+            existing_config = self._load_memory_config()
+            if existing_config:
+                self._memory_config_created_at = existing_config.get(
+                    "created_at", self._memory_config_created_at
+                )
+                self._check_and_rebuild_if_mismatched()
+            # Write/update config on every init
+            self._save_memory_config()
 
         # LLM completion function — injected by caller or resolved via gateway.
         # Signature: completion_fn(prompt: str, response_format=None, ...) -> str
@@ -307,14 +321,137 @@ class AgenticMemorySystem:
                 self.embedding_backend = new_backend
                 self.model_name = new_model
                 old_retriever = self.retriever
+                # Delete old vectordb and rebuild with new model
+                if self._vector_dir and os.path.exists(self._vector_dir):
+                    shutil.rmtree(self._vector_dir, ignore_errors=True)
+                    os.makedirs(self._vector_dir, exist_ok=True)
                 self.retriever = self._create_retriever()
-                if hasattr(old_retriever, "collection") and hasattr(
-                    self.retriever, "add_document"
-                ):
+
+                # Re-embed all notes
+                reindexed = 0
+                for nid, note in self.memories.items():
                     try:
-                        pass  # Vector data will be rebuilt incrementally on next sync
-                    except Exception:
-                        pass
+                        metadata = self._build_note_metadata(note)
+                        self.retriever.add_document(note.content, metadata, nid)
+                        reindexed += 1
+                    except Exception as exc:
+                        logger.warning("Re-embed failed for %s: %s", nid, exc)
+                logger.info("Hot-reload re-embed: %d/%d notes", reindexed, len(self.memories))
+                self._save_memory_config()
+
+    # --- Per-memory config (Plan 028) ---
+
+    _CONFIG_FILENAME = "memory.config.json"
+
+    def _config_path(self) -> str:
+        return os.path.join(self.persist_dir, self._CONFIG_FILENAME)
+
+    def _load_memory_config(self) -> dict:
+        """Load per-memory config from disk. Returns empty dict if missing."""
+        path = self._config_path()
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            logger.warning("Corrupt memory.config.json at %s — ignoring", path)
+            return {}
+
+    def _save_memory_config(self) -> None:
+        """Write per-memory config to disk."""
+        if not self.persist_dir:
+            return
+        plan_id = os.path.basename(self.persist_dir)
+        if plan_id.startswith("memory-"):
+            plan_id = plan_id[len("memory-"):]
+        plan_name = self._resolve_plan_name(plan_id)
+        data = {
+            "version": 1,
+            "plan_id": plan_id,
+            "plan_name": plan_name,
+            "embedding_model": self.model_name,
+            "embedding_backend": self.embedding_backend,
+            "embedding_dimension": getattr(self.retriever, "_dimension", None),
+            "vector_backend": self.vector_backend,
+            "note_count": len(self.memories),
+            "created_at": self._memory_config_created_at,
+            "last_synced_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        try:
+            path = self._config_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+        except Exception:
+            logger.warning("Failed to write memory.config.json")
+
+    @staticmethod
+    def _resolve_plan_name(plan_id: str) -> str:
+        """Resolve plan name from dashboard metadata."""
+        meta_path = os.path.join(
+            os.path.expanduser("~"), ".ostwin", ".agents", "plans",
+            f"{plan_id}.meta.json"
+        )
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    return json.load(f).get("title", plan_id)
+            except Exception:
+                pass
+        return plan_id
+
+    def _check_and_rebuild_if_mismatched(self) -> bool:
+        """Check if vectordb was built with a different embedding model.
+
+        If mismatched, deletes vectordb and rebuilds from notes on disk.
+        Returns True if a rebuild was triggered.
+        """
+        if not self.persist_dir or not self._vector_dir:
+            return False
+
+        mem_config = self._load_memory_config()
+        if not mem_config:
+            # No config = first boot or legacy. Write config, no rebuild.
+            return False
+
+        stored_model = mem_config.get("embedding_model", "")
+        if not stored_model or stored_model == self.model_name:
+            return False
+
+        plan_name = mem_config.get("plan_name", mem_config.get("plan_id", "unknown"))
+        logger.warning(
+            "Memory '%s' indexed with '%s', current model is '%s'. "
+            "Rebuilding vectordb.",
+            plan_name, stored_model, self.model_name,
+        )
+
+        # Delete and recreate vectordb
+        if os.path.exists(self._vector_dir):
+            shutil.rmtree(self._vector_dir, ignore_errors=True)
+            os.makedirs(self._vector_dir, exist_ok=True)
+
+        # Recreate retriever with new model
+        self.retriever = self._create_retriever()
+
+        # Re-embed all notes from memory
+        reindexed = 0
+        for note_id, note in self.memories.items():
+            try:
+                metadata = self._build_note_metadata(note)
+                self.retriever.add_document(note.content, metadata, note_id)
+                reindexed += 1
+            except Exception as exc:
+                logger.warning("Failed to re-embed note %s: %s", note_id, exc)
+
+        logger.info(
+            "Vectordb rebuild complete for '%s': %d/%d notes re-embedded",
+            plan_name, reindexed, len(self.memories),
+        )
+
+        # Update config with new model
+        self._save_memory_config()
+        return True
 
     # --- Persistence helpers ---
 
@@ -1353,6 +1490,10 @@ class AgenticMemorySystem:
             written += 1
 
         self._dirty = False
+
+        # Update per-memory config with current state
+        self._save_memory_config()
+
         return {
             "merge": merge_result,
             "written": written,
