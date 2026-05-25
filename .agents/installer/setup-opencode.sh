@@ -40,7 +40,7 @@ setup_opencode_permissions() {
 }
 
 generate_opencode_tools() {
-  local project_root="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$INSTALL_DIR/opencode_server}}"
+  local project_root="$INSTALL_DIR/opencode_server"
   local dashboard_port="${DASHBOARD_PORT:-3366}"
 
   if ! command -v python3 &>/dev/null && ! [[ -x "$VENV_DIR/bin/python" ]]; then

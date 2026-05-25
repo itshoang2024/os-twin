@@ -9,6 +9,7 @@ Vault endpoints NEVER return secret values, only is_set status.
 import json
 import logging
 import os
+import shlex
 import sys
 import subprocess
 from pathlib import Path as FSPath
@@ -29,6 +30,7 @@ from dashboard.lib.settings.google_oauth import (
     start_oauth,
     exchange_code,
     get_oauth_status,
+    get_adc_path,
     OAuthSession,
 )
 
@@ -729,6 +731,44 @@ async def sync_opencode(
     )
 
 
+class OpenCodeRestartResponse(BaseModel):
+    """Result of bouncing the opencode-serve subprocess."""
+
+    pid: Optional[int] = None
+    healthy: bool
+    message: str
+
+
+@router.post("/opencode/restart", response_model=OpenCodeRestartResponse)
+async def restart_opencode(
+    user: dict = Depends(get_current_user),
+):
+    """Bounce opencode-serve so it picks up updated credentials / env.
+
+    Used after a manual credential change or when the auto-restart trigger
+    is suppressed.  Synchronous: waits up to 15s for the new process to
+    report healthy.
+    """
+    from dashboard.lib.opencode_service import (
+        restart as _restart_opencode_sync,
+        wait_for_health,
+    )
+
+    pid = _restart_opencode_sync(health_timeout=15.0)
+    if pid is None:
+        return OpenCodeRestartResponse(
+            pid=None,
+            healthy=False,
+            message="opencode CLI not on PATH; cannot start",
+        )
+    healthy = wait_for_health(timeout=2.0)
+    return OpenCodeRestartResponse(
+        pid=pid,
+        healthy=healthy,
+        message="restarted" if healthy else "started but health check timed out",
+    )
+
+
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────
 
 
@@ -935,11 +975,18 @@ def _try_opencode_sync() -> None:
 _OSTWIN_DIR = FSPath.home() / ".ostwin"
 _ENV_FILE = _OSTWIN_DIR / ".env"
 _SA_FILE = _OSTWIN_DIR / "google-service-account.json"
+_ZSHRC_FILE = FSPath.home() / ".zshrc"
+_ZSHRC_BEGIN = "# >>> ostwin managed env >>>"
+_ZSHRC_END = "# <<< ostwin managed env <<<"
+_ZSHRC_NOTE = "# Updated by Ostwin dashboard so standalone opencode inherits Vertex AI settings."
+_ZSHRC_ENV_HEADER = "# Ostwin environment (API keys, config)"
 
 # Env vars managed by this sync — never conflate with vault-managed keys.
 _VERTEX_ENV_KEYS = {
     "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_VERTEX_PROJECT",
     "VERTEX_LOCATION",
+    "GOOGLE_VERTEX_LOCATION",
     "GOOGLE_APPLICATION_CREDENTIALS",
 }
 
@@ -965,15 +1012,13 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
 
     * **service_account** (default) — writes the service-account JSON to
       disk and sets ``GOOGLE_APPLICATION_CREDENTIALS`` in ``.env``.
-    * **oauth** — relies on Application Default Credentials (ADC) at
-      ``~/.config/gcloud/application_default_credentials.json``.
-      ``GOOGLE_APPLICATION_CREDENTIALS`` is *removed* from ``.env`` so
-      the SDK falls through to ADC auto-discovery.
+    * **oauth** — points ``GOOGLE_APPLICATION_CREDENTIALS`` at the
+      Ostwin-managed browser OAuth ADC file when it exists.
 
-    In both modes ``GOOGLE_CLOUD_PROJECT`` and ``VERTEX_LOCATION`` are
-    always written.
+    In both modes the dashboard-compatible env names and OpenCode's native
+    Vertex aliases are always written.
 
-    When Google is switched away from vertex mode, all three env vars
+    When Google is switched away from vertex mode, all Vertex env vars
     are commented out and the on-disk service-account file is deleted.
     """
     try:
@@ -991,20 +1036,27 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
             # skips empty values, which is fine as a guard).
             if project_id:
                 env_updates["GOOGLE_CLOUD_PROJECT"] = project_id
+                env_updates["GOOGLE_VERTEX_PROJECT"] = project_id
             if location:
                 env_updates["VERTEX_LOCATION"] = location
+                env_updates["GOOGLE_VERTEX_LOCATION"] = location
 
             if auth_mode == "oauth":
-                # OAuth / ADC mode — do NOT set GOOGLE_APPLICATION_CREDENTIALS.
-                # The Google SDK auto-discovers ADC from the well-known path.
-                _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
-                os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+                # OAuth / ADC mode — use the ADC file written by the
+                # dashboard browser OAuth flow.
+                adc_file = get_adc_path()
+                if adc_file.exists():
+                    env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_file)
+                else:
+                    _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
+                    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
                 # Clean up on-disk SA file if leftover from a previous mode
                 if _SA_FILE.exists():
                     _SA_FILE.unlink()
-                logger.info("[SETTINGS] Vertex auth_mode=oauth — using ADC auto-discovery")
+                logger.info("[SETTINGS] Vertex auth_mode=oauth — using Ostwin-managed ADC")
             else:
                 # service_account mode — write SA file + env var
+                wrote_service_account = False
                 try:
                     from dashboard.lib.settings.vault import get_vault
 
@@ -1015,15 +1067,25 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
                         _OSTWIN_DIR.mkdir(parents=True, exist_ok=True)
                         _SA_FILE.write_text(sa_json)
                         env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(_SA_FILE)
+                        wrote_service_account = True
                         logger.info("[SETTINGS] Wrote service-account JSON to %s", _SA_FILE)
                 except Exception as exc:
                     logger.warning(
                         "[SETTINGS] Could not extract service-account from vault: %s",
                         exc,
                     )
+                if not wrote_service_account:
+                    _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
+                    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
             if env_updates:
                 _upsert_env_vars(env_updates)
+            _sync_shell_profile_env(
+                env_updates,
+                remove={"GOOGLE_APPLICATION_CREDENTIALS"}
+                if "GOOGLE_APPLICATION_CREDENTIALS" not in env_updates
+                else set(),
+            )
 
             # Also set in the running process so litellm picks them up
             for k, v in env_updates.items():
@@ -1041,6 +1103,7 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
             _remove_env_vars(_VERTEX_ENV_KEYS)
             for k in _VERTEX_ENV_KEYS:
                 os.environ.pop(k, None)
+            _sync_shell_profile_env({})
             # Remove the on-disk service-account file
             if _SA_FILE.exists():
                 _SA_FILE.unlink()
@@ -1048,6 +1111,20 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
 
     except Exception as exc:
         logger.warning("[SETTINGS] Vertex env sync failed: %s", exc)
+        return
+
+    # opencode-serve was spawned with its env locked in at install time.
+    # POSIX env vars are immutable from outside the process, so the only
+    # way for the running daemon to see the new GOOGLE_APPLICATION_CREDENTIALS
+    # / project / location is to bounce it.  Fire-and-forget on a background
+    # thread so the user's request doesn't block.
+    try:
+        from dashboard.lib.opencode_service import restart_async
+
+        restart_async()
+        logger.info("[SETTINGS] Scheduled opencode-serve restart after vertex env sync")
+    except Exception as exc:
+        logger.warning("[SETTINGS] Failed to schedule opencode-serve restart: %s", exc)
 
 
 def _parse_env_file() -> list[dict]:
@@ -1146,6 +1223,141 @@ def _remove_env_vars(keys_to_remove: set[str]) -> None:
             changed = True
     if changed:
         _ENV_FILE.write_text(_serialize_env_file(entries))
+
+
+def _sync_shell_profile_env(
+    updates: Dict[str, str],
+    *,
+    remove: set[str] | None = None,
+) -> None:
+    """Maintain a tiny ~/.zshrc export block for standalone CLI tools.
+
+    ``~/.ostwin/.env`` is loaded by dashboard and plan wrappers, but an
+    ordinary terminal running ``opencode`` directly does not read it.  This
+    marked zsh block exports only the non-secret Vertex selectors needed by
+    OpenCode's native google-vertex provider, plus the active credentials
+    file path.
+    """
+    remove = remove or set()
+    managed_updates = {
+        key: value
+        for key, value in updates.items()
+        if key in _VERTEX_ENV_KEYS and key not in remove and value
+    }
+
+    existing = _ZSHRC_FILE.read_text() if _ZSHRC_FILE.exists() else ""
+    without_block = _remove_empty_ostwin_env_headers(
+        _remove_legacy_zshrc_vertex_block(
+            _remove_managed_zshrc_block(existing)
+        )
+    ).rstrip()
+
+    if managed_updates and not _zshrc_sources_ostwin_env(without_block):
+        export_lines = [
+            _ZSHRC_BEGIN,
+            _ZSHRC_NOTE,
+        ]
+        for key in sorted(managed_updates):
+            export_lines.append(f"export {key}={shlex.quote(str(managed_updates[key]))}")
+        export_lines.append(_ZSHRC_END)
+        block = "\n".join(export_lines)
+        new_content = f"{without_block}\n\n{block}\n" if without_block else f"{block}\n"
+    else:
+        new_content = f"{without_block}\n" if without_block else ""
+
+    if new_content != existing:
+        _ZSHRC_FILE.write_text(new_content)
+
+
+def _remove_managed_zshrc_block(content: str) -> str:
+    """Remove the Ostwin-managed ~/.zshrc block, preserving all other text."""
+    start = content.find(_ZSHRC_BEGIN)
+    if start == -1:
+        return content
+    end = content.find(_ZSHRC_END, start)
+    if end == -1:
+        return content
+    end += len(_ZSHRC_END)
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    return content[:start].rstrip() + ("\n" if content[:start].strip() and content[end:].strip() else "") + content[end:].lstrip()
+
+
+def _remove_legacy_zshrc_vertex_block(content: str) -> str:
+    """Remove the earlier unmarked dashboard Vertex export block if present."""
+    lines = content.splitlines(keepends=True)
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() != _ZSHRC_NOTE:
+            result.append(lines[i])
+            i += 1
+            continue
+
+        j = i + 1
+        saw_vertex_export = False
+        while j < len(lines):
+            stripped = lines[j].strip()
+            if not stripped:
+                j += 1
+                continue
+            if _is_zshrc_vertex_export(stripped):
+                saw_vertex_export = True
+                j += 1
+                continue
+            break
+
+        if saw_vertex_export:
+            i = j
+        else:
+            result.append(lines[i])
+            i += 1
+
+    return "".join(result)
+
+
+def _is_zshrc_vertex_export(line: str) -> bool:
+    return any(line.startswith(f"export {key}=") for key in _VERTEX_ENV_KEYS)
+
+
+def _remove_empty_ostwin_env_headers(content: str) -> str:
+    """Drop stale Ostwin env headings that are not attached to env sourcing."""
+    lines = content.splitlines(keepends=True)
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() != _ZSHRC_ENV_HEADER:
+            result.append(lines[i])
+            i += 1
+            continue
+
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+
+        next_line = lines[j].strip() if j < len(lines) else ""
+        if ".ostwin/.env" not in next_line or "source" not in next_line:
+            i += 1
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+            continue
+
+        result.append(lines[i])
+        i += 1
+
+    return "".join(result)
+
+
+def _zshrc_sources_ostwin_env(content: str) -> bool:
+    """Return True when ~/.zshrc already sources the Ostwin .env file."""
+    env_path = str(_ENV_FILE)
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "source" in stripped and (env_path in stripped or ".ostwin/.env" in stripped):
+            return True
+    return False
 
 
 def _sync_provider_key_to_env(vault_key: str, secret: str) -> None:

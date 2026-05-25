@@ -174,11 +174,11 @@ knowledge://namespace-name/file-hash#chunk-index
 
 ### Bridge MCP Tool
 
-The `find_notes_by_knowledge_link` tool searches memory notes that reference specific knowledge entities:
+The `knowledge_find_notes_by_knowledge_link` tool searches memory notes that reference specific knowledge entities:
 
 ```python
 # Find memory notes linked to a knowledge chunk
-result = find_notes_by_knowledge_link(
+result = knowledge_find_notes_by_knowledge_link(
     namespace="my-docs",
     file_hash="abc123",
     chunk_idx=0

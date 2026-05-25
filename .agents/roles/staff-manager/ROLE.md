@@ -33,7 +33,7 @@ Every finding MUST be classified:
 Before reviewing ANY code, load both layers of the brain:
 
 ```
-search_memory(query="<epic/task terms, module names, data shapes>")
+memory_search(query="<epic/task terms, module names, data shapes>")
 memory_tree()
 knowledge_query(namespace="<project-docs>", query="<relevant standards>", mode="summarized")
 ```
@@ -84,7 +84,7 @@ Your verdict MUST include:
 After every review, save to memory:
 
 ```
-save_memory(
+memory_save(
   content="Reviewed EPIC-XXX — <verdict>. Key findings: <P0s and P1s>. Patterns: <recurring issues>. Cross-room notes: <dependencies discovered>.",
   name="Staff Review — EPIC-XXX <module>",
   path="staff-reviews/<epic-id>",

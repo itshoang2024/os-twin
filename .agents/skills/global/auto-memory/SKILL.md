@@ -9,16 +9,16 @@ description: Use this skill to save, search, and manage persistent memories via 
 
 Auto-memory is a **persistent, semantic knowledge base** exposed as an MCP server over stdio. It stores knowledge as interconnected markdown notes with auto-generated tags, keywords, directory paths, and links between related memories. The system uses vector embeddings for semantic search.
 
-The MCP server name is `memory`. Tools are prefixed accordingly (e.g. `memory.save_memory`, `memory.search_memory`).
+The MCP server name is `memory`. Tools are prefixed accordingly (e.g. `memory.memory_save`, `memory.memory_search`).
 
 ## Available MCP Tools
 
-### `save_memory` -- Store a new memory
+### `memory_save` -- Store a new memory
 
 Write detailed, rich memories (3-10 sentences). Include context, reasoning, examples, trade-offs, and gotchas. The system auto-generates name, path, keywords, tags, summary, and links if not provided.
 
 ```
-save_memory(
+memory_save(
   content: str,          # REQUIRED -- the memory content. Be thorough.
   name: str | None,      # Optional 2-5 word name. Auto-generated if omitted.
   path: str | None,      # Optional directory path (e.g. "backend/database"). Auto-generated.
@@ -28,7 +28,7 @@ save_memory(
 
 **Good memory:**
 ```
-save_memory(
+memory_save(
   content="PostgreSQL's JSONB type stores semi-structured data with full indexing
   support via GIN indexes. We chose it over MongoDB because our data has relational
   aspects (user->orders->items) but product attributes vary per category. The GIN index
@@ -40,15 +40,15 @@ save_memory(
 
 **Bad memory:**
 ```
-save_memory(content="Use PostgreSQL JSONB for product data.")
+memory_save(content="Use PostgreSQL JSONB for product data.")
 ```
 
-### `search_memory` -- Semantic search across all memories
+### `memory_search` -- Semantic search across all memories
 
 Returns the most relevant memories ranked by vector similarity. Use specific, descriptive queries.
 
 ```
-search_memory(
+memory_search(
   query: str,   # Natural language query. Be specific.
   k: int = 5    # Max results to return.
 )
@@ -56,8 +56,8 @@ search_memory(
 
 **Examples:**
 ```
-search_memory(query="PostgreSQL indexing strategies for JSON data")
-search_memory(query="authentication flow and JWT token handling", k=10)
+memory_search(query="PostgreSQL indexing strategies for JSON data")
+memory_search(query="authentication flow and JWT token handling", k=10)
 ```
 
 Results include: id, name, path, content, tags, keywords, links, backlinks.
@@ -125,7 +125,7 @@ These tools exist but are disabled by default via `MEMORY_DISABLED_TOOLS` env va
 ### Architectural decisions -- Include the WHY
 
 ```
-save_memory(
+memory_save(
   content="Chose JWT stateless auth over server sessions because multiple services
   need to verify auth independently. Token stored in localStorage on frontend.
   24h expiry with refresh token rotation. Secret via JWT_SECRET env var.
@@ -139,7 +139,7 @@ save_memory(
 ### Code patterns and conventions
 
 ```
-save_memory(
+memory_save(
   content="All API errors return a standard shape: {detail: string, code: string, errors?: [{field, message}]}.
   HTTP codes: 400=validation, 401=missing auth, 403=forbidden, 404=not found, 409=conflict.
   The frontend error interceptor in src/lib/api.ts relies on this shape -- changing it breaks toast notifications.
@@ -152,7 +152,7 @@ save_memory(
 ### Warnings and gotchas
 
 ```
-save_memory(
+memory_save(
   content="The cats.status column has a PostgreSQL CHECK constraint: CHECK (status IN ('available','reserved','sold')).
   Adding new statuses requires an Alembic migration. Without it, INSERT/UPDATE fails with
   psycopg2.errors.CheckViolation. Migration command: alembic revision --autogenerate -m 'add status'
@@ -165,7 +165,7 @@ save_memory(
 ### User preferences and workflow
 
 ```
-save_memory(
+memory_save(
   content="User prefers bundled PRs over many small ones for refactors. Confirmed when
   I chose a single PR for the auth middleware rewrite and they said 'yeah the single bundled PR
   was the right call here'. For feature work they prefer smaller PRs but for sweeping

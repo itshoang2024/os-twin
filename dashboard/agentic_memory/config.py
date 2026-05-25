@@ -36,7 +36,7 @@ class LLMConfig:
     API endpoint URL and ``compatible_key`` provides an optional API key.
     """
     backend: str = "openai-compatible"
-    model: str = "google-vertex/gemini-3-flash-preview"
+    model: str = "gemini-3-flash-preview"
     compatible_url: str = ""
     compatible_key: str = ""
 
@@ -274,13 +274,13 @@ def load_config() -> MemoryConfig:
     config = MemoryConfig(
         llm=LLMConfig(
             backend=llm_d.get("backend", "openai-compatible"),
-            model=llm_d.get("model", "google-vertex/gemini-3-flash-preview"),
+            model=llm_d.get("model", "gemini-3-flash-preview"),
             compatible_url=llm_d.get("compatible_url", ""),
             compatible_key=llm_d.get("compatible_key", ""),
         ),
         embedding=EmbeddingConfig(
             backend=embedding_d.get("backend", "openai-compatible"),
-            model=embedding_d.get("model", "google-vertex/gemini-embedding-001"),
+            model=embedding_d.get("model", "gemini-embedding-001"),
             compatible_url=embedding_d.get("compatible_url", ""),
             compatible_key=embedding_d.get("compatible_key", ""),
         ),

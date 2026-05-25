@@ -19,17 +19,35 @@ load_env_defaults() {
 
   local line key value
   while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
     case "$line" in
       ""|\#*) continue ;;
     esac
+    if [[ "$line" == export[[:space:]]* ]]; then
+      line="${line#export}"
+      line="${line#"${line%%[![:space:]]*}"}"
+    fi
     if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
       key="${line%%=*}"
       value="${line#*=}"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
       if [[ -z "${!key+x}" ]]; then
         export "${key}=${value}"
       fi
     fi
   done < "$env_file"
+}
+
+source_env_hook() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
 }
 
 parse_opencode_host_port() {
@@ -66,10 +84,15 @@ export OSTWIN_HOME="$INSTALL_DIR"
 export PATH="${VENV_DIR}/bin:${INSTALL_DIR}/.agents/bin:${PATH}"
 
 load_env_defaults "$INSTALL_DIR/.env"
-if [[ -f "$INSTALL_DIR/.env.sh" ]]; then
-  # shellcheck source=/dev/null
-  source "$INSTALL_DIR/.env.sh"
-fi
+load_env_defaults "$APP_DIR/.env"
+load_env_defaults "$APP_DIR/.agents/.env"
+source_env_hook "$INSTALL_DIR/.env.sh"
+source_env_hook "$APP_DIR/.env.sh"
+source_env_hook "$APP_DIR/.agents/.env.sh"
+
+PROJECT_DIR="${OSTWIN_PROJECT_DIR:-$APP_DIR}"
+mkdir -p "$PROJECT_DIR"
+export OSTWIN_PROJECT_DIR="$PROJECT_DIR"
 
 export DASHBOARD_PORT="${PORT:-${DASHBOARD_PORT:-3366}}"
 export OPENCODE_BASE_URL="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
@@ -81,14 +104,14 @@ if [[ "${OSTWIN_START_OPENCODE:-true}" == "true" ]]; then
     exit 1
   fi
 
-  echo "[entrypoint] Generating OpenCode tools in ${SERVER_DIR}"
+  echo "[entrypoint] Generating OpenCode tools in ${PROJECT_DIR}"
   "${VENV_DIR}/bin/python" -m dashboard.opencode_tools \
-    --project-root "$SERVER_DIR" \
+    --project-root "$PROJECT_DIR" \
     --dashboard-port "$DASHBOARD_PORT"
 
   echo "[entrypoint] Starting opencode serve on ${OPENCODE_HOST}:${OPENCODE_PORT}"
   (
-    cd "$SERVER_DIR"
+    cd "$PROJECT_DIR"
     exec opencode serve --hostname "$OPENCODE_HOST" --port "$OPENCODE_PORT"
   ) > "$LOG_DIR/opencode-server.log" 2>&1 &
   OPENCODE_PID=$!

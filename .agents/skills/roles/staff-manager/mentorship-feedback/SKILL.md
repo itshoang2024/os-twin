@@ -101,7 +101,7 @@ After every mentorship extraction:
 
 ```bash
 # Save the lesson
-save_memory(
+memory_save(
   content="Lesson: Trace data contracts across boundaries...",
   name="Lesson — data contract tracing",
   path="mentorship/lessons",
@@ -109,7 +109,7 @@ save_memory(
 )
 
 # Save recurring pattern (if 2+ occurrences)
-save_memory(
+memory_save(
   content="Pattern: Shape mismatch in fallback paths. Seen in EPIC-003, EPIC-007...",
   name="Pattern — fallback shape mismatch",
   path="mentorship/patterns",

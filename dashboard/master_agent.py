@@ -81,7 +81,8 @@ _master_config = MasterAgentConfig()
 
 # Legacy direct-LLM provider IDs that OpenCode does not recognise. If one of
 # these slips through (e.g. from a stale persisted runtime setting), we
-# re-infer the OpenCode-style ID from the model name.
+# re-infer the OpenCode-style ID from the model name. ``google-vertex`` is a
+# real OpenCode provider for Vertex AI and must be preserved when selected.
 _LEGACY_PROVIDER_IDS: frozenset[str] = frozenset({"google-genai", "google_gemini"})
 
 
@@ -94,6 +95,13 @@ def _infer_provider_for_model(model: str) -> str | None:
     if "claude" in model_lower:
         return "anthropic"
     return None
+
+
+def _normalize_opencode_model_id(model: str, provider: str | None) -> str:
+    """Return the model id OpenCode expects for server-side chat calls."""
+    if provider == "google" and model.endswith("-customtools"):
+        return model.removesuffix("-customtools")
+    return model
 
 
 def normalize_master_model(
@@ -196,6 +204,7 @@ def _resolve_model_provider(
         inferred = _infer_provider_for_model(resolved_model)
         if inferred:
             resolved_provider = inferred
+    resolved_model = _normalize_opencode_model_id(resolved_model, resolved_provider)
     return (resolved_model, resolved_provider or DEFAULT_PROVIDER)
 
 
@@ -897,6 +906,7 @@ async def _stream_session_deltas(
     stream = await client.event.list()
     chat_task = asyncio.create_task(chat_coro)
     last_text_by_part: dict[str, str] = {}
+    role_by_message_id: dict[str, str] = {}
 
     def _matches_session(obj) -> bool:
         sid = getattr(obj, "sessionID", None) or getattr(obj, "session_id", None)
@@ -905,6 +915,18 @@ async def _stream_session_deltas(
             if inner is not None:
                 sid = getattr(inner, "id", None)
         return sid == session_id
+
+    async def _message_role(message_id: str) -> str | None:
+        if not message_id:
+            return None
+        if message_id not in role_by_message_id:
+            for item in await client.session.messages(session_id):
+                info = _get_obj_field(item, "info")
+                mid = _get_obj_field(info, "id")
+                role = _get_obj_field(info, "role")
+                if mid and role:
+                    role_by_message_id[mid] = role
+        return role_by_message_id.get(message_id)
 
     try:
         async for event in stream:
@@ -920,6 +942,9 @@ async def _stream_session_deltas(
                 if getattr(part, "type", None) != "text":
                     continue
                 if not _matches_session(part):
+                    continue
+                message_id = getattr(part, "messageID", None) or getattr(part, "message_id", None)
+                if await _message_role(message_id or "") != "assistant":
                     continue
                 full = getattr(part, "text", "") or ""
                 pid = getattr(part, "id", "") or ""

@@ -864,8 +864,15 @@ class AgenticMemorySystem:
             evo_label = False
         self._save_note(note)
 
-        metadata = self._build_note_metadata(note)
-        self.retriever.add_document(note.content, metadata, note.id)
+        try:
+            metadata = self._build_note_metadata(note)
+            self.retriever.add_document(note.content, metadata, note.id)
+        except Exception as exc:
+            logger.error(
+                "Failed to add note %s to vector store: %s. "
+                "Note saved to disk but not searchable until embedding succeeds.",
+                note.id, exc,
+            )
 
         # Flush any deferred GC from retriever operations
         if hasattr(self.retriever, "flush_gc"):
@@ -1232,9 +1239,15 @@ class AgenticMemorySystem:
                 )
                 self.retriever.delete_document(nid)
 
-            metadata = self._build_note_metadata(note)
-            self.retriever.add_document(note.content, metadata, nid)
-            vectors_repaired += 1
+            try:
+                metadata = self._build_note_metadata(note)
+                self.retriever.add_document(note.content, metadata, nid)
+                vectors_repaired += 1
+            except Exception as exc:
+                logger.warning(
+                    "Skipping vectordb insert for note %s during merge: %s",
+                    nid, exc,
+                )
 
         return {
             "added_from_disk": added_from_disk,

@@ -1,0 +1,109 @@
+name: Release Guard
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-guard:
+    name: Release Guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release PR
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, "r", encoding="utf-8") as event_file:
+              event = json.load(event_file)
+
+          pr = event["pull_request"]
+          head_ref = pr["head"]["ref"]
+          body = pr.get("body") or ""
+
+          errors = []
+
+          release_branch_pattern = re.compile(r"^release-\d{4}\.\d{2}\.\d{2}\.\d+$")
+          hotfix_branch_pattern = re.compile(r"^hotfix/.+")
+          is_release_pr = bool(release_branch_pattern.fullmatch(head_ref))
+          is_hotfix_pr = bool(hotfix_branch_pattern.fullmatch(head_ref))
+
+          if not is_release_pr and not is_hotfix_pr:
+              errors.append(
+                  "PRs into main must come from release-YYYY.MM.DD.N or hotfix/* "
+                  f"(got {head_ref!r})."
+              )
+              print("Release Guard failed:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          if is_hotfix_pr:
+              print("Release Guard passed for hotfix PR.")
+              sys.exit(0)
+
+          version_match = re.search(
+              r"(?im)^\s*Release version:\s*(v\d+\.\d+\.\d+)\s*$",
+              body,
+          )
+          version = version_match.group(1) if version_match else None
+          if not version:
+              errors.append("PR body must include 'Release version: vX.Y.Z'.")
+
+          required_fields = [
+              "Lark release note",
+              "Release captain",
+              "QA testers",
+              "Risk",
+              "Rollback plan",
+          ]
+          for field in required_fields:
+              if not re.search(rf"(?im)^\s*{re.escape(field)}:\s*\S+", body):
+                  errors.append(f"PR body must include '{field}: ...'.")
+
+          if not re.search(
+              r"(?im)^\s*Lark release note:\s*https?://\S+",
+              body,
+          ):
+              errors.append("'Lark release note' must be an http(s) URL.")
+
+          if version:
+              result = subprocess.run(
+                  ["git", "ls-remote", "--tags", "origin", f"refs/tags/{version}"],
+                  check=False,
+                  capture_output=True,
+                  text=True,
+              )
+              if result.returncode != 0:
+                  errors.append(
+                      "Could not verify remote tags: "
+                      + (result.stderr.strip() or result.stdout.strip())
+                  )
+              elif result.stdout.strip():
+                  errors.append(f"Release tag '{version}' already exists.")
+
+          if errors:
+              print("Release Guard failed:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print("Release Guard passed.")
+          PY

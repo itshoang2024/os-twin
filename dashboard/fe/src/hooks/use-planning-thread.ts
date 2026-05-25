@@ -110,18 +110,21 @@ export function usePlanningThread(id: string) {
             const dataStr = line.slice(6);
             if (!dataStr.trim() || dataStr === '[DONE]') continue;
 
+            let eventData: any;
             try {
-              const eventData = JSON.parse(dataStr);
-              if (eventData.token) {
-                fullAssistantMessage += eventData.token;
-                setStreamedResponse(fullAssistantMessage);
-              } else if (eventData.error) {
-                throw new Error(eventData.error);
-              } else if (eventData.done) {
-                // Done event
-              }
+              eventData = JSON.parse(dataStr);
             } catch (e) {
               console.error('Error parsing SSE data', e, 'Data:', dataStr);
+              continue;
+            }
+
+            if (eventData.token) {
+              fullAssistantMessage += eventData.token;
+              setStreamedResponse(fullAssistantMessage);
+            } else if (eventData.error) {
+              throw new Error(eventData.error);
+            } else if (eventData.done) {
+              // Done event
             }
           }
         }

@@ -103,12 +103,12 @@ AgenticMemorySystem
 
 ## Data Flow
 
-### `save_memory` Flow (most important)
+### `memory_save` Flow (most important)
 
 ```
-Agent calls save_memory(content, name?, path?, tags?) via MCP (stdio)
+Agent calls memory_save(content, name?, path?, tags?) via MCP (stdio)
   │
-  ├─ 1. mcp_server.py:save_memory()
+  ├─ 1. mcp_server.py:memory_save()
   │     - Pre-generate UUID for stable client handle
   │     - Log incoming request
   │
@@ -538,7 +538,7 @@ def _open_with_retry(_zvec, collection_path: str):
     """Open a Zvec collection with retry on lock contention.
     
     Multiple MCP server processes may try to open the same collection
-    simultaneously when several agents call save_memory concurrently.
+    simultaneously when several agents call memory_save concurrently.
     """
     last_err = None
     for _attempt in range(30):  # ~30s total wait
@@ -616,8 +616,8 @@ DISABLED_TOOLS = {
 
 | Tool | Location | Description |
 |------|----------|-------------|
-| `save_memory` | 552-656 | Save a new memory with full LLM analysis |
-| `search_memory` | 659-695 | Semantic vector search |
+| `memory_save` | 552-656 | Save a new memory with full LLM analysis |
+| `memory_search` | 659-695 | Semantic vector search |
 | `memory_tree` | 866-877 | Directory tree visualization |
 | `grep_memory` | 1062-1101 | Grep across note .md files |
 | `find_memory` | 1151-1190 | Find notes by filename patterns |
@@ -636,11 +636,11 @@ DISABLED_TOOLS = {
 | `sync_to_disk` | 933-951 | Write in-memory state to disk |
 | `graph_snapshot` | 954-965 | Full graph data for UI visualization |
 
-### `save_memory` Tool Details
+### `memory_save` Tool Details
 
 ```python
-@optional_tool("save_memory")
-def save_memory(
+@optional_tool("memory_save")
+def memory_save(
     content: str,
     name: Optional[str] = None,
     path: Optional[str] = None,
@@ -669,11 +669,11 @@ def save_memory(
     """
 ```
 
-### `search_memory` Tool Details
+### `memory_search` Tool Details
 
 ```python
-@optional_tool("search_memory")
-def search_memory(query: str, k: int = 5) -> str:
+@optional_tool("memory_search")
+def memory_search(query: str, k: int = 5) -> str:
     """Search the knowledge base using natural language.
 
     Returns the most semantically relevant memories for the query. Results include
@@ -1038,7 +1038,7 @@ memory-cli.py stats
 ### Testing MCP Server Directly
 
 ```bash
-# Test save_memory via raw MCP JSON-RPC
+# Test memory_save via raw MCP JSON-RPC
 echo -e '{
   "jsonrpc":"2.0",
   "id":1,
@@ -1052,7 +1052,7 @@ echo -e '{
   "id":2,
   "method":"tools/call",
   "params":{
-    "name":"save_memory",
+    "name":"memory_save",
     "arguments":{"content":"test note with enough content to be meaningful for the LLM to analyze"}
   }
 }' | \
@@ -1070,11 +1070,11 @@ echo -e '{
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `RuntimeError: Can't lock read-write collection` | Concurrent zvec writers | Already fixed with 30s retry. If persists, reduce concurrent agents. |
-| `Memory queued for save` but no notes appear | Old version with daemon background thread | Already fixed — `save_memory` is synchronous now |
+| `Memory queued for save` but no notes appear | Old version with daemon background thread | Already fixed — `memory_save` is synchronous now |
 | `ModuleNotFoundError: No module named 'requests'` | Wrong Python interpreter | Self-healing should re-exec. If fails, set `MEMORY_NO_REEXEC=false` or check venv. |
 | `GOOGLE_API_KEY not found` | Missing API key | Set in `~/.ostwin/.env` or shell rc file |
 | `{env:VAR}` placeholder visible in compiled config | Var not in shell, .env, or rc files | Add to `~/.ostwin/.env` and re-run `ostwin init` |
-| `save_memory` takes 10+ seconds | Normal — synchronous LLM analysis | Expected behavior in stdio mode |
+| `memory_save` takes 10+ seconds | Normal — synchronous LLM analysis | Expected behavior in stdio mode |
 | Notes in wrong directory | `WARROOMS_DIR` or `MEMORY_PERSIST_DIR` resolution | Check `_find_project_root()` fallback chain |
 
 ### Logs
@@ -1130,4 +1130,4 @@ The Agentic Memory MCP Server provides:
 5. **Concurrency-safe** — Lock retry + synchronous saves handle parallel agents
 6. **Fast startup** — Lazy imports + background init keep MCP responsive
 
-The key insight is that **all persistence is synchronous** in stdio mode — there's no background queue. The ~10s latency for `save_memory` is the cost of guaranteeing data is on disk before the process is killed.
+The key insight is that **all persistence is synchronous** in stdio mode — there's no background queue. The ~10s latency for `memory_save` is the cost of guaranteeing data is on disk before the process is killed.

@@ -1176,7 +1176,7 @@ class OllamaEmbeddingClient(EmbeddingClient):
             result = response["embeddings"]
         except Exception as exc:
             logger.error("Ollama embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(result, target_dim)
@@ -1227,7 +1227,7 @@ class OpenAICompatibleEmbeddingClient(EmbeddingClient):
                 result = [item["embedding"] for item in data["data"]]
         except Exception as exc:
             logger.error("OpenAI-compatible embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(result, target_dim)
@@ -1277,7 +1277,7 @@ class GeminiEmbeddingClient(EmbeddingClient):
             embeddings = [e.values for e in result.embeddings]
         except Exception as exc:
             logger.error("Gemini embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(embeddings, target_dim)

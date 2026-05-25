@@ -2,7 +2,7 @@
 Google OAuth2 flow for Vertex AI authentication.
 
 Implements the OAuth2 Authorization Code flow using Google's well-known
-desktop-app client credentials (the same ones ``gcloud auth`` uses).
+desktop-app client credentials.
 The result is an Application Default Credentials (ADC) JSON file that
 litellm and other Google SDKs pick up automatically.
 
@@ -11,7 +11,7 @@ Flow
 1. ``start_oauth()`` → returns an authorization URL for the browser.
 2. User authenticates in the browser, Google redirects to our callback.
 3. ``exchange_code()`` → exchanges the auth code for tokens.
-4. Tokens are saved as ADC at ``~/.config/gcloud/application_default_credentials.json``.
+4. Tokens are saved as an Ostwin-managed ADC file.
 
 Security
 --------
@@ -38,9 +38,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── Google's well-known desktop-app OAuth2 credentials ────────────────
-# These are the same credentials ``gcloud auth application-default login``
-# uses.  They are intentionally public (not secret) for installed/desktop
-# apps per Google's OAuth2 documentation.
+# These are intentionally public (not secret) for installed/desktop apps
+# per Google's OAuth2 documentation.
 _CLIENT_ID = "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com"
 _CLIENT_SECRET = "d-FL95Q19q7MQmFpd7hHD0Ty"
 
@@ -52,7 +51,7 @@ _SCOPES = [
     "openid",
 ]
 
-_ADC_DIR = Path.home() / ".config" / "gcloud"
+_ADC_DIR = Path.home() / ".ostwin" / "google"
 _ADC_FILE = _ADC_DIR / "application_default_credentials.json"
 
 
@@ -82,6 +81,11 @@ class OAuthSession:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
+def get_adc_path() -> Path:
+    """Return the Ostwin-managed ADC path for browser OAuth credentials."""
+    return _ADC_FILE
+
 
 def start_oauth(
     redirect_uri: str,
@@ -244,23 +248,27 @@ def get_oauth_status() -> Dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         return {"authenticated": False, "adc_path": str(_ADC_FILE), "error": "corrupt"}
 
-    adc_type = adc.get("type", "unknown")
-    has_refresh = bool(adc.get("refresh_token"))
-
     result: Dict[str, Any] = {
-        "authenticated": has_refresh or adc_type == "service_account",
+        "authenticated": False,
         "adc_path": str(_ADC_FILE),
-        "type": adc_type,
+        "type": adc.get("type", "unknown"),
     }
-
-    # Try to get email from a quick token refresh
-    if has_refresh and adc_type == "authorized_user":
-        email = _get_email_from_adc(adc)
-        if email:
-            result["email"] = email
 
     if adc.get("quota_project_id"):
         result["project_id"] = adc["quota_project_id"]
+
+    adc_type = adc.get("type", "unknown")
+    if adc_type == "service_account":
+        result["authenticated"] = True
+        return result
+
+    if adc_type == "authorized_user":
+        authenticated, email, error = _refresh_adc(adc)
+        result["authenticated"] = authenticated
+        if email:
+            result["email"] = email
+        if error:
+            result["error"] = error
 
     return result
 
@@ -310,19 +318,52 @@ def _extract_email(id_token: str) -> Optional[str]:
         return None
 
 
-def _get_email_from_adc(adc: Dict[str, Any]) -> Optional[str]:
-    """Try a token refresh to get the associated email."""
+def _refresh_adc(adc: Dict[str, Any]) -> tuple[bool, Optional[str], Optional[str]]:
+    """Refresh authorized-user ADC and return validity plus display metadata."""
+    refresh_token = adc.get("refresh_token")
+    if not refresh_token:
+        return False, None, "missing_refresh_token"
+
     try:
         with httpx.Client(timeout=10) as client:
             resp = client.post(_TOKEN_URL, data={
                 "client_id": adc.get("client_id", _CLIENT_ID),
                 "client_secret": adc.get("client_secret", _CLIENT_SECRET),
-                "refresh_token": adc["refresh_token"],
+                "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             })
-        if resp.status_code == 200:
-            tokens = resp.json()
-            return _extract_email(tokens.get("id_token", ""))
+    except Exception as exc:
+        logger.warning("[GOOGLE_OAUTH] ADC refresh failed: %s", exc)
+        return False, None, "refresh_failed"
+
+    if resp.status_code != 200:
+        error = _token_refresh_error(resp)
+        logger.warning(
+            "[GOOGLE_OAUTH] ADC refresh rejected (status=%s, error=%s)",
+            resp.status_code,
+            error,
+        )
+        return False, None, error
+
+    try:
+        tokens = resp.json()
     except Exception:
-        pass
-    return None
+        return False, None, "invalid_token_response"
+
+    if not tokens.get("access_token"):
+        return False, None, "missing_access_token"
+
+    return True, _extract_email(tokens.get("id_token", "")), None
+
+
+def _token_refresh_error(resp: httpx.Response) -> str:
+    """Return a stable, non-secret error code for a failed token refresh."""
+    try:
+        payload = resp.json()
+    except Exception:
+        return "refresh_failed"
+
+    error = str(payload.get("error") or "").strip()
+    if error == "invalid_grant":
+        return "reauth_required"
+    return error or "refresh_failed"

@@ -14,19 +14,9 @@ name: Agent OS — CI
 
 on:
   push:
-    branches: [main, hotfix/*, feature/*, fix/*]
-    paths:
-      - '.agents/**'
-      - 'bot/**'
-      - 'dashboard/**'
-      - '.github/workflows/ci.yml'
+    branches: [main, release-*, hotfix/*, feature/*, fix/*]
   pull_request:
-    branches: [main]
-    paths:
-      - '.agents/**'
-      - 'bot/**'
-      - 'dashboard/**'
-      - '.github/workflows/ci.yml'
+    branches: [main, release-*]
   workflow_dispatch:
 
 permissions:

@@ -27,6 +27,15 @@
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Ensure the completion banner (with API key) always prints, even if
+# service-start steps fail under set -e.
+_banner_printed=false
+trap '
+  if ! $_banner_printed; then
+    print_completion_banner 2>/dev/null || true
+  fi
+' EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALLER_DIR="$SCRIPT_DIR/installer"
 INSTALL_DIR="${HOME}/.ostwin"
@@ -156,19 +165,26 @@ generate_opencode_tools
 section_9_start=$(get_now)
 if $START_SERVICES; then
   header "9. Starting OpenCode server"
-  start_opencode_server
+  start_opencode_server || warn "OpenCode server failed to start (non-fatal)"
   header "9a. Starting dashboard"
-  start_dashboard; publish_skills
+  start_dashboard || warn "Dashboard failed to start (non-fatal)"
+  publish_skills || warn "Skill publishing failed (non-fatal)"
 else
   header "9. Runtime services (skipped)"
   info "Skipping OpenCode/dashboard startup (--no-start). Start services from the runtime entrypoint."
 fi
 header "9c. Installing channel dependencies (Telegram + Discord + Slack)"
-install_channels
+install_channels || warn "Channel install failed (non-fatal)"
 ok_time "Section 9 complete" "$(print_duration "$section_9_start")"
 # if $START_CHANNEL && [[ -n "${CHAN_DIR:-}" ]]; then
 #   header "9d. Starting channel connectors"; start_channels
 # fi
-header "10. Registering dashboard auto-start"
-setup_autostart
+if $START_SERVICES; then
+  header "10. Registering dashboard auto-start"
+  setup_autostart || warn "Auto-start registration failed (non-fatal)"
+else
+  header "10. Dashboard auto-start (skipped)"
+  info "Skipping auto-start registration (--no-start). Register manually later via setup_autostart."
+fi
 print_completion_banner
+_banner_printed=true

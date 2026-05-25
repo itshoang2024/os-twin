@@ -22,10 +22,10 @@ All tools are executed via the `mcporter` CLI following `brain-ops` standards:
 
 | Tool | Purpose |
 |------|---------|
-| `memory.search_memory` | Check for recent retrieval complaints or "promote-to-knowledge" tags |
-| `knowledge.knowledge_list_namespaces` | Get baseline stats per namespace |
-| `knowledge.knowledge_query` | Run probe queries in `raw`, `graph`, `summarized` modes |
-| `memory.save_memory` | Record the audit findings and health scores |
+| `memory.search` | Check for recent retrieval complaints or "promote-to-knowledge" tags |
+| `knowledge.list_namespaces` | Get baseline stats per namespace |
+| `knowledge.query` | Run probe queries in `raw`, `graph`, `summarized` modes |
+| `memory.save` | Record the audit findings and health scores |
 
 ## Instructions
 
@@ -33,14 +33,14 @@ All tools are executed via the `mcporter` CLI following `brain-ops` standards:
 
 Before probing, check if other agents have reported issues with the Knowledge layer:
 ```bash
-npx mcporter call memory.search_memory query:'missing knowledge OR poor retrieval OR llm_unavailable'
+npx mcporter call memory.search query:'missing knowledge OR poor retrieval OR llm_unavailable'
 ```
 Record any specific namespaces or domains that have been flagged by the team.
 
 ### 2. Establish Baseline Knowledge Stats
 
 ```bash
-npx mcporter call knowledge.knowledge_list_namespaces
+npx mcporter call knowledge.list_namespaces
 ```
 Record per-namespace: `files_indexed`, `chunks`, `entities`, `relations`. Flag:
 - Files > 0 but chunks = 0 → ingestion failure
@@ -59,9 +59,9 @@ For each namespace, construct 3–5 probes based on the content (and any Memory 
 
 Test the resilience of the Knowledge namespace across all retrieval strategies:
 ```bash
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'raw' top_k:5
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'graph' top_k:5
-npx mcporter call knowledge.knowledge_query namespace:'<ns>' query:'<probe>' mode:'summarized' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'raw' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'graph' top_k:5
+npx mcporter call knowledge.query namespace:'<ns>' query:'<probe>' mode:'summarized' top_k:5
 ```
 Record: `chunks` count, `entities`, `answer`, `latency_ms`, `warnings`.
 
@@ -78,7 +78,7 @@ Record: `chunks` count, `entities`, `answer`, `latency_ms`, `warnings`.
 As an evaluator, you **MUST** save your audit results to Memory so the rest of the team knows the health of the Knowledge layer.
 
 ```bash
-npx mcporter call memory.save_memory \
+npx mcporter call memory.save \
   content:'Ontology Audit for <namespace>. Score: <score>. Findings: <details>. Recommendations: <action items>.' \
   name:'Knowledge Audit: <namespace>' \
   path:'audits/knowledge' \
@@ -100,8 +100,8 @@ Save a detailed `quality-audit.md` artifact with per-namespace probe results, he
 
 ## Verification
 
-1. `search_memory` called before probing to discover pain points.
+1. `memory_search` called before probing to discover pain points.
 2. All namespaces probed with multiple queries across all three modes via `npx mcporter`.
 3. Each namespace has a health score assigned.
-4. `save_memory` called with the final audit verdict.
+4. `memory_save` called with the final audit verdict.
 5. `quality-audit.md` artifact produced.

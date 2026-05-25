@@ -29,7 +29,7 @@ You are not an IC. You are not a code reviewer. You are the **organizational lea
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<team names, OKR terms, velocity data>")
+memory_search(query="<team names, OKR terms, velocity data>")
 memory_tree()
 knowledge_query(namespace="<org-docs>", query="<priorities, headcount, OKRs>", mode="summarized")
 ```
@@ -76,7 +76,7 @@ Monthly:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Director sync — Q[X] Week [Y]. OKR status: [summary]. Blocked teams: [list]. Health flags: [concerns]. Actions: [decisions made].",
   name="Director Sync — Q[X]W[Y]",
   path="director/syncs/q[x]-w[y]",

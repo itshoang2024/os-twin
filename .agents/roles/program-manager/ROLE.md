@@ -28,7 +28,7 @@ You are not a people manager. You are not a technical authority. You are the **e
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<program name, milestone terms, dependency terms>")
+memory_search(query="<program name, milestone terms, dependency terms>")
 memory_tree()
 knowledge_query(namespace="<project-docs>", query="<plans, timelines, requirements>", mode="summarized")
 ```
@@ -76,7 +76,7 @@ Before any major launch, using the `launch-readiness` skill:
 ### Phase 6 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="Program update — [program]. Milestones: [on track/at risk/behind]. Key risks: [top 3]. Dependencies: [blocked items]. Next actions: [list].",
   name="Program Update — [program] Week [N]",
   path="programs/[program]/updates/week-[n]",

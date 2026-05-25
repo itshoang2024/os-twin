@@ -137,19 +137,16 @@ Before starting new work, query for relevant context from past projects:
 - `global_memory_grep(pattern, flags)` — Grep across all memory files
 - `global_memory_read(memory_id, plan_id)` — Read specific memory
 
-**Global Knowledge Tools** (query documentation across all namespaces):
-- `global_knowledge_query(query, mode="raw", top_k=10, namespaces=[])` — Query all knowledge
-- `global_knowledge_search_all(query, top_k=5)` — Fast vector search
-- `global_knowledge_list_namespaces()` — See available knowledge bases
-- `global_knowledge_get_stats()` — Aggregate statistics
-- `global_knowledge_find_relevant(query)` — Find most relevant namespace
+**Knowledge Tools** (query documentation across namespaces):
+- `knowledge_query(namespace, query, mode="raw", top_k=10)` — Query a specific knowledge namespace
+- `knowledge_list_namespaces()` — See available knowledge bases and their statistics
 
-### When to Use Global Context
+### When to Use Context
 
 1. **Before assigning epics**: Check for similar past work
    ```
    global_memory_search("authentication", k=5)
-   global_knowledge_query("authentication implementation", mode="summarized")
+   knowledge_query("project-docs", "authentication implementation", mode="summarized")
    ```
 
 2. **During triage**: Check for recurring issues
@@ -161,13 +158,13 @@ Before starting new work, query for relevant context from past projects:
 3. **For skill discovery**: Find relevant patterns
    ```
    global_memory_search("testing strategy")
-   global_knowledge_find_relevant("API testing")
+   knowledge_query("project-docs", "API testing", mode="summarized")
    ```
 
 4. **For planning**: Understand project landscape
    ```
    global_memory_list_plans()
-   global_knowledge_list_namespaces()
+   knowledge_list_namespaces()
    ```
 
 5. **For design new roles**: support user to design new roles by leveraging existing roles design patterns and structure and also available skills and tools
