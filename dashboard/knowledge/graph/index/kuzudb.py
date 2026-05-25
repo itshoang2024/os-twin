@@ -265,7 +265,34 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
                 # Try a simple query to see if the table exists
                 conn.execute("MATCH (n:Node) RETURN n LIMIT 1")
                 logger.debug(f"Node table already exists for index: {self.index}")
-                return
+
+                # Verify the embedding dimension matches the current config.
+                # A mismatch (e.g. DB created with 1024 but embedder now
+                # produces 768) would cause every insert/query to fail with
+                # "Unsupported casting LIST ... Expected: X, Actual: Y".
+                try:
+                    result = conn.execute(
+                        "CALL table_info('Node') RETURN *"
+                    )
+                    for row in result:
+                        col_name = row[1] if len(row) > 1 else ""
+                        col_type = str(row[2]) if len(row) > 2 else ""
+                        if col_name == "embedding" and f"[{EMBEDDING_DIMENSION}]" not in col_type:
+                            logger.warning(
+                                f"Embedding dimension mismatch in graph.db for index "
+                                f"'{self.index}': schema has {col_type} but current "
+                                f"EMBEDDING_DIMENSION={EMBEDDING_DIMENSION}. "
+                                f"Dropping and recreating schema."
+                            )
+                            conn.execute("DROP TABLE IF EXISTS RELATES")
+                            conn.execute("DROP TABLE IF EXISTS Node")
+                            break
+                    else:
+                        # No mismatch found — schema is valid
+                        return
+                except Exception as dim_check_err:
+                    logger.debug(f"Could not verify embedding dimension: {dim_check_err}")
+                    return
             except:
                 # Table doesn't exist, create it
                 pass
