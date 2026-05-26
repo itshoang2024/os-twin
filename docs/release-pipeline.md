@@ -48,6 +48,21 @@ PR from `hotfix/*` into `main`:
 Use the direct hotfix lane only for urgent production fixes. Normal work still
 goes through `release-*`.
 
+## Release Rollover Automation
+
+When a `release-*` PR is merged into `main`, GitHub may move unmerged PRs that
+were targeting that release branch back to `main`. The `Roll Release Forward`
+workflow handles this automatically:
+
+- It runs only after a merged PR from `release-YYYY.MM.DD.N` into `main`.
+- If there are dangling open PRs, it creates a new `release-YYYY.MM.DD.N`
+  branch from the latest `main`.
+- It retargets PRs that were still based on the old release branch.
+- It also retargets non-hotfix PRs that were moved back to `main`.
+- It leaves intentional `hotfix/* -> main` PRs alone.
+
+If no dangling PRs exist, it does not create a new release branch.
+
 ## Versioning Rule
 
 Use `vMAJOR.MINOR.PATCH`, for example `v1.0.1`, `v1.1.0`, or `v2.0.0`.
