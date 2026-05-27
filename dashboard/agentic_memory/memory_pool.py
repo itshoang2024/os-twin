@@ -216,6 +216,26 @@ class MemoryPool:
 
     # -- Eviction --------------------------------------------------------------
 
+    def evict(self, persist_dir: str) -> bool:
+        """Evict a specific slot by persist_dir. Returns True if found and evicted."""
+        canonical = os.path.realpath(persist_dir)
+        with self._lock:
+            slot = self._slots.pop(canonical, None)
+            if slot is None:
+                return False
+        # Cleanup outside lock
+        t = threading.Thread(
+            target=self._cleanup_slot,
+            args=(slot,),
+            daemon=True,
+            name=f"pool-evict-{os.path.basename(canonical)}",
+        )
+        with self._cleanup_threads_lock:
+            self._cleanup_threads = [ct for ct in self._cleanup_threads if ct.is_alive()]
+            self._cleanup_threads.append(t)
+        t.start()
+        return True
+
     def _evict_one(self) -> bool:
         """Evict one idle slot according to policy.  Returns True if evicted.
 

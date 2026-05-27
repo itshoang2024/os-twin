@@ -6,11 +6,12 @@ directory to serve graph snapshots, memory notes, and search results to the fron
 
 import os
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 import asyncio
 import json
+import threading
 import re
 import sys
 
@@ -731,3 +732,198 @@ async def export_namespace(
         media_type="application/gzip",
         headers={"Content-Disposition": f'attachment; filename="memory-{plan_id}.tar.gz"'},
     )
+
+
+# ── Embedding reindex (Plan 028) ──────────────────────────────────────
+
+_reindex_state: Dict[str, Any] = {
+    "status": "idle",
+    "current_plan": None,
+    "current_progress": "0/0",
+    "plans_completed": 0,
+    "plans_total": 0,
+    "elapsed_seconds": 0,
+}
+_reindex_lock = threading.Lock()
+
+
+def _scan_memory_configs(proposed_model: str) -> list:
+    """Scan all memory directories and compare embedding_model against proposed."""
+    plans = []
+    if not MEMORY_BASE_DIR.exists():
+        return plans
+
+    for entry in sorted(MEMORY_BASE_DIR.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        config_path = entry / "memory.config.json"
+        notes_dir = entry / "notes"
+
+        raw_name = entry.name
+        plan_id = raw_name[len("memory-"):] if raw_name.startswith("memory-") else raw_name
+
+        note_count = 0
+        if notes_dir.exists():
+            note_count = sum(1 for _ in notes_dir.rglob("*.md"))
+
+        if config_path.exists():
+            try:
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                current_model = cfg.get("embedding_model", "")
+                plan_name = cfg.get("plan_name", plan_id)
+                status = "match" if current_model == proposed_model else "mismatch"
+            except Exception:
+                current_model = "unknown"
+                plan_name = plan_id
+                status = "mismatch"
+        else:
+            current_model = "unknown"
+            plan_name = plan_id
+            status = "unknown"
+
+        plans.append({
+            "plan_id": plan_id,
+            "plan_name": plan_name,
+            "current_embedding_model": current_model,
+            "note_count": note_count,
+            "status": status,
+            "persist_dir": str(entry),
+        })
+
+    return plans
+
+
+@router.get("/api/amem/embedding-status", responses={200: {"description": "OK"}})
+async def get_embedding_status(
+    model: str = "",
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Check which plans need re-indexing if embedding model changes."""
+    from dashboard.agentic_memory.config import load_config
+    cfg = load_config()
+    current_model = cfg.embedding.model
+    proposed_model = model or current_model
+
+    plans = await asyncio.to_thread(_scan_memory_configs, proposed_model)
+
+    mismatch_notes = sum(p["note_count"] for p in plans if p["status"] != "match")
+
+    return {
+        "current_model": current_model,
+        "proposed_model": proposed_model,
+        "plans": [{k: v for k, v in p.items() if k != "persist_dir"} for p in plans],
+        "total_reindex_notes": mismatch_notes,
+        "estimated_seconds": mismatch_notes * 2,
+    }
+
+
+def _run_reindex(proposed_model: str, plans: list):
+    """Background re-index worker."""
+    import shutil
+    import time as _time
+    start = _time.monotonic()
+
+    with _reindex_lock:
+        _reindex_state["status"] = "running"
+        _reindex_state["plans_total"] = len(plans)
+        _reindex_state["plans_completed"] = 0
+
+    for plan_info in plans:
+        persist_dir = plan_info["persist_dir"]
+        plan_name = plan_info["plan_name"]
+        notes_dir = Path(persist_dir) / "notes"
+        vector_dir = Path(persist_dir) / "vectordb"
+
+        with _reindex_lock:
+            _reindex_state["current_plan"] = plan_name
+            _reindex_state["current_progress"] = f"0/{plan_info['note_count']}"
+
+        # Delete old vectordb
+        if vector_dir.exists():
+            shutil.rmtree(vector_dir, ignore_errors=True)
+        vector_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a temporary memory system to re-embed
+        try:
+            from dashboard.agentic_memory.memory_system import AgenticMemorySystem
+            from dashboard.agentic_memory.config import load_config
+            cfg = load_config()
+
+            sys = AgenticMemorySystem(
+                model_name=proposed_model,
+                embedding_backend=cfg.embedding.backend,
+                vector_backend=cfg.vector.backend,
+                persist_dir=persist_dir,
+            )
+
+            with _reindex_lock:
+                _reindex_state["current_progress"] = (
+                    f"{len(sys.memories)}/{plan_info['note_count']}"
+                )
+                _reindex_state["plans_completed"] += 1
+                _reindex_state["elapsed_seconds"] = int(_time.monotonic() - start)
+
+        except Exception as exc:
+            logger.error("Re-index failed for %s: %s", plan_name, exc)
+            with _reindex_lock:
+                _reindex_state["plans_completed"] += 1
+
+    with _reindex_lock:
+        _reindex_state["status"] = "completed"
+        _reindex_state["current_plan"] = None
+        _reindex_state["elapsed_seconds"] = int(_time.monotonic() - start)
+
+
+@router.post("/api/amem/reindex", responses={200: {"description": "OK"}})
+async def start_reindex(
+    request: Request,
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Trigger re-indexing of mismatched memory namespaces."""
+    body = await request.json()
+    proposed_model = body.get("model", "")
+    if not proposed_model:
+        raise HTTPException(400, "Missing 'model' in request body")
+
+    with _reindex_lock:
+        if _reindex_state["status"] == "running":
+            raise HTTPException(409, "Re-index already in progress")
+
+    plans = _scan_memory_configs(proposed_model)
+    mismatched = [p for p in plans if p["status"] != "match"]
+
+    if not mismatched:
+        return {"status": "no_changes", "message": "All plans already use this model"}
+
+    # Evict mismatched plans from pool so they reload with new config
+    try:
+        from dashboard.routes.memory_mcp import get_pool
+        pool = get_pool()
+        if pool:
+            for p in mismatched:
+                pool.evict(p["persist_dir"])
+    except Exception:
+        pass
+
+    # Run in background thread
+    thread = threading.Thread(
+        target=_run_reindex,
+        args=(proposed_model, mismatched),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "status": "started",
+        "plans_to_reindex": len(mismatched),
+        "total_notes": sum(p["note_count"] for p in mismatched),
+    }
+
+
+@router.get("/api/amem/reindex/status", responses={200: {"description": "OK"}})
+async def get_reindex_status(
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Poll re-index progress."""
+    with _reindex_lock:
+        return dict(_reindex_state)
