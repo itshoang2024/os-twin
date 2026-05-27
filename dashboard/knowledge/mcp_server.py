@@ -600,6 +600,83 @@ def reset_mcp_session_manager() -> None:
         mcp._session_manager = None  # type: ignore[attr-defined]
 
 
+# ---------------------------------------------------------------------------
+# Tool: knowledge_web_research
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def knowledge_web_research(
+    namespace: str,
+    query: str,
+    engines: list[str] | None = None,
+    categories: list[str] | None = None,
+    max_results: int = 10,
+    summarize: bool = True,
+    language: str = "en",
+) -> dict:
+    """Research a topic on the web and ingest findings into a knowledge namespace.
+
+    Uses the configured SearXNG metasearch engine to search the web,
+    fetches and converts top pages to markdown, ingests the content into the
+    target namespace (with entity extraction), and optionally generates an
+    LLM summary of findings.
+
+    Args:
+        namespace: target namespace. Auto-created if it doesn't exist.
+        query: the research question or topic (1–500 characters).
+        engines: optional SearXNG engines to target. Examples:
+            ``["youtube"]``, ``["github"]``, ``["google", "bing"]``.
+            When None, SearXNG uses its default engine set.
+        categories: optional SearXNG categories. Examples:
+            ``["videos"]``, ``["it"]``, ``["general", "science"]``.
+        max_results: maximum number of search results to fetch (1–50, default 10).
+        summarize: when True, generates an LLM summary of findings (default True).
+        language: search language code (default ``"en"``).
+
+    Returns a ResearchResult dict with ``query``, ``namespace``,
+    ``engines_used``, ``categories_used``, ``sources`` (per-URL status),
+    ``total_chunks_added``, ``total_entities_added``, ``summary``,
+    ``elapsed_seconds``, and ``warnings``.
+
+    Error codes: ``EMPTY_QUERY``, ``QUERY_TOO_LONG``, ``INVALID_MAX_RESULTS``,
+    ``INVALID_NAMESPACE_ID``, ``IMPORT_IN_PROGRESS``, ``INTERNAL_ERROR``.
+
+    Example: ``knowledge_web_research("game_research", "pixel art animation techniques 2024", engines=["google", "youtube"], categories=["it", "videos"])``
+    """
+    try:
+        if not query or not query.strip():
+            return _err("EMPTY_QUERY", "query must not be empty")
+        if len(query) > 500:
+            return _err("QUERY_TOO_LONG", f"query length {len(query)} exceeds maximum of 500 characters")
+        if max_results < 1 or max_results > 50:
+            return _err("INVALID_MAX_RESULTS", "max_results must be between 1 and 50")
+
+        ks = _get_service()
+        result = await asyncio.to_thread(
+            ks.research,
+            namespace,
+            query,
+            engines=engines,
+            categories=categories,
+            max_results=max_results,
+            summarize=summarize,
+            language=language,
+            actor=_get_mcp_actor() or "anonymous",
+        )
+        return result
+    except Exception as exc:
+        from dashboard.knowledge.namespace import InvalidNamespaceIdError  # noqa: WPS433
+        from dashboard.knowledge.audit import ImportInProgressError  # noqa: WPS433
+
+        if isinstance(exc, InvalidNamespaceIdError):
+            return _err("INVALID_NAMESPACE_ID", str(exc))
+        if isinstance(exc, ImportInProgressError):
+            return _err("IMPORT_IN_PROGRESS", str(exc))
+        logger.exception("knowledge_web_research failed")
+        return _err("INTERNAL_ERROR", str(exc))
+
+
 __all__ = [
     "mcp",
     "get_mcp_app",
@@ -610,6 +687,7 @@ __all__ = [
     "knowledge_import_text",
     "knowledge_get_import_status",
     "knowledge_query",
+    "knowledge_web_research",
     # EPIC-007
     "find_notes_by_knowledge_link",
 ]

@@ -79,7 +79,7 @@ fi
 for _mod in lib.sh versions.conf detect-os.sh check-deps.sh install-deps.sh \
             install-files.sh setup-venv.sh setup-env.sh setup-models.sh patch-mcp.sh \
             build-frontend.sh setup-path.sh setup-opencode.sh sync-agents.sh \
-            start-opencode-server.sh start-dashboard.sh start-channels.sh \
+            start-opencode-server.sh start-dashboard.sh start-searxng.sh start-channels.sh \
             setup-autostart.sh verify.sh; do
   # shellcheck disable=SC1090
   source "$INSTALLER_DIR/$_mod"
@@ -169,10 +169,13 @@ if $START_SERVICES; then
   header "9a. Starting dashboard"
   start_dashboard || warn "Dashboard failed to start (non-fatal)"
   publish_skills || warn "Skill publishing failed (non-fatal)"
+  header "9b. Starting SearXNG (metasearch engine)"
+  start_searxng || warn "SearXNG start failed (non-fatal)"
 else
   header "9. Runtime services (skipped)"
   info "Skipping OpenCode/dashboard startup (--no-start). Start services from the runtime entrypoint."
 fi
+
 header "9c. Installing channel dependencies (Telegram + Discord + Slack)"
 install_channels || warn "Channel install failed (non-fatal)"
 ok_time "Section 9 complete" "$(print_duration "$section_9_start")"

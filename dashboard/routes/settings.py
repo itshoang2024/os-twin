@@ -245,7 +245,10 @@ async def put_knowledge_settings(
     dashboard restart.
     """
     resolver = get_settings_resolver()
-    data = payload.model_dump(mode="json")
+    # Only persist fields explicitly provided by the caller — Pydantic fills
+    # unset fields with defaults (empty strings) which would overwrite
+    # previously persisted values.
+    data = payload.model_dump(mode="json", exclude_unset=True)
     # knowledge_embedding_dimension is read-only (fixed from OSTWIN_EMBEDDING_DIM).
     # Strip it from the payload so users cannot persist a conflicting value.
     data.pop("knowledge_embedding_dimension", None)
