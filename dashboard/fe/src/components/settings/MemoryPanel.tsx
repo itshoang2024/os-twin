@@ -821,7 +821,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {VECTOR_BACKENDS.map((opt) => {
-            const isSelected = effective.vector_backend === opt.value;
+            const isSelected = draft.vector_backend === opt.value;
             return (
               <button
                 key={opt.value}
@@ -862,13 +862,13 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <input
               type="range"
               min={0.1} max={1.0} step={0.05}
-              value={effective.similarity_weight}
+              value={draft.similarity_weight}
               onChange={(e) => updateDraft({ similarity_weight: parseFloat(e.target.value) })}
               className="w-full"
             />
             <div className="flex justify-between text-[9px] text-slate-400 mt-1">
               <span>Time-decay</span>
-              <span className="font-mono">{effective.similarity_weight!.toFixed(2)}</span>
+              <span className="font-mono">{draft.similarity_weight!.toFixed(2)}</span>
               <span>Similarity</span>
             </div>
           </div>
@@ -879,7 +879,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-baseline gap-1">
               <input
                 type="number"
-                value={effective.decay_half_life_days}
+                value={draft.decay_half_life_days}
                 onChange={(e) => updateDraft({ decay_half_life_days: Math.max(1, parseFloat(e.target.value) || 30) })}
                 min={1} max={365}
                 className="w-full px-2 py-1.5 rounded text-xs font-mono"
@@ -903,10 +903,10 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Context Aware</label>
               <button
-                onClick={() => updateDraft({ context_aware: !effective.context_aware })}
-                className={`relative w-9 h-5 rounded-full transition-colors ${effective.context_aware ? 'bg-blue-500' : 'bg-slate-300'}`}
+                onClick={() => updateDraft({ context_aware: !draft.context_aware })}
+                className={`relative w-9 h-5 rounded-full transition-colors ${draft.context_aware ? 'bg-blue-500' : 'bg-slate-300'}`}
               >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${effective.context_aware ? 'translate-x-4' : ''}`} />
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${draft.context_aware ? 'translate-x-4' : ''}`} />
               </button>
             </div>
             <p className="text-[9px] text-slate-400">Include similar memories in LLM analysis</p>
@@ -915,10 +915,10 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Context Tree</label>
               <button
-                onClick={() => updateDraft({ context_aware_tree: !effective.context_aware_tree })}
-                className={`relative w-9 h-5 rounded-full transition-colors ${effective.context_aware_tree ? 'bg-blue-500' : 'bg-slate-300'}`}
+                onClick={() => updateDraft({ context_aware_tree: !draft.context_aware_tree })}
+                className={`relative w-9 h-5 rounded-full transition-colors ${draft.context_aware_tree ? 'bg-blue-500' : 'bg-slate-300'}`}
               >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${effective.context_aware_tree ? 'translate-x-4' : ''}`} />
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${draft.context_aware_tree ? 'translate-x-4' : ''}`} />
               </button>
             </div>
             <p className="text-[9px] text-slate-400">Include directory tree in analysis</p>
@@ -927,7 +927,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <label className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 block text-slate-500">Max Links</label>
             <input
               type="number"
-              value={effective.max_links}
+              value={draft.max_links}
               onChange={(e) => updateDraft({ max_links: Math.max(0, parseInt(e.target.value, 10) || 3) })}
               min={0} max={20}
               className="w-full px-2 py-1.5 rounded text-xs font-mono"
@@ -949,10 +949,10 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Auto Sync</label>
               <button
-                onClick={() => updateDraft({ auto_sync: !effective.auto_sync })}
-                className={`relative w-9 h-5 rounded-full transition-colors ${effective.auto_sync ? 'bg-blue-500' : 'bg-slate-300'}`}
+                onClick={() => updateDraft({ auto_sync: !draft.auto_sync })}
+                className={`relative w-9 h-5 rounded-full transition-colors ${draft.auto_sync ? 'bg-blue-500' : 'bg-slate-300'}`}
               >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${effective.auto_sync ? 'translate-x-4' : ''}`} />
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${draft.auto_sync ? 'translate-x-4' : ''}`} />
               </button>
             </div>
             <p className="text-[9px] text-slate-400">Periodic disk sync</p>
@@ -962,10 +962,10 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-baseline gap-1">
               <input
                 type="number"
-                value={effective.sync_interval_s}
+                value={draft.sync_interval_s}
                 onChange={(e) => updateDraft({ sync_interval_s: Math.max(10, parseInt(e.target.value, 10) || 60) })}
                 min={10} max={3600}
-                disabled={!effective.auto_sync}
+                disabled={!draft.auto_sync}
                 className="w-full px-2 py-1.5 rounded text-xs font-mono disabled:opacity-40"
                 style={inputStyle}
               />
@@ -975,7 +975,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
           <div className="bg-white border border-slate-200 rounded-lg p-3">
             <label className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 block text-slate-500">Conflict Resolution</label>
             <select
-              value={effective.conflict_resolution}
+              value={draft.conflict_resolution}
               onChange={(e) => updateDraft({ conflict_resolution: e.target.value })}
               className="w-full px-2 py-1.5 rounded text-xs"
               style={inputStyle}
@@ -1000,7 +1000,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-baseline gap-1">
               <input
                 type="number"
-                value={effective.pool_idle_timeout_s}
+                value={draft.pool_idle_timeout_s}
                 onChange={(e) => updateDraft({ pool_idle_timeout_s: Math.max(0, parseInt(e.target.value, 10) || 300) })}
                 min={0} max={86400}
                 className="w-full px-2 py-1.5 rounded text-xs font-mono"
@@ -1014,7 +1014,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <label className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 block text-slate-500">Max Instances</label>
             <input
               type="number"
-              value={effective.pool_max_instances}
+              value={draft.pool_max_instances}
               onChange={(e) => updateDraft({ pool_max_instances: Math.max(1, parseInt(e.target.value, 10) || 10) })}
               min={1} max={100}
               className="w-full px-2 py-1.5 rounded text-xs font-mono"
@@ -1024,7 +1024,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
           <div className="bg-white border border-slate-200 rounded-lg p-3">
             <label className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 block text-slate-500">Eviction Policy</label>
             <select
-              value={effective.pool_eviction_policy}
+              value={draft.pool_eviction_policy}
               onChange={(e) => updateDraft({ pool_eviction_policy: e.target.value })}
               className="w-full px-2 py-1.5 rounded text-xs"
               style={inputStyle}
@@ -1039,7 +1039,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
             <div className="flex items-baseline gap-1">
               <input
                 type="number"
-                value={effective.pool_sync_interval_s}
+                value={draft.pool_sync_interval_s}
                 onChange={(e) => updateDraft({ pool_sync_interval_s: Math.max(10, parseInt(e.target.value, 10) || 60) })}
                 min={10} max={3600}
                 className="w-full px-2 py-1.5 rounded text-xs font-mono"
