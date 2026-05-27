@@ -389,6 +389,7 @@ class NamespaceManager:
                     shutil.rmtree(ns_path)
                 except OSError as exc:
                     logger.error("Second rmtree attempt failed for %s: %s", ns_path, exc)
+                    raise
 
             logger.info("Deleted namespace %r (%s)", namespace, ns_path)
             return True
