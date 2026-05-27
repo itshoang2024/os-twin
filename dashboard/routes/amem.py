@@ -18,9 +18,7 @@ import sys
 from dashboard.api_utils import PLANS_DIR, GLOBAL_PLANS_DIR, find_plan_file
 from dashboard.auth import get_current_user
 
-MEMORY_BASE_DIR = Path(
-    os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".ostwin" / "memory"))
-)
+MEMORY_BASE_DIR = Path(os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".ostwin" / "memory")))
 
 # Reuse the canonical note parser from the co-located agentic_memory package
 # instead of duplicating the YAML/frontmatter logic. We import from `memory_note`
@@ -318,6 +316,64 @@ async def get_memory_graph(plan_id: str, user: Annotated[dict, Depends(get_curre
     return await asyncio.to_thread(_build_graph, notes)
 
 
+# ── Merkle tree visualization ─────────────────────────────────────────
+
+
+def _transform_merkle_tree(node: dict, name: str = "(root)") -> dict:
+    """Convert the raw ``merkle_manifest.json`` nested dict into a
+    d3-hierarchy-compatible ``{name, hash, type, children}`` shape.
+    """
+    children = []
+    for key in sorted(k for k in node if k != "_hash"):
+        value = node[key]
+        if isinstance(value, str):
+            children.append(
+                {
+                    "name": key,
+                    "hash": value,
+                    "type": "leaf",
+                    "children": [],
+                }
+            )
+        elif isinstance(value, dict):
+            children.append(_transform_merkle_tree(value, key))
+    return {
+        "name": name,
+        "hash": node.get("_hash", ""),
+        "type": "dir",
+        "children": children,
+    }
+
+
+def _load_merkle_manifest(manifest_path: Path) -> dict:
+    """Load ``merkle_manifest.json`` and reshape for the frontend."""
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tree_data = raw.get("tree", {})
+    return {
+        "root_hash": raw.get("root_hash", ""),
+        "generated_at": raw.get("generated_at", ""),
+        "note_count": raw.get("note_count", 0),
+        "vectordb_root_hash": raw.get("vectordb_root_hash", ""),
+        "tree": _transform_merkle_tree(tree_data),
+    }
+
+
+@router.get("/api/amem/{plan_id}/merkle", responses={404: {"description": "Not found"}})
+async def get_merkle_tree(
+    plan_id: str,
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Return the Merkle integrity tree for a plan's memory namespace."""
+    mem_dir = _require_memory_dir(plan_id)
+    manifest_path = mem_dir / "merkle_manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No Merkle manifest found. Run a sync to generate one.",
+        )
+    return await asyncio.to_thread(_load_merkle_manifest, manifest_path)
+
+
 def _render_graph_png(graph_data: dict) -> bytes:
     """Render graph data as a PNG image. Runs in a thread (CPU-bound)."""
     import io
@@ -535,6 +591,7 @@ MEMORY_BASE_DIR = Path(os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".o
 @router.get("/api/amem/namespaces")
 async def list_namespaces(user: Annotated[dict, Depends(get_current_user)]):
     """List all memory namespaces with stats."""
+
     # Heavy file system scanning — offload to thread pool
     def _scan_namespaces():
         if not MEMORY_BASE_DIR.exists():
@@ -548,7 +605,9 @@ async def list_namespaces(user: Annotated[dict, Depends(get_current_user)]):
             if ".archive-" in entry.name:
                 continue
 
-            plan_id = entry.name
+            # Strip the "memory-" prefix to get the canonical plan_id
+            raw_name = entry.name
+            plan_id = raw_name[len("memory-") :] if raw_name.startswith("memory-") else raw_name
             notes_dir = entry / "notes"
             notes_count = len(list(notes_dir.rglob("*.md"))) if notes_dir.exists() else 0
 
@@ -605,8 +664,8 @@ async def clear_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Clear all notes for a plan namespace."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
         raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     notes_dir = ns_dir / "notes"
@@ -674,8 +733,8 @@ async def archive_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Archive a namespace: rename to <plan_id>.archive-<date>, create fresh empty one."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
         raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     notes_dir = ns_dir / "notes"
@@ -714,13 +773,9 @@ async def export_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Export a namespace as a .tar.gz download."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
-        # Try via plan working_dir symlink
-        try:
-            ns_dir = _resolve_memory_dir(plan_id)
-        except HTTPException:
-            raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
+        raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
