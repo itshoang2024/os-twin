@@ -1335,41 +1335,61 @@ class AgenticMemorySystem:
 
         self._rebuild_backlinks()
 
-        # 5. Verify vectordb ↔ notes consistency using content_hash.
-        #    For each note, check if vectordb has the same hash. Three cases:
-        #    - Missing from vectordb entirely → embed and insert
-        #    - Hash mismatch (stale vector) → re-embed
-        #    - Hash matches → consistent, skip
-        all_mem_ids = list(self.memories.keys())
-        stored_hashes = self.retriever.get_stored_hashes(all_mem_ids)
+        # 5. Verify vectordb ↔ notes consistency.
+        #    Uses merkle dirty tracking when available (O(dirty)),
+        #    falls back to vectordb aggregate hash comparison (O(1) check),
+        #    then full scan (O(N)) only when needed.
         vectors_repaired = 0
-        for nid in all_mem_ids:
-            note = self.memories[nid]
-            stored_hash = stored_hashes.get(nid)
+        dirty_ids = self._integrity.get_dirty_ids()
 
-            if stored_hash == note.content_hash:
-                continue  # consistent
+        if dirty_ids:
+            # Fast path: only check notes that changed this session
+            check_ids = list(dirty_ids)
+            logger.debug("vectordb check: %d dirty notes", len(check_ids))
+        else:
+            # After restart: compare vectordb aggregate hash
+            expected_hashes = {nid: n.content_hash for nid, n in self.memories.items()}
+            expected_vdb_hash = self._integrity.compute_vectordb_hash(expected_hashes)
+            stored_vdb_hash = self._integrity.vectordb_root_hash
 
-            if stored_hash is None:
-                logger.warning("merge: note %s missing from vectordb, adding", nid)
+            if expected_vdb_hash == stored_vdb_hash and stored_vdb_hash:
+                # O(1) — vectordb consistent, skip full scan
+                logger.debug("vectordb consistent (hash=%s), skipping check", stored_vdb_hash[:8])
+                check_ids = []
             else:
-                logger.warning(
-                    "merge: note %s has stale vector (hash %s vs %s), re-embedding",
-                    nid,
-                    stored_hash,
-                    note.content_hash,
-                )
-                self.retriever.delete_document(nid)
+                # Hash mismatch or no stored hash — full scan needed
+                check_ids = list(self.memories.keys())
+                logger.debug("vectordb hash mismatch, full scan (%d notes)", len(check_ids))
 
-            try:
-                metadata = self._build_note_metadata(note)
-                self.retriever.add_document(note.content, metadata, nid)
-                vectors_repaired += 1
-            except Exception as exc:
-                logger.warning(
-                    "Skipping vectordb insert for note %s during merge: %s",
-                    nid, exc,
-                )
+        if check_ids:
+            stored_hashes = self.retriever.get_stored_hashes(check_ids)
+            for nid in check_ids:
+                note = self.memories.get(nid)
+                if not note:
+                    continue
+                stored_hash = stored_hashes.get(nid)
+
+                if stored_hash == note.content_hash:
+                    continue  # consistent
+
+                if stored_hash is None:
+                    logger.warning("merge: note %s missing from vectordb, adding", nid)
+                else:
+                    logger.warning(
+                        "merge: note %s has stale vector (hash %s vs %s), re-embedding",
+                        nid, stored_hash, note.content_hash,
+                    )
+                    self.retriever.delete_document(nid)
+
+                try:
+                    metadata = self._build_note_metadata(note)
+                    self.retriever.add_document(note.content, metadata, nid)
+                    vectors_repaired += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping vectordb insert for note %s during merge: %s",
+                        nid, exc,
+                    )
 
         return {
             "added_from_disk": added_from_disk,
@@ -1487,7 +1507,9 @@ class AgenticMemorySystem:
                 self._save_note(note, touch_modified=False)
                 written += 1
 
-        # Step 3: persist Merkle manifest and clear dirty state.
+        # Step 3: compute vectordb aggregate hash, then persist manifest.
+        all_hashes = {nid: n.content_hash for nid, n in self.memories.items()}
+        self._integrity.compute_vectordb_hash(all_hashes)
         self._integrity.flush()
         self._dirty = False
 
