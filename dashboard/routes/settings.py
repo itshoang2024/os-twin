@@ -40,6 +40,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+_SECRET_KEY_HINTS = ("key", "secret", "token", "password")
+
+
+def _mask_secret(field: str, val: Any) -> Any:
+    """Redact values for fields whose name looks secret-bearing."""
+    name = field.lower()
+    if val not in (None, "") and any(hint in name for hint in _SECRET_KEY_HINTS):
+        return "***"
+    return val
+
+
+def _log_namespace_change(namespace: str, old: Dict[str, Any], new: Dict[str, Any], user: dict) -> None:
+    """Log which fields changed in a namespace patch (old -> new, secrets masked)."""
+    changes = {
+        field: (old.get(field), val)
+        for field, val in new.items()
+        if old.get(field) != val
+    }
+    who = user.get("username", "?")
+    if not changes:
+        logger.info("[SETTINGS] %s patched by %s (no field changes)", namespace, who)
+        return
+    rendered = ", ".join(
+        f"{field}: {_mask_secret(field, before)!r} -> {_mask_secret(field, after)!r}"
+        for field, (before, after) in changes.items()
+    )
+    logger.info("[SETTINGS] %s changed by %s: %s", namespace, who, rendered)
+
+
 # ── Request / Response Models ──────────────────────────────────────────
 
 
@@ -448,10 +477,13 @@ async def patch_global_namespace(
             value["master_agent_model"] = format_master_model(value["master_agent_model"])
 
     resolver = get_settings_resolver()
+    old_namespace = dict(resolver.load_config().get(namespace, {}))
     try:
         resolver.patch_namespace(namespace, value)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    _log_namespace_change(namespace, old_namespace, value, user)
 
     if namespace == "runtime" and "master_agent_model" in value:
         from dashboard.master_agent import set_master_model
