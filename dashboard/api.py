@@ -79,18 +79,24 @@ from dashboard.routes import (
 )
 
 # Configure logging — file + console
-# All dashboard logs are written to ~/.ostwin/dashboard/debug.log (DEBUG level)
+# All dashboard logs are written to ~/.ostwin/dashboard/debug.log.
+# The file level is controlled by OSTWIN_LOG_LEVEL (default INFO); set it to
+# DEBUG to capture debug-level lines (e.g. embedding-client creation).
 # Console output stays at INFO to keep the terminal clean.
 _log_dir = Path.home() / ".ostwin" / "dashboard"
 _log_dir.mkdir(parents=True, exist_ok=True)
 _log_file = _log_dir / "debug.log"
+
+_file_level = getattr(
+    logging, os.environ.get("OSTWIN_LOG_LEVEL", "INFO").upper(), logging.INFO
+)
 
 from logging.handlers import RotatingFileHandler
 
 _file_handler = RotatingFileHandler(
     str(_log_file), maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
 )
-_file_handler.setLevel(logging.INFO)
+_file_handler.setLevel(_file_level)
 _file_handler.setFormatter(
     logging.Formatter("%(asctime)s  %(levelname)-8s  %(name)s  %(message)s")
 )
@@ -103,8 +109,10 @@ _console_handler.setFormatter(
 
 # Attach handlers directly — basicConfig is a no-op if any import already
 # triggered default logging configuration before this line.
+# Root must be as verbose as the most verbose handler, else records are
+# dropped before reaching the file handler.
 _root = logging.getLogger()
-_root.setLevel(logging.INFO)
+_root.setLevel(min(_file_level, logging.INFO))
 # Silence noisy httpx/httpcore request logging (connection pools, redirects, etc.)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
