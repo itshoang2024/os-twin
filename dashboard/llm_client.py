@@ -1405,8 +1405,15 @@ def create_embedding_client(
     except Exception:
         providers_cfg = None
 
-    if model_provider in ("google", "google-genai", "google_gemini", "google-vertex"):
-        is_vertex = embed_provider == "google-vertex"
+    _GOOGLE_PROVIDERS = ("google", "google-genai", "google_gemini", "google-vertex", "gemini")
+
+    if model_provider in _GOOGLE_PROVIDERS or embed_provider in _GOOGLE_PROVIDERS:
+        is_vertex = embed_provider == "google-vertex" or model_provider == "google-vertex"
+        # Also check settings for vertex deployment mode
+        if not is_vertex and providers_cfg:
+            google_cfg = getattr(providers_cfg, "google", None)
+            if google_cfg and getattr(google_cfg, "deployment_mode", None) == "vertex":
+                is_vertex = True
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         client = GeminiEmbeddingClient(
             model=clean_model,
