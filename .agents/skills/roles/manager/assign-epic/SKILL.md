@@ -54,7 +54,7 @@ For each epic/task, choose the **most specific** role:
 |------|-----------|-----------|-----------|
 | EPIC-001 | Build REST API | `api-engineer` | Needs HTTP, auth, validation expertise |
 | EPIC-002 | Design database schema | `database-architect` | Schema design, migration planning |
-| EPIC-003 | Security audit | `security-auditor` | OWASP, vulnerability scanning |
+| EPIC-003 | Security audit | `security-engineer` | OWASP, vulnerability scanning |
 
 **Rules:**
 - Don't default to `engineer` -- invent the ideal specialist

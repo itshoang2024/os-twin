@@ -168,4 +168,20 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc.states.review.role | Should -Be "security-specialist"
         $lc.states.review.type | Should -Be "review"
     }
+
+    It "Keeps non-security capabilities as reviewer-only routing" {
+        $lifecycleFile = Join-Path $TestDrive "database-lifecycle.json"
+
+        & $script:ResolvePipeline `
+            -RequiredCapabilities @("database") `
+            -AssignedRole "engineer" `
+            -OutputPath $lifecycleFile `
+            -AgentsDir $script:agentsDir
+
+        $lc = Get-Content $lifecycleFile -Raw | ConvertFrom-Json
+
+        $lc.states.developing.role | Should -Be "engineer"
+        $lc.states.review.role | Should -Be "database-architect"
+        $lc.states.review.type | Should -Be "review"
+    }
 }

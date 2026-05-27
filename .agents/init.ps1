@@ -296,6 +296,22 @@ if (Test-Path $ResolveScript) {
     }
 }
 
+# ─── Sync project role definitions to OpenCode agents directory ──────────────
+# Ensures that roles defined in .agents/roles/ and contributes/roles/ are
+# available as named agents for `opencode run --agent <role>`.
+# This runs on every init so contributed roles (e.g. security-specialist) are
+# always present even on a clean machine that hasn't run the full installer.
+
+$SyncAgentsScript = Join-Path $ScriptDir "plan" "Sync-ContributedAgents.ps1"
+if (Test-Path $SyncAgentsScript) {
+    Write-Step "Syncing role definitions to OpenCode agents..."
+    try {
+        & $SyncAgentsScript -ProjectDir $TargetDir
+    } catch {
+        Write-Warn "Agent sync returned non-zero (non-critical): $_"
+    }
+}
+
 # ─── Clone global opencode.json to project .opencode/ ────────────────────────
 # Ensures agents running in the project context (via Invoke-Agent.ps1) have the
 # full config: MCP servers, agent permissions, tools blocks, provider definitions.
