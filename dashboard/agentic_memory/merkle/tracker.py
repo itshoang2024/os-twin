@@ -116,6 +116,22 @@ class IntegrityTracker:
                 self._tree = MerkleTree.from_data(data["tree"], self._hasher)
                 self._vectordb_root_hash = data.get("vectordb_root_hash", "")
                 self._note_count = data.get("note_count", 0)
+
+                # Verify loaded root matches actual note content.
+                # Notes may have been edited on disk while process was down
+                # (same count, different content).
+                fresh_leaves = {n.filepath: n.content_hash for n in notes.values()}
+                fresh_tree = MerkleTree(self._hasher)
+                fresh_root = fresh_tree.build(fresh_leaves)
+
+                if fresh_root != self._tree.root_hash:
+                    logger.info(
+                        "Merkle manifest stale (root %s != fresh %s), rebuilding",
+                        self._tree.root_hash[:8] if self._tree.root_hash else "empty",
+                        fresh_root[:8] if fresh_root else "empty",
+                    )
+                    return self.build_from_notes(notes)
+
                 logger.debug(
                     "Loaded Merkle manifest (%d notes, root=%s)",
                     self._note_count,

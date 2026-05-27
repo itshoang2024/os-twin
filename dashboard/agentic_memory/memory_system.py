@@ -1349,8 +1349,8 @@ class AgenticMemorySystem:
         else:
             # After restart: compare vectordb aggregate hash
             expected_hashes = {nid: n.content_hash for nid, n in self.memories.items()}
+            stored_vdb_hash = self._integrity.vectordb_root_hash  # read BEFORE mutating
             expected_vdb_hash = self._integrity.compute_vectordb_hash(expected_hashes)
-            stored_vdb_hash = self._integrity.vectordb_root_hash
 
             if expected_vdb_hash == stored_vdb_hash and stored_vdb_hash:
                 # O(1) — vectordb consistent, skip full scan
@@ -1695,6 +1695,8 @@ class AgenticMemorySystem:
         """Remove old markdown file and empty parent dirs if filepath changed."""
         if not self._notes_dir or old_filepath == new_filepath:
             return
+        # Remove the old path from the merkle tree to avoid phantom leaves.
+        self._integrity.notify_delete("", old_filepath)
         old_full_path = os.path.join(self._notes_dir, old_filepath)
         if not os.path.exists(old_full_path):
             return
