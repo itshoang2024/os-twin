@@ -464,6 +464,36 @@ async def patch_global_namespace(
     # Sync Vertex AI env vars to ~/.ostwin/.env when provider config changes.
     if namespace == "providers":
         _sync_vertex_env(value)
+        # Invalidate cached embedding clients so the new deployment_mode
+        # (gemini vs vertex) takes effect without a restart.
+        try:
+            from dashboard.routes.knowledge import _get_service  # noqa: WPS433
+
+            svc = _get_service()
+            if hasattr(svc, "invalidate_model_cache"):
+                svc.invalidate_model_cache()
+
+            import dashboard.ai as _ai_mod
+
+            _ai_mod._embedder = None
+            if hasattr(_ai_mod, "_embedder_cache"):
+                _ai_mod._embedder_cache.clear()
+
+            try:
+                from dashboard.knowledge.graph.index import kuzudb
+
+                kuzudb._embedder_singleton = None
+            except Exception:
+                pass
+
+            try:
+                from dashboard.llm_client import _embedding_cache
+
+                _embedding_cache.clear()
+            except Exception:
+                pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Embedding cache invalidation after provider change skipped: %s", exc)
 
     # Flag config reload for the MCP memory server when memory settings change.
     if namespace == "memory":
