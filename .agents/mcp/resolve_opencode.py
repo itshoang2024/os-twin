@@ -197,7 +197,7 @@ def _permission_key(server_name):
 
     Examples:
         "channel"         → "channel_*"
-        "obscura-browser" → "obscura-browser_*"
+        "chrome-devtools" → "chrome-devtools_*"
     """
     return f"{server_name}_*"
 

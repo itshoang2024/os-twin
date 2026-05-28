@@ -15,7 +15,7 @@ setup() {
   declare -f patch_mcp_config > /dev/null
 }
 
-@test "patch_mcp_config adds AGENT_DIR and OSTWIN_PYTHON to .env" {
+@test "patch_mcp_config adds AGENT_DIR, OSTWIN_PYTHON, and PATH to .env" {
   # Create temp test directory
   TEST_DIR=$(mktemp -d)
   INSTALL_DIR="$TEST_DIR"
@@ -38,12 +38,13 @@ setup() {
   [[ -f "$TEST_DIR/.env" ]]
   grep -q "export AGENT_DIR=" "$TEST_DIR/.env"
   grep -q "export OSTWIN_PYTHON=" "$TEST_DIR/.env"
+  grep -q "export PATH=" "$TEST_DIR/.env"
   
   # Cleanup
   rm -rf "$TEST_DIR"
 }
 
-@test "patch_mcp_config replaces existing AGENT_DIR in .env" {
+@test "patch_mcp_config replaces existing AGENT_DIR and PATH in .env" {
   TEST_DIR=$(mktemp -d)
   INSTALL_DIR="$TEST_DIR"
   VENV_DIR="$TEST_DIR/.venv"
@@ -57,12 +58,16 @@ setup() {
   # Create .env with old AGENT_DIR
   echo "AGENT_DIR=/old/path" > "$TEST_DIR/.env"
   echo "export AGENT_DIR=/old/path" >> "$TEST_DIR/.env"
+  echo "PATH=/old/path" >> "$TEST_DIR/.env"
+  echo "export PATH=/old/path" >> "$TEST_DIR/.env"
   
   run patch_mcp_config
   
   # Should have only one AGENT_DIR line
   AGENT_COUNT=$(grep -c "AGENT_DIR=" "$TEST_DIR/.env" || echo 0)
   [[ "$AGENT_COUNT" -eq 1 ]]
+  PATH_COUNT=$(grep -c "^export PATH=" "$TEST_DIR/.env" || echo 0)
+  [[ "$PATH_COUNT" -eq 1 ]]
   
   # Should be the new value
   grep -q "export AGENT_DIR=$TEST_DIR" "$TEST_DIR/.env"

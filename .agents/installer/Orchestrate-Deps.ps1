@@ -126,17 +126,17 @@ function Invoke-DependencyOrchestration {
             Install-OpenCode
         }
 
-        # Obscura backs the built-in obscura-browser MCP server. Install it
-        # before MCP config is seeded so fresh installs can start the server.
-        $obscuraPath = Check-Obscura
-        if ($obscuraPath) {
-            Write-Ok "obscura ($obscuraPath)"
+        # Chrome DevTools backs the built-in browser automation MCP server.
+        # Install it before MCP config is seeded so fresh installs can start the server.
+        $chromeDevToolsPath = Check-ChromeDevTools
+        if ($chromeDevToolsPath) {
+            Write-Ok "chrome-devtools runtime ($chromeDevToolsPath)"
         }
         elseif ($script:SkipOptional) {
-            Write-Warn "obscura not found (skipped — SkipOptional)"
+            Write-Warn "chrome-devtools runtime not found (skipped — SkipOptional)"
         }
         else {
-            Install-Obscura
+            Install-ChromeDevTools
         }
 
         # Node.js

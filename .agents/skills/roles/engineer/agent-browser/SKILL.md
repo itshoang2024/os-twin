@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: Use Vercel agent-browser CLI for browser automation workflows including search, navigation, snapshots, clicks, form fills, screenshots, and file downloads. CLI-oriented alternative to Playwright MCP or obscura-browser MCP.
+description: Use Vercel agent-browser CLI for browser automation workflows including search, navigation, snapshots, clicks, form fills, screenshots, and file downloads. CLI-oriented alternative to Playwright MCP or Chrome DevTools MCP.
 tags: [engineer, browser, automation, web, cli]
 triggers:
   - "use agent-browser"
@@ -23,7 +23,7 @@ mutating: true
 - Deterministic browser automation using refs like `@e1`, `@e2` from snapshots (not coordinates)
 - All screenshots and downloads saved inside project under `artifacts/browser-downloads/`
 - Exact artifact paths reported to user
-- Graceful fallback to Playwright MCP or obscura-browser MCP if CLI unavailable
+- Graceful fallback to Playwright MCP or Chrome DevTools MCP if CLI unavailable
 - No stealth or anti-bot bypass logic enabled by default
 
 ## When to Use
@@ -38,13 +38,22 @@ mutating: true
 
 ```bash
 # Install CLI
-npm install -g agent-browser
+pnpm add -g agent-browser@0.27.0
 
 # Run post-install setup if needed
 agent-browser install
 
 # Verify
 agent-browser --version
+```
+
+## Start Here
+
+Load the installed CLI's version-matched workflow before running a non-trivial browser task:
+
+```bash
+agent-browser skills get core
+agent-browser skills get core --full
 ```
 
 ## Core Commands
@@ -230,17 +239,9 @@ agent-browser close
 
 If `agent-browser` CLI is unavailable:
 
-### obscura-browser MCP
+### Chrome DevTools MCP
 
-Use these tools:
-- `browser_open` - Navigate to URL
-- `browser_snapshot` - Get page state
-- `browser_click` - Click element
-- `browser_fill` - Fill input
-- `browser_screenshot` - Capture screenshot
- - `browser_click_and_download` - Click element and wait for browser download (for JS-triggered downloads)
-- `browser_press` - Press keyboard key
-- `browser_close` - Close browser
+Use the currently available `chrome-devtools` MCP tools for browser navigation, snapshots, interaction, and browser state. This server is backed by native Obscura MCP, so tool names come from the active MCP runtime. Prefer `agent-browser` or Playwright MCP when screenshot files or download artifacts are required.
 
 ### Playwright MCP
 

@@ -31,6 +31,10 @@ setup() {
   [[ "$NODE_VER" == v* ]]
 }
 
+@test "AGENT_BROWSER_VERSION is set" {
+  [[ -n "$AGENT_BROWSER_VERSION" ]]
+}
+
 @test "double-sourcing is safe" {
   source "$INSTALLER_DIR/versions.conf"
   source "$INSTALLER_DIR/versions.conf"

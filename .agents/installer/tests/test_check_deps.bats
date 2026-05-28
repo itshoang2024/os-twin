@@ -39,14 +39,80 @@ setup() {
   fi
 }
 
-@test "check_obscura() detects installer-managed binary" {
+@test "check_agent_browser() succeeds when agent-browser is in PATH" {
+  if command -v agent-browser &>/dev/null; then
+    run check_agent_browser
+    [[ "$status" -eq 0 ]]
+  else
+    skip "agent-browser not available"
+  fi
+}
+
+@test "check_chrome_devtools() detects installer-managed binary" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/ostwin"
   mkdir -p "$INSTALL_DIR/.agents/bin"
-  touch "$INSTALL_DIR/.agents/bin/obscura"
+  cat > "$INSTALL_DIR/.agents/bin/obscura" <<'EOF'
+#!/bin/sh
+if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+  exit 0
+fi
+exit 1
+EOF
   chmod +x "$INSTALL_DIR/.agents/bin/obscura"
 
-  result=$(check_obscura)
-  [[ "$result" == "$INSTALL_DIR/.agents/bin/obscura" || -n "$result" ]]
+  local orig_path="$PATH"
+  PATH="/bin:/usr/bin"
+  result=$(check_chrome_devtools)
+  PATH="$orig_path"
+  [[ "$result" == "$INSTALL_DIR/.agents/bin/obscura" ]]
+}
+
+@test "check_chrome_devtools() rejects obscura without native MCP support" {
+  local fake_bin="$BATS_TEST_TMPDIR/fake-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/obscura" <<'EOF'
+#!/bin/sh
+exit 2
+EOF
+  chmod +x "$fake_bin/obscura"
+
+  local orig_path="$PATH"
+  PATH="$fake_bin:/bin:/usr/bin"
+  INSTALL_DIR="$BATS_TEST_TMPDIR/missing-install"
+  run check_chrome_devtools
+  PATH="$orig_path"
+
+  [[ "$status" -eq 1 ]]
+  [[ -z "$output" ]]
+}
+
+@test "check_chrome_devtools() rejects stale managed binary even when PATH has valid obscura" {
+  INSTALL_DIR="$BATS_TEST_TMPDIR/ostwin"
+  mkdir -p "$INSTALL_DIR/.agents/bin"
+  cat > "$INSTALL_DIR/.agents/bin/obscura" <<'EOF'
+#!/bin/sh
+exit 2
+EOF
+  chmod +x "$INSTALL_DIR/.agents/bin/obscura"
+
+  local fake_bin="$BATS_TEST_TMPDIR/valid-path-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/obscura" <<'EOF'
+#!/bin/sh
+if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "$fake_bin/obscura"
+
+  local orig_path="$PATH"
+  PATH="$fake_bin:/bin:/usr/bin"
+  run check_chrome_devtools
+  PATH="$orig_path"
+
+  [[ "$status" -eq 1 ]]
+  [[ -z "$output" ]]
 }
 
 @test "check_brew() succeeds on macOS with Homebrew" {
@@ -64,5 +130,7 @@ setup() {
   check_python > /dev/null 2>&1 || true
   check_node > /dev/null 2>&1 || true
   check_uv > /dev/null 2>&1 || true
+  check_agent_browser > /dev/null 2>&1 || true
+  check_chrome_devtools > /dev/null 2>&1 || true
   [[ "$PATH" == "$orig_path" ]]
 }

@@ -12,7 +12,7 @@
       - uv                 (Python package/env manager)
       - Node.js            (for dashboard UI)
       - opencode           (Agent execution engine)
-      - Obscura            (built-in browser MCP runtime)
+      - Chrome DevTools    (built-in browser MCP runtime)
       - Pester 5+          (PowerShell test framework)
       - MCP dependencies   (fastapi, uvicorn, etc.)
 
