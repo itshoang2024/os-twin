@@ -27,10 +27,11 @@ All legal outputs are drafts for qualified attorney review. They are not legal a
 
 For high-stakes work, externally shared work, or any output that could guide a legal decision:
 1. Check the OSTwin profile paths below and state whether company, practice, and matter context was loaded, absent, or assumed.
-2. State document/source read coverage: complete, partial, sampled, excerpt-only, or not provided.
-3. Confirm the intended audience and output destination before writing privileged analysis or external-facing text.
-4. If any gate item is unknown, either ask a focused question or proceed only with an explicit gap marker.
-5. Run `references/legal-output-checklist.md` before the final output.
+2. **When the task depends on user-provided documents, contracts, PDFs, DOCX, exhibits, filings, policies, or other source files: apply `source-document-intake` before legal analysis.** Record extraction method and read coverage per that skill's provenance output requirements.
+3. State document/source read coverage: complete, partial, sampled, excerpt-only, OCR-needed, conversion-needed, or not provided.
+4. Confirm the intended audience and output destination before writing privileged analysis or external-facing text.
+5. If any gate item is unknown, either ask a focused question or proceed only with an explicit gap marker.
+6. Run `references/legal-output-checklist.md` before the final output.
 
 Do not treat generic legal positions as the user's house playbook. If profile data is absent, label the work as unconfigured and avoid "standard position" claims.
 
@@ -79,7 +80,7 @@ Use profile data when available. If profile data is absent, proceed with explici
 ## Output Frame
 
 Start high-stakes outputs with:
-- Reviewer note: sources used, read coverage, verification gaps, jurisdiction assumptions, and attorney-review requirement.
+- Reviewer note: sources used, read coverage (per `source-document-intake` provenance output when source documents were opened), verification gaps, jurisdiction assumptions, and attorney-review requirement.
 - Draft marking: legal professional work product or non-legal research notes, depending on user role.
 - Decision options: practical next steps without choosing the legal decision for the user.
 
