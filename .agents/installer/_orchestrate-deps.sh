@@ -150,6 +150,11 @@ if check_node; then
     step "Installing clawhub CLI..."
     npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
   fi
+  if ! $SKIP_OPTIONAL; then
+    install_agent_browser
+  elif ! check_agent_browser; then
+    warn "agent-browser not found (skipped — --skip-optional)"
+  fi
 else
   warn "Node.js not found"
   if ask "Install Node.js? (required for Dashboard UI)"; then
@@ -164,6 +169,11 @@ else
       if ! command -v clawhub &>/dev/null && command -v npm &>/dev/null; then
         step "Installing clawhub CLI..."
         npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
+      fi
+      if ! $SKIP_OPTIONAL; then
+        install_agent_browser
+      elif ! check_agent_browser; then
+        warn "agent-browser not found (skipped — --skip-optional)"
       fi
     else
       warn "Node.js installation failed"

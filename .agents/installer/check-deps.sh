@@ -3,7 +3,7 @@
 # check-deps.sh — Dependency presence checks (pure — no installs)
 #
 # Provides: check_python, check_pwsh, check_node, check_uv, check_opencode,
-#           check_obscura, check_brew
+#           check_agent_browser, check_obscura, check_brew
 #
 # Requires: lib.sh (version_gte), versions.conf (MIN_PYTHON_VERSION, MIN_PWSH_VERSION)
 #
@@ -72,6 +72,12 @@ check_uv() {
 
 check_opencode() {
   command -v opencode &>/dev/null
+}
+
+# ─── agent-browser (Browser automation CLI) ─────────────────────────────────
+
+check_agent_browser() {
+  command -v agent-browser &>/dev/null
 }
 
 # ─── Obscura browser binary ─────────────────────────────────────────────────

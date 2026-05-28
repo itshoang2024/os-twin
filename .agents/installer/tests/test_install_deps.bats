@@ -42,6 +42,24 @@ setup() {
   declare -f install_obscura > /dev/null
 }
 
+@test "install_agent_browser function is defined" {
+  declare -f install_agent_browser > /dev/null
+}
+
+@test "install_agent_browser installs CLI and runs post-install setup" {
+  local body
+  body=$(declare -f install_agent_browser)
+  [[ "$body" == *'npm install -g "agent-browser@$AGENT_BROWSER_VERSION"'* ]]
+  [[ "$body" == *"agent-browser install"* ]]
+}
+
+@test "install_agent_browser uses pinned version from versions.conf" {
+  local body
+  body=$(declare -f install_agent_browser)
+  [[ -n "$AGENT_BROWSER_VERSION" ]]
+  [[ "$body" == *"AGENT_BROWSER_VERSION"* ]]
+}
+
 @test "install_obscura does not enable stealth by default" {
   local body
   body=$(declare -f install_obscura)

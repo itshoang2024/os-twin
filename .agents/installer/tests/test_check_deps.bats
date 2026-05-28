@@ -39,6 +39,15 @@ setup() {
   fi
 }
 
+@test "check_agent_browser() succeeds when agent-browser is in PATH" {
+  if command -v agent-browser &>/dev/null; then
+    run check_agent_browser
+    [[ "$status" -eq 0 ]]
+  else
+    skip "agent-browser not available"
+  fi
+}
+
 @test "check_obscura() detects installer-managed binary" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/ostwin"
   mkdir -p "$INSTALL_DIR/.agents/bin"
@@ -64,5 +73,6 @@ setup() {
   check_python > /dev/null 2>&1 || true
   check_node > /dev/null 2>&1 || true
   check_uv > /dev/null 2>&1 || true
+  check_agent_browser > /dev/null 2>&1 || true
   [[ "$PATH" == "$orig_path" ]]
 }

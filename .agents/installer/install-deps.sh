@@ -3,10 +3,12 @@
 # install-deps.sh — Dependency installers
 #
 # Provides: install_brew, install_uv, install_python, install_pwsh,
-#           install_node, install_opencode, install_obscura, install_pester
+#           install_node, install_opencode, install_agent_browser,
+#           install_obscura, install_pester
 #
 # Requires: lib.sh, versions.conf, detect-os.sh (OS, ARCH, PKG_MGR),
-#           check-deps.sh (check_uv, check_brew, check_opencode, check_obscura)
+#           check-deps.sh (check_uv, check_brew, check_opencode,
+#           check_agent_browser, check_obscura)
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Guard against double-sourcing
@@ -330,6 +332,54 @@ install_obscura() {
   rm -rf "$tmp_dir"
   export PATH="$bin_dir:$PATH"
   ok "obscura installed to $bin_dir/obscura"
+}
+
+# ─── agent-browser (Browser automation CLI) ─────────────────────────────────
+
+install_agent_browser() {
+  if check_agent_browser; then
+    local ab_ver
+    ab_ver=$(agent-browser --version 2>&1 | head -1 || echo "installed")
+    ok "agent-browser $ab_ver"
+    return 0
+  fi
+
+  if ! command -v npm &>/dev/null; then
+    warn "Skipping agent-browser — npm not found"
+    return 0
+  fi
+
+  step "Installing agent-browser CLI..."
+  local installed=false
+  if npm install -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
+    installed=true
+  elif command -v sudo &>/dev/null && sudo npm install -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
+    installed=true
+  fi
+
+  if ! $installed; then
+    warn "agent-browser npm install failed; browser automation CLI will require manual install"
+    return 0
+  fi
+
+  local npm_prefix
+  npm_prefix=$(npm prefix -g 2>/dev/null || true)
+  if [[ -n "$npm_prefix" && -d "$npm_prefix/bin" && ":$PATH:" != *":$npm_prefix/bin:"* ]]; then
+    export PATH="$npm_prefix/bin:$PATH"
+  fi
+
+  if check_agent_browser; then
+    step "Running agent-browser post-install setup..."
+    if ! agent-browser install 2>/dev/null; then
+      warn "agent-browser install failed; CLI is installed but browser runtime may need manual setup"
+    fi
+
+    local ab_ver
+    ab_ver=$(agent-browser --version 2>&1 | head -1 || echo "installed")
+    ok "agent-browser $ab_ver installed"
+  else
+    warn "agent-browser installed but not immediately available in PATH"
+  fi
 }
 
 # ─── Pester (PowerShell test framework) ──────────────────────────────────────
