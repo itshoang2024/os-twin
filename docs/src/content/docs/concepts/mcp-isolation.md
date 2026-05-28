@@ -95,11 +95,11 @@ OSTwin ships with six MCP servers. They are defined in `.agents/mcp/mcp-builtin.
 
 ### Local Servers (Subprocess)
 
-| Server | Script | Key Tools |
+| Server | Launch | Key Tools |
 |--------|--------|-----------|
 | **channel** | `.agents/mcp/channel-server.py` | `post_message`, `read_messages`, `get_latest` |
 | **warroom** | `.agents/mcp/warroom-server.py` | `update_status`, `report_progress`, `list_artifacts` |
-| **chrome-devtools** | `.agents/mcp/obscura-browser-server.py` | Chrome DevTools automation via CDP-compatible endpoint |
+| **chrome-devtools** | `obscura mcp` | Browser automation through Obscura's native MCP server |
 | **playwright** | `npx @playwright/mcp@latest` | Browser automation and testing |
 
 Local servers are launched as subprocesses by the agent runner. Each gets its own process, ensuring isolation -- a crash in one server does not affect others.

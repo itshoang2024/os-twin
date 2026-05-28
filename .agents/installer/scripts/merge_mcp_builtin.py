@@ -17,11 +17,17 @@ import sys
 
 _LEGACY_BROWSER_SERVER = "-".join(["chrome", "devtools"])
 _LEGACY_BROWSER_PACKAGE = f"{_LEGACY_BROWSER_SERVER}-mcp"
+_LEGACY_BROWSER_ADAPTER = "obscura-browser-server.py"
+_LEGACY_BROWSER_ALIAS = "obscura-browser"
+_LEGACY_BROWSER_TYPO = "chrom-devtools"
 
 DEPRECATED_BUILTINS = {
-    # Replaced by the built-in chrome-devtools server. Only entries whose
-    # command contains this managed package marker are pruned.
-    _LEGACY_BROWSER_SERVER: [_LEGACY_BROWSER_PACKAGE],
+    # Replaced by the built-in chrome-devtools server backed by native
+    # Obscura MCP. Only entries whose command contains managed markers are
+    # pruned; user-owned servers with the same name are kept.
+    _LEGACY_BROWSER_SERVER: [_LEGACY_BROWSER_PACKAGE, _LEGACY_BROWSER_ADAPTER],
+    _LEGACY_BROWSER_ALIAS: [_LEGACY_BROWSER_ADAPTER],
+    _LEGACY_BROWSER_TYPO: [_LEGACY_BROWSER_PACKAGE, _LEGACY_BROWSER_ADAPTER],
 }
 
 

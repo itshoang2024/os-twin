@@ -152,7 +152,7 @@ OSTwin is four subsystems communicating through the filesystem:
 |-----------|----------|---------|
 | **Engine** | PowerShell | Plan execution, agent invocation, lifecycle enforcement |
 | **Dashboard** | Python (FastAPI) + TypeScript (Next.js) | Real-time monitoring, SSE streaming, memory search |
-| **MCP Servers** | Python | Tool interfaces for agents (channel, warroom, memory, knowledge) |
+| **MCP Servers** | Python + native MCP CLIs | Tool interfaces for agents (channel, warroom, memory, knowledge, browser automation) |
 | **Bot** | TypeScript | Chat platform integrations (Discord, Telegram, Slack) |
 
 All state lives in `.agents/` — plans, war-rooms, roles, skills, and the shared memory ledger. No database, no message broker, no shared process.
@@ -165,7 +165,7 @@ All state lives in `.agents/` — plans, war-rooms, roles, skills, and the share
 | `warroom` | local | `update_status`, `report_progress`, `list_artifacts` |
 | `memory` | remote | `publish`, `query`, `search`, `get_context` |
 | `knowledge` | remote | `list_namespaces`, `query`, `search_all`, `find_relevant` |
-| `chrome-devtools` | local | Chrome DevTools automation via CDP-compatible endpoint |
+| `chrome-devtools` | local | Browser automation through Obscura's native MCP server |
 | `playwright` | local | Browser automation |
 
 ## Data Layout

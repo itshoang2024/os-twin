@@ -93,7 +93,7 @@ trust_level: core
 Use `agent-browser` for browser automation when it is available. It provides CDP-backed navigation, accessibility-tree snapshots with stable element refs, clicks, form fills, screenshots, downloads, and workflow-specific guidance through `agent-browser skills get core`.
 
 ### Chrome DevTools MCP
-Use the available `chrome-devtools` tools for CDP-compatible browser automation, page snapshots, interaction, screenshots, file downloads, and browser health checks.
+Use the available `chrome-devtools` tools for browser navigation, page snapshots, interaction, and browser state through the native Obscura MCP server. Use `agent-browser` or `playwright` when screenshot files, viewport checks, or download evidence are required.
 
 ### Playwright MCP
 Use the available `playwright` tools for browser navigation, interaction, console inspection, network inspection, screenshots, and viewport checks.

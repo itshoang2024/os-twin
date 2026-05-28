@@ -9,12 +9,19 @@ import importlib.util
 
 
 MANAGED_BROWSER_NAME = "-".join(["chrome", "devtools"])
+LEGACY_BROWSER_ALIAS = "obscura-browser"
+LEGACY_BROWSER_TYPO = "chrom-devtools"
 LEGACY_MANAGED_BROWSER_PACKAGE = f"{MANAGED_BROWSER_NAME}-mcp"
 LEGACY_MANAGED_BROWSER_COMMAND = [
     "npx",
     "-y",
     f"{LEGACY_MANAGED_BROWSER_PACKAGE}@latest",
 ]
+LEGACY_BROWSER_ADAPTER_COMMAND = [
+    "{env:OSTWIN_PYTHON}",
+    "{env:AGENT_DIR}/mcp/obscura-browser-server.py",
+]
+NATIVE_BROWSER_COMMAND = ["obscura", "mcp"]
 
 
 def _load_merge_module():
@@ -67,7 +74,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     },
                     "playwright": {
@@ -86,10 +93,7 @@ class TestMergeMcpBuiltin:
             result = _read_json(config_path)
 
             assert MANAGED_BROWSER_NAME in result["mcp"]
-            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == [
-                "{env:OSTWIN_PYTHON}",
-                "{env:AGENT_DIR}/mcp/obscura-browser-server.py",
-            ]
+            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
 
     def test_prunes_legacy_managed_browser_string_command(self):
         """Legacy managed browser MCP command strings are removed too."""
@@ -113,7 +117,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     }
                 }
@@ -127,10 +131,90 @@ class TestMergeMcpBuiltin:
             result = _read_json(config_path)
 
             assert MANAGED_BROWSER_NAME in result["mcp"]
-            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == [
-                "{env:OSTWIN_PYTHON}",
-                "{env:AGENT_DIR}/mcp/obscura-browser-server.py",
-            ]
+            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
+
+    def test_prunes_legacy_python_adapter_config(self):
+        """Old Python adapter config is removed during migration."""
+        module = _load_merge_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            builtin_path = Path(tmpdir) / "mcp-builtin.json"
+
+            existing_config = {
+                "mcp": {
+                    MANAGED_BROWSER_NAME: {
+                        "type": "local",
+                        "command": LEGACY_BROWSER_ADAPTER_COMMAND,
+                        "environment": {"PATH": "{env:PATH}"}
+                    }
+                }
+            }
+
+            builtin_config = {
+                "mcp": {
+                    MANAGED_BROWSER_NAME: {
+                        "type": "local",
+                        "command": NATIVE_BROWSER_COMMAND,
+                        "environment": {"PATH": "{env:PATH}"}
+                    }
+                }
+            }
+
+            _write_json(config_path, existing_config)
+            _write_json(builtin_path, builtin_config)
+
+            module.merge_builtin(str(config_path), str(builtin_path))
+
+            result = _read_json(config_path)
+
+            assert MANAGED_BROWSER_NAME in result["mcp"]
+            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
+
+    def test_prunes_legacy_alias_python_adapter_config(self):
+        """Old browser alias names are removed when they use managed commands."""
+        module = _load_merge_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            builtin_path = Path(tmpdir) / "mcp-builtin.json"
+
+            existing_config = {
+                "mcp": {
+                    LEGACY_BROWSER_ALIAS: {
+                        "type": "local",
+                        "command": LEGACY_BROWSER_ADAPTER_COMMAND,
+                        "environment": {"PATH": "{env:PATH}"}
+                    },
+                    LEGACY_BROWSER_TYPO: {
+                        "type": "local",
+                        "command": LEGACY_MANAGED_BROWSER_COMMAND,
+                        "environment": {"PATH": "{env:PATH}"}
+                    }
+                }
+            }
+
+            builtin_config = {
+                "mcp": {
+                    MANAGED_BROWSER_NAME: {
+                        "type": "local",
+                        "command": NATIVE_BROWSER_COMMAND,
+                        "environment": {"PATH": "{env:PATH}"}
+                    }
+                }
+            }
+
+            _write_json(config_path, existing_config)
+            _write_json(builtin_path, builtin_config)
+
+            module.merge_builtin(str(config_path), str(builtin_path))
+
+            result = _read_json(config_path)
+
+            assert LEGACY_BROWSER_ALIAS not in result["mcp"]
+            assert LEGACY_BROWSER_TYPO not in result["mcp"]
+            assert MANAGED_BROWSER_NAME in result["mcp"]
+            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
 
     def test_adds_chrome_devtools_from_builtin(self):
         """Existing config gets chrome-devtools added from builtin."""
@@ -154,7 +238,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     },
                     "playwright": {
@@ -235,7 +319,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     }
                 }
@@ -275,7 +359,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     }
                 }
@@ -351,7 +435,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     "chrome-devtools": {
                         "type": "local",
-                        "command": ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/obscura-browser-server.py"],
+                        "command": NATIVE_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     }
                 }
@@ -365,10 +449,7 @@ class TestMergeMcpBuiltin:
             result = _read_json(config_path)
 
             assert MANAGED_BROWSER_NAME in result["mcp"]
-            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == [
-                "{env:OSTWIN_PYTHON}",
-                "{env:AGENT_DIR}/mcp/obscura-browser-server.py",
-            ]
+            assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
 
 
 if __name__ == "__main__":

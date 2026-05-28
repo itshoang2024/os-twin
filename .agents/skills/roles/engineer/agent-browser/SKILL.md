@@ -232,15 +232,7 @@ If `agent-browser` CLI is unavailable:
 
 ### Chrome DevTools MCP
 
-Use these tools:
-- `browser_open` - Navigate to URL
-- `browser_snapshot` - Get page state
-- `browser_click` - Click element
-- `browser_fill` - Fill input
-- `browser_screenshot` - Capture screenshot
- - `browser_click_and_download` - Click element and wait for browser download (for JS-triggered downloads)
-- `browser_press` - Press keyboard key
-- `browser_close` - Close browser
+Use the currently available `chrome-devtools` MCP tools for browser navigation, snapshots, interaction, and browser state. This server is backed by native Obscura MCP, so tool names come from the active MCP runtime. Prefer `agent-browser` or Playwright MCP when screenshot files or download artifacts are required.
 
 ### Playwright MCP
 
