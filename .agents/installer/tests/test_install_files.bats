@@ -68,6 +68,39 @@ EOF
   rm -rf "$tmp_install" "$tmp_script"
 }
 
+@test "_seed_mcp_config: prefers mcp-builtin.json over ignored config.json" {
+  local tmp_install="$(mktemp -d)"
+  local tmp_script="$(mktemp -d)"
+
+  mkdir -p "$tmp_script/mcp"
+  cat > "$tmp_script/mcp/config.json" <<'EOF'
+{
+  "mcp": {
+    "stale": { "type": "local", "command": ["python", "stale.py"] }
+  }
+}
+EOF
+  cat > "$tmp_script/mcp/mcp-builtin.json" <<'EOF'
+{
+  "mcp": {
+    "chrome-devtools": { "type": "local", "command": ["obscura", "mcp"] }
+  }
+}
+EOF
+
+  SCRIPT_DIR="$tmp_script"
+  INSTALL_DIR="$tmp_install"
+
+  run _seed_mcp_config
+  [ "$status" -eq 0 ]
+
+  local cfg_content="$(cat "$tmp_install/.agents/mcp/config.json")"
+  [[ "$cfg_content" == *"chrome-devtools"* ]]
+  [[ "$cfg_content" != *"stale"* ]]
+
+  rm -rf "$tmp_install" "$tmp_script"
+}
+
 @test "_seed_mcp_config: preserves existing config.json on re-install" {
   local tmp_install="$(mktemp -d)"
   local tmp_script="$(mktemp -d)"
@@ -93,6 +126,8 @@ EOF
   }
 }
 EOF
+  touch "$tmp_install/.agents/mcp/obscura-browser-server.py"
+  touch "$tmp_install/.agents/mcp/test_obscura_browser.py"
 
   # Override globals for test
   SCRIPT_DIR="$tmp_script"
@@ -108,6 +143,8 @@ EOF
   local cfg_content="$(cat "$tmp_install/.agents/mcp/config.json")"
   [[ "$cfg_content" == *"custom-server"* ]]
   [[ "$cfg_content" == *"localhost:8080"* ]]
+  [ ! -f "$tmp_install/.agents/mcp/obscura-browser-server.py" ]
+  [ ! -f "$tmp_install/.agents/mcp/test_obscura_browser.py" ]
   
   rm -rf "$tmp_install" "$tmp_script"
 }

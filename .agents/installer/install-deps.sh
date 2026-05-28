@@ -3,10 +3,12 @@
 # install-deps.sh — Dependency installers
 #
 # Provides: install_brew, install_uv, install_python, install_pwsh,
-#           install_node, install_opencode, install_obscura, install_pester
+#           install_node, install_opencode, install_agent_browser,
+#           install_chrome_devtools, install_pester
 #
 # Requires: lib.sh, versions.conf, detect-os.sh (OS, ARCH, PKG_MGR),
-#           check-deps.sh (check_uv, check_brew, check_opencode, check_obscura)
+#           check-deps.sh (check_uv, check_brew, check_opencode,
+#           check_agent_browser, check_chrome_devtools)
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Guard against double-sourcing
@@ -264,13 +266,13 @@ install_opencode() {
   fi
 }
 
-# ─── Obscura browser binary ─────────────────────────────────────────────────
+# ─── Chrome DevTools browser runtime ────────────────────────────────────────
 
-install_obscura() {
+install_chrome_devtools() {
   local existing
-  existing=$(check_obscura 2>/dev/null || true)
+  existing=$(check_chrome_devtools 2>/dev/null || true)
   if [[ -n "$existing" ]]; then
-    ok "obscura already installed ($existing)"
+    ok "chrome-devtools runtime already installed ($existing)"
     return 0
   fi
 
@@ -286,12 +288,12 @@ install_obscura() {
       asset="obscura-x86_64-macos.tar.gz"
       ;;
     *)
-      warn "No Obscura release asset configured for ${OS}/${ARCH}; obscura-browser MCP will require manual Obscura install"
+      warn "No Chrome DevTools runtime asset configured for ${OS}/${ARCH}; chrome-devtools MCP will require manual runtime install"
       return 0
       ;;
   esac
 
-  step "Installing Obscura browser..."
+  step "Installing Chrome DevTools browser runtime..."
   local bin_dir="$INSTALL_DIR/.agents/bin"
   local tmp_dir
   tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ostwin-obscura.XXXXXX")
@@ -300,14 +302,14 @@ install_obscura() {
 
   mkdir -p "$bin_dir"
   if ! curl -fsSL "$url" -o "$archive"; then
-    warn "Obscura download failed from $url"
-    warn "obscura-browser MCP will require manual Obscura install"
+    warn "Chrome DevTools runtime download failed from $url"
+    warn "chrome-devtools MCP will require manual runtime install"
     rm -rf "$tmp_dir"
     return 0
   fi
 
   if ! tar -xzf "$archive" -C "$tmp_dir"; then
-    warn "Obscura archive extraction failed"
+    warn "Chrome DevTools runtime archive extraction failed"
     rm -rf "$tmp_dir"
     return 0
   fi
@@ -318,7 +320,7 @@ install_obscura() {
     binary=$(find "$tmp_dir" -type f -name obscura.exe 2>/dev/null | head -1)
   fi
   if [[ -z "$binary" ]]; then
-    warn "Obscura binary not found in release archive"
+    warn "Chrome DevTools runtime binary not found in release archive"
     rm -rf "$tmp_dir"
     return 0
   fi
@@ -329,7 +331,58 @@ install_obscura() {
   chmod +x "$bin_dir"/obscura* 2>/dev/null || true
   rm -rf "$tmp_dir"
   export PATH="$bin_dir:$PATH"
-  ok "obscura installed to $bin_dir/obscura"
+  ok "chrome-devtools runtime installed to $bin_dir"
+}
+
+# ─── agent-browser (Browser automation CLI) ─────────────────────────────────
+
+install_agent_browser() {
+  if check_agent_browser; then
+    local ab_ver
+    ab_ver=$(agent-browser --version 2>&1 | head -1 || echo "installed")
+    ok "agent-browser $ab_ver"
+    return 0
+  fi
+
+  if ! command -v pnpm &>/dev/null; then
+    warn "Skipping agent-browser — pnpm not found"
+    return 0
+  fi
+
+  local pnpm_bin_dir
+  pnpm_bin_dir=$(pnpm config get global-bin-dir 2>/dev/null || true)
+  if [[ -z "$pnpm_bin_dir" || "$pnpm_bin_dir" == "undefined" || "$pnpm_bin_dir" == "null" ]]; then
+    pnpm_bin_dir="${PNPM_HOME:-$HOME/.local/bin}"
+    mkdir -p "$pnpm_bin_dir"
+    export PNPM_HOME="$pnpm_bin_dir"
+    pnpm config set global-bin-dir "$pnpm_bin_dir" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "${PNPM_HOME:-}" && -d "$PNPM_HOME" && ":$PATH:" != *":$PNPM_HOME:"* ]]; then
+    export PATH="$PNPM_HOME:$PATH"
+  fi
+  if [[ -n "$pnpm_bin_dir" && "$pnpm_bin_dir" != "undefined" && -d "$pnpm_bin_dir" && ":$PATH:" != *":$pnpm_bin_dir:"* ]]; then
+    export PATH="$pnpm_bin_dir:$PATH"
+  fi
+
+  step "Installing agent-browser CLI with pnpm..."
+  if ! pnpm add -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
+    warn "agent-browser pnpm install failed; browser automation CLI will require manual install"
+    return 0
+  fi
+
+  if check_agent_browser; then
+    step "Running agent-browser post-install setup..."
+    if ! agent-browser install 2>/dev/null; then
+      warn "agent-browser install failed; CLI is installed but browser runtime may need manual setup"
+    fi
+
+    local ab_ver
+    ab_ver=$(agent-browser --version 2>&1 | head -1 || echo "installed")
+    ok "agent-browser $ab_ver installed"
+  else
+    warn "agent-browser installed but not immediately available in PATH"
+  fi
 }
 
 # ─── Pester (PowerShell test framework) ──────────────────────────────────────

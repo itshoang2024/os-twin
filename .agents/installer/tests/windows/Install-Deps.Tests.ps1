@@ -69,13 +69,13 @@ Describe "Install-OpenCode" {
     }
 }
 
-Describe "Install-Obscura" {
+Describe "Install-ChromeDevTools" {
     It "Should define the function" {
-        Get-Command Install-Obscura | Should -Not -BeNullOrEmpty
+        Get-Command Install-ChromeDevTools | Should -Not -BeNullOrEmpty
     }
 
     It "Should have CmdletBinding" {
-        $cmd = Get-Command Install-Obscura
+        $cmd = Get-Command Install-ChromeDevTools
         $cmd.CmdletBinding | Should -Be $true
     }
 
@@ -85,14 +85,14 @@ Describe "Install-Obscura" {
             [pscustomobject]@{ name = "obscura-x86_64-windows.zip" }
         )
 
-        $asset = Select-ObscuraAsset -Assets $assets -OS "windows" -Arch "x64"
+        $asset = Select-ChromeDevToolsAsset -Assets $assets -OS "windows" -Arch "x64"
         $asset.name | Should -Be "obscura-x86_64-windows.zip"
     }
 
     It "Should return null when no release asset matches" {
         $assets = @([pscustomobject]@{ name = "obscura-x86_64-linux.tar.gz" })
 
-        $asset = Select-ObscuraAsset -Assets $assets -OS "windows" -Arch "arm64"
+        $asset = Select-ChromeDevToolsAsset -Assets $assets -OS "windows" -Arch "arm64"
         $asset | Should -BeNullOrEmpty
     }
 
@@ -101,7 +101,7 @@ Describe "Install-Obscura" {
         $content | Should -Not -Match '\$env:OBSCURA_ARGS'
     }
 
-    It "Should preserve obscura-worker when copying release binaries" {
+    It "Should preserve companion worker when copying release binaries" {
         $content = Get-Content (Join-Path $script:InstallerModDir "Install-Deps.ps1") -Raw
         $content | Should -Match 'obscura-worker'
     }

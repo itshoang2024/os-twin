@@ -110,10 +110,12 @@ function Seed-McpConfig {
 
     # Find seed source
     $seedSrc = ""
+    $srcBuiltinJson = Join-Path $script:ScriptDir "mcp\mcp-builtin.json"
     $srcConfigJson = Join-Path $script:ScriptDir "mcp\config.json"
     $srcMcpConfigJson = Join-Path $script:ScriptDir "mcp\mcp-config.json"
 
-    if (Test-Path $srcConfigJson) { $seedSrc = $srcConfigJson }
+    if (Test-Path $srcBuiltinJson) { $seedSrc = $srcBuiltinJson }
+    elseif (Test-Path $srcConfigJson) { $seedSrc = $srcConfigJson }
     elseif (Test-Path $srcMcpConfigJson) { $seedSrc = $srcMcpConfigJson }
 
     # Ensure mcp dir exists
@@ -182,6 +184,12 @@ function Seed-McpConfig {
             $src = Join-Path $mcpSrcDir $jsonName
             if (Test-Path $src) {
                 Copy-Item -Path $src -Destination (Join-Path $mcpDir $jsonName) -Force
+            }
+        }
+        foreach ($legacyName in @("obscura-browser-server.py", "test_obscura_browser.py")) {
+            $legacyPath = Join-Path $mcpDir $legacyName
+            if (Test-Path $legacyPath) {
+                Remove-Item -Path $legacyPath -Force
             }
         }
         Write-Ok "mcp/ scripts synced"
