@@ -17,17 +17,23 @@ import sys
 
 _LEGACY_BROWSER_SERVER = "-".join(["chrome", "devtools"])
 _LEGACY_BROWSER_PACKAGE = f"{_LEGACY_BROWSER_SERVER}-mcp"
-_LEGACY_BROWSER_ADAPTER = "obscura-browser-server.py"
-_LEGACY_BROWSER_ALIAS = "obscura-browser"
-_LEGACY_BROWSER_TYPO = "chrom-devtools"
+_DEPRECATED_BROWSER_ADAPTER_MARKER = "obscura-browser-server.py"
+_DEPRECATED_BROWSER_ALIAS = "obscura-browser"
+_DEPRECATED_BROWSER_TYPO = "chrom-devtools"
 
 DEPRECATED_BUILTINS = {
-    # Replaced by the built-in chrome-devtools server backed by native
-    # Obscura MCP. Only entries whose command contains managed markers are
-    # pruned; user-owned servers with the same name are kept.
-    _LEGACY_BROWSER_SERVER: [_LEGACY_BROWSER_PACKAGE, _LEGACY_BROWSER_ADAPTER],
-    _LEGACY_BROWSER_ALIAS: [_LEGACY_BROWSER_ADAPTER],
-    _LEGACY_BROWSER_TYPO: [_LEGACY_BROWSER_PACKAGE, _LEGACY_BROWSER_ADAPTER],
+    # Migration markers only: these strings identify installer-owned browser
+    # configs from older installs so they can be removed and replaced by the
+    # native `obscura mcp` builtin. They are not launched as runtime commands.
+    _LEGACY_BROWSER_SERVER: [
+        _LEGACY_BROWSER_PACKAGE,
+        _DEPRECATED_BROWSER_ADAPTER_MARKER,
+    ],
+    _DEPRECATED_BROWSER_ALIAS: [_DEPRECATED_BROWSER_ADAPTER_MARKER],
+    _DEPRECATED_BROWSER_TYPO: [
+        _LEGACY_BROWSER_PACKAGE,
+        _DEPRECATED_BROWSER_ADAPTER_MARKER,
+    ],
 }
 
 

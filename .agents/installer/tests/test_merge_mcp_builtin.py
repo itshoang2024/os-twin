@@ -9,15 +9,15 @@ import importlib.util
 
 
 MANAGED_BROWSER_NAME = "-".join(["chrome", "devtools"])
-LEGACY_BROWSER_ALIAS = "obscura-browser"
-LEGACY_BROWSER_TYPO = "chrom-devtools"
+DEPRECATED_BROWSER_ALIAS = "obscura-browser"
+DEPRECATED_BROWSER_TYPO = "chrom-devtools"
 LEGACY_MANAGED_BROWSER_PACKAGE = f"{MANAGED_BROWSER_NAME}-mcp"
 LEGACY_MANAGED_BROWSER_COMMAND = [
     "npx",
     "-y",
     f"{LEGACY_MANAGED_BROWSER_PACKAGE}@latest",
 ]
-LEGACY_BROWSER_ADAPTER_COMMAND = [
+DEPRECATED_BROWSER_ADAPTER_COMMAND = [
     "{env:OSTWIN_PYTHON}",
     "{env:AGENT_DIR}/mcp/obscura-browser-server.py",
 ]
@@ -145,7 +145,7 @@ class TestMergeMcpBuiltin:
                 "mcp": {
                     MANAGED_BROWSER_NAME: {
                         "type": "local",
-                        "command": LEGACY_BROWSER_ADAPTER_COMMAND,
+                        "command": DEPRECATED_BROWSER_ADAPTER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     }
                 }
@@ -181,12 +181,12 @@ class TestMergeMcpBuiltin:
 
             existing_config = {
                 "mcp": {
-                    LEGACY_BROWSER_ALIAS: {
+                    DEPRECATED_BROWSER_ALIAS: {
                         "type": "local",
-                        "command": LEGACY_BROWSER_ADAPTER_COMMAND,
+                        "command": DEPRECATED_BROWSER_ADAPTER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
                     },
-                    LEGACY_BROWSER_TYPO: {
+                    DEPRECATED_BROWSER_TYPO: {
                         "type": "local",
                         "command": LEGACY_MANAGED_BROWSER_COMMAND,
                         "environment": {"PATH": "{env:PATH}"}
@@ -211,8 +211,8 @@ class TestMergeMcpBuiltin:
 
             result = _read_json(config_path)
 
-            assert LEGACY_BROWSER_ALIAS not in result["mcp"]
-            assert LEGACY_BROWSER_TYPO not in result["mcp"]
+            assert DEPRECATED_BROWSER_ALIAS not in result["mcp"]
+            assert DEPRECATED_BROWSER_TYPO not in result["mcp"]
             assert MANAGED_BROWSER_NAME in result["mcp"]
             assert result["mcp"][MANAGED_BROWSER_NAME]["command"] == NATIVE_BROWSER_COMMAND
 
