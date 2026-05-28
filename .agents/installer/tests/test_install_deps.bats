@@ -49,7 +49,7 @@ setup() {
 @test "install_agent_browser installs CLI and runs post-install setup" {
   local body
   body=$(declare -f install_agent_browser)
-  [[ "$body" == *'npm install -g "agent-browser@$AGENT_BROWSER_VERSION"'* ]]
+  [[ "$body" == *'pnpm add -g "agent-browser@$AGENT_BROWSER_VERSION"'* ]]
   [[ "$body" == *"agent-browser install"* ]]
 }
 
@@ -58,6 +58,14 @@ setup() {
   body=$(declare -f install_agent_browser)
   [[ -n "$AGENT_BROWSER_VERSION" ]]
   [[ "$body" == *"AGENT_BROWSER_VERSION"* ]]
+}
+
+@test "install_agent_browser uses pnpm instead of npm" {
+  local body
+  body=$(declare -f install_agent_browser)
+  [[ "$body" == *"command -v pnpm"* ]]
+  [[ "$body" != *"npm install -g"* ]]
+  [[ "$body" != *"npm prefix"* ]]
 }
 
 @test "install_obscura does not enable stealth by default" {

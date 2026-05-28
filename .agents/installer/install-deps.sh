@@ -344,28 +344,31 @@ install_agent_browser() {
     return 0
   fi
 
-  if ! command -v npm &>/dev/null; then
-    warn "Skipping agent-browser — npm not found"
+  if ! command -v pnpm &>/dev/null; then
+    warn "Skipping agent-browser — pnpm not found"
     return 0
   fi
 
-  step "Installing agent-browser CLI..."
-  local installed=false
-  if npm install -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
-    installed=true
-  elif command -v sudo &>/dev/null && sudo npm install -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
-    installed=true
+  local pnpm_bin_dir
+  pnpm_bin_dir=$(pnpm config get global-bin-dir 2>/dev/null || true)
+  if [[ -z "$pnpm_bin_dir" || "$pnpm_bin_dir" == "undefined" || "$pnpm_bin_dir" == "null" ]]; then
+    pnpm_bin_dir="${PNPM_HOME:-$HOME/.local/bin}"
+    mkdir -p "$pnpm_bin_dir"
+    export PNPM_HOME="$pnpm_bin_dir"
+    pnpm config set global-bin-dir "$pnpm_bin_dir" >/dev/null 2>&1 || true
   fi
 
-  if ! $installed; then
-    warn "agent-browser npm install failed; browser automation CLI will require manual install"
+  if [[ -n "${PNPM_HOME:-}" && -d "$PNPM_HOME" && ":$PATH:" != *":$PNPM_HOME:"* ]]; then
+    export PATH="$PNPM_HOME:$PATH"
+  fi
+  if [[ -n "$pnpm_bin_dir" && "$pnpm_bin_dir" != "undefined" && -d "$pnpm_bin_dir" && ":$PATH:" != *":$pnpm_bin_dir:"* ]]; then
+    export PATH="$pnpm_bin_dir:$PATH"
+  fi
+
+  step "Installing agent-browser CLI with pnpm..."
+  if ! pnpm add -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
+    warn "agent-browser pnpm install failed; browser automation CLI will require manual install"
     return 0
-  fi
-
-  local npm_prefix
-  npm_prefix=$(npm prefix -g 2>/dev/null || true)
-  if [[ -n "$npm_prefix" && -d "$npm_prefix/bin" && ":$PATH:" != *":$npm_prefix/bin:"* ]]; then
-    export PATH="$npm_prefix/bin:$PATH"
   fi
 
   if check_agent_browser; then
