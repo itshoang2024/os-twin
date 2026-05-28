@@ -82,15 +82,32 @@ check_agent_browser() {
 
 # ─── Chrome DevTools browser runtime ────────────────────────────────────────
 
+_obscura_supports_mcp() {
+  local candidate="$1"
+  [[ -n "$candidate" && -x "$candidate" ]] || return 1
+  "$candidate" mcp --help >/dev/null 2>&1
+}
+
 check_chrome_devtools() {
-  if command -v obscura &>/dev/null; then
-    command -v obscura
-    return 0
+  local candidate
+  if [[ -n "${INSTALL_DIR:-}" ]]; then
+    candidate="$INSTALL_DIR/.agents/bin/obscura"
+    if [[ -e "$candidate" ]]; then
+      if _obscura_supports_mcp "$candidate"; then
+        echo "$candidate"
+        return 0
+      fi
+      return 1
+    fi
   fi
-  if [[ -n "${INSTALL_DIR:-}" && -x "$INSTALL_DIR/.agents/bin/obscura" ]]; then
-    echo "$INSTALL_DIR/.agents/bin/obscura"
-    return 0
-  fi
+
+  while IFS= read -r candidate; do
+    if _obscura_supports_mcp "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done < <(type -P -a obscura 2>/dev/null || true)
+
   return 1
 }
 

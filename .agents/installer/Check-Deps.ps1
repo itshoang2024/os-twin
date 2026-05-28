@@ -116,19 +116,57 @@ function Check-OpenCode {
 
 # ─── Chrome DevTools browser runtime ────────────────────────────────────────
 
+function Test-ChromeDevToolsMcpSupport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path
+    )
+
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+
+    $previousLastExitCode = $global:LASTEXITCODE
+    try {
+        & $Path mcp --help *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $global:LASTEXITCODE = $previousLastExitCode
+    }
+}
+
 function Check-ChromeDevTools {
     [CmdletBinding()]
     param()
 
-    $cmd = Get-Command obscura -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source) {
-        return [string]$cmd.Source
+    if ($script:InstallDir) {
+        $localBin = Join-Path $script:InstallDir ".agents\bin"
+        $managedCandidates = @(
+            (Join-Path $localBin "obscura.exe"),
+            (Join-Path $localBin "obscura")
+        )
+        foreach ($candidate in $managedCandidates) {
+            if (Test-Path -LiteralPath $candidate) {
+                if (Test-ChromeDevToolsMcpSupport -Path $candidate) {
+                    return [string]$candidate
+                }
+                return ""
+            }
+        }
     }
 
-    if ($script:InstallDir) {
-        $local = Join-Path $script:InstallDir ".agents\bin\obscura.exe"
-        if (Test-Path $local) {
-            return [string]$local
+    $pathCandidates = Get-Command obscura -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source } |
+        ForEach-Object { [string]$_.Source }
+
+    foreach ($candidate in ($pathCandidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-ChromeDevToolsMcpSupport -Path $candidate) {
+            return [string]$candidate
         }
     }
 
