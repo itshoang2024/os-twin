@@ -135,54 +135,54 @@ Describe "mcp-builtin.json Server Configuration" {
         $script:BuiltinConfigPath = Join-Path $PSScriptRoot "..\..\..\mcp\mcp-builtin.json"
     }
 
-    It "Should include obscura-browser server" {
+    It "Should include chrome-devtools server" {
         Test-Path $script:BuiltinConfigPath | Should -Be $true
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $config.mcp.PSObject.Properties.Name | Should -Contain "obscura-browser"
+        $config.mcp.PSObject.Properties.Name | Should -Contain "chrome-devtools"
     }
 
-    It "Should NOT include deprecated browser MCP server" {
+    It "Should NOT include deprecated browser MCP server names" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $deprecatedBrowserName = @("chrome", "devtools") -join "-"
-        $config.mcp.PSObject.Properties.Name | Should -Not -Contain $deprecatedBrowserName
+        $config.mcp.PSObject.Properties.Name | Should -Not -Contain "obscura-browser"
+        $config.mcp.PSObject.Properties.Name | Should -Not -Contain "chrom-devtools"
     }
 
-    It "obscura-browser command should use OSTWIN_PYTHON placeholder" {
+    It "chrome-devtools command should use OSTWIN_PYTHON placeholder" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command
-        $obscuraCmd[0] | Should -Be "{env:OSTWIN_PYTHON}"
+        $chromeDevToolsCmd = $config.mcp.'chrome-devtools'.command
+        $chromeDevToolsCmd[0] | Should -Be "{env:OSTWIN_PYTHON}"
     }
 
-    It "obscura-browser command should use AGENT_DIR placeholder for server script" {
+    It "chrome-devtools command should use AGENT_DIR placeholder for server script" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command
-        $obscuraCmd[1] | Should -Be "{env:AGENT_DIR}/mcp/obscura-browser-server.py"
+        $chromeDevToolsCmd = $config.mcp.'chrome-devtools'.command
+        $chromeDevToolsCmd[1] | Should -Be "{env:AGENT_DIR}/mcp/obscura-browser-server.py"
     }
 
-    It "obscura-browser command should NOT use hardcoded Python path" {
+    It "chrome-devtools command should NOT use hardcoded Python path" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command -join " "
-        $obscuraCmd | Should -Not -Match "C:\\.*python"
-        $obscuraCmd | Should -Not -Match "/usr/bin/python"
-        $obscuraCmd | Should -Not -Match "/usr/local/bin/python"
+        $chromeDevToolsCmd = $config.mcp.'chrome-devtools'.command -join " "
+        $chromeDevToolsCmd | Should -Not -Match "C:\\.*python"
+        $chromeDevToolsCmd | Should -Not -Match "/usr/bin/python"
+        $chromeDevToolsCmd | Should -Not -Match "/usr/local/bin/python"
     }
 
-    It "obscura-browser environment should use project-relative AGENT_OS_ROOT" {
+    It "chrome-devtools environment should use project-relative AGENT_OS_ROOT" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
+        $env = $config.mcp.'chrome-devtools'.environment
         $env.AGENT_OS_ROOT | Should -Be "."
         $env.AGENT_OS_ROOT | Should -Not -Match "\{env:"
     }
 
-    It "obscura-browser environment should include PATH placeholder" {
+    It "chrome-devtools environment should include PATH placeholder" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
+        $env = $config.mcp.'chrome-devtools'.environment
         $env.PATH | Should -Be "{env:PATH}"
     }
 
-    It "obscura-browser should NOT set OBSCURA_ARGS by default (stealth is opt-in)" {
+    It "chrome-devtools should NOT set OBSCURA_ARGS by default (stealth is opt-in)" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
+        $env = $config.mcp.'chrome-devtools'.environment
         $env.PSObject.Properties.Name | Should -Not -Contain "OBSCURA_ARGS"
     }
 

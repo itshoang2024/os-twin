@@ -74,7 +74,7 @@ def inject_env(mcp_path: str, env_path: str) -> None:
                     server[env_key][k] = v
             elif k in server_refs and v:
                 server[env_key][k] = v
-        # Builtin MCP commands can use placeholders too, e.g. obscura-browser
+        # Builtin MCP commands can use placeholders too, e.g. chrome-devtools
         # launches with ["{env:OSTWIN_PYTHON}", "{env:AGENT_DIR}/mcp/..."].
         if "command" in server and isinstance(server["command"], list):
             for idx, cmd_elem in enumerate(server["command"]):

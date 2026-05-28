@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Agent OS - MCP Obscura Browser Server
+Agent OS - MCP Chrome DevTools Server
 
-Controls Obscura browser through a CDP-compatible endpoint.
-Uses Playwright Python as the CDP client only; it launches Obscura, not Chrome.
+Controls the Chrome DevTools browser runtime through a CDP-compatible endpoint.
+Uses Playwright Python as the CDP client only; it launches the bundled runtime,
+not the user's default Chrome profile.
 
 Environment:
-    OBSCURA_BIN           Path to obscura binary (default: installed .agents/bin copy, then PATH)
-    OBSCURA_PORT          CDP port (default: 9222)
-    OBSCURA_ARGS          Additional args for obscura serve (e.g., "--stealth")
+    CHROME_DEVTOOLS_BIN   Path to runtime binary (default: installed .agents/bin copy, then PATH)
+    CHROME_DEVTOOLS_PORT  CDP port (default: 9222)
+    CHROME_DEVTOOLS_ARGS  Additional args for runtime serve (e.g., "--stealth")
     OSTWIN_BROWSER_DOWNLOAD_DIR  Preferred artifact directory for downloads/screenshots/PDFs
     AGENT_OS_ROOM_DIR     Room fallback: <room>/artifacts/downloads
     AGENT_OS_ROOT         Project fallback: <project>/artifacts/browser-downloads
@@ -28,9 +29,9 @@ from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 
-def _default_obscura_bin() -> str:
+def _default_chrome_devtools_bin() -> str:
     """Prefer the installer-managed binary, then fall back to PATH lookup."""
-    configured = os.environ.get("OBSCURA_BIN")
+    configured = os.environ.get("CHROME_DEVTOOLS_BIN") or os.environ.get("OBSCURA_BIN")
     if configured:
         return configured
 
@@ -44,9 +45,11 @@ def _default_obscura_bin() -> str:
     return "obscura"
 
 
-OBSCURA_BIN = _default_obscura_bin()
-OBSCURA_PORT = int(os.environ.get("OBSCURA_PORT", "9222"))
-OBSCURA_ARGS = os.environ.get("OBSCURA_ARGS", "")
+CHROME_DEVTOOLS_BIN = _default_chrome_devtools_bin()
+CHROME_DEVTOOLS_PORT = int(
+    os.environ.get("CHROME_DEVTOOLS_PORT") or os.environ.get("OBSCURA_PORT", "9222")
+)
+CHROME_DEVTOOLS_ARGS = os.environ.get("CHROME_DEVTOOLS_ARGS") or os.environ.get("OBSCURA_ARGS", "")
 INTERACTIVE_SELECTOR = (
     "a, button, input, textarea, select, option, [role], [aria-label], "
     "[title], [tabindex]:not([tabindex='-1'])"
@@ -198,12 +201,12 @@ def _safe_download_path(download_dir: str, filename: str) -> str:
 
 
 def _get_default_launch_args(port: int) -> List[str]:
-    """Get default launch args for obscura serve (no --stealth by default)."""
+    """Get default launch args for the browser runtime serve mode."""
     return ["serve", "--port", str(port)]
 
 
 def _build_launch_args(port: int, extra_args: str = "") -> List[str]:
-    """Build complete launch args, merging defaults with OBSCURA_ARGS."""
+    """Build complete launch args, merging defaults with extra runtime args."""
     args = _get_default_launch_args(port)
     if extra_args:
         extra = shlex.split(extra_args)
@@ -264,7 +267,7 @@ def _build_elements_from_dom_snapshot(raw_elements: List[Dict[str, Any]]) -> Lis
     return elements
 
 
-mcp = FastMCP("ostwin-obscura-browser", log_level="CRITICAL")
+mcp = FastMCP("ostwin-chrome-devtools", log_level="CRITICAL")
 
 _browser_process: Optional[subprocess.Popen] = None
 _playwright: Any = None
@@ -272,15 +275,20 @@ _cdp_client: Any = None
 _page: Any = None
 
 
-def _is_obscura_cdp_endpoint(version_info: Dict[str, Any]) -> bool:
-    """Return true when /json/version identifies the endpoint as Obscura."""
+def _is_chrome_devtools_cdp_endpoint(version_info: Dict[str, Any]) -> bool:
+    """Return true when /json/version identifies the managed browser runtime."""
     fields = (
         version_info.get("Browser"),
         version_info.get("Product"),
         version_info.get("User-Agent"),
         version_info.get("userAgent"),
     )
-    return any("obscura" in str(value).lower() for value in fields if value)
+    return any(
+        marker in str(value).lower()
+        for value in fields
+        if value
+        for marker in ("chrome devtools", "obscura")
+    )
 
 
 def _adapter_started_browser_alive() -> bool:
@@ -295,12 +303,12 @@ async def _ensure_browser() -> dict:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        return {"running": False, "port": OBSCURA_PORT, "error": "playwright not installed"}
+        return {"running": False, "port": CHROME_DEVTOOLS_PORT, "error": "playwright not installed"}
 
     if _page is not None:
         try:
             await _page.evaluate("1")
-            return {"running": True, "port": OBSCURA_PORT}
+            return {"running": True, "port": CHROME_DEVTOOLS_PORT}
         except Exception:
             if _cdp_client is not None:
                 try:
@@ -319,14 +327,14 @@ async def _ensure_browser() -> dict:
     try:
         import httpx
         async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"http://localhost:{OBSCURA_PORT}/json/version")
+            resp = await client.get(f"http://localhost:{CHROME_DEVTOOLS_PORT}/json/version")
             if resp.status_code == 200:
                 data = resp.json()
-                if not _is_obscura_cdp_endpoint(data) and not _adapter_started_browser_alive():
+                if not _is_chrome_devtools_cdp_endpoint(data) and not _adapter_started_browser_alive():
                     return {
                         "running": False,
-                        "port": OBSCURA_PORT,
-                        "error": "Existing CDP endpoint is not Obscura-managed",
+                        "port": CHROME_DEVTOOLS_PORT,
+                        "error": "Existing CDP endpoint is not Chrome DevTools managed",
                     }
                 ws_url = data.get("webSocketDebuggerUrl")
                 if ws_url:
@@ -339,15 +347,15 @@ async def _ensure_browser() -> dict:
                     else:
                         ctx = await _cdp_client.new_context()
                         _page = await ctx.new_page()
-                    return {"running": True, "port": OBSCURA_PORT}
+                    return {"running": True, "port": CHROME_DEVTOOLS_PORT}
     except Exception:
         pass
 
-    return {"running": False, "port": OBSCURA_PORT}
+    return {"running": False, "port": CHROME_DEVTOOLS_PORT}
 
 
 async def _start_browser() -> dict:
-    """Start Obscura browser process."""
+    """Start the Chrome DevTools browser runtime process."""
     global _browser_process
 
     status = await _ensure_browser()
@@ -356,12 +364,12 @@ async def _start_browser() -> dict:
     if status.get("error"):
         return status
 
-    obscura_exe = shutil.which(OBSCURA_BIN) or OBSCURA_BIN
+    browser_exe = shutil.which(CHROME_DEVTOOLS_BIN) or CHROME_DEVTOOLS_BIN
     try:
-        args = _build_launch_args(OBSCURA_PORT, OBSCURA_ARGS)
+        args = _build_launch_args(CHROME_DEVTOOLS_PORT, CHROME_DEVTOOLS_ARGS)
     except ValueError as e:
-        return {"running": False, "error": f"Invalid OBSCURA_ARGS: {e}"}
-    full_cmd = [obscura_exe] + args
+        return {"running": False, "error": f"Invalid CHROME_DEVTOOLS_ARGS: {e}"}
+    full_cmd = [browser_exe] + args
 
     try:
         popen_kwargs = {
@@ -376,7 +384,7 @@ async def _start_browser() -> dict:
             **popen_kwargs,
         )
     except FileNotFoundError:
-        return {"running": False, "error": f"Obscura binary not found: {obscura_exe}"}
+        return {"running": False, "error": f"Chrome DevTools runtime binary not found: {browser_exe}"}
     except Exception as e:
         return {"running": False, "error": str(e)}
 
@@ -530,8 +538,8 @@ async def browser_screenshot(
 ) -> str:
     """Capture screenshot of current page.
 
-    Uses CDP Page.captureScreenshot directly for Obscura compatibility.
-    Falls back to Playwright helper for non-Obscura backends.
+    Uses CDP Page.captureScreenshot directly for Chrome DevTools runtime compatibility.
+    Falls back to Playwright helper for other CDP backends.
     Returns JSON with 'success', 'path', and a short base64 'data_preview' or 'error'.
     """
     if _page is None:

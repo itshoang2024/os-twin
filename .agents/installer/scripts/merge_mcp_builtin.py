@@ -19,7 +19,7 @@ _LEGACY_BROWSER_SERVER = "-".join(["chrome", "devtools"])
 _LEGACY_BROWSER_PACKAGE = f"{_LEGACY_BROWSER_SERVER}-mcp"
 
 DEPRECATED_BUILTINS = {
-    # Replaced by obscura-browser in mcp-builtin.json. Only entries whose
+    # Replaced by the built-in chrome-devtools server. Only entries whose
     # command contains this managed package marker are pruned.
     _LEGACY_BROWSER_SERVER: [_LEGACY_BROWSER_PACKAGE],
 }

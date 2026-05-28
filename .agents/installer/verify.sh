@@ -5,7 +5,8 @@
 # Provides: verify_components, print_completion_banner
 #
 # Requires: lib.sh, check-deps.sh (check_python, check_pwsh, check_uv,
-#           check_opencode, check_agent_browser), globals: INSTALL_DIR, VENV_DIR, DASHBOARD_ONLY,
+#           check_opencode, check_agent_browser, check_chrome_devtools),
+#           globals: INSTALL_DIR, VENV_DIR, DASHBOARD_ONLY,
 #           BASH_VER, PYTHON_VERSION, PWSH_VERSION, DASHBOARD_PORT,
 #           START_CHANNEL, TUNNEL_URL
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,12 +72,12 @@ verify_components() {
       echo -e "    agent-browser:    ${YELLOW}⚠️  not installed${NC}"
     fi
 
-    local obscura_path
-    obscura_path=$(check_obscura 2>/dev/null || true)
-    if [[ -n "$obscura_path" ]]; then
-      echo -e "    obscura:          ${GREEN}✅ $obscura_path${NC}"
+    local chrome_devtools_path
+    chrome_devtools_path=$(check_chrome_devtools 2>/dev/null || true)
+    if [[ -n "$chrome_devtools_path" ]]; then
+      echo -e "    chrome-devtools:  ${GREEN}✅ installed${NC}"
     else
-      echo -e "    obscura:          ${YELLOW}⚠️  not installed${NC}"
+      echo -e "    chrome-devtools:  ${YELLOW}⚠️  not installed${NC}"
     fi
 
     if [[ -d "$VENV_DIR" ]]; then

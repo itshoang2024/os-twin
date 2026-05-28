@@ -165,7 +165,7 @@ All state lives in `.agents/` — plans, war-rooms, roles, skills, and the share
 | `warroom` | local | `update_status`, `report_progress`, `list_artifacts` |
 | `memory` | remote | `publish`, `query`, `search`, `get_context` |
 | `knowledge` | remote | `list_namespaces`, `query`, `search_all`, `find_relevant` |
-| `obscura-browser` | local | Obscura browser via CDP-compatible endpoint |
+| `chrome-devtools` | local | Chrome DevTools automation via CDP-compatible endpoint |
 | `playwright` | local | Browser automation |
 
 ## Data Layout

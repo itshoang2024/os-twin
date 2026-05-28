@@ -27,7 +27,7 @@
         "Authorization": "Bearer {env:OSTWIN_API_KEY}"
       }
     },
-    "chrom-devtools": {
+    "chrome-devtools": {
       "type": "local",
       "command": [
         "{env:OSTWIN_PYTHON}",

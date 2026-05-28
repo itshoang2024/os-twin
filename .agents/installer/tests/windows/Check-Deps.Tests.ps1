@@ -93,17 +93,17 @@ Describe "Check-OpenCode" {
     }
 }
 
-Describe "Check-Obscura" {
+Describe "Check-ChromeDevTools" {
     It "Should define the function" {
-        Get-Command Check-Obscura | Should -Not -BeNullOrEmpty
+        Get-Command Check-ChromeDevTools | Should -Not -BeNullOrEmpty
     }
 
     It "Should return a string path or empty string" {
-        $result = Check-Obscura
+        $result = Check-ChromeDevTools
         $result | Should -BeOfType [string]
     }
 
-    It "Should detect installer-managed obscura.exe" {
+    It "Should detect installer-managed Chrome DevTools runtime binary" {
         $oldInstallDir = $script:InstallDir
         try {
             $script:InstallDir = Join-Path $TestDrive "ostwin"
@@ -112,9 +112,9 @@ Describe "Check-Obscura" {
             $expected = Join-Path $binDir "obscura.exe"
             New-Item -ItemType File -Path $expected -Force | Out-Null
 
-            $result = Check-Obscura
+            $result = Check-ChromeDevTools
             if ($result -ne $expected) {
-                Set-ItResult -Skipped -Because "A real obscura executable on PATH takes precedence"
+                Set-ItResult -Skipped -Because "A real Chrome DevTools runtime executable on PATH takes precedence"
             }
             else {
                 $result | Should -Be $expected

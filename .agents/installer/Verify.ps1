@@ -90,12 +90,12 @@ function Verify-Components {
             Write-Host "    node:             ⚠️  not installed" -ForegroundColor Yellow
         }
 
-        $obscuraPath = Check-Obscura
-        if ($obscuraPath) {
-            Write-Host "    obscura:          ✅ $obscuraPath" -ForegroundColor Green
+        $chromeDevToolsPath = Check-ChromeDevTools
+        if ($chromeDevToolsPath) {
+            Write-Host "    chrome-devtools:  ✅ installed" -ForegroundColor Green
         }
         else {
-            Write-Host "    obscura:          ⚠️  not installed" -ForegroundColor Yellow
+            Write-Host "    chrome-devtools:  ⚠️  not installed" -ForegroundColor Yellow
         }
 
         # venv

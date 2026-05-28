@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: Use Vercel agent-browser CLI for browser automation workflows including search, navigation, snapshots, clicks, form fills, screenshots, and file downloads. CLI-oriented alternative to Playwright MCP or obscura-browser MCP.
+description: Use Vercel agent-browser CLI for browser automation workflows including search, navigation, snapshots, clicks, form fills, screenshots, and file downloads. CLI-oriented alternative to Playwright MCP or Chrome DevTools MCP.
 tags: [engineer, browser, automation, web, cli]
 triggers:
   - "use agent-browser"
@@ -23,7 +23,7 @@ mutating: true
 - Deterministic browser automation using refs like `@e1`, `@e2` from snapshots (not coordinates)
 - All screenshots and downloads saved inside project under `artifacts/browser-downloads/`
 - Exact artifact paths reported to user
-- Graceful fallback to Playwright MCP or obscura-browser MCP if CLI unavailable
+- Graceful fallback to Playwright MCP or Chrome DevTools MCP if CLI unavailable
 - No stealth or anti-bot bypass logic enabled by default
 
 ## When to Use
@@ -230,7 +230,7 @@ agent-browser close
 
 If `agent-browser` CLI is unavailable:
 
-### obscura-browser MCP
+### Chrome DevTools MCP
 
 Use these tools:
 - `browser_open` - Navigate to URL

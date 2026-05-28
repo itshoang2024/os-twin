@@ -48,13 +48,13 @@ setup() {
   fi
 }
 
-@test "check_obscura() detects installer-managed binary" {
+@test "check_chrome_devtools() detects installer-managed binary" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/ostwin"
   mkdir -p "$INSTALL_DIR/.agents/bin"
   touch "$INSTALL_DIR/.agents/bin/obscura"
   chmod +x "$INSTALL_DIR/.agents/bin/obscura"
 
-  result=$(check_obscura)
+  result=$(check_chrome_devtools)
   [[ "$result" == "$INSTALL_DIR/.agents/bin/obscura" || -n "$result" ]]
 }
 
@@ -74,5 +74,6 @@ setup() {
   check_node > /dev/null 2>&1 || true
   check_uv > /dev/null 2>&1 || true
   check_agent_browser > /dev/null 2>&1 || true
+  check_chrome_devtools > /dev/null 2>&1 || true
   [[ "$PATH" == "$orig_path" ]]
 }

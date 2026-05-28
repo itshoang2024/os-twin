@@ -20,8 +20,9 @@ setup() {
   declare -f print_completion_banner > /dev/null
 }
 
-@test "verify_components reports agent-browser status" {
+@test "verify_components reports browser automation status" {
   local body
   body=$(declare -f verify_components)
   [[ "$body" == *"agent-browser"* ]]
+  [[ "$body" == *"chrome-devtools"* ]]
 }

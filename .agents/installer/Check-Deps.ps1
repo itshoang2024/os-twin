@@ -2,7 +2,7 @@
 # Check-Deps.ps1 — Dependency presence checks (pure — no installs)
 #
 # Provides: Check-Python, Check-Pwsh, Check-Node, Check-UV, Check-OpenCode,
-#           Check-Obscura
+#           Check-ChromeDevTools
 #
 # Requires: Lib.ps1 (Compare-VersionGte), Versions.ps1 (MinPythonVersion, MinPwshVersion)
 #
@@ -114,9 +114,9 @@ function Check-OpenCode {
     $null -ne (Get-Command opencode -ErrorAction SilentlyContinue)
 }
 
-# ─── Obscura browser binary ─────────────────────────────────────────────────
+# ─── Chrome DevTools browser runtime ────────────────────────────────────────
 
-function Check-Obscura {
+function Check-ChromeDevTools {
     [CmdletBinding()]
     param()
 

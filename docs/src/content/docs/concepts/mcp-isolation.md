@@ -99,7 +99,7 @@ OSTwin ships with six MCP servers. They are defined in `.agents/mcp/mcp-builtin.
 |--------|--------|-----------|
 | **channel** | `.agents/mcp/channel-server.py` | `post_message`, `read_messages`, `get_latest` |
 | **warroom** | `.agents/mcp/warroom-server.py` | `update_status`, `report_progress`, `list_artifacts` |
-| **obscura-browser** | `.agents/mcp/obscura-browser-server.py` | Obscura browser via CDP-compatible endpoint |
+| **chrome-devtools** | `.agents/mcp/obscura-browser-server.py` | Chrome DevTools automation via CDP-compatible endpoint |
 | **playwright** | `npx @playwright/mcp@latest` | Browser automation and testing |
 
 Local servers are launched as subprocesses by the agent runner. Each gets its own process, ensuring isolation -- a crash in one server does not affect others.
@@ -117,14 +117,14 @@ Remote servers connect to the dashboard API via SSE transport. They require an `
 
 Not every role needs every server. The typical assignment is:
 
-| Role | channel | warroom | memory | knowledge | obscura-browser | playwright |
+| Role | channel | warroom | memory | knowledge | chrome-devtools | playwright |
 |------|---------|---------|--------|-----------|-----------------|------------|
 | engineer | yes | yes | yes | -- | -- | -- |
 | qa | yes | yes | yes | -- | -- | -- |
 | architect | -- | -- | yes | yes | -- | -- |
 | manager | yes | yes | yes | yes | -- | -- |
 
-Roles with `no_mcp: true` (like the architect in lightweight mode) get zero MCP servers. Roles that need browser automation get `obscura-browser` or `playwright` injected via `mcp_refs` in their `role.json`.
+Roles with `no_mcp: true` (like the architect in lightweight mode) get zero MCP servers. Roles that need browser automation get `chrome-devtools` or `playwright` injected via `mcp_refs` in their `role.json`.
 
 ## Vault-Based Secrets
 
