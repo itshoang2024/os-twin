@@ -38,13 +38,22 @@ mutating: true
 
 ```bash
 # Install CLI
-npm install -g agent-browser
+pnpm add -g agent-browser@0.27.0
 
 # Run post-install setup if needed
 agent-browser install
 
 # Verify
 agent-browser --version
+```
+
+## Start Here
+
+Load the installed CLI's version-matched workflow before running a non-trivial browser task:
+
+```bash
+agent-browser skills get core
+agent-browser skills get core --full
 ```
 
 ## Core Commands
