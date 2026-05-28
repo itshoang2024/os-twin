@@ -21,7 +21,7 @@ Describe "Patch-McpConfig" {
         { Patch-McpConfig } | Should -Not -Throw
     }
 
-    It "Should add AGENT_DIR and OSTWIN_PYTHON to .env when not present" {
+    It "Should add AGENT_DIR, OSTWIN_PYTHON, and PATH to .env when not present" {
         Set-Content -Path (Join-Path $mcpDir "config.json") -Value '{"mcpServers": {}}'
         $envFile = Join-Path $testDir ".env"
         Set-Content -Path $envFile -Value "SOME_KEY=value"
@@ -35,13 +35,14 @@ Describe "Patch-McpConfig" {
         $content = Get-Content $envFile -Raw
         $content | Should -Match 'AGENT_DIR='
         $content | Should -Match 'OSTWIN_PYTHON='
+        $content | Should -Match 'PATH='
     }
 
-    It "Should not duplicate AGENT_DIR and OSTWIN_PYTHON in .env" {
+    It "Should not duplicate AGENT_DIR, OSTWIN_PYTHON, and PATH in .env" {
         Set-Content -Path (Join-Path $mcpDir "config.json") -Value '{"mcpServers": {}}'
         $venvPython = Join-Path $script:VenvDir "Scripts\python.exe"
         $envFile = Join-Path $testDir ".env"
-        Set-Content -Path $envFile -Value "AGENT_DIR=$testDir`nOSTWIN_PYTHON=$venvPython"
+        Set-Content -Path $envFile -Value "AGENT_DIR=$testDir`nOSTWIN_PYTHON=$venvPython`nPATH=C:\old"
 
         $script:PatchScriptsDir = Join-Path $TestDrive "fake-scripts"
         New-Item -ItemType Directory -Path $script:PatchScriptsDir -Force | Out-Null
@@ -50,8 +51,10 @@ Describe "Patch-McpConfig" {
 
         $agentDirLines = Get-Content $envFile | Where-Object { $_ -match 'AGENT_DIR=' }
         $ostwinPythonLines = Get-Content $envFile | Where-Object { $_ -match 'OSTWIN_PYTHON=' }
+        $pathLines = Get-Content $envFile | Where-Object { $_ -match '^PATH=' }
         $agentDirLines.Count | Should -Be 1
         $ostwinPythonLines.Count | Should -Be 1
+        $pathLines.Count | Should -Be 1
     }
 
     It "Should create .env when it doesn't exist" {
@@ -66,7 +69,7 @@ Describe "Patch-McpConfig" {
         Test-Path $envFile | Should -Be $true
     }
 
-    It "Should write AGENT_DIR and OSTWIN_PYTHON in KEY=VALUE format (no export prefix)" {
+    It "Should write AGENT_DIR, OSTWIN_PYTHON, and PATH in KEY=VALUE format (no export prefix)" {
         Set-Content -Path (Join-Path $mcpDir "config.json") -Value '{"mcpServers": {}}'
         $envFile = Join-Path $testDir ".env"
 
@@ -80,8 +83,10 @@ Describe "Patch-McpConfig" {
         # Use (?m) multiline flag since -Raw returns the entire file as one string
         $content | Should -Match '(?m)^AGENT_DIR='
         $content | Should -Match '(?m)^OSTWIN_PYTHON='
+        $content | Should -Match '(?m)^PATH='
         $content | Should -Not -Match 'export AGENT_DIR='
         $content | Should -Not -Match 'export OSTWIN_PYTHON='
+        $content | Should -Not -Match 'export PATH='
     }
 
     It "inject_env_to_mcp.py should resolve {env:*} in command arrays" {
@@ -135,54 +140,44 @@ Describe "mcp-builtin.json Server Configuration" {
         $script:BuiltinConfigPath = Join-Path $PSScriptRoot "..\..\..\mcp\mcp-builtin.json"
     }
 
-    It "Should include obscura-browser server" {
+    It "Should include chrome-devtools server" {
         Test-Path $script:BuiltinConfigPath | Should -Be $true
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $config.mcp.PSObject.Properties.Name | Should -Contain "obscura-browser"
+        $config.mcp.PSObject.Properties.Name | Should -Contain "chrome-devtools"
     }
 
-    It "Should NOT include deprecated browser MCP server" {
+    It "Should NOT include deprecated browser MCP server names" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $deprecatedBrowserName = @("chrome", "devtools") -join "-"
-        $config.mcp.PSObject.Properties.Name | Should -Not -Contain $deprecatedBrowserName
+        $config.mcp.PSObject.Properties.Name | Should -Not -Contain "obscura-browser"
+        $config.mcp.PSObject.Properties.Name | Should -Not -Contain "chrom-devtools"
     }
 
-    It "obscura-browser command should use OSTWIN_PYTHON placeholder" {
+    It "chrome-devtools command should use native Obscura MCP server" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command
-        $obscuraCmd[0] | Should -Be "{env:OSTWIN_PYTHON}"
+        $chromeDevToolsCmd = $config.mcp.'chrome-devtools'.command
+        $chromeDevToolsCmd[0] | Should -Be "obscura"
+        $chromeDevToolsCmd[1] | Should -Be "mcp"
     }
 
-    It "obscura-browser command should use AGENT_DIR placeholder for server script" {
+    It "chrome-devtools command should NOT use Python or the legacy adapter" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command
-        $obscuraCmd[1] | Should -Be "{env:AGENT_DIR}/mcp/obscura-browser-server.py"
+        $chromeDevToolsCmd = $config.mcp.'chrome-devtools'.command -join " "
+        $chromeDevToolsCmd | Should -Not -Match "OSTWIN_PYTHON"
+        $chromeDevToolsCmd | Should -Not -Match "obscura-browser-server.py"
+        $chromeDevToolsCmd | Should -Not -Match "C:\\.*python"
+        $chromeDevToolsCmd | Should -Not -Match "/usr/bin/python"
+        $chromeDevToolsCmd | Should -Not -Match "/usr/local/bin/python"
     }
 
-    It "obscura-browser command should NOT use hardcoded Python path" {
+    It "chrome-devtools environment should include PATH placeholder" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $obscuraCmd = $config.mcp.'obscura-browser'.command -join " "
-        $obscuraCmd | Should -Not -Match "C:\\.*python"
-        $obscuraCmd | Should -Not -Match "/usr/bin/python"
-        $obscuraCmd | Should -Not -Match "/usr/local/bin/python"
-    }
-
-    It "obscura-browser environment should use project-relative AGENT_OS_ROOT" {
-        $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
-        $env.AGENT_OS_ROOT | Should -Be "."
-        $env.AGENT_OS_ROOT | Should -Not -Match "\{env:"
-    }
-
-    It "obscura-browser environment should include PATH placeholder" {
-        $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
+        $env = $config.mcp.'chrome-devtools'.environment
         $env.PATH | Should -Be "{env:PATH}"
     }
 
-    It "obscura-browser should NOT set OBSCURA_ARGS by default (stealth is opt-in)" {
+    It "chrome-devtools should NOT set OBSCURA_ARGS by default (stealth is opt-in)" {
         $config = Get-Content $script:BuiltinConfigPath -Raw | ConvertFrom-Json
-        $env = $config.mcp.'obscura-browser'.environment
+        $env = $config.mcp.'chrome-devtools'.environment
         $env.PSObject.Properties.Name | Should -Not -Contain "OBSCURA_ARGS"
     }
 

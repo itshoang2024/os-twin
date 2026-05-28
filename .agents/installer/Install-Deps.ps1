@@ -2,10 +2,10 @@
 # Install-Deps.ps1 — Dependency installers (Windows-specific)
 #
 # Provides: Install-UV, Install-Python, Install-Pwsh, Install-Node,
-#           Install-OpenCode, Install-Obscura, Install-Pester
+#           Install-OpenCode, Install-ChromeDevTools, Install-Pester
 #
 # Requires: Lib.ps1, Versions.ps1, Detect-OS.ps1 ($script:PkgMgr, $script:ARCH),
-#           Check-Deps.ps1 (Check-UV, Check-OpenCode, Check-Obscura)
+#           Check-Deps.ps1 (Check-UV, Check-OpenCode, Check-ChromeDevTools)
 # ──────────────────────────────────────────────────────────────────────────────
 
 if ($script:_InstallDepsPs1Loaded) { return }
@@ -290,9 +290,9 @@ function Install-OpenCode {
     }
 }
 
-# ─── Obscura browser binary ─────────────────────────────────────────────────
+# ─── Chrome DevTools browser runtime ────────────────────────────────────────
 
-function Select-ObscuraAsset {
+function Select-ChromeDevToolsAsset {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
@@ -334,13 +334,13 @@ function Select-ObscuraAsset {
     return $null
 }
 
-function Install-Obscura {
+function Install-ChromeDevTools {
     [CmdletBinding()]
     param()
 
-    $existing = Check-Obscura
+    $existing = Check-ChromeDevTools
     if ($existing) {
-        Write-Ok "obscura already installed ($existing)"
+        Write-Ok "chrome-devtools runtime already installed ($existing)"
         return
     }
 
@@ -349,14 +349,14 @@ function Install-Obscura {
     $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "ostwin-obscura-$([System.Guid]::NewGuid().ToString('N'))"
 
     try {
-        Write-Step "Installing Obscura browser..."
+        Write-Step "Installing Chrome DevTools browser runtime..."
         New-Item -ItemType Directory -Path $binDir -Force | Out-Null
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
         $release = Invoke-RestMethod "https://api.github.com/repos/h4ckf0r0day/obscura/releases/latest" -ErrorAction Stop
-        $asset = Select-ObscuraAsset -Assets @($release.assets)
+        $asset = Select-ChromeDevToolsAsset -Assets @($release.assets)
         if (-not $asset) {
-            Write-Warn "No Obscura release asset for $($script:OS)/$($script:ARCH); obscura-browser MCP will require manual Obscura install"
+            Write-Warn "No Chrome DevTools runtime asset for $($script:OS)/$($script:ARCH); chrome-devtools MCP will require manual runtime install"
             return
         }
 
@@ -373,7 +373,7 @@ function Install-Obscura {
             }
         }
         else {
-            throw "Unsupported Obscura archive: $archive"
+            throw "Unsupported Chrome DevTools runtime archive: $archive"
         }
 
         $releaseBinaries = Get-ChildItem -Path $tmpDir -Recurse -File |
@@ -387,7 +387,7 @@ function Install-Obscura {
             Where-Object { $_.Name -ieq "obscura.exe" -or $_.Name -ieq "obscura" } |
             Select-Object -First 1
         if (-not $binary) {
-            throw "Obscura binary not found in release archive"
+            throw "Chrome DevTools runtime binary not found in release archive"
         }
 
         foreach ($releaseBinary in $releaseBinaries) {
@@ -398,11 +398,11 @@ function Install-Obscura {
             $env:PATH = "$binDir;$env:PATH"
         }
 
-        Write-Ok "obscura installed ($target)"
+        Write-Ok "chrome-devtools runtime installed ($binDir)"
     }
     catch {
-        Write-Warn "Obscura install failed: $_"
-        Write-Warn "obscura-browser MCP will require manual Obscura install"
+        Write-Warn "Chrome DevTools runtime install failed: $_"
+        Write-Warn "chrome-devtools MCP will require manual runtime install"
     }
     finally {
         Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue

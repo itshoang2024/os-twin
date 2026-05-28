@@ -294,9 +294,9 @@ ostwin mcp install <git-url> --name custom-server
 ostwin mcp install --http https://stitch.googleapis.com/mcp
 ostwin mcp list
 ostwin mcp catalog
-ostwin mcp remove obscura-browser
+ostwin mcp remove chrome-devtools
 ostwin mcp credentials set API_KEY
-ostwin mcp test obscura-browser
+ostwin mcp test chrome-devtools
 ```
 
 | Subcommand | Description |

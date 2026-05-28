@@ -98,6 +98,17 @@ Describe "Seed-McpConfig" {
         Test-Path (Join-Path $mcpDstDir "config.json") | Should -Be $true
     }
 
+    It "Should prefer mcp-builtin.json over ignored config.json on first install" {
+        Set-Content -Path (Join-Path $mcpSrcDir "config.json") -Value '{"mcp": {"stale": {"type": "local"}}}'
+        Set-Content -Path (Join-Path $mcpSrcDir "mcp-builtin.json") -Value '{"mcp": {"chrome-devtools": {"type": "local", "command": ["obscura", "mcp"]}}}'
+
+        Seed-McpConfig
+
+        $content = Get-Content (Join-Path $mcpDstDir "config.json") -Raw
+        $content | Should -Match "chrome-devtools"
+        $content | Should -Not -Match '"stale"'
+    }
+
     It "Should not overwrite existing config.json" {
         Set-Content -Path (Join-Path $mcpDstDir "config.json") -Value '{"existing": true}'
         Set-Content -Path (Join-Path $mcpSrcDir "config.json") -Value '{"new": true}'
@@ -180,6 +191,8 @@ Describe "MCP file sync" {
         Set-Content -Path (Join-Path $mcpSrcDir "mcp-builtin.json") -Value '{"builtin": true}'
         Set-Content -Path (Join-Path $mcpSrcDir "mcp-catalog.json") -Value '{"catalog": true}'
         Set-Content -Path (Join-Path $mcpDstDir "config.json") -Value '{"mcpServers": {}}'
+        Set-Content -Path (Join-Path $mcpDstDir "obscura-browser-server.py") -Value "# old adapter"
+        Set-Content -Path (Join-Path $mcpDstDir "test_obscura_browser.py") -Value "# old test"
 
         Seed-McpConfig
 
@@ -188,6 +201,8 @@ Describe "MCP file sync" {
         Test-Path (Join-Path $mcpDstDir "mcp-builtin.json") | Should -Be $true -Because "mcp-builtin.json should be synced by Seed-McpConfig"
         Test-Path (Join-Path $mcpDstDir "mcp-catalog.json") | Should -Be $true -Because "mcp-catalog.json should be synced by Seed-McpConfig"
         Test-Path (Join-Path $mcpDstDir "server.py") | Should -Be $true -Because ".py files should be synced by Seed-McpConfig"
+        Test-Path (Join-Path $mcpDstDir "obscura-browser-server.py") | Should -Be $false -Because "legacy browser adapter should be removed"
+        Test-Path (Join-Path $mcpDstDir "test_obscura_browser.py") | Should -Be $false -Because "legacy adapter tests should be removed"
     }
 }
 
@@ -232,4 +247,3 @@ Describe "Sync-Bot" {
         { Sync-Bot } | Should -Not -Throw
     }
 }
-
