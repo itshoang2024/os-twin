@@ -139,3 +139,4 @@ docs/plan/
 docs/plan/**
 
 .memory
+artifacts/

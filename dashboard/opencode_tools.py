@@ -828,7 +828,7 @@ AGENTS: dict[str, str] = {
 }
 
 
-def _opencode_config(model: str = "google-vertex/gemini-3.1-pro-preview-customtools") -> dict:
+def _opencode_config(model: str = "google-vertex/gemini-3.1-pro-preview") -> dict:
     # The ostwin agent speaks to the dashboard primarily through ostwin_* tools.
     # bash is enabled so that `!` command injections in .opencode/commands/*.md
     # can execute (e.g. curl calls to the dashboard API). The agent's system
@@ -975,7 +975,7 @@ def _write_commands(commands_dir: Path) -> list[Path]:
 def generate_all(
     project_root: Optional[Path] = None,
     dashboard_port: str = DASHBOARD_PORT_DEFAULT,
-    model: str = "google-vertex/gemini-3.1-pro-preview-customtools",
+    model: str = "google-vertex/gemini-3.1-pro-preview",
 ) -> list[Path]:
     project_root = project_root or _resolve_project_root()
     helpers = _api_helpers_inlined(dashboard_port)
@@ -1020,7 +1020,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate OpenCode tool files for Ostwin")
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--dashboard-port", default=DASHBOARD_PORT_DEFAULT)
-    parser.add_argument("--model", default="google-vertex/gemini-3.1-pro-preview-customtools")
+    parser.add_argument("--model", default="google-vertex/gemini-3.1-pro-preview")
     args = parser.parse_args()
 
     files = generate_all(

@@ -1423,7 +1423,7 @@ def create_embedding_client(
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         
         # logging the decision to use GeminiEmbeddingClient for Google providers, along with the resolved API key (masked) and base URL
-        logger.debug("Using GeminiEmbeddingClient for provider %r (is_vertex=%r), resolved_api_key=%s, resolved_base_url=%r",
+        logger.info("Using GeminiEmbeddingClient for provider %r (is_vertex=%r), resolved_api_key=%s, resolved_base_url=%r",
                      embed_provider, is_vertex, "****" if resolved_key else None, base_url)
         client = GeminiEmbeddingClient(
             model=clean_model,

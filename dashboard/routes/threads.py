@@ -43,7 +43,7 @@ async def create_thread(request: ThreadMessageRequest, user: dict = Depends(get_
         raise HTTPException(status_code=422, detail="Message cannot be empty")
     
     from dashboard.plan_agent import plan_logger as tlog
-    
+
     store = global_state.planning_store
     if not store:
         raise HTTPException(status_code=500, detail="Planning store not initialized")
@@ -83,7 +83,7 @@ async def list_threads(limit: int = Query(20), offset: int = Query(0), user: dic
     store = global_state.planning_store
     if not store:
         raise HTTPException(status_code=500, detail="Planning store not initialized")
-        
+
     threads = store.list_threads(limit=limit, offset=offset)
     total = len(store._read_index())
     return {"threads": threads, "total": total}
@@ -91,14 +91,16 @@ async def list_threads(limit: int = Query(20), offset: int = Query(0), user: dic
 @router.get("/api/plans/threads/{thread_id}")
 async def get_thread(thread_id: str, user: dict = Depends(get_current_user)):
     store = global_state.planning_store
+
     if not store:
         raise HTTPException(status_code=500, detail="Planning store not initialized")
-        
+
     thread = store.get(thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
         
     messages = store.get_messages(thread_id)
+    print('ccbm5', thread_id, thread, messages)
     return {"thread": thread, "messages": messages}
 
 async def auto_generate_title(thread_id: str, first_message: str):

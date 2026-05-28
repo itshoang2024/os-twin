@@ -56,9 +56,7 @@ async def test_synthesize_creates_skeleton_and_spawns_worker(fake_plans_dir):
         return _skel_dict(plan_id, fake_plans_dir, "/tmp/proj")
 
     # Worker stub: simulate ostwin-worker overwriting the file with real epics.
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_child_99"}
+    async def fake_post(path, body):
         if path == "/session/ses_child_99/message":
             plan_file.write_text(
                 "# Plan: Security Website\n\n"
@@ -74,11 +72,13 @@ async def test_synthesize_creates_skeleton_and_spawns_worker(fake_plans_dir):
             }
         raise AssertionError(f"unexpected path: {path}")
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_child_99")
+    post_json = AsyncMock(side_effect=fake_post)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="WORKER_PROMPT"):
         result = await ps.synthesize_plan_from_thread(
             thread_id="pt-1",
@@ -91,6 +91,7 @@ async def test_synthesize_creates_skeleton_and_spawns_worker(fake_plans_dir):
     assert "Drafted 3 epics" in result["worker_summary"]
     assert result["child_session_id"] == "ses_child_99"
     assert plan_file.exists()
+    create_session.assert_awaited_once_with(parent_id=None)
 
 
 @pytest.mark.asyncio
@@ -105,14 +106,12 @@ async def test_synthesize_uses_worker_mode_prompt(fake_plans_dir):
         plan_file.write_text("skel")
         return _skel_dict(plan_id, fake_plans_dir)
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_xyz"}
+    async def fake_post(path, body):
         plan_file.write_text("# Plan\n\n## EPIC-001 — Foo\n")
         return {"parts": [{"type": "text", "text": "ok"}]}
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_xyz")
+    post_json = AsyncMock(side_effect=fake_post)
 
     captured = {}
 
@@ -122,7 +121,9 @@ async def test_synthesize_uses_worker_mode_prompt(fake_plans_dir):
         return "WORKER_PROMPT"
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", side_effect=fake_prompt):
         await ps.synthesize_plan_from_thread(
             thread_id="pt-1", chat_history=[], title="T",
@@ -144,17 +145,17 @@ async def test_synthesize_passes_correct_message_payload(fake_plans_dir):
         plan_file.write_text("skel")
         return _skel_dict(plan_id, fake_plans_dir, "/tmp/proj")
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_payload"}
+    async def fake_post(path, body):
         plan_file.write_text("# Plan\n\n## EPIC-001 — Foo\n")
         return {"parts": [{"type": "text", "text": "done"}]}
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_payload")
+    post_json = AsyncMock(side_effect=fake_post)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value="ses_parent"), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="SYS_PROMPT"):
         await ps.synthesize_plan_from_thread(
             thread_id="pt-1",
@@ -165,12 +166,11 @@ async def test_synthesize_passes_correct_message_payload(fake_plans_dir):
             title="Security Site",
         )
 
-    # Two POSTs: /session, then /session/<id>/message
-    calls = mock_client.post.await_args_list
-    assert calls[0].args[0] == "/session"
-    assert calls[1].args[0] == "/session/ses_payload/message"
+    create_session.assert_awaited_once_with(parent_id="ses_parent")
+    calls = post_json.await_args_list
+    assert calls[0].args[0] == "/session/ses_payload/message"
 
-    body = calls[1].kwargs.get("body") or (calls[1].args[1] if len(calls[1].args) > 1 else None)
+    body = calls[0].args[1]
     assert body is not None, f"expected body kwarg in {calls[1]}"
     assert body["agent"] == "ostwin-worker"
     assert body["system"] == "SYS_PROMPT"
@@ -198,17 +198,17 @@ async def test_synthesize_raises_and_cleans_up_when_no_epics(fake_plans_dir):
         roles_file.write_text("{}")
         return _skel_dict(plan_id, fake_plans_dir)
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_empty"}
+    async def fake_post(path, body):
         # worker doesn't touch the file — no epics ever land
         return {"parts": [{"type": "text", "text": "sorry, I couldn't generate a plan"}]}
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_empty")
+    post_json = AsyncMock(side_effect=fake_post)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
         with pytest.raises(RuntimeError, match="no epics"):
             await ps.synthesize_plan_from_thread(
@@ -235,14 +235,12 @@ async def test_synthesize_raises_and_cleans_up_on_session_create_failure(fake_pl
         meta_file.write_text("{}")
         return _skel_dict(plan_id, fake_plans_dir)
 
-    async def fake_post(path, **kwargs):
+    async def fake_create_session(*, parent_id=None):
         raise RuntimeError("opencode server unreachable")
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
-
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", AsyncMock(side_effect=fake_create_session)), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
         with pytest.raises(RuntimeError, match="opencode server unreachable"):
             await ps.synthesize_plan_from_thread(
@@ -272,9 +270,7 @@ async def test_synthesize_indexes_epics_with_supported_kwargs_only(fake_plans_di
         plan_file.write_text("skel")
         return _skel_dict(plan_id, fake_plans_dir, working_dir="/tmp/proj")
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_idx"}
+    async def fake_post(path, body):
         plan_file.write_text(
             "# Plan: Indexing test\n\n"
             "## Config\n\nworking_dir: /tmp/proj\n\n"
@@ -283,8 +279,8 @@ async def test_synthesize_indexes_epics_with_supported_kwargs_only(fake_plans_di
         )
         return {"parts": [{"type": "text", "text": "ok"}]}
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_idx")
+    post_json = AsyncMock(side_effect=fake_post)
 
     # Use a real spec so unsupported kwargs (task_ref, depends_on) raise TypeError.
     from dashboard.zvec_store import OSTwinStore
@@ -293,7 +289,9 @@ async def test_synthesize_indexes_epics_with_supported_kwargs_only(fake_plans_di
     monkeypatch.setattr(global_state, "store", mock_store)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
         result = await ps.synthesize_plan_from_thread(
             thread_id="pt-1", chat_history=[], title="Indexing test",
@@ -334,20 +332,20 @@ async def test_synthesize_cleanup_removes_zvec_entry_and_assets(fake_plans_dir, 
         (assets_dir / "uploaded.png").write_bytes(b"fake-image-bytes")
         return _skel_dict(plan_id, fake_plans_dir)
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_phantom"}
+    async def fake_post(path, body):
         # Worker doesn't touch the file — synthesis must raise + cleanup
         return {"parts": [{"type": "text", "text": "I gave up"}]}
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_phantom")
+    post_json = AsyncMock(side_effect=fake_post)
 
     mock_store = MagicMock()
     monkeypatch.setattr(global_state, "store", mock_store)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
         with pytest.raises(RuntimeError, match="no epics"):
             await ps.synthesize_plan_from_thread(
@@ -374,9 +372,7 @@ async def test_synthesize_aggregates_text_parts_into_worker_summary(fake_plans_d
         plan_file.write_text("skel")
         return _skel_dict(plan_id, fake_plans_dir)
 
-    async def fake_post(path, **kwargs):
-        if path == "/session":
-            return {"id": "ses_parts"}
+    async def fake_post(path, body):
         plan_file.write_text("# Plan\n\n## EPIC-001 — A\n\n## EPIC-002 — B\n")
         return {
             "parts": [
@@ -386,11 +382,13 @@ async def test_synthesize_aggregates_text_parts_into_worker_summary(fake_plans_d
             ],
         }
 
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
+    create_session = AsyncMock(return_value="ses_parts")
+    post_json = AsyncMock(side_effect=fake_post)
 
     with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
-         patch("dashboard.plan_synthesis.get_opencode_client", return_value=mock_client), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", create_session), \
+         patch("dashboard.plan_synthesis._post_opencode_json", post_json), \
          patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
         result = await ps.synthesize_plan_from_thread(
             thread_id="pt-1", chat_history=[], title="T",
@@ -399,3 +397,35 @@ async def test_synthesize_aggregates_text_parts_into_worker_summary(fake_plans_d
     assert "First sentence." in result["worker_summary"]
     assert "Second sentence." in result["worker_summary"]
     assert result["epic_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_synthesize_tolerates_empty_opencode_message_response(fake_plans_dir):
+    """OpenCode may accept POST /message with HTTP 200 and an empty body."""
+    from dashboard import plan_synthesis as ps
+
+    plan_id = "p_empty_response"
+    plan_file = fake_plans_dir / f"{plan_id}.md"
+
+    def fake_create(**_kwargs):
+        plan_file.write_text("skel")
+        return _skel_dict(plan_id, fake_plans_dir)
+
+    async def fake_read_session_text(child_id):
+        assert child_id == "ses_async"
+        plan_file.write_text("# Plan\n\n## EPIC-001 — Async worker\n")
+        return "Drafted async worker plan."
+
+    with patch("dashboard.plan_synthesis.create_plan_on_disk", side_effect=fake_create), \
+         patch("dashboard.plan_synthesis.get_opencode_session_id", return_value=None), \
+         patch("dashboard.plan_synthesis._create_opencode_session", AsyncMock(return_value="ses_async")), \
+         patch("dashboard.plan_synthesis._post_opencode_json", AsyncMock(return_value={})), \
+         patch("dashboard.plan_synthesis.read_session_text", AsyncMock(side_effect=fake_read_session_text)), \
+         patch("dashboard.plan_synthesis.asyncio.sleep", AsyncMock()), \
+         patch("dashboard.plan_synthesis.get_system_prompt", return_value="P"):
+        result = await ps.synthesize_plan_from_thread(
+            thread_id="pt-1", chat_history=[], title="T",
+        )
+
+    assert result["epic_count"] == 1
+    assert result["worker_summary"] == "Drafted async worker plan."

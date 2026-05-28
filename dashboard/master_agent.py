@@ -258,6 +258,105 @@ def reset_master_client() -> None:
     logger.info("[MASTER_AGENT] Client reset, will rebuild on next use")
 
 
+class _OpenCodeHTTPError(Exception):
+    """HTTP error from the OpenCode server's raw JSON API."""
+
+    def __init__(self, status_code: int, message: str, body: str = "") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+def _opencode_http_timeout():
+    import httpx
+
+    return httpx.Timeout(
+        OPENCODE_HTTP_READ_TIMEOUT,
+        connect=OPENCODE_HTTP_CONNECT_TIMEOUT,
+    )
+
+
+def _opencode_http_auth():
+    if not OPENCODE_SERVER_PASSWORD:
+        return None
+
+    import httpx
+
+    return httpx.BasicAuth(OPENCODE_SERVER_USERNAME, OPENCODE_SERVER_PASSWORD)
+
+
+def _extract_http_error_message(status_code: int, raw_body: str) -> str:
+    try:
+        parsed = json.loads(raw_body)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict):
+        data = parsed.get("data")
+        if isinstance(data, dict) and data.get("message"):
+            return str(data["message"])
+        if parsed.get("message"):
+            return str(parsed["message"])
+        if parsed.get("error"):
+            return str(parsed["error"])
+
+    return raw_body.strip() or f"OpenCode request failed with HTTP {status_code}"
+
+
+async def _post_opencode_json(path: str, body: dict) -> dict:
+    """POST strict JSON to OpenCode without the generated SDK transport layer.
+
+    The SDK remains useful for typed reads and SSE, but the dashboard write
+    path needs the server to receive exactly one application/json body. Some
+    OpenCode responses are currently HTTP 200 with an empty body, so callers
+    must tolerate ``{}`` here instead of letting the SDK run ``json.loads("")``.
+    """
+    import httpx
+
+    async with httpx.AsyncClient(
+        base_url=OPENCODE_BASE_URL,
+        auth=_opencode_http_auth(),
+        timeout=_opencode_http_timeout(),
+    ) as http:
+        response = await http.post(path, json=body)
+
+    if response.status_code >= 400:
+        raise _OpenCodeHTTPError(
+            response.status_code,
+            _extract_http_error_message(response.status_code, response.text),
+            response.text,
+        )
+
+    if not response.content:
+        return {}
+
+    try:
+        parsed = response.json()
+    except json.JSONDecodeError as exc:
+        raise _OpenCodeHTTPError(
+            response.status_code,
+            f"OpenCode returned invalid JSON: {exc}",
+            response.text,
+        ) from exc
+
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
+async def _create_opencode_session(parent_id: str | None = None) -> str:
+    """Create an OpenCode session with an explicit JSON body.
+
+    The generated Python SDK sends ``Content-Type: application/json`` with an
+    empty body for ``session.create()``, which OpenCode rejects as malformed
+    JSON. Sending ``json={}`` keeps this endpoint strict and compatible.
+    """
+    body = {"parentID": parent_id} if parent_id else {}
+    data = await _post_opencode_json("/session", body)
+    session_id = data.get("id")
+    if not isinstance(session_id, str) or not session_id:
+        raise RuntimeError("OpenCode session create response did not include an id")
+    return session_id
+
+
 # ── Session registry ──────────────────────────────────────────────────────
 
 
@@ -353,14 +452,13 @@ class _SessionRegistry:
                 self._sessions.pop(conversation_id, None)
                 self._has_system_set.discard(conversation_id)
 
-            client = get_opencode_client()
-            session = await client.session.create()
-            self._sessions[conversation_id] = session.id
+            session_id = await _create_opencode_session()
+            self._sessions[conversation_id] = session_id
             self._sessions.move_to_end(conversation_id)
             self._evict_if_needed()
             self._schedule_persist()
-            logger.info("[MASTER_AGENT] New session %s for conversation %s", session.id, conversation_id)
-            return session.id
+            logger.info("[MASTER_AGENT] New session %s for conversation %s", session_id, conversation_id)
+            return session_id
 
     async def _session_still_exists(self, session_id: str) -> bool:
         """Validate that an OpenCode session still exists server-side.
@@ -425,6 +523,11 @@ class _SessionRegistry:
 
 
 _session_registry = _SessionRegistry()
+
+
+def get_opencode_session_id(conversation_id: str) -> str | None:
+    """Return the current OpenCode session id for a dashboard conversation."""
+    return _session_registry.get(conversation_id)
 
 
 # ── Session content reading ───────────────────────────────────────────────
@@ -699,8 +802,8 @@ async def _opencode_chat(
     fields, while the actual OpenCode server schema nests them under
     ``model: {providerID, modelID}`` and has ``additionalProperties: false``
     — so the flat shape is silently dropped and the server falls back to its
-    default model.  We POST the correctly-shaped body directly through the
-    SDK's underlying transport so auth/timeouts still apply.
+    default model. We POST the correctly-shaped body with raw ``httpx`` JSON
+    so the server receives a strict application/json request.
 
     Recovers from a stale ``NotFoundError`` by recreating the session once.
     ``system`` is only sent on the first message per conversation (the
@@ -708,7 +811,6 @@ async def _opencode_chat(
     """
     NotFoundError = _not_found_exc()
 
-    client = get_opencode_client()
     m, p = _resolve_model_provider(model_id, provider_id)
 
     send_system = bool(
@@ -725,15 +827,13 @@ async def _opencode_chat(
         return body
 
     async def _post(sid: str):
-        return await client.post(
-            f"/session/{sid}/message",
-            body=_body(),
-            cast_to=object,
-        )
+        return await _post_opencode_json(f"/session/{sid}/message", _body())
 
     try:
         resp = await _post(session_id)
-    except NotFoundError:
+    except (NotFoundError, _OpenCodeHTTPError) as exc:
+        if isinstance(exc, _OpenCodeHTTPError) and exc.status_code != 404:
+            raise
         if not conversation_id:
             raise
         logger.warning(
@@ -776,7 +876,6 @@ async def _opencode_command(
     """
     NotFoundError = _not_found_exc()
 
-    client = get_opencode_client()
     m, p = _resolve_model_provider(model_id, provider_id)
 
     def _body() -> dict:
@@ -790,15 +889,13 @@ async def _opencode_command(
         return body
 
     async def _post(sid: str):
-        return await client.post(
-            f"/session/{sid}/command",
-            body=_body(),
-            cast_to=object,
-        )
+        return await _post_opencode_json(f"/session/{sid}/command", _body())
 
     try:
         resp = await _post(session_id)
-    except NotFoundError:
+    except (NotFoundError, _OpenCodeHTTPError) as exc:
+        if isinstance(exc, _OpenCodeHTTPError) and exc.status_code != 404:
+            raise
         if not conversation_id:
             raise
         logger.warning(

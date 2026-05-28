@@ -10,19 +10,27 @@ allocated per Promote click.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
 import dashboard.global_state as global_state
 from dashboard.api_utils import PLANS_DIR
-from dashboard.master_agent import get_opencode_client
+from dashboard.master_agent import (
+    _create_opencode_session,
+    _post_opencode_json,
+    get_opencode_session_id,
+    read_session_text,
+)
 from dashboard.plan_agent import get_system_prompt
 from dashboard.routes.plans import create_plan_on_disk
 
 logger = logging.getLogger(__name__)
 
 _EPIC_RE = re.compile(r"EPIC-\d{3}")
+_WORKER_TIMEOUT_SECONDS = float(os.environ.get("OSTWIN_WORKER_TIMEOUT_SECONDS", "75"))
 
 
 async def synthesize_plan_from_thread(
@@ -43,8 +51,6 @@ async def synthesize_plan_from_thread(
 
     try:
         system_prompt = get_system_prompt(PLANS_DIR, mode="worker")
-        client = get_opencode_client()
-
         history_blob = "\n".join(
             f"{m.get('role', 'user')}: {m.get('content', '')}" for m in chat_history
         )
@@ -66,31 +72,28 @@ async def synthesize_plan_from_thread(
             "4. Return a 2-3 sentence summary of what you drafted.\n"
         )
 
-        child = await client.post("/session", body={}, cast_to=object)
-        child_id = child.get("id") if isinstance(child, dict) else None
-        if not child_id:
-            raise RuntimeError(
-                f"Failed to spawn worker child session for plan {plan_id}: {child!r}"
-            )
+        parent_id = get_opencode_session_id(f"thread-{thread_id}")
+        child_id = await _create_opencode_session(parent_id=parent_id)
 
-        resp = await client.post(
+        resp = await _post_opencode_json(
             f"/session/{child_id}/message",
-            body={
+            {
                 "agent": "ostwin-worker",
                 "system": system_prompt,
                 "parts": [{"type": "text", "text": task_message}],
             },
-            cast_to=object,
         )
 
-        parts = resp.get("parts", []) if isinstance(resp, dict) else []
-        worker_summary = "\n".join(
-            p.get("text", "")
-            for p in parts
-            if isinstance(p, dict) and p.get("type") == "text"
-        ).strip()
-
+        worker_summary = _extract_worker_summary(resp)
         content = plan_file.read_text() if plan_file.exists() else ""
+
+        if not worker_summary and not _EPIC_RE.search(content):
+            content, worker_summary = await _wait_for_worker_output(
+                child_id,
+                plan_file,
+                timeout_seconds=_WORKER_TIMEOUT_SECONDS,
+            )
+
         epic_count = len(_EPIC_RE.findall(content))
 
         if epic_count == 0:
@@ -176,3 +179,39 @@ def _cleanup_skeleton(plan_id: str) -> None:
             store.delete_plan(plan_id)
         except Exception as e:
             logger.warning("Failed to remove plan %s from zvec index: %s", plan_id, e)
+
+
+def _extract_worker_summary(resp: dict) -> str:
+    parts = resp.get("parts", []) if isinstance(resp, dict) else []
+    return "\n".join(
+        p.get("text", "")
+        for p in parts
+        if isinstance(p, dict) and p.get("type") == "text"
+    ).strip()
+
+
+async def _wait_for_worker_output(
+    child_id: str,
+    plan_file,
+    *,
+    timeout_seconds: float,
+) -> tuple[str, str]:
+    """Wait for OpenCode versions that accept /message before returning text."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    last_summary = ""
+
+    while True:
+        content = plan_file.read_text() if plan_file.exists() else ""
+        if _EPIC_RE.search(content):
+            return content, last_summary
+
+        try:
+            last_summary = (await read_session_text(child_id)).strip() or last_summary
+        except Exception as exc:
+            logger.debug("Unable to read worker session %s yet: %s", child_id, exc)
+
+        if loop.time() >= deadline:
+            return content, last_summary
+
+        await asyncio.sleep(1)

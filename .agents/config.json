@@ -7,10 +7,10 @@
     "max_detail_bytes": 16384,
     "max_context_entries": 15,
     "auto_publish_on_done": true,
-    "llm_backend": "ollama",
-    "llm_model": "gemma3:4b",
-    "embedding_backend": "ollama",
-    "embedding_model": "",
+    "llm_backend": "openai-compatible",
+    "llm_model": "google-vertex/gemini-3-flash-preview",
+    "embedding_backend": "openai-compatible",
+    "embedding_model": "google-vertex/gemini-embedding-001",
     "vector_backend": "zvec",
     "context_aware": true,
     "auto_sync": true,
@@ -41,14 +41,18 @@
     "auto_draft": true
   },
   "runtime": {
-    "max_concurrent_rooms": 9999
+    "master_agent_model": "google-vertex/gemini-3.5-flash"
   },
   "knowledge": {
-    "knowledge_llm_model": "",
-    "knowledge_embedding_model": "gemini-embedding-001",
+    "knowledge_llm_model": "google-vertex/gemini-2.5-flash",
+    "knowledge_embedding_model": "google-vertex/gemini-embedding-001",
     "knowledge_embedding_dimension": 1024,
-    "knowledge_llm_backend": "",
-    "knowledge_embedding_backend": "gemini"
+    "knowledge_llm_backend": "openai-compatible",
+    "knowledge_embedding_backend": "openai-compatible",
+    "knowledge_llm_compatible_url": "",
+    "knowledge_llm_compatible_key": "",
+    "knowledge_embedding_compatible_url": "",
+    "knowledge_embedding_compatible_key": ""
   },
   "providers": {
     "openai": null,
@@ -69,5 +73,13 @@
     "custom": {},
     "openai_compatible": null,
     "ollama": null
+  },
+  "manager": {
+    "poll_interval_seconds": 5,
+    "max_concurrent_rooms": 9999,
+    "max_engineer_retries": 3,
+    "state_timeout_seconds": 900,
+    "auto_approve_tools": false,
+    "dynamic_pipelines": true
   }
 }

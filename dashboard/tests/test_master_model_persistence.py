@@ -353,12 +353,11 @@ class TestRoundTripAcrossRestart:
 
         ma.load_persisted_master_model()
 
-        mock_client = MagicMock()
-        mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-model"))
-        mock_client.post = AsyncMock()
+        post_json = AsyncMock()
 
         with (
-            patch("dashboard.master_agent.get_opencode_client", return_value=mock_client),
+            patch("dashboard.master_agent._create_opencode_session", AsyncMock(return_value="sess-model")),
+            patch("dashboard.master_agent._post_opencode_json", post_json),
             patch(
                 "dashboard.master_agent.read_session_text",
                 new_callable=AsyncMock,
@@ -370,8 +369,7 @@ class TestRoundTripAcrossRestart:
                 conversation_id="persisted-model-chat",
             )
 
-        post_kwargs = mock_client.post.call_args.kwargs
-        body = post_kwargs["body"]
+        body = post_json.call_args.args[1]
         assert body["model"]["modelID"] == "gemini-3.1-pro"
         assert body["model"]["providerID"] == "google"
 
@@ -396,12 +394,11 @@ class TestRoundTripAcrossRestart:
 
         ma.load_persisted_master_model()  # no-op, but mirrors the startup path
 
-        mock_client = MagicMock()
-        mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-fresh"))
-        mock_client.post = AsyncMock()
+        post_json = AsyncMock()
 
         with (
-            patch("dashboard.master_agent.get_opencode_client", return_value=mock_client),
+            patch("dashboard.master_agent._create_opencode_session", AsyncMock(return_value="sess-fresh")),
+            patch("dashboard.master_agent._post_opencode_json", post_json),
             patch(
                 "dashboard.master_agent.read_session_text",
                 new_callable=AsyncMock,
@@ -413,7 +410,7 @@ class TestRoundTripAcrossRestart:
                 conversation_id="fresh-install-chat",
             )
 
-        body = mock_client.post.call_args.kwargs["body"]
+        body = post_json.call_args.args[1]
         assert body["model"]["providerID"] == "google"
         assert body["model"]["providerID"] != "google-vertex"
 
@@ -431,12 +428,11 @@ class TestRoundTripAcrossRestart:
         ma._master_config.provider = "google-vertex"  # stale legacy value
         ma._master_config.is_explicit = True
 
-        mock_client = MagicMock()
-        mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-legacy"))
-        mock_client.post = AsyncMock()
+        post_json = AsyncMock()
 
         with (
-            patch("dashboard.master_agent.get_opencode_client", return_value=mock_client),
+            patch("dashboard.master_agent._create_opencode_session", AsyncMock(return_value="sess-legacy")),
+            patch("dashboard.master_agent._post_opencode_json", post_json),
             patch(
                 "dashboard.master_agent.read_session_text",
                 new_callable=AsyncMock,
@@ -448,7 +444,7 @@ class TestRoundTripAcrossRestart:
                 conversation_id="legacy-vertex-chat",
             )
 
-        body = mock_client.post.call_args.kwargs["body"]
+        body = post_json.call_args.args[1]
         assert body["model"]["providerID"] == "google"
 
 

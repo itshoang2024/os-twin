@@ -28,6 +28,7 @@ Responsibilities consolidated here (previously split across bash):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
@@ -230,15 +231,103 @@ def _build_child_env(project_dir: Path) -> dict[str, str]:
 # ── Tool generation ───────────────────────────────────────────────────
 
 
+def _module_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _normalise_opencode_agent_model(
+    model: str,
+    config: dict | None = None,
+) -> str:
+    model = (model or "").strip()
+    if not model:
+        return ""
+
+    provider = ""
+    model_id = model
+    if "/" in model:
+        provider, model_id = model.split("/", 1)
+
+    if model_id.endswith("-customtools"):
+        model_id = model_id.removesuffix("-customtools")
+
+    if provider == "google":
+        google = ((config or {}).get("providers") or {}).get("google") or {}
+        if google.get("deployment_mode") == "vertex":
+            provider = "google-vertex"
+
+    if not provider and ("gemini" in model_id.lower() or model_id.lower().startswith("gemma")):
+        provider = "google-vertex"
+
+    return f"{provider}/{model_id}" if provider else model_id
+
+
+def _config_candidates(module_root: Path) -> list[Path]:
+    candidates: list[Path] = []
+    if explicit := os.environ.get("OSTWIN_CONFIG_PATH"):
+        candidates.append(Path(explicit).expanduser())
+    if project_dir := os.environ.get("OSTWIN_PROJECT_DIR"):
+        candidates.append(Path(project_dir).expanduser() / ".agents" / "config.json")
+    candidates.extend(
+        [
+            INSTALL_DIR / ".agents" / "config.json",
+            module_root / ".agents" / "config.json",
+        ]
+    )
+    return candidates
+
+
+def _resolve_opencode_agent_model(env: dict[str, str], module_root: Path | None = None) -> str:
+    """Resolve the model baked into generated OpenCode agent definitions."""
+    for key in ("OSTWIN_OPENCODE_AGENT_MODEL", "OSTWIN_OPENCODE_MODEL", "MASTER_AGENT_MODEL"):
+        if value := env.get(key):
+            return _normalise_opencode_agent_model(value)
+
+    root = module_root or _module_root()
+    seen: set[Path] = set()
+    for path in _config_candidates(root):
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            config = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        model = ((config.get("runtime") or {}).get("master_agent_model") or "").strip()
+        if model:
+            return _normalise_opencode_agent_model(model, config)
+
+    return "google-vertex/gemini-3.1-pro-preview"
+
+
 def _generate_opencode_tools(env: dict[str, str], project_dir: Path) -> None:
     """Best-effort generation of the opencode tool stubs into ``project_dir``."""
     venv_py = INSTALL_DIR / ".venv" / "bin" / "python"
-    py = str(venv_py) if venv_py.exists() else shutil.which("python3")
+    candidates = [
+        str(venv_py) if venv_py.exists() else "",
+        sys.executable,
+        shutil.which("python3") or "",
+    ]
+    py = next((candidate for candidate in candidates if candidate), None)
     if not py:
         logger.debug("[OPENCODE_SERVICE] no python interpreter; skipping tool gen")
         return
+
+    module_root = _module_root()
+    child_env = dict(env)
+    child_env["PYTHONPATH"] = (
+        f"{module_root}{os.pathsep}{child_env['PYTHONPATH']}"
+        if child_env.get("PYTHONPATH")
+        else str(module_root)
+    )
+    model = _resolve_opencode_agent_model(env, module_root)
+
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
                 py,
                 "-m",
@@ -247,14 +336,22 @@ def _generate_opencode_tools(env: dict[str, str], project_dir: Path) -> None:
                 str(project_dir),
                 "--dashboard-port",
                 env.get("DASHBOARD_PORT", "3366"),
+                "--model",
+                model,
             ],
-            env=env,
+            env=child_env,
             cwd=str(project_dir),
             timeout=30,
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            logger.warning(
+                "[OPENCODE_SERVICE] tool generation failed with %s: %s",
+                result.returncode,
+                (result.stderr or result.stdout or "").strip(),
+            )
     except (subprocess.TimeoutExpired, OSError) as exc:
         logger.debug("[OPENCODE_SERVICE] tool generation skipped: %s", exc)
 

@@ -187,10 +187,10 @@ class TestSessionRegistry:
     async def test_creates_session_on_first_access(self):
         from dashboard.master_agent import _session_registry
 
-        with patch("dashboard.master_agent.get_opencode_client") as mock_oc:
-            mock_client = MagicMock()
-            mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-new"))
-            mock_oc.return_value = mock_client
+        with patch(
+            "dashboard.master_agent._create_opencode_session",
+            AsyncMock(return_value="sess-new"),
+        ):
 
             sid = await _session_registry.get_or_create("conv-1")
             assert sid == "sess-new"
@@ -346,9 +346,9 @@ class TestDeltaMessaging:
         mock_item.parts = [text_part]
 
         with patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
+             patch("dashboard.master_agent._post_opencode_json", new_callable=AsyncMock) as post_json, \
              patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="First reply"):
             mock_client = MagicMock()
-            mock_client.post = AsyncMock()
             mock_client.session.messages = AsyncMock(return_value=MagicMock())
             mock_oc.return_value = mock_client
 
@@ -358,13 +358,13 @@ class TestDeltaMessaging:
             ]
             await master_chat(msgs, conversation_id="conv-delta")
 
-            chat_call = mock_client.post.call_args
-            parts = chat_call[1]["body"]["parts"]
+            chat_call = post_json.call_args
+            parts = chat_call.args[1]["parts"]
             assert any("hello" in str(p) for p in parts)
 
             assert _session_registry.has_system("conv-delta")
 
-            mock_client.post = AsyncMock()
+            post_json.reset_mock()
 
             msgs.append(ChatMessage(role="assistant", content="First reply"))
             msgs.append(ChatMessage(role="user", content="follow-up"))
@@ -372,8 +372,8 @@ class TestDeltaMessaging:
             with patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="Second reply"):
                 await master_chat(msgs, conversation_id="conv-delta")
 
-            chat_call2 = mock_client.post.call_args
-            parts2 = chat_call2[1]["body"]["parts"]
+            chat_call2 = post_json.call_args
+            parts2 = chat_call2.args[1]["parts"]
             assert any("follow-up" in str(p) for p in parts2)
             assert not any("hello" in str(p) for p in parts2)
 
@@ -382,14 +382,12 @@ class TestDeltaMessaging:
         """Different conversation_ids get separate sessions."""
         from dashboard.master_agent import _session_registry, master_chat
 
-        with patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
+        with patch(
+            "dashboard.master_agent._create_opencode_session",
+            AsyncMock(side_effect=["sess-A", "sess-B"]),
+        ), \
+             patch("dashboard.master_agent._post_opencode_json", new_callable=AsyncMock), \
              patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="reply"):
-            mock_client = MagicMock()
-            mock_client.session.create = AsyncMock(side_effect=[
-                MagicMock(id="sess-A"), MagicMock(id="sess-B")
-            ])
-            mock_client.post = AsyncMock()
-            mock_oc.return_value = mock_client
 
             await master_chat(
                 [ChatMessage(role="user", content="msg-A")],
@@ -587,9 +585,9 @@ class TestSystemPromptTracking:
         _session_registry._sessions["conv-sys"] = "sess-sys"
 
         with patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
+             patch("dashboard.master_agent._post_opencode_json", new_callable=AsyncMock) as post_json, \
              patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="reply"):
             mock_client = MagicMock()
-            mock_client.post = AsyncMock()
             mock_client.session.messages = AsyncMock(return_value=MagicMock())
             mock_oc.return_value = mock_client
 
@@ -599,11 +597,11 @@ class TestSystemPromptTracking:
             ]
             await master_chat(msgs, conversation_id="conv-sys")
 
-            first_call_body = mock_client.post.call_args[1]["body"]
+            first_call_body = post_json.call_args.args[1]
             assert "system" in first_call_body
             assert first_call_body["system"] == "Be helpful"
 
-            mock_client.post = AsyncMock()
+            post_json.reset_mock()
 
             msgs2 = [
                 ChatMessage(role="system", content="Be helpful"),
@@ -613,7 +611,7 @@ class TestSystemPromptTracking:
             with patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="reply2"):
                 await master_chat(msgs2, conversation_id="conv-sys")
 
-            second_call_body = mock_client.post.call_args[1]["body"]
+            second_call_body = post_json.call_args.args[1]
             assert "system" not in second_call_body
 
 
@@ -623,11 +621,8 @@ class TestOpenCodeCommand:
         """OpenCode /command expects model as provider/model, not chat's object shape."""
         from dashboard.master_agent import _opencode_command
 
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value=MagicMock())
-
         with (
-            patch("dashboard.master_agent.get_opencode_client", return_value=mock_client),
+            patch("dashboard.master_agent._post_opencode_json", new_callable=AsyncMock) as post_json,
             patch(
                 "dashboard.master_agent.read_session_text",
                 new_callable=AsyncMock,
@@ -644,7 +639,7 @@ class TestOpenCodeCommand:
             )
 
         assert result == "ok"
-        body = mock_client.post.call_args.kwargs["body"]
+        body = post_json.call_args.args[1]
         assert body == {
             "command": "draft",
             "arguments": "build a todo app",
@@ -658,13 +653,9 @@ class TestMasterComplete:
     async def test_returns_content(self):
         from dashboard.master_agent import master_complete
 
-        with patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
+        with patch("dashboard.master_agent._create_opencode_session", AsyncMock(return_value="sess-1")), \
+             patch("dashboard.master_agent._post_opencode_json", new_callable=AsyncMock), \
              patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="Summary"):
-            mock_client = MagicMock()
-            mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-1"))
-            mock_client.post = AsyncMock()
-            mock_oc.return_value = mock_client
-
             result = await master_complete("Summarize this")
             assert result == "Summary"
 
@@ -672,16 +663,19 @@ class TestMasterComplete:
     async def test_conversation_id_reuses_session(self):
         from dashboard.master_agent import master_complete
 
-        with patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
+        create_session = AsyncMock(return_value="sess-persist")
+        post_json = AsyncMock()
+
+        with patch("dashboard.master_agent._create_opencode_session", create_session), \
+             patch("dashboard.master_agent._post_opencode_json", post_json), \
+             patch("dashboard.master_agent.get_opencode_client") as mock_oc, \
              patch("dashboard.master_agent.read_session_text", new_callable=AsyncMock, return_value="Done"):
             mock_client = MagicMock()
-            mock_client.session.create = AsyncMock(return_value=MagicMock(id="sess-persist"))
             mock_client.session.messages = AsyncMock(return_value=MagicMock())
-            mock_client.post = AsyncMock()
             mock_oc.return_value = mock_client
 
             await master_complete("First", conversation_id="conv-1")
             await master_complete("Second", conversation_id="conv-1")
 
-            assert mock_client.session.create.call_count == 1
-            assert mock_client.post.call_count == 2
+            assert create_session.call_count == 1
+            assert post_json.call_count == 2

@@ -21,12 +21,12 @@ _plan_log_dir.mkdir(parents=True, exist_ok=True)
 _plan_log_file = _plan_log_dir / "plan.log"
 
 plan_logger = logging.getLogger("plan_agent.trace")
-plan_logger.setLevel(logging.INFO)
+plan_logger.setLevel(logging.DEBUG)
 plan_logger.propagate = False
 
 if not plan_logger.handlers:
     _fh = logging.FileHandler(_plan_log_file, encoding="utf-8")
-    _fh.setLevel(logging.INFO)
+    _fh.setLevel(logging.DEBUG)
     _fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-5s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     plan_logger.addHandler(_fh)
 
