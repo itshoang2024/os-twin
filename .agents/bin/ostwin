@@ -400,6 +400,8 @@ Commands:
                                   search <query>, update [--all|<slug>], remove <slug>
   mcp               Manage MCP extensions
                      Subcommands: install, list, catalog, remove, sync
+  search-engine     Install and run local SearXNG search under ~/.ostwin
+                     Subcommands: install, configure, start, stop, status, settings
   reload-env        Reload ~/.ostwin/.env into MCP config env blocks
   test              Run test suites
                      Options: --suite NAME, --verbose
@@ -1738,6 +1740,26 @@ switch ($Command) {
                 exit 1
             }
         }
+    }
+
+    # -- search-engine -------------------------------------------------------
+    "search-engine" {
+        $searchScript = Join-Path $AgentsDir "search-engine.sh"
+        if (-not (Test-Path $searchScript)) {
+            $searchScript = Join-Path $OstwinHome ".agents/search-engine.sh"
+        }
+        if (-not (Test-Path $searchScript)) {
+            Write-Error "[ERROR] search-engine.sh not found."
+            Write-Error "  Searched: $AgentsDir and $OstwinHome/.agents/"
+            exit 1
+        }
+        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+            Write-Error "[ERROR] bash is required for search-engine management."
+            exit 1
+        }
+        $env:OSTWIN_HOME = $OstwinHome
+        & bash $searchScript @Arguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
     }
 
     # ── reload-env ───────────────────────────────────────────────────────────

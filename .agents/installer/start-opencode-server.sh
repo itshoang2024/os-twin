@@ -51,9 +51,10 @@ start_opencode_server() {
     return
   fi
 
-  step "Starting opencode-serve via dashboard.lib.opencode_service..."
-  if _opencode_service_invoke start; then
-    ok "OpenCode server is healthy"
+  # Start quietly on success; opencode_service logs are noisy during install and
+  # are only useful when startup fails.
+  if _opencode_service_invoke start >/dev/null 2>&1; then
+    return 0
   else
     warn "OpenCode server did not start cleanly"
     info "Check logs: $INSTALL_DIR/logs/opencode-server.log"
