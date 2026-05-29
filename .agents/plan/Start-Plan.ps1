@@ -766,8 +766,12 @@ function New-PlanWarRooms {
         if ($entry.Pipeline) {
             $roomArgs['Pipeline'] = $entry.Pipeline
         }
-        if ($entry.RequiredCapabilities -and $entry.RequiredCapabilities.Count -gt 0) {
-            $roomArgs['RequiredCapabilities'] = $entry.RequiredCapabilities
+        # PlanParser exposes parsed directives as .Capabilities; forward them to
+        # New-WarRoom as RequiredCapabilities so Resolve-Pipeline can drive the
+        # correct lifecycle (e.g. security → security-engineer worker +
+        # security-specialist evaluator).
+        if ($entry.Capabilities -and $entry.Capabilities.Count -gt 0) {
+            $roomArgs['RequiredCapabilities'] = $entry.Capabilities
         }
         if ($entry.Lifecycle) {
             $roomArgs['Lifecycle'] = $entry.Lifecycle

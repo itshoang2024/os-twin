@@ -90,6 +90,8 @@ if (-not $result.Runner) {
                 $result.Source = 'registry'
                 $result.Capabilities = if ($matchedRole.capabilities) { @($matchedRole.capabilities) } else { @() }
                 if ($matchedRole.default_model) { $result.Model = $matchedRole.default_model }
+                $registryTimeout = if ($matchedRole.timeout) { $matchedRole.timeout } elseif ($matchedRole.timeout_seconds) { $matchedRole.timeout_seconds } else { $null }
+                if ($registryTimeout) { $result.Timeout = $registryTimeout }
             }
         }
     }
@@ -164,6 +166,7 @@ if (-not $result.Runner -and $RequiredCapabilities.Count -gt 0) {
             $result.Runner = $bestMatch.Runner
             if ($bestMatch.Capabilities) { $result.Capabilities = @($bestMatch.Capabilities) }
             if ($bestMatch.Model) { $result.Model = $bestMatch.Model }
+            if ($bestMatch.Timeout) { $result.Timeout = $bestMatch.Timeout }
             $result.BaseRole = $bestMatch.Name
             $result.Source = 'capability-match'
         }

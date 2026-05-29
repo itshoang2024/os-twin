@@ -29,11 +29,27 @@ function Patch-McpConfig {
     $venvPython = Join-Path $script:VenvDir "Scripts\python.exe"
 
     # 1. Ensure critical path env vars are set in .env
-    # These are required for {env:AGENT_DIR} and {env:OSTWIN_PYTHON} resolution
+    # These are required for {env:AGENT_DIR}, {env:OSTWIN_PYTHON}, and {env:PATH}
+    # resolution. PATH must include .agents\bin so native CLI-backed MCP servers
+    # such as `obscura mcp` can start even before a new shell picks up PATH changes.
     # NOTE: .env files use KEY=VALUE format (no 'export' prefix - that's for shell scripts)
+    $pathEntries = @(
+        (Join-Path $script:VenvDir "Scripts"),
+        (Join-Path $script:InstallDir ".agents\bin")
+    )
+    if ($env:USERPROFILE) {
+        $pathEntries += Join-Path $env:USERPROFILE ".local\bin"
+        $pathEntries += Join-Path $env:USERPROFILE ".opencode\bin"
+    }
+    if ($env:Path) {
+        $pathEntries += ($env:Path -split ";" | Where-Object { $_ })
+    }
+    $mcpPath = ($pathEntries | Where-Object { $_ } | Select-Object -Unique) -join ";"
+
     $envEntries = @(
         "AGENT_DIR=$($script:InstallDir)",
-        "OSTWIN_PYTHON=$venvPython"
+        "OSTWIN_PYTHON=$venvPython",
+        "PATH=$mcpPath"
     )
 
     # Read existing content
@@ -41,7 +57,7 @@ function Patch-McpConfig {
 
     # Remove old entries (with or without export) and add fresh ones
     $cleanedContent = $existingContent
-    foreach ($key in @("AGENT_DIR", "OSTWIN_PYTHON")) {
+    foreach ($key in @("AGENT_DIR", "OSTWIN_PYTHON", "PATH")) {
         $cleanedContent = $cleanedContent -replace "(?m)^export $key=.*\r?\n", ""
         $cleanedContent = $cleanedContent -replace "(?m)^$key=.*\r?\n", ""
     }

@@ -202,8 +202,26 @@ elseif ($CandidateRoles.Count -gt 0) {
 # MODE 3: Capability-derived pipeline
 elseif ($RequiredCapabilities.Count -gt 0) {
     $baseRole = $AssignedRole -replace ':.*$', ''
+
+    # Security is special in this PR: it has a dedicated worker/evaluator pair,
+    # so Capabilities: security should use security-engineer as the worker and
+    # security-specialist as the reviewer. Other capabilities keep the existing
+    # behavior: assigned worker + capability-specific reviewer.
+    $capPrimaryMap = @{
+        'security' = 'security-engineer'
+    }
+    if ($baseRole -eq 'engineer') {
+        foreach ($cap in $RequiredCapabilities) {
+            $capLower = $cap.ToLower()
+            if ($capPrimaryMap.ContainsKey($capLower)) {
+                $baseRole = $capPrimaryMap[$capLower]
+                break   # first matching capability sets the primary worker
+            }
+        }
+    }
+
     $capReviewerMap = @{
-        'security'       = 'security-auditor'
+        'security'       = 'security-specialist'
         'database'       = 'database-architect'
         'architecture'   = 'architect'
         'infrastructure' = 'devops'
@@ -213,7 +231,11 @@ elseif ($RequiredCapabilities.Count -gt 0) {
     foreach ($cap in $RequiredCapabilities) {
         $capLower = $cap.ToLower()
         if ($capReviewerMap.ContainsKey($capLower)) {
-            $candidateList += $capReviewerMap[$capLower]
+            $reviewer = $capReviewerMap[$capLower]
+            # Only add reviewer when it is distinct from the primary worker
+            if ($reviewer -ne $baseRole -and $candidateList -notcontains $reviewer) {
+                $candidateList += $reviewer
+            }
         }
     }
 }

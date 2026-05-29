@@ -1009,24 +1009,34 @@ def generate_all(
     # Connector-parity slash commands generated from the embedded registry.
     written.extend(_write_commands(commands_dir))
 
-    logger.info("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
+    logger.debug("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
     return written
 
 
 if __name__ == "__main__":
     import argparse
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Generate OpenCode tool files for Ostwin")
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--dashboard-port", default=DASHBOARD_PORT_DEFAULT)
     parser.add_argument("--model", default="google-vertex/gemini-3.1-pro-preview-customtools")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print generated file paths and debug logging",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
 
     files = generate_all(
         project_root=args.project_root,
         dashboard_port=args.dashboard_port,
         model=args.model,
     )
-    for f in files:
-        print(f"  wrote {f}")
+    if args.verbose:
+        for f in files:
+            print(f"  generated {f}")

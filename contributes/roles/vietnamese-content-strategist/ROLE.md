@@ -17,7 +17,7 @@ When assigned a Task (TASK-XXX), implement it directly.
 ### Phase 0 — Context (ALWAYS DO THIS FIRST)
 Before writing any code, load context from both layers:
 `
-search_memory(query="<terms from your brief>")
+memory_search(query="<terms from your brief>")
 memory_tree()
 knowledge_query("project-docs", "What are the conventions for <area>?", mode="summarized")
 `
@@ -37,7 +37,7 @@ knowledge_query("project-docs", "What are the conventions for <area>?", mode="su
 1. Ensure all checkboxes in TASKS.md are checked
 2. MANDATORY: Save to memory:
    `
-   save_memory(
+   memory_save(
      content="<key code, interfaces, decisions>",
      name="<descriptive name>",
      path="code/<module>",

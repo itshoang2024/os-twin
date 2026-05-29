@@ -1389,6 +1389,174 @@ class Ingestor:
             "elapsed_seconds": round(elapsed, 3),
         }
 
+    # ---- ingest_research_batch -----------------------------------------
+
+    def ingest_research_batch(
+        self,
+        namespace: str,
+        items: list[dict],
+        *,
+        options: IngestOptions | None = None,
+    ) -> dict:
+        """Batch-ingest multiple research results into ``namespace``.
+
+        Each item in ``items`` is a dict with:
+        - ``text`` (str): The markdown content to ingest.
+        - ``source_url`` (str): The URL the content was fetched from.
+        - ``source_title`` (str): Human-readable title.
+        - ``metadata`` (dict): Extra metadata to attach to every chunk
+          (e.g. ``source_engine``, ``source_query``, ``research_timestamp``).
+
+        This is similar to calling :meth:`ingest_text` N times, but:
+        - Uses a single ``register_import`` / stats update for the whole batch
+        - Shares the embedder/LLM across all items (amortises warm-up)
+        - Returns per-source chunk counts for provenance tracking
+
+        Returns:
+            dict with keys: ``namespace``, ``chunks_added``, ``entities_added``,
+            ``relations_added``, ``errors``, ``per_source`` (url → chunk_count),
+            ``elapsed_seconds``.
+        """
+        options = options or IngestOptions()
+        run_t0 = time.monotonic()
+        metrics = get_metrics_registry()
+
+        if options.llm_model:
+            self._apply_llm_model_override(options.llm_model)
+
+        meta = self._nm.get(namespace)
+        if meta is None:
+            raise NamespaceNotFoundError(namespace)
+
+        total_chunks = 0
+        total_entities = 0
+        total_relations = 0
+        errors: list[str] = []
+        per_source: dict[str, int] = {}
+
+        for item in items:
+            text = item.get("text", "")
+            source_url = item.get("source_url", "unknown")
+            source_title = item.get("source_title", "")
+            extra_metadata = item.get("metadata", {})
+
+            if not text or not text.strip():
+                per_source[source_url] = 0
+                continue
+
+            text_bytes = text.encode("utf-8")
+            # Idempotency key: hash of URL + content
+            content_hash = _sha256((source_url + text).encode("utf-8"))
+            now_ts = time.time()
+
+            # Skip if already indexed (unless force)
+            if not options.force and content_hash and self._is_already_indexed(namespace, content_hash):
+                per_source[source_url] = 0
+                continue
+
+            fe = FileEntry(
+                path=f"research://{source_url}",
+                size=len(text_bytes),
+                mtime=now_ts,
+                extension=".html",
+                content_hash=content_hash,
+            )
+
+            # Chunk the text
+            sliding_window_threshold = options.chunk_size * 10
+            if len(text) > sliding_window_threshold:
+                chunker = SlidingWindowChunker(
+                    window_size=options.sliding_window_size,
+                    overlap=options.sliding_window_overlap,
+                    page_chars=options.chunk_size,
+                )
+                raw_chunks = chunker.chunk(text)
+                chunks_text = [c["text"] for c in raw_chunks]
+                chunk_metas = [c["metadata"] for c in raw_chunks]
+            else:
+                chunks_text = _chunk_text(text, options.chunk_size, options.chunk_overlap)
+                chunk_metas = [{} for _ in chunks_text]
+
+            if not chunks_text:
+                per_source[source_url] = 0
+                continue
+
+            # Build chunk dicts with metadata
+            chunks: list[dict] = []
+            for i, (chunk, cmeta) in enumerate(zip(chunks_text, chunk_metas)):
+                metadata = {
+                    "file_path": f"research://{source_url}",
+                    "filename": source_title or source_url,
+                    "chunk_index": i,
+                    "total_chunks": len(chunks_text),
+                    "file_size": fe.size,
+                    "mtime": fe.mtime,
+                    "extension": ".html",
+                    "file_hash": content_hash,
+                    "chunk_hash": _sha256(chunk.encode("utf-8")),
+                    "source_type": "research",
+                }
+                metadata.update(cmeta)
+                metadata.update(extra_metadata)
+                chunks.append({"text": chunk, "metadata": metadata})
+
+            # Embed + extract entities
+            try:
+                counts = self._extract_and_embed(namespace, fe, chunks, options)
+                item_chunks = counts["chunks_added"]
+                total_chunks += item_chunks
+                total_entities += counts["entities_added"]
+                total_relations += counts["relations_added"]
+                per_source[source_url] = item_chunks
+            except Exception as exc:
+                logger.error("Research ingest failed for %s: %s", source_url, exc)
+                errors.append(f"{source_url}: {exc}")
+                per_source[source_url] = 0
+
+        # Update namespace stats once for the whole batch
+        if total_chunks > 0:
+            try:
+                self._nm.update_stats(
+                    namespace,
+                    files_indexed=sum(1 for c in per_source.values() if c > 0),
+                    chunks=total_chunks,
+                    entities=total_entities,
+                    relations=total_relations,
+                    vectors=total_chunks,
+                )
+            except Exception as exc:
+                logger.exception("Could not update namespace stats after research batch: %s", exc)
+
+            # Append a single import record for the whole research batch
+            try:
+                self._nm.append_import(
+                    namespace,
+                    ImportRecord(
+                        folder_path=f"research://batch({len(items)} urls)",
+                        started_at=_utcnow(),
+                        finished_at=_utcnow(),
+                        status="completed",
+                        file_count=sum(1 for c in per_source.values() if c > 0),
+                        error_count=len(errors),
+                    ),
+                )
+            except Exception as exc:
+                logger.exception("Could not append research import record: %s", exc)
+
+        elapsed = time.monotonic() - run_t0
+        metrics.counter("ingest_files_total").inc(sum(1 for c in per_source.values() if c > 0))
+        metrics.histogram("ingest_latency_seconds").observe(elapsed)
+
+        return {
+            "namespace": namespace,
+            "chunks_added": total_chunks,
+            "entities_added": total_entities,
+            "relations_added": total_relations,
+            "errors": errors,
+            "per_source": per_source,
+            "elapsed_seconds": round(elapsed, 3),
+        }
+
 
 __all__ = [
     "FileEntry",

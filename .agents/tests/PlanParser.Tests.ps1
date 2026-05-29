@@ -535,4 +535,61 @@ depends_on: []
         $result[0].Roles | Should -Contain 'engineer:fe'
         $result[0].Roles | Should -Contain 'qa'
     }
+
+    # =====================================================
+    # Capabilities directive — lifecycle routing
+    # These tests assert the contract Start-Plan relies on:
+    # parsed .Capabilities must be forwarded to New-WarRoom
+    # as RequiredCapabilities to drive Resolve-Pipeline.
+    # =====================================================
+
+    It 'parses Capabilities: security with no Roles directive — HasExplicitRoles is false' {
+        $md = @"
+## EPIC-001 - Security Hardening
+Capabilities: security
+#### Definition of Done
+- [ ] Done
+#### Acceptance Criteria
+- [ ] AC
+depends_on: []
+"@
+        $result = ConvertFrom-PlanMarkdown -Content $md
+        $result[0].Capabilities | Should -Contain 'security'
+        # No Roles: directive means the default 'engineer' was injected
+        $result[0].HasExplicitRoles | Should -BeFalse
+        $result[0].Roles            | Should -Contain 'engineer'
+    }
+
+    It 'parses Capabilities: security, database (multi-capability)' {
+        $md = @"
+## EPIC-001 - Multi-Cap
+Capabilities: security, database
+#### Definition of Done
+- [ ] Done
+#### Acceptance Criteria
+- [ ] AC
+depends_on: []
+"@
+        $result = ConvertFrom-PlanMarkdown -Content $md
+        $result[0].Capabilities | Should -Contain 'security'
+        $result[0].Capabilities | Should -Contain 'database'
+        $result[0].Capabilities.Count | Should -Be 2
+    }
+
+    It 'records Capabilities independently of Roles directive' {
+        $md = @"
+## EPIC-001 - Cap Plus Role
+Roles: security-engineer
+Capabilities: security
+#### Definition of Done
+- [ ] Done
+#### Acceptance Criteria
+- [ ] AC
+depends_on: []
+"@
+        $result = ConvertFrom-PlanMarkdown -Content $md
+        $result[0].Roles        | Should -Contain 'security-engineer'
+        $result[0].HasExplicitRoles | Should -BeTrue
+        $result[0].Capabilities | Should -Contain 'security'
+    }
 }

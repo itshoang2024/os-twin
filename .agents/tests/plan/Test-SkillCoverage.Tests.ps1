@@ -118,6 +118,75 @@ Describe "Test-SkillCoverage" {
         }
     }
 
+    Context "Role lookup in contributes/roles/" {
+        It "finds a role in contributes/roles/ without scaffolding" {
+            $roleName = "contrib-role-$script:testSuffix"
+
+            # Pre-create the role inside the project's contributes/roles/
+            $contributePath = Join-Path $script:projectDir "contributes" "roles" $roleName
+            New-Item -ItemType Directory -Path $contributePath -Force | Out-Null
+            @{ name = $roleName } | ConvertTo-Json | Out-File (Join-Path $contributePath "role.json") -Encoding utf8
+
+            $plan = @(New-PlanEntry -Roles @($roleName))
+
+            $output = & $script:TestSkillCoverage -PlanParsed $plan -ProjectDir $script:projectDir *>&1
+            $outputStr = $output -join "`n"
+
+            $outputStr | Should -Not -Match "Role '$roleName' not found"
+            $outputStr | Should -Not -Match "Auto-scaffolded.*$roleName"
+            $outputStr | Should -Match "All required skills and roles verified"
+        }
+
+        It "does not scaffold a role that already exists in contributes/roles/" {
+            $roleName = "no-scaffold-contrib-$script:testSuffix"
+            # Track for cleanup — even though we don't expect scaffolding, guard it
+            $script:createdRoles.Add($roleName)
+
+            # Pre-create the role inside the project's contributes/roles/
+            $contributePath = Join-Path $script:projectDir "contributes" "roles" $roleName
+            New-Item -ItemType Directory -Path $contributePath -Force | Out-Null
+            @{ name = $roleName; capabilities = @("security") } |
+                ConvertTo-Json | Out-File (Join-Path $contributePath "role.json") -Encoding utf8
+
+            $plan = @(New-PlanEntry -Roles @($roleName))
+
+            & $script:TestSkillCoverage -PlanParsed $plan -ProjectDir $script:projectDir *>&1 | Out-Null
+
+            # The role must NOT have been scaffolded to ~/.ostwin or ~/.config/opencode
+            $ostwinPath = Join-Path $script:ostwinRolesDir $roleName
+            Test-Path $ostwinPath | Should -BeFalse `
+                -Because "contributed roles must not be auto-scaffolded to ~/.ostwin"
+
+            $openCodeFile = Join-Path $script:openCodeAgentsDir "$roleName.md"
+            Test-Path $openCodeFile | Should -BeFalse `
+                -Because "contributed roles must not be auto-scaffolded to ~/.config/opencode"
+        }
+
+        It "reads skill_refs from contributes/roles/<role>/role.json for coverage check" {
+            $roleName = "contrib-skill-role-$script:testSuffix"
+            $skillName = "contrib-skill-$script:testSuffix"
+
+            # Contributed role with a skill_ref
+            $contributePath = Join-Path $script:projectDir "contributes" "roles" $roleName
+            New-Item -ItemType Directory -Path $contributePath -Force | Out-Null
+            @{ name = $roleName; skill_refs = @($skillName) } |
+                ConvertTo-Json | Out-File (Join-Path $contributePath "role.json") -Encoding utf8
+
+            # The skill is present in the project's skills directory
+            $skillDir = Join-Path $script:agentsDir "skills" "global" $skillName
+            New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            "# $skillName" | Out-File -FilePath (Join-Path $skillDir "SKILL.md") -Encoding utf8
+
+            $plan = @(New-PlanEntry -Roles @($roleName))
+
+            $output = & $script:TestSkillCoverage -PlanParsed $plan -ProjectDir $script:projectDir *>&1
+            $outputStr = $output -join "`n"
+
+            $outputStr | Should -Not -Match "Skill '$skillName'.*not found"
+            $outputStr | Should -Match "All required skills and roles verified"
+        }
+    }
+
     Context "Role lookup in ~/.config/opencode/agents/" {
         It "finds a role via ~/.config/opencode/agents/<role>.md without scaffolding" {
             $roleName = "opencode-role-$script:testSuffix"

@@ -144,6 +144,64 @@ Describe "New-WarRoom lifecycle.json" {
         }
     }
 
+    Context "Capabilities-derived lifecycle — security" {
+        It "RequiredCapabilities=['security'] with engineer creates security-engineer worker and security-specialist evaluator" {
+            # When a plan declares Capabilities: security with no explicit Roles:,
+            # Start-Plan passes AssignedRole='engineer' and RequiredCapabilities=@('security').
+            # Resolve-Pipeline must upgrade the worker to security-engineer and add
+            # security-specialist as the evaluator.
+            & $script:NewWarRoom -RoomId "room-cap-sec-01" -TaskRef "EPIC-SEC-01" `
+                                 -TaskDescription "Security hardening epic" `
+                                 -WarRoomsDir $script:warRoomsDir `
+                                 -AssignedRole "engineer" `
+                                 -RequiredCapabilities @("security")
+
+            $lc = Get-Content (Join-Path $script:warRoomsDir "room-cap-sec-01" "lifecycle.json") -Raw | ConvertFrom-Json
+
+            $lc.states.developing.role | Should -Be "security-engineer" `
+                -Because "security capability must upgrade generic engineer worker"
+            $lc.states.developing.type | Should -Be "work"
+            $lc.states.optimize.role   | Should -Be "security-engineer"
+            $lc.states.fixing.role     | Should -Be "security-engineer"
+            $lc.states.review.role     | Should -Be "security-specialist" `
+                -Because "security capability maps reviewer to security-specialist"
+            $lc.states.review.type     | Should -Be "review"
+        }
+
+        It "RequiredCapabilities=['security'] with explicit security-engineer keeps security-engineer as worker" {
+            # When the plan explicitly specifies Roles: security-engineer, the assigned
+            # role already is security-engineer — upgrade map must not interfere.
+            & $script:NewWarRoom -RoomId "room-cap-sec-02" -TaskRef "EPIC-SEC-02" `
+                                 -TaskDescription "Explicit security-engineer epic" `
+                                 -WarRoomsDir $script:warRoomsDir `
+                                 -AssignedRole "security-engineer" `
+                                 -RequiredCapabilities @("security")
+
+            $lc = Get-Content (Join-Path $script:warRoomsDir "room-cap-sec-02" "lifecycle.json") -Raw | ConvertFrom-Json
+
+            $lc.states.developing.role | Should -Be "security-engineer"
+            $lc.states.review.role     | Should -Be "security-specialist"
+        }
+
+        It "RequiredCapabilities=['security'] lifecycle includes triage and terminal states" {
+            & $script:NewWarRoom -RoomId "room-cap-sec-03" -TaskRef "EPIC-SEC-03" `
+                                 -TaskDescription "Security audit" `
+                                 -WarRoomsDir $script:warRoomsDir `
+                                 -AssignedRole "engineer" `
+                                 -RequiredCapabilities @("security")
+
+            $lc = Get-Content (Join-Path $script:warRoomsDir "room-cap-sec-03" "lifecycle.json") -Raw | ConvertFrom-Json
+
+            $lc.states.triage.type        | Should -Be "triage"
+            $lc.states.failed.type        | Should -Be "decision"
+            $lc.states.passed.type        | Should -Be "terminal"
+            $lc.states.'failed-final'.type | Should -Be "terminal"
+            # Review must have error signal to handle evaluator crashes
+            $lc.states.review.signals.error | Should -Not -BeNullOrEmpty
+            $lc.states.review.signals.error.target | Should -Be "failed"
+        }
+    }
+
     Context "Unknown role gets generic state name" {
         It "unknown role 'data-scientist' gets 'review' state" {
             & $script:NewWarRoom -RoomId "room-ur-01" -TaskRef "EPIC-040" `

@@ -84,6 +84,10 @@ fi
 
 PID_FILE="$AGENTS_DIR/dashboard.pid"
 
+# Log verbosity for the dashboard's file log (~/.ostwin/dashboard/debug.log).
+# Defaults to DEBUG; override by exporting OSTWIN_LOG_LEVEL (e.g. in .env).
+export OSTWIN_LOG_LEVEL="${OSTWIN_LOG_LEVEL:-DEBUG}"
+
 # Raise open-file limit — the polling loop + background zvec sync can easily
 # exhaust macOS's default 256-fd limit, causing "Too many open files" errors.
 ulimit -n 4096 2>/dev/null || ulimit -n 2048 2>/dev/null || true

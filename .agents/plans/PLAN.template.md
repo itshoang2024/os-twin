@@ -65,7 +65,7 @@ Capabilities: accessibility, security   (adds a11y-review + security-review stag
 ```
 
 Capability-to-stage mapping:
-- `security` -> `security-review` (by `security-auditor`)
+- `security` -> `security-review` (by `security-specialist`)
 - `database` -> `schema-review` (by `database-architect`)
 - `architecture` -> `architect-review` (by `architect`)
 - `infrastructure` -> `infra-review` (by `devops`)

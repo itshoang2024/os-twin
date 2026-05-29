@@ -29,7 +29,7 @@ You are the **last line of defense** before users feel pain. Your job is to ensu
 ### Phase 0 — Context Loading (MANDATORY)
 
 ```
-search_memory(query="<service names, incidents, SLO terms>")
+memory_search(query="<service names, incidents, SLO terms>")
 memory_tree()
 knowledge_query(namespace="<ops-docs>", query="<runbooks, SLOs, architecture>", mode="summarized")
 ```
@@ -71,7 +71,7 @@ Monthly:
 ### Phase 5 — Memory Commit (MANDATORY)
 
 ```
-save_memory(
+memory_save(
   content="SRE Review — [Service]. SLO status: [X]%. Error budget: [Y]% remaining. Incidents this month: [N]. Top issue: [description]. Action: [next steps].",
   name="SRE Review — [Service] [Month]",
   path="sre/reviews/[service]/[month]",

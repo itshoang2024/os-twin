@@ -1,0 +1,159 @@
+name: Roll Release Forward
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  roll-release-forward:
+    name: Create next release branch and retarget dangling PRs
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-')
+
+    steps:
+      - name: Create next release branch and retarget PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OLD_RELEASE: ${{ github.event.pull_request.head.ref }}
+          MERGED_PR: ${{ github.event.pull_request.number }}
+          MERGED_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from datetime import datetime, timedelta, timezone
+
+          repo = os.environ["REPO"]
+          old_release = os.environ["OLD_RELEASE"]
+          merged_pr = os.environ["MERGED_PR"]
+          merged_title = os.environ["MERGED_TITLE"]
+
+          release_branch_pattern = re.compile(r"^release-\d{4}\.\d{2}\.\d{2}\.\d+$")
+          if not release_branch_pattern.fullmatch(old_release):
+              print(f"{old_release!r} is not a valid release branch. Skipping.")
+              sys.exit(0)
+
+          def run(args, check=True):
+              result = subprocess.run(
+                  args,
+                  check=False,
+                  capture_output=True,
+                  text=True,
+              )
+              if check and result.returncode != 0:
+                  if result.stdout:
+                      print(result.stdout)
+                  if result.stderr:
+                      print(result.stderr, file=sys.stderr)
+                  raise SystemExit(result.returncode)
+              return result
+
+          prs_raw = run([
+              "gh",
+              "pr",
+              "list",
+              "--repo",
+              repo,
+              "--state",
+              "open",
+              "--limit",
+              "200",
+              "--json",
+              "number,title,url,baseRefName,headRefName",
+          ]).stdout
+          open_prs = json.loads(prs_raw)
+
+          candidates = []
+          for pr in open_prs:
+              base = pr["baseRefName"]
+              head = pr["headRefName"]
+
+              if base == old_release:
+                  candidates.append(pr)
+                  continue
+
+              if base == "main" and not head.startswith(("release-", "hotfix/")):
+                  candidates.append(pr)
+
+          deduped_candidates = []
+          seen_numbers = set()
+          for pr in candidates:
+              if pr["number"] in seen_numbers:
+                  continue
+              seen_numbers.add(pr["number"])
+              deduped_candidates.append(pr)
+          candidates = deduped_candidates
+
+          if not candidates:
+              print("No dangling PRs found. No new release branch is needed.")
+              sys.exit(0)
+
+          today = datetime.now(timezone.utc) + timedelta(hours=7)
+          release_prefix = f"release-{today:%Y.%m.%d}"
+
+          counter = 1
+          while True:
+              new_release = f"{release_prefix}.{counter}"
+              exists = run(
+                  ["gh", "api", f"repos/{repo}/git/ref/heads/{new_release}"],
+                  check=False,
+              )
+              if exists.returncode != 0:
+                  break
+              counter += 1
+
+          main_sha = run([
+              "gh",
+              "api",
+              f"repos/{repo}/git/ref/heads/main",
+              "--jq",
+              ".object.sha",
+          ]).stdout.strip()
+
+          run([
+              "gh",
+              "api",
+              "--method",
+              "POST",
+              f"repos/{repo}/git/refs",
+              "-f",
+              f"ref=refs/heads/{new_release}",
+              "-f",
+              f"sha={main_sha}",
+          ])
+
+          comment_body = (
+              f"`{old_release}` was merged into `main` in PR #{merged_pr}: {merged_title}\n\n"
+              f"This PR has been retargeted to `{new_release}` so it stays in the release pipeline."
+          )
+
+          for pr in candidates:
+              number = str(pr["number"])
+              print(f"Retargeting PR #{number} from {pr['baseRefName']} to {new_release}")
+              run(["gh", "pr", "edit", number, "--repo", repo, "--base", new_release])
+              run(["gh", "pr", "comment", number, "--repo", repo, "--body", comment_body])
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as summary:
+                  summary.write(f"## Roll Release Forward\n\n")
+                  summary.write(f"- Old release: `{old_release}`\n")
+                  summary.write(f"- New release: `{new_release}`\n")
+                  summary.write(f"- Source main SHA: `{main_sha}`\n")
+                  summary.write(f"- Retargeted PRs: {len(candidates)}\n\n")
+                  for pr in candidates:
+                      summary.write(f"- #{pr['number']}: {pr['title']} ({pr['url']})\n")
+
+          print(f"Created {new_release} from main and retargeted {len(candidates)} PR(s).")
+          PY

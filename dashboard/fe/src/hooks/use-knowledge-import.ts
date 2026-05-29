@@ -86,6 +86,13 @@ export function useKnowledgeJobs(namespace: string | null) {
     {
       revalidateOnFocus: false,
       dedupingInterval: 2000,
+      refreshInterval: (latestData) => {
+        // Poll every 3s while any job is still running
+        const hasActive = latestData?.jobs?.some(j => 
+          ['pending', 'running'].includes(j.state)
+        );
+        return hasActive ? 3000 : 0;
+      },
     }
   );
 

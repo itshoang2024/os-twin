@@ -1,6 +1,6 @@
 ---
 name: threat-modeling
-description: Conduct STRIDE/DREAD threat models for new features and system changes. Identifies assets, threat actors, attack vectors, and mitigations before code is written. Produces structured threat model documents with risk ratings and security requirements.
+description: Use when decomposing a feature, API, service, data flow, or architecture change to identify entry points, assets, trust boundaries, STRIDE threats, DREAD risk, and countermeasures before or during implementation.
 ---
 
 # threat-modeling
@@ -8,6 +8,26 @@ description: Conduct STRIDE/DREAD threat models for new features and system chan
 ## Purpose
 
 Threat modeling answers: "What can go wrong?" before it goes wrong. By identifying threats during design, we prevent security vulnerabilities from being coded in.
+
+## Three-Step Process
+
+### 1. Decompose the Application
+
+Capture enough structure to reason about abuse:
+
+- Entry points: routes, APIs, queues, webhooks, file uploads, admin tools, CLI jobs, scheduled jobs.
+- Assets: credentials, sessions, PII, payment data, secrets, tenant data, audit logs, business-critical state.
+- Trust levels: anonymous user, authenticated user, privileged user, service account, external partner, internal operator.
+- Trust boundaries: browser to server, service to service, app to database, app to third party, public to private network.
+- Data Flow Diagram: show sources, processes, stores, sinks, and boundaries. Keep it lightweight but concrete.
+
+### 2. Determine and Rank Threats
+
+Use STRIDE to classify attacker goals, then rank with DREAD or the project's severity scale. Include context: attacker prerequisite, reachable path, affected asset, mitigating controls, and likely impact.
+
+### 3. Define Countermeasures
+
+For every meaningful threat, specify preventive, detective, or responsive controls. Prefer controls that can be verified in code, tests, configuration, or operational evidence.
 
 ## STRIDE Threat Categories
 
@@ -32,6 +52,15 @@ Threat modeling answers: "What can go wrong?" before it goes wrong. By identifyi
 
 **Risk score = (D + R + E + A + D) / 5**
 
+Recommended mapping:
+
+| Average | Risk | Expected action |
+|---------|------|-----------------|
+| 8.0-10.0 | Critical | Block until mitigated or explicitly accepted |
+| 6.0-7.9 | High | Require mitigation before release |
+| 3.0-5.9 | Medium | Track with owner and deadline |
+| 1.0-2.9 | Low | Accept or harden opportunistically |
+
 ## Threat Model Template
 
 ```markdown
@@ -44,6 +73,11 @@ Threat modeling answers: "What can go wrong?" before it goes wrong. By identifyi
 ## System Description
 [What the system does, data flows, trust boundaries]
 
+## Entry Points
+| Entry Point | Caller | Trust Level | Notes |
+|-------------|--------|-------------|-------|
+| POST /api/orders | Authenticated user | External authenticated | Creates payment-bearing state |
+
 ## Assets
 | Asset | Classification | Owner |
 |-------|---------------|-------|
@@ -52,6 +86,9 @@ Threat modeling answers: "What can go wrong?" before it goes wrong. By identifyi
 
 ## Trust Boundaries
 [Where do trust levels change? e.g., client→server, service→database]
+
+## Data Flow Diagram
+[Link to DFD or concise text diagram]
 
 ## Threat Analysis
 
@@ -78,10 +115,12 @@ Threat modeling answers: "What can go wrong?" before it goes wrong. By identifyi
 - Changes to data storage or processing
 - Integration with external services
 - Infrastructure changes
+- Any path that parses untrusted input, performs redirects, changes state, or crosses tenant/security boundaries
 
 ## Anti-Patterns
 
-- Threat modeling after the code is written → it's a design activity, not a review activity
-- Modeling every tiny change → focus on features with security implications
-- Generic threats without context → "SQL injection is possible" is unhelpful; specify WHERE and HOW
-- No mitigations → identifying threats without defining how to address them is incomplete
+- Threat modeling only after code is complete. It is primarily a design activity.
+- Modeling every tiny change equally. Focus on changes with security implications.
+- Generic threats without context. "SQL injection is possible" is unhelpful; specify where, how, and what interpreter is involved.
+- No mitigations. Identifying threats without countermeasures is incomplete.
+- No trust boundary. A threat model without trust levels usually misses the attacker path.

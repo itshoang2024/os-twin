@@ -1,9 +1,10 @@
 # Release Pipeline V1
 
-OSTwin uses a small two-environment merge pipeline:
+OSTwin uses a small two-environment merge pipeline with a direct hotfix lane:
 
 ```text
-feature/fix/hotfix/chore -> release-YYYY.MM.DD.N -> main
+feature/fix/chore -> release-YYYY.MM.DD.N -> main
+hotfix/* -> main -> sync main back into active release branches
 ```
 
 `release-*` is the QA environment. `main` is production/stable.
@@ -24,21 +25,43 @@ tag/release, for example `v1.0.1`.
 PR into `release-*`:
 
 - Source may be `feature/*`, `fix/*`, `hotfix/*`, `chore/*`, or a team member branch.
-- CI/tests must run and pass.
 - Review remains trust-based. Release notes are not required here.
 
 PR from `release-*` into `main`:
 
 - Source branch must match `release-YYYY.MM.DD.N`.
-- CI/tests must pass.
 - `Release Guard` must pass.
 - Two tester approvals are required.
 - A Lark release note is required.
 - A SemVer release version is required, for example `v1.0.1`.
 - After merge, the release captain creates the matching GitHub tag/release.
 
-Hotfixes follow the same path. If a hotfix is needed on the same day as another
-release, increment the release branch counter.
+PR from `hotfix/*` into `main`:
+
+- Source branch must start with `hotfix/`.
+- `Release Guard` must pass.
+- Two approvals are required by the main ruleset.
+- Release note and SemVer fields are not required for the hotfix PR.
+- After the hotfix is merged, GitHub Actions opens a sync PR from `main` into
+  each active `release-*` branch so QA continues from the latest production code.
+
+Use the direct hotfix lane only for urgent production fixes. Normal work still
+goes through `release-*`.
+
+## Release Rollover Automation
+
+When a `release-*` PR is merged into `main`, GitHub may move unmerged PRs that
+were targeting that release branch back to `main`. The `Roll Release Forward`
+workflow handles this automatically:
+
+- It runs only after a merged PR from `release-YYYY.MM.DD.N` into `main`.
+- If there are dangling open PRs, it creates a new `release-YYYY.MM.DD.N`
+  branch from the latest `main`.
+- It retargets PRs that were still based on the old release branch.
+- It also retargets non-hotfix PRs that were moved back to `main`.
+- It leaves intentional `hotfix/* -> main` PRs alone.
+
+If no dangling PRs exist, it does not create a new release branch.
 
 ## Versioning Rule
 
@@ -130,10 +153,7 @@ Main ruleset:
 - Require 2 approvals
 - Dismiss stale approvals when new commits are pushed
 - Require approval from someone other than the last pusher
-- Require status checks:
-  - `Release Guard`
-  - `CI Gate — All Checks`
-  - `Run Pester Unit Tests`
+- Require `Release Guard` once the hotfix-aware guard workflow is on `main`
 
 Release branch ruleset:
 
@@ -144,6 +164,3 @@ Release branch ruleset:
 - Block deletion and non-fast-forward updates
 - Require pull request before merge
 - Require 0 approvals so review stays trust-based
-- Require status checks:
-  - `CI Gate — All Checks`
-  - `Run Pester Unit Tests`
