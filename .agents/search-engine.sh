@@ -13,7 +13,7 @@ CONFIG_DIR="$SEARCH_HOME/etc"
 SETTINGS_PATH="${SEARXNG_SETTINGS_PATH:-$CONFIG_DIR/settings.yml}"
 PID_FILE="$SEARCH_HOME/searxng.pid"
 LOG_DIR="$OSTWIN_HOME/logs"
-DEFAULT_PORT="${OSTWIN_SEARCH_PORT:-8888}"
+DEFAULT_PORT="${OSTWIN_SEARCH_PORT:-6633}"
 DEFAULT_BIND="${OSTWIN_SEARCH_BIND:-127.0.0.1}"
 REPO_URL="${OSTWIN_SEARCH_REPO:-https://github.com/searxng/searxng}"
 
@@ -293,6 +293,22 @@ is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+pid_value() {
+  tr -d '[:space:]' < "$PID_FILE" 2>/dev/null || true
+}
+
+server_url() {
+  printf 'http://%s:%s' "$BIND" "$PORT"
+}
+
+is_serving() {
+  command -v curl >/dev/null 2>&1 || return 1
+  curl -fsS \
+    -H "X-Forwarded-For: 127.0.0.1" \
+    -H "X-Real-IP: 127.0.0.1" \
+    --max-time 3 "$(server_url)/" >/dev/null 2>&1
+}
+
 start_server() {
   parse_port_bind "$@"
   if [[ ! -x "$VENV_DIR/bin/python" || ! -d "$SRC_DIR" ]]; then
@@ -303,13 +319,17 @@ start_server() {
     write_settings
   fi
   if is_running; then
-    ok "SearXNG already running (PID $(cat "$PID_FILE"))"
-    info "URL: http://$BIND:$PORT"
-    return
+    if is_serving; then
+      ok "SearXNG already running (PID $(pid_value))"
+      info "URL: $(server_url)"
+      return
+    fi
+    info "SearXNG PID $(pid_value) is not serving on $(server_url); restarting"
+    stop_server
   fi
 
   ensure_dirs
-  info "Starting SearXNG on http://$BIND:$PORT"
+  info "Starting SearXNG on $(server_url)"
   (
     cd "$SRC_DIR"
     export SEARXNG_SETTINGS_PATH="$SETTINGS_PATH"
@@ -319,14 +339,26 @@ start_server() {
     echo $! > "$PID_FILE"
   )
 
-  sleep 1
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if ! is_running; then
+      break
+    fi
+    if is_serving; then
+      ok "SearXNG started (PID $(pid_value))"
+      info "URL: $(server_url)"
+      info "Log: $LOG_DIR/searxng.log"
+      return
+    fi
+    sleep 1
+  done
+
   if is_running; then
-    ok "SearXNG started (PID $(cat "$PID_FILE"))"
+    fail "SearXNG started but is not responding on $(server_url). Check $LOG_DIR/searxng.log"
     info "Log: $LOG_DIR/searxng.log"
   else
     fail "SearXNG failed to start. Check $LOG_DIR/searxng.log"
-    exit 1
   fi
+  exit 1
 }
 
 stop_server() {
@@ -354,14 +386,20 @@ stop_server() {
 }
 
 status_server() {
+  PORT="$DEFAULT_PORT"
+  BIND="$DEFAULT_BIND"
   if is_running; then
-    ok "SearXNG running (PID $(cat "$PID_FILE"))"
+    if is_serving; then
+      ok "SearXNG running (PID $(pid_value))"
+    else
+      info "SearXNG process exists (PID $(pid_value)) but is not responding on $(server_url)"
+    fi
   else
     info "SearXNG is not running"
   fi
   info "Home: $SEARCH_HOME"
   info "Settings: $SETTINGS_PATH"
-  info "URL: http://$DEFAULT_BIND:$DEFAULT_PORT"
+  info "URL: $(server_url)"
 }
 
 cmd="${1:-help}"

@@ -73,7 +73,8 @@ func newRootCommand() *cobra.Command {
 	flags.StringVar(&opts.Profile, "profile", opts.Profile, "install profile: full, dashboard, minimal")
 	flags.BoolVar(&opts.DashboardOnly, "dashboard-only", false, "install dashboard API and frontend only")
 	flags.BoolVar(&opts.Channel, "channel", false, "install channel connector dependencies")
-	flags.BoolVar(&opts.SearchEngine, "search-engine", false, "install the optional local SearXNG search engine")
+	flags.BoolVar(&opts.SearchEngine, "search-engine", false, "install the optional SearXNG search engine")
+	flags.StringVar(&opts.SearchEngineMode, "search-engine-mode", opts.SearchEngineMode, "SearXNG install method: docker or local")
 	flags.BoolVar(&opts.SkipOptional, "skip-optional", false, "skip optional components")
 	flags.BoolVar(&opts.NoOpenCodeConfig, "no-opencode-config", false, "skip writing OpenCode config")
 	flags.BoolVar(&opts.NoStart, "no-start", false, "install without starting services")
@@ -153,6 +154,27 @@ func runInteractive(opts *installer.Options) error {
 
 	if err := form.Run(); err != nil {
 		return err
+	}
+
+	if opts.SearchEngine {
+		if opts.SearchEngineMode == "" {
+			opts.SearchEngineMode = "docker"
+		}
+		modeForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("SearXNG install method").
+					Description("Docker is isolated; local clones SearXNG and installs it into a Python venv.").
+					Options(
+						huh.NewOption("Docker", "docker"),
+						huh.NewOption("Local source / venv", "local"),
+					).
+					Value(&opts.SearchEngineMode),
+			),
+		)
+		if err := modeForm.Run(); err != nil {
+			return err
+		}
 	}
 
 	port, err := strconv.Atoi(portValue)

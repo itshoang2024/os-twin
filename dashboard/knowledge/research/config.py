@@ -9,7 +9,7 @@ import os
 
 # --- SearXNG connection ---------------------------------------------------
 
-SEARXNG_URL: str = os.environ.get("OSTWIN_SEARXNG_URL", "http://localhost:8080")
+SEARXNG_URL: str = os.environ.get("OSTWIN_SEARXNG_URL", "http://localhost:6633")
 
 # --- Research tunables ----------------------------------------------------
 
