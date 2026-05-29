@@ -101,6 +101,16 @@ export const templateCatalog: TemplateCategoryMeta[] = [
     ],
   },
   {
+    id: 'documents', name: 'Documents', icon: 'description',
+    description: 'Drafts, reports, notes, source-based docs',
+    templates: [
+      { id: 'document-draft', name: 'Draft a document', description: 'Create a structured document from a brief or notes', fieldCount: 8, covers: ['goal', 'audience', 'scope'] },
+      { id: 'rewrite-document', name: 'Rewrite or polish text', description: 'Revise an existing draft for clarity, tone, or audience', fieldCount: 7, covers: ['goal', 'audience', 'constraints'] },
+      { id: 'source-based-report', name: 'Source-based report or memo', description: 'Write a report grounded in provided docs or sources', fieldCount: 7, covers: ['goal', 'scope', 'constraints'] },
+      { id: 'meeting-notes', name: 'Meeting notes / minutes', description: 'Turn notes or a transcript into decisions and action items', fieldCount: 7, covers: ['goal', 'audience', 'done-when'] },
+    ],
+  },
+  {
     id: 'creative', name: 'Creative', icon: 'palette',
     description: 'Decks, docs, scripts, briefs -- any purpose',
     templates: [

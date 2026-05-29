@@ -146,4 +146,43 @@ describe('TemplatePicker', () => {
     const { container } = render(<TemplatePicker categories={[]} onSelectTemplate={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('renders a Documents tab when included in categories', () => {
+    const categoriesWithDocs = [
+      ...mockCategories,
+      {
+        id: 'documents',
+        name: 'Documents',
+        icon: 'description',
+        description: 'Drafts, reports, notes, source-based docs',
+        templates: [
+          { id: 'document-draft', name: 'Draft a document', description: 'Create a structured document from a brief or notes', fieldCount: 8, covers: ['goal', 'audience', 'scope'] },
+          { id: 'meeting-notes', name: 'Meeting notes / minutes', description: 'Turn notes or a transcript into decisions and action items', fieldCount: 7, covers: ['goal', 'audience', 'done-when'] },
+        ],
+      },
+    ];
+    render(<TemplatePicker categories={categoriesWithDocs} onSelectTemplate={() => {}} />);
+    expect(screen.getByRole('tab', { name: /Documents/i })).toBeInTheDocument();
+  });
+
+  it('switches to Documents tab and shows its templates', () => {
+    const categoriesWithDocs = [
+      ...mockCategories,
+      {
+        id: 'documents',
+        name: 'Documents',
+        icon: 'description',
+        description: 'Drafts, reports, notes, source-based docs',
+        templates: [
+          { id: 'document-draft', name: 'Draft a document', description: 'Create a structured document from a brief or notes', fieldCount: 8, covers: ['goal', 'audience', 'scope'] },
+          { id: 'meeting-notes', name: 'Meeting notes / minutes', description: 'Turn notes or a transcript into decisions and action items', fieldCount: 7, covers: ['goal', 'audience', 'done-when'] },
+        ],
+      },
+    ];
+    render(<TemplatePicker categories={categoriesWithDocs} onSelectTemplate={() => {}} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Documents/i }));
+    expect(screen.getByText('Draft a document')).toBeInTheDocument();
+    expect(screen.getByText('Meeting notes / minutes')).toBeInTheDocument();
+    expect(screen.queryByText('Frontend App')).not.toBeInTheDocument();
+  });
 });

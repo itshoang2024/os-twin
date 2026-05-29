@@ -1,9 +1,12 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import {
   extractFieldsFromTemplate,
   computeCompleteness,
   hydrateTemplate,
+  planCategories,
 } from './prompt-templates';
+import { templateCatalog, loadTemplateContent } from './template-catalog';
 
 describe('extractFieldsFromTemplate', () => {
   it('extracts fields from a simple template', () => {
@@ -100,5 +103,37 @@ describe('hydrateTemplate', () => {
     const result = hydrateTemplate(tpl, { 'field-0': 'MyApp' });
     expect(result).toContain('MyApp');
     expect(result).toContain('{{ }}');
+  });
+});
+
+describe('Documents category', () => {
+  it('templateCatalog includes a Documents category', () => {
+    const cat = templateCatalog.find(c => c.id === 'documents');
+    expect(cat).toBeDefined();
+    expect(cat?.name).toBe('Documents');
+    expect(cat?.icon).toBe('description');
+  });
+
+  it('planCategories includes documents with exactly 4 templates', () => {
+    const cat = planCategories.find(c => c.id === 'documents');
+    expect(cat).toBeDefined();
+    expect(cat?.templates).toHaveLength(4);
+    const ids = cat?.templates.map(t => t.id);
+    expect(ids).toContain('document-draft');
+    expect(ids).toContain('rewrite-document');
+    expect(ids).toContain('source-based-report');
+    expect(ids).toContain('meeting-notes');
+  });
+
+  it('loadTemplateContent("meeting-notes") returns content with action items', async () => {
+    const result = await loadTemplateContent('meeting-notes');
+    expect(result).not.toBeNull();
+    expect(result?.promptTemplate).toContain('action items');
+  });
+
+  it('loadTemplateContent("source-based-report") returns content with provenance', async () => {
+    const result = await loadTemplateContent('source-based-report');
+    expect(result).not.toBeNull();
+    expect(result?.promptTemplate).toContain('provenance');
   });
 });

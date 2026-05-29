@@ -849,6 +849,117 @@ const complianceTemplates: PromptTemplate[] = [
   }),
 ];
 
+const documentsTemplates: PromptTemplate[] = [
+  tpl({
+    id: 'document-draft',
+    name: 'Draft a document',
+    description: 'Create a structured document from a brief or notes',
+    promptTemplate: `# Document draft: {{document type or title}}
+
+## Audience
+{{e.g. manager, customer, teacher, internal team}}
+
+## Purpose
+{{what this document should accomplish}}
+
+## Source material I have
+{{e.g. rough notes, links, uploaded files, none}}
+
+## Sections I want
+- {{ }}
+- {{ }}
+
+## Tone
+{{e.g. concise, formal, friendly, executive}}
+
+## Length
+{{e.g. one page, 800 words, detailed memo}}
+
+---
+Turn the details above into an Ostwin plan for drafting the document. Include epics, roles, lifecycle, tasks, acceptance criteria, and review steps.`,
+  }),
+  tpl({
+    id: 'rewrite-document',
+    name: 'Rewrite or polish text',
+    description: 'Revise an existing draft for clarity, tone, or audience',
+    promptTemplate: `# Rewrite document: {{document or section name}}
+
+## Current text or file
+{{paste text, describe the file, or say I will upload it}}
+
+## Who reads it
+{{ }}
+
+## What should change
+- {{e.g. shorten it}}
+- {{e.g. make it more formal}}
+
+## What must stay the same
+{{facts, claims, structure, citations, formatting}}
+
+## Tone
+{{e.g. teacher-facing, executive, legal, technical, plain language}}
+
+---
+Turn the details above into an Ostwin plan for rewriting the document. Include source intake if files are provided, drafting steps, review criteria, and final QA checks.`,
+  }),
+  tpl({
+    id: 'source-based-report',
+    name: 'Source-based report or memo',
+    description: 'Write a report grounded in provided docs or sources',
+    promptTemplate: `# Source-based report: {{topic}}
+
+## Source files or links
+{{what I will provide or where they are}}
+
+## Main question
+{{ }}
+
+## Required output format
+{{e.g. formal report, memo, table, PDF-ready outline}}
+
+## Citation / provenance requirement
+{{e.g. cite pages, include source table, no citations needed}}
+
+## Risks or sensitive points
+{{e.g. legal, financial, medical, confidential, academic}}
+
+## Audience
+{{ }}
+
+---
+Turn the details above into an Ostwin plan for producing a source-grounded report. Include document intake, extraction coverage, provenance, drafting, verification, and final review.`,
+  }),
+  tpl({
+    id: 'meeting-notes',
+    name: 'Meeting notes / minutes',
+    description: 'Turn notes or a transcript into decisions and action items',
+    promptTemplate: `# Meeting notes: {{meeting name or topic}}
+
+## Raw notes, transcript, or recording source
+{{paste notes, describe the file, or say I will upload it}}
+
+## Meeting purpose
+{{ }}
+
+## Attendees or teams
+{{ }}
+
+## Output style
+{{e.g. concise minutes, detailed recap, executive summary}}
+
+## Must capture
+- {{e.g. decisions}}
+- {{e.g. action items with owners and due dates}}
+
+## Audience
+{{e.g. internal team, leadership, client}}
+
+---
+Turn the details above into an Ostwin plan for producing meeting notes or minutes. Include source intake if files are provided, summary structure, decisions, action items, owner/date extraction, review, and final QA checks.`,
+  }),
+];
+
 const creativeTemplates: PromptTemplate[] = [
   tpl({
     id: 'slide-deck',
@@ -959,5 +1070,6 @@ export const planCategories: PlanCategory[] = [
   { id: 'operations', name: 'Operations', icon: 'settings', description: 'Workflows, schedules, sync, recurring jobs', templates: operationsTemplates },
   { id: 'research', name: 'Research', icon: 'science', description: 'Market intel, competitive analysis, data digging', templates: researchTemplates },
   { id: 'compliance', name: 'Compliance', icon: 'verified', description: 'Audits, risk reports, policy, postmortems', templates: complianceTemplates },
+  { id: 'documents', name: 'Documents', icon: 'description', description: 'Drafts, reports, notes, source-based docs', templates: documentsTemplates },
   { id: 'creative', name: 'Creative', icon: 'palette', description: 'Decks, docs, scripts, briefs — assets, any purpose', templates: creativeTemplates },
 ];
