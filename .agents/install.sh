@@ -231,15 +231,16 @@ verify_components
 generate_opencode_tools
 section_9_start=$(get_now)
 if $START_SERVICES; then
+  header "9. Starting OpenCode server"
   start_opencode_server || warn "OpenCode server failed to start (non-fatal)"
-  header "9. Starting dashboard"
+  header "9a. Starting dashboard"
   start_dashboard || warn "Dashboard failed to start (non-fatal)"
   publish_skills || warn "Skill publishing failed (non-fatal)"
   if $INSTALL_SEARCH_ENGINE; then
-    header "9b. Starting SearXNG (metasearch engine)"
+    header "9c. Starting SearXNG (metasearch engine)"
     start_searxng || warn "SearXNG start failed (non-fatal)"
   else
-    header "9b. SearXNG (skipped)"
+    header "9c. SearXNG (skipped)"
     info "Run installer with --search-engine to install and start SearXNG"
   fi
 else
@@ -247,7 +248,7 @@ else
   info "Skipping OpenCode/dashboard startup (--no-start). Start services from the runtime entrypoint."
 fi
 
-header "9c. Installing channel dependencies (Telegram + Discord + Slack)"
+header "9d. Installing channel dependencies (Telegram + Discord + Slack)"
 install_channels || warn "Channel install failed (non-fatal)"
 ok_time "Section 9 complete" "$(print_duration "$section_9_start")"
 # if $START_CHANNEL && [[ -n "${CHAN_DIR:-}" ]]; then

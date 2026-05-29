@@ -127,10 +127,9 @@ start_dashboard() {
   supervisor="$(_dashboard_supervisor || true)"
 
   if [[ -n "$supervisor" ]]; then
-    # Kill any process holding the port BEFORE supervisor restart.
-    # The supervisor only manages processes it started — a manually
-    # started dashboard (debugging, ostwin dashboard start, etc.)
-    # won't be killed by systemctl restart.
+    # Supervisor remains responsible for the managed dashboard lifecycle, but
+    # first clear any stray/manual listener that the supervisor would not stop.
+    # This avoids a restart racing an unmanaged debug process for the port.
     _kill_dashboard_port_listeners "$DASHBOARD_PORT" || true
     _restart_dashboard_via_supervisor "$supervisor" "$DASHBOARD_PORT" \
       || {

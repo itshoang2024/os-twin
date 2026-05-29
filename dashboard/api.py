@@ -37,7 +37,7 @@ if _env_file.is_file():
     try:
         from dotenv import load_dotenv
 
-        load_dotenv(_env_file, override=False)
+        load_dotenv(_env_file, override=True)
     except ImportError:
         # Manual fallback — only set vars not already in the environment
         with _env_file.open() as _f:
@@ -49,7 +49,7 @@ if _env_file.is_file():
                     _k, _, _v = _line.partition("=")
                     _k = _k.strip()
                     _v = _v.strip().strip("\"'")
-                    if _k and _k not in os.environ:
+                    if _k:
                         os.environ[_k] = _v
 
 # Add the project root and dashboard dir to sys.path
@@ -266,13 +266,12 @@ def _replace_mounted_mcp_app(parent_app, fresh_mcp_app) -> None:
     for route in parent_app.router.routes:
         if isinstance(route, Mount) and route.path == "/api/knowledge/mcp":
             existing = route.app
-            # Direct mount (dev mode, no auth) — replace and we're done.
+            # Wrapped mount: existing is a Starlette() with an inner
+            # Mount("/", app=_mcp_app) that needs to be replaced.
             if hasattr(existing, "router") and any(
                 isinstance(r, Mount)
                 for r in getattr(existing.router, "routes", [])
             ):
-                # Wrapped variant: existing is a Starlette() with a
-                # Mount("/", app=_mcp_app) inside.
                 for inner in existing.router.routes:
                     if isinstance(inner, Mount) and inner.path == "":
                         inner.app = fresh_mcp_app
@@ -500,10 +499,10 @@ app.include_router(chat.router)         # /api/chat — OpenCode session-backed 
 # (the MCP server registry UI at fe/src/app/mcp/page.tsx).
 # Lazy: importing dashboard.knowledge.mcp_server does NOT pull kuzu / zvec /
 # anthropic — those load on the first tool call.
-# Auth: when OSTWIN_API_KEY is set AND OSTWIN_DEV_MODE != "1", a Starlette
-# middleware enforces ``Authorization: Bearer <key>``. Otherwise (dev mode,
-# or no key configured) anonymous access is allowed — the MCP transport's
-# own JSON-RPC handshake still validates message structure.
+# Auth: the wrapper is always installed; the gate is evaluated PER REQUEST
+# inside _MCPBearerAuth.dispatch so env_watcher / load_dotenv reloads of
+# OSTWIN_API_KEY and OSTWIN_DEV_MODE take effect without restarting the
+# dashboard. See dashboard/env_watcher.py for the runtime reload contract.
 try:
     from dashboard.knowledge.mcp_server import get_mcp_app
 
@@ -516,45 +515,55 @@ try:
     # FastMCP-specific lifespan_context.
     _register_mcp_lifespan(_mcp_app)
 
-    if (
-        os.environ.get("OSTWIN_DEV_MODE") != "1"
-        and os.environ.get("OSTWIN_API_KEY")
-    ):
-        from starlette.applications import Starlette
-        from starlette.middleware import Middleware
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
-        from starlette.routing import Mount
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount
 
-        _expected_token = f"Bearer {os.environ.get('OSTWIN_API_KEY')}"
-
-        class _MCPBearerAuth(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):  # type: ignore[override]
-                if request.headers.get("authorization") != _expected_token:
-                    return JSONResponse(
-                        {"error": "unauthorized", "code": "UNAUTHORIZED"},
-                        status_code=401,
-                    )
+    class _MCPBearerAuth(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):  # type: ignore[override]
+            # Re-read env on every request: env_watcher / load_dotenv may
+            # have toggled dev mode or rotated the key after startup.
+            if os.environ.get("OSTWIN_DEV_MODE") == "1":
                 return await call_next(request)
+            key = os.environ.get("OSTWIN_API_KEY", "")
+            if not key:
+                # Fail closed. Anonymous fallback would let env_watcher
+                # downgrade an authenticated endpoint to unauthenticated by
+                # blanking the key at runtime. OSTWIN_DEV_MODE=1 is the only
+                # supported anonymous-access escape hatch.
+                logger.warning(
+                    "MCP request rejected: OSTWIN_API_KEY is not configured "
+                    "and OSTWIN_DEV_MODE is not set."
+                )
+                return JSONResponse(
+                    {
+                        "error": "service_unavailable",
+                        "code": "MCP_AUTH_NOT_CONFIGURED",
+                        "detail": (
+                            "OSTWIN_API_KEY is not configured. Set it in "
+                            "~/.ostwin/.env, or set OSTWIN_DEV_MODE=1 for "
+                            "local development."
+                        ),
+                    },
+                    status_code=503,
+                )
+            if request.headers.get("authorization") != f"Bearer {key}":
+                return JSONResponse(
+                    {"error": "unauthorized", "code": "UNAUTHORIZED"},
+                    status_code=401,
+                )
+            return await call_next(request)
 
-        wrapped_mcp = Starlette(
-            routes=[Mount("/", app=_mcp_app)],
-            middleware=[Middleware(_MCPBearerAuth)],
-        )
-        app.mount("/api/knowledge/mcp", wrapped_mcp)
-        logger.info("Knowledge MCP server mounted at /api/knowledge/mcp (auth required)")
-    else:
-        app.mount("/api/knowledge/mcp", _mcp_app)
-        if os.environ.get("OSTWIN_DEV_MODE") == "1":
-            _port = os.environ.get("DASHBOARD_PORT", "3366")
-            logger.info(
-                "Knowledge MCP server live at http://localhost:%s/api/knowledge/mcp (dev mode, no auth)",
-                _port,
-            )
-        else:
-            logger.info(
-                "Knowledge MCP server mounted at /api/knowledge/mcp (no auth — OSTWIN_API_KEY unset)"
-            )
+    wrapped_mcp = Starlette(
+        routes=[Mount("/", app=_mcp_app)],
+        middleware=[Middleware(_MCPBearerAuth)],
+    )
+    app.mount("/api/knowledge/mcp", wrapped_mcp)
+    logger.info(
+        "Knowledge MCP server mounted at /api/knowledge/mcp (auth evaluated per request)"
+    )
 except Exception as _mcp_exc:
     logger.warning("Failed to mount knowledge MCP server: %s", _mcp_exc)
 

@@ -124,23 +124,20 @@ def test_mcp_tools_have_documented_descriptions() -> None:
 
 
 def _captured_mcp_bearer_token() -> str | None:
-    """Pull the MCP auth wrapper's expected ``Bearer ...`` token, if any.
+    """Return the ``Bearer ...`` token the MCP wrapper currently expects.
 
-    ``dashboard.api`` captures ``OSTWIN_API_KEY`` at import time into the
-    module-level ``_expected_token`` and bakes it into the
-    ``_MCPBearerAuth`` middleware. Tests can run with a different
-    ``OSTWIN_API_KEY`` env var than what was captured at import (conftest
-    autouse sets test-key per-test, but ``dashboard.api`` loads
-    ``~/.ostwin/.env`` at module load time which may have a different
-    key) — this helper returns the captured value so the handshake test
-    can authenticate either way.
-
-    Returns ``None`` if the MCP mount was attached without an auth wrapper
-    (dev mode, or no key at import time).
+    The wrapper now evaluates auth per request (see ``_MCPBearerAuth.dispatch``
+    in ``dashboard.api``), so the "captured" value is just whatever is in
+    ``os.environ`` at call time. Returns a token only when the middleware
+    requires one. ``None`` means either dev mode bypasses auth, or no key is
+    configured and the middleware will fail closed with 503.
     """
-    import dashboard.api as api_mod
-
-    return getattr(api_mod, "_expected_token", None)
+    if os.environ.get("OSTWIN_DEV_MODE") == "1":
+        return None
+    key = os.environ.get("OSTWIN_API_KEY", "")
+    if not key:
+        return None
+    return f"Bearer {key}"
 
 
 # ---------------------------------------------------------------------------
@@ -179,13 +176,10 @@ def test_mcp_endpoint_handshake_via_post() -> None:
         },
     }
     headers = {"accept": "application/json, text/event-stream"}
-    # The MCP mount may be wrapped with bearer auth depending on whether
-    # OSTWIN_DEV_MODE was set at app-import time (which can vary across
-    # test orderings). The wrapper captures ``OSTWIN_API_KEY`` at module
-    # import time — which may not match the current env var (conftest
-    # autouse fixture sets test-key per-test, but ``dashboard.api``
-    # imports ``~/.ostwin/.env`` at module load). Inspect the wrapper's
-    # captured token directly so the test passes either way.
+    # The wrapper now evaluates auth per request against the live env, so
+    # ``_captured_mcp_bearer_token`` simply reflects the current
+    # ``OSTWIN_API_KEY`` / ``OSTWIN_DEV_MODE`` state — no module-level
+    # capture to worry about.
     captured_token = _captured_mcp_bearer_token()
     if captured_token:
         headers["Authorization"] = captured_token
@@ -214,6 +208,177 @@ def test_mcp_endpoint_handshake_via_post() -> None:
     assert "jsonrpc" in body or "result" in body, (
         f"Unexpected response body from {successful_path}: {body[:500]}"
     )
+
+
+def test_mcp_auth_gate_evaluated_per_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP auth gate must read the live env on every request.
+
+    Regression for the import-time gate bug: prior to the fix, whether the
+    bearer-auth middleware was installed was decided once at app import. If
+    the dashboard started without ``OSTWIN_API_KEY`` (or with
+    ``OSTWIN_DEV_MODE=1``), the MCP mount was bare and ``env_watcher``
+    later loading the key into ``os.environ`` had no effect — MCP stayed
+    anonymous until process restart.
+
+    This test rotates the env after the app has been imported and proves
+    that the wrapper now enforces the new state on the very next request.
+    """
+    from dashboard.api import app
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "auth-gate-test", "version": "0.1"},
+        },
+    }
+    base_headers = {"accept": "application/json, text/event-stream"}
+
+    # Set a fresh key AFTER the dashboard app has been imported. Under the
+    # old import-time gate, the middleware would not have been installed
+    # if the key was missing at import — so this rotation would have no
+    # effect and the endpoint would accept unauthenticated requests.
+    monkeypatch.setenv("OSTWIN_API_KEY", "rotated-key-after-import")
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # No Authorization header → must be rejected with 401 now that a
+        # key is set, even though it was not set at import time.
+        r_unauth = client.post(
+            "/api/knowledge/mcp/", json=payload, headers=base_headers
+        )
+        assert r_unauth.status_code == 401, (
+            f"MCP accepted unauthenticated request after key rotation "
+            f"(status={r_unauth.status_code}, body={r_unauth.text[:200]!r}). "
+            f"Gate is still being evaluated at import time, not per request."
+        )
+
+        # Correct bearer token → handshake proceeds.
+        authed_headers = {
+            **base_headers,
+            "Authorization": "Bearer rotated-key-after-import",
+        }
+        r_authed = None
+        for path in (
+            "/api/knowledge/mcp/",
+            "/api/knowledge/mcp/mcp",
+            "/api/knowledge/mcp",
+        ):
+            r_authed = client.post(path, json=payload, headers=authed_headers)
+            if r_authed.status_code == 200:
+                break
+        assert r_authed is not None and r_authed.status_code == 200, (
+            f"MCP rejected the rotated key "
+            f"(status={r_authed.status_code if r_authed else 'n/a'}, "
+            f"body={r_authed.text[:200] if r_authed else 'n/a'!r})"
+        )
+
+
+def test_mcp_dev_mode_flag_evaluated_per_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Toggling ``OSTWIN_DEV_MODE`` after import must take effect immediately.
+
+    Companion to ``test_mcp_auth_gate_evaluated_per_request`` — the dev
+    mode bypass is also re-read per request so operators can clear it via
+    ``.env`` + env_watcher without restarting.
+    """
+    from dashboard.api import app
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "devmode-test", "version": "0.1"},
+        },
+    }
+    headers = {"accept": "application/json, text/event-stream"}
+
+    monkeypatch.setenv("OSTWIN_API_KEY", "test-key")
+    monkeypatch.setenv("OSTWIN_DEV_MODE", "1")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # Dev mode ON → no auth required.
+        r = None
+        for path in (
+            "/api/knowledge/mcp/",
+            "/api/knowledge/mcp/mcp",
+            "/api/knowledge/mcp",
+        ):
+            r = client.post(path, json=payload, headers=headers)
+            if r.status_code == 200:
+                break
+        assert r is not None and r.status_code == 200, (
+            f"Dev mode bypass not honored (status={r.status_code if r else 'n/a'})"
+        )
+
+        # Flip dev mode OFF mid-session — next request must require auth.
+        monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+        r2 = client.post("/api/knowledge/mcp/", json=payload, headers=headers)
+        assert r2.status_code == 401, (
+            f"Clearing OSTWIN_DEV_MODE did not take effect "
+            f"(status={r2.status_code}, body={r2.text[:200]!r})"
+        )
+
+
+def test_mcp_returns_503_when_key_unset_and_not_dev_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP must fail closed when no key is configured and dev mode is off.
+
+    Regression for the anonymous-fallback bug introduced when the gate moved
+    from import time to per request. With env_watcher able to clear
+    ``OSTWIN_API_KEY`` at runtime, an anonymous fallback would silently
+    downgrade an authenticated endpoint to unauthenticated. The only
+    supported anonymous escape hatch is ``OSTWIN_DEV_MODE=1``.
+    """
+    from dashboard.api import app
+
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "fail-closed-test", "version": "0.1"},
+        },
+    }
+    headers = {"accept": "application/json, text/event-stream"}
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # No key, no dev mode, no Authorization header — must be 503.
+        r = client.post("/api/knowledge/mcp/", json=payload, headers=headers)
+        assert r.status_code == 503, (
+            f"MCP did not fail closed when key was unset "
+            f"(status={r.status_code}, body={r.text[:200]!r})"
+        )
+        body = r.json()
+        assert body.get("code") == "MCP_AUTH_NOT_CONFIGURED", (
+            f"Unexpected error code in 503 response: {body!r}"
+        )
+
+        # Even a Bearer header should not pass when no key is configured.
+        r2 = client.post(
+            "/api/knowledge/mcp/",
+            json=payload,
+            headers={**headers, "Authorization": "Bearer anything"},
+        )
+        assert r2.status_code == 503, (
+            f"MCP accepted a Bearer header when no key was configured "
+            f"(status={r2.status_code}, body={r2.text[:200]!r})"
+        )
 
 
 def test_mcp_endpoint_not_shadowed_by_fe_catchall() -> None:
