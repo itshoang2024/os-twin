@@ -131,7 +131,7 @@ depends_on: []
         $standaloneTask.Type | Should -Be 'task'
     }
 
-    It 'extracts Working_dir directive' {
+    It 'extracts Working_dir directive as array' {
         $md = @"
 ## EPIC-001 - Scoped
 Working_dir: src/frontend
@@ -143,6 +143,19 @@ depends_on: []
 "@
         $result = ConvertFrom-PlanMarkdown -Content $md
         $result[0].EpicWorkingDir | Should -Be 'src/frontend'
+    }
+
+    It 'errors on multiple comma-separated Working_dir values' {
+        $md = @"
+## EPIC-001 - Multi
+Working_dir: src/api, src/shared
+#### Definition of Done
+- [ ] Done
+#### Acceptance Criteria
+- [ ] AC
+depends_on: []
+"@
+        { ConvertFrom-PlanMarkdown -Content $md } | Should -Throw "*Only a single working directory*"
     }
 
     It 'extracts Objective directive' {

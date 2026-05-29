@@ -16,7 +16,7 @@
 .PARAMETER TaskDescription
     Full task/epic description.
 .PARAMETER WorkingDir
-    Project working directory. Default: current directory.
+    Scoped working directory for this room's agents (absolute path).
 .PARAMETER DefinitionOfDone
     Array of goal strings for the definition of done.
 .PARAMETER AcceptanceCriteria
@@ -32,7 +32,7 @@
 
 .EXAMPLE
     ./New-WarRoom.ps1 -RoomId "room-001" -TaskRef "EPIC-001" `
-                      -TaskDescription "Implement user auth" -WorkingDir "/project" `
+                      -TaskDescription "Implement user auth" -WorkingDir "/project/src/api" `
                       -DefinitionOfDone @("JWT working", "Tests pass") `
                       -AcceptanceCriteria @("POST /login returns 200")
 #>
@@ -134,7 +134,8 @@ $config = [ordered]@{
     plan_id    = $PlanId
     depends_on = @($DependsOn)
     created_at = $ts
-    working_dir = (Resolve-Path $WorkingDir -ErrorAction SilentlyContinue).Path
+    working_dir = if ([System.IO.Path]::IsPathRooted($WorkingDir)) { $WorkingDir }
+                  else { (Resolve-Path $WorkingDir -ErrorAction SilentlyContinue).Path }
 
     assignment = [ordered]@{
         title           = ($TaskDescription -split "`n")[0].Trim()
@@ -214,12 +215,15 @@ if ($planRolesConfig -and $planRolesConfig.$baseRole) {
 # Search order favors repo core roles over installed/home copies.
 if ($roleSkillRefs.Count -eq 0) {
     $homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+    $firstWorkingDir = if ($WorkingDir -and $WorkingDir -ne '.') { $WorkingDir } else { $null }
     $roleJsonCandidates = @(
         (Join-Path $agentsDir "roles" $baseRole "role.json"),
         (Join-Path $homeDir ".ostwin" ".agents" "roles" $baseRole "role.json"),
-        (Join-Path $homeDir ".ostwin" "roles" $baseRole "role.json"),
-        (Join-Path $WorkingDir "contributes" "roles" $baseRole "role.json")
+        (Join-Path $homeDir ".ostwin" "roles" $baseRole "role.json")
     )
+    if ($firstWorkingDir) {
+        $roleJsonCandidates += (Join-Path $firstWorkingDir "contributes" "roles" $baseRole "role.json")
+    }
     foreach ($roleJsonPath in ($roleJsonCandidates | Select-Object -Unique)) {
         if (Test-Path $roleJsonPath) {
             try {

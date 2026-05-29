@@ -13,8 +13,7 @@ Per-epic format:
 ```
 Roles: @<role1>, @<role2>, ...    (dynamically chosen agents for this epic's workflow)
 Objective: <mission>            (what this war-room must achieve — be specific)
-Lifecycle:                      (REQUIRED: Dynamically map the closed-loop transitions between the chosen roles, including specific 
-working_dir: <path>             (scope agents to a subdirectory)
+working_dir: <path>              (scope agents to a specific subdirectory)
 ```
 
 {{AVAILABLE_ROLES}}

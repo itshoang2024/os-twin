@@ -2322,7 +2322,7 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
                     epic_ref=epic["task_ref"], plan_id=plan_id,
                     title=epic["title"], body=epic["body"],
                     room_id=epic["room_id"],
-                    working_dir=",".join(epic.get("working_dirs", [epic.get("working_dir", ".")])),
+                    working_dir=epic.get("working_dir", "."),
                     status="pending",
                 )
         except Exception as e:
@@ -3470,20 +3470,18 @@ async def get_epic_audit(plan_id: str, task_ref: str, user: dict = Depends(get_c
 @router.get("/api/plans/{plan_id}/epics/{task_ref}/brief")
 async def get_epic_brief(plan_id: str, task_ref: str, user: dict = Depends(get_current_user)):
     room_dir = _resolve_room_dir(plan_id, task_ref)
-    if not room_dir: return {"content": "", "working_dirs": [], "created_at": None}
+    if not room_dir: return {"content": "", "working_dir": "", "created_at": None}
     brief_file = room_dir / "brief.md"
     config_file = room_dir / "config.json"
     content = brief_file.read_text() if brief_file.exists() else "# No brief provided"
-    working_dirs = []
+    working_dir = ""
     if config_file.exists():
         try:
             cfg = json.loads(config_file.read_text())
-            if "working_dirs" in cfg and isinstance(cfg["working_dirs"], list):
-                working_dirs = cfg["working_dirs"]
-            elif "working_dir" in cfg and cfg["working_dir"]:
-                working_dirs = [cfg["working_dir"]]
+            if "working_dir" in cfg and cfg["working_dir"]:
+                working_dir = cfg["working_dir"]
         except: pass
-    return {"content": content, "working_dirs": working_dirs, "created_at": None}
+    return {"content": content, "working_dir": working_dir, "created_at": None}
 
 @router.get("/api/plans/{plan_id}/epics/{task_ref}/artifacts")
 async def get_epic_artifacts(plan_id: str, task_ref: str, user: dict = Depends(get_current_user)):
