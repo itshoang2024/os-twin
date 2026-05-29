@@ -1,0 +1,23 @@
+# SearXNG metasearch engine for ostwin web research
+# Start: docker compose -f docker-compose.searxng.yml up -d
+#
+# Default endpoint: http://localhost:6633
+# Set OSTWIN_SEARXNG_URL env var if using a different host/port.
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ostwin-searxng
+    ports:
+      - "${SEARXNG_PORT:-6633}:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-6633}/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped

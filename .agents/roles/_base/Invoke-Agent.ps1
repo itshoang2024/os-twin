@@ -226,9 +226,14 @@ if (Test-Path $configPath) {
         }
     }
 
-    # WorkingDir: instance → parameter
-    if (-not $WorkingDir -and $instanceConfig -and $instanceConfig.working_dir) {
-        $WorkingDir = $instanceConfig.working_dir
+    # WorkingDir: parameter → instance config → room config.json
+    if (-not $WorkingDir -and $instanceConfig) {
+        if ($instanceConfig.PSObject.Properties['working_dir'] -and $instanceConfig.working_dir) {
+            $WorkingDir = $instanceConfig.working_dir
+        }
+    }
+    if (-not $WorkingDir -and $roomCfg -and $roomCfg.PSObject.Properties['working_dir'] -and $roomCfg.working_dir) {
+        $WorkingDir = $roomCfg.working_dir
     }
 
     # no_mcp: instance → role → default false
@@ -256,9 +261,14 @@ if (Test-Path $configPath) {
         }
         $searchDir = $parentDir
     }
-    # Fallback: env variable or WorkingDir
+    # Fallback: env variable
     if (-not $ProjectDir -and $env:PROJECT_DIR) { $ProjectDir = $env:PROJECT_DIR }
     if (-not $ProjectDir -and $WorkingDir) { $ProjectDir = $WorkingDir }
+
+    # --- Override ProjectDir with WorkingDir when scoped ---
+    if ($WorkingDir) {
+        $ProjectDir = $WorkingDir
+    }
 
     # --- CLI resolution: (1) explicit -AgentCmd  →  (2) Role-specific env (e.g. ARCHITECT_CMD)  →  (3) OSTWIN_AGENT_CMD  →  (4) "opencode run" ---
     # No bin/agent binary lookup — the full flow is managed by the bash/powershell wrapper.
@@ -325,7 +335,6 @@ if (-not $ProjectDir) {
         $searchDir2 = $parentDir2
     }
     if (-not $ProjectDir -and $env:PROJECT_DIR) { $ProjectDir = $env:PROJECT_DIR }
-    if (-not $ProjectDir -and $WorkingDir) { $ProjectDir = $WorkingDir }
 }
 
 # --- Skill Staging: project-local .agents/skills/ (shared across rooms) ---

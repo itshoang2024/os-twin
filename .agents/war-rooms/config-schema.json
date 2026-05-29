@@ -32,11 +32,9 @@
       "format": "date-time"
     },
     "working_dir": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Project working directory"
+      "type": "string",
+      "default": ".",
+      "description": "Scoped working directory for this war-room's agents"
     },
     "assignment": {
       "type": "object",

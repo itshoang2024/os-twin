@@ -159,11 +159,11 @@ $taskDesc = if (Test-Path (Join-Path $RoomDir "brief.md")) {
 } else { "No task description found." }
 
 # --- Parse working directory from brief.md ---
-$workingDir = Get-Location
+$workingDir = ''
 $briefContent = $taskDesc
-if ($briefContent -match 'working_dir:\s*(.+)') {
+if ($briefContent -match '## Working Directory\s*\n(.+)') {
     $workingDir = $Matches[1].Trim()
-} elseif ($briefContent -match '## Working Directory\s*\n(.+)') {
+} elseif ($briefContent -match 'working_dir:\s*(.+)') {
     $workingDir = $Matches[1].Trim()
 }
 
@@ -295,7 +295,7 @@ $analystOutputs
 Room: $roomName
 Task Ref: $taskRef
 Role: audit
-Working Directory: $workingDir
+Working Directory: $(if ($workingDir) { $workingDir } else { Get-Location })
 $predecessorSection
 
 ## Instructions

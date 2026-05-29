@@ -1,25 +1,54 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import KnowledgeTabCore from '@/components/knowledge/KnowledgeTabCore';
+
+/**
+ * Extract namespace name from a pathname like /knowledge/{name}.
+ * Returns '' if the name is missing or is the static-export placeholder '_'.
+ */
+function extractNamespace(pathname: string): string {
+  const segments = pathname.split('/');
+  const idx = segments.indexOf('knowledge');
+  if (idx >= 0 && segments[idx + 1]) {
+    const name = decodeURIComponent(segments[idx + 1]);
+    return name === '_' ? '' : name;
+  }
+  return '';
+}
 
 /**
  * Client component that reads route params and renders the detail view.
  */
 export default function NamespaceDetailContent() {
-  const params = useParams();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
 
-  // Extract the namespace name from the route
-  const namespaceName = typeof params.name === 'string'
-    ? decodeURIComponent(params.name)
-    : Array.isArray(params.name)
-      ? decodeURIComponent(params.name[0])
-      : '';
+  // usePathname() may return the static-export placeholder path (/knowledge/_)
+  // during initial hydration. Fall back to window.location.pathname which always
+  // reflects the real browser URL.
+  const [namespaceName, setNamespaceName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return extractNamespace(window.location.pathname);
+    }
+    return extractNamespace(pathname);
+  });
+
+  // Re-sync when Next.js router updates pathname (e.g. client-side navigation)
+  useEffect(() => {
+    const resolved = extractNamespace(pathname) || (typeof window !== 'undefined' ? extractNamespace(window.location.pathname) : '');
+    if (resolved && resolved !== namespaceName) {
+      setNamespaceName(resolved);
+    }
+  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optional tab query param: /knowledge/my-ns?tab=import
   const tabParam = searchParams.get('tab');
-  const defaultTab = tabParam === 'import' ? 'import' as const : tabParam === 'nexus' ? 'nexus' as const : undefined;
+  const defaultTab = tabParam === 'import' ? 'import' as const
+    : tabParam === 'research' ? 'research' as const
+    : tabParam === 'nexus' ? 'nexus' as const
+    : undefined;
 
   if (!namespaceName) {
     return (

@@ -495,4 +495,103 @@ Write-Output @()
             $result.Source | Should -Be "cached"
         }
     }
+
+    # =====================================================
+    # Registry timeout propagation (security-engineer scenario)
+    # =====================================================
+    # security-engineer is the first role to carry a per-role `timeout` in
+    # registry.json. These tests pin that the registry-tier reads it, that the
+    # `timeout_seconds` alias still works, and that the default fallback
+    # remains 600 when neither key is present.
+    Context "Registry timeout propagation" {
+
+        BeforeAll {
+            $script:tempTimeoutRoot = Join-Path ([System.IO.Path]::GetTempPath()) "resolve-role-timeout-$(Get-Random)"
+            $script:tempTimeoutAgents = Join-Path $script:tempTimeoutRoot ".agents"
+            New-Item -ItemType Directory -Path (Join-Path $script:tempTimeoutAgents "roles" "_base") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $script:tempTimeoutAgents "roles" "security-engineer") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $script:tempTimeoutAgents "roles" "alias-role") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $script:tempTimeoutAgents "roles" "no-timeout-role") -Force | Out-Null
+
+            $script:dynRunner = Join-Path $script:tempTimeoutAgents "roles" "_base" "Start-DynamicRole.ps1"
+            "# stub dynamic" | Out-File -FilePath $script:dynRunner -Encoding utf8
+            "# stub ephemeral" | Out-File -FilePath (Join-Path $script:tempTimeoutAgents "roles" "_base" "Start-EphemeralAgent.ps1") -Encoding utf8
+
+            @{
+                roles = @(
+                    @{
+                        name          = "security-engineer"
+                        runner        = "roles/_base/Start-DynamicRole.ps1"
+                        capabilities  = @("security", "secure-code-review")
+                        default_model = "google-vertex/zai-org/glm-5-maas"
+                        timeout       = 3600
+                    },
+                    @{
+                        name            = "alias-role"
+                        runner          = "roles/_base/Start-DynamicRole.ps1"
+                        capabilities    = @("audit")
+                        timeout_seconds = 1800
+                    },
+                    @{
+                        name         = "no-timeout-role"
+                        runner       = "roles/_base/Start-DynamicRole.ps1"
+                        capabilities = @("misc")
+                    }
+                )
+            } | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $script:tempTimeoutAgents "roles" "registry.json") -Encoding utf8
+        }
+
+        AfterAll {
+            if (Test-Path $script:tempTimeoutRoot) {
+                Remove-Item $script:tempTimeoutRoot -Recurse -Force
+            }
+        }
+
+        It "propagates the registry 'timeout' field to Resolve-Role result" {
+            $result = & $script:resolveRole -RoleName "security-engineer" -AgentsDir $script:tempTimeoutAgents
+            $result.Source | Should -Be "registry"
+            $result.Runner | Should -Be $script:dynRunner
+            $result.Timeout | Should -Be 3600
+            $result.Capabilities | Should -Contain "security"
+        }
+
+        It "honours the 'timeout_seconds' alias when 'timeout' is absent" {
+            $result = & $script:resolveRole -RoleName "alias-role" -AgentsDir $script:tempTimeoutAgents
+            $result.Timeout | Should -Be 1800
+        }
+
+        It "falls back to the default 600s timeout when neither key is set" {
+            $result = & $script:resolveRole -RoleName "no-timeout-role" -AgentsDir $script:tempTimeoutAgents
+            $result.Timeout | Should -Be 600
+        }
+
+        It "routes the 'security' capability to security-engineer via capability-match" {
+            # Tier 3 capability matching: when no role name is given, the
+            # 'security' capability should land on security-engineer (the
+            # routing fix that supersedes the dead 'security-auditor' mapping).
+            $mockRoles = @(
+                [PSCustomObject]@{
+                    Name         = "engineer"
+                    Runner       = $script:engineerRunner
+                    Capabilities = @("code-generation", "file-editing")
+                    Source       = "registry"
+                },
+                [PSCustomObject]@{
+                    Name         = "security-engineer"
+                    Runner       = $script:dynRunner
+                    Capabilities = @("security", "secure-code-review", "threat-modeling")
+                    Source       = "registry"
+                }
+            )
+
+            $result = & $script:resolveRole `
+                -RoleName "" `
+                -RequiredCapabilities @("security") `
+                -AgentsDir $script:tempTimeoutAgents `
+                -AvailableRoles $mockRoles
+
+            $result.Source | Should -Be "capability-match"
+            $result.BaseRole | Should -Be "security-engineer"
+        }
+    }
 }

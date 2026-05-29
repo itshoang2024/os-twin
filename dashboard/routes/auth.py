@@ -4,8 +4,10 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Read API key at module load (same as dashboard.auth)
-_API_KEY = os.environ.get("OSTWIN_API_KEY", "")
+# Read API key at request time (not cached at import) so
+# env_watcher and load_dotenv(override=True) changes take effect.
+def _get_api_key() -> str:
+    return os.environ.get("OSTWIN_API_KEY", "")
 AUTH_COOKIE_NAME = "ostwin_auth_key"
 
 
@@ -26,14 +28,14 @@ async def login_for_access_token(request: Request):
         form = await request.form()
         key = form.get("key", "") or form.get("password", "")
 
-    if not key or not _API_KEY:
+    if not key or not _get_api_key():
         return JSONResponse(
             status_code=401,
             content={"detail": "Invalid API key"},
         )
 
     import secrets
-    if not secrets.compare_digest(str(key), _API_KEY):
+    if not secrets.compare_digest(str(key), _get_api_key()):
         return JSONResponse(
             status_code=401,
             content={"detail": "Invalid API key"},
@@ -52,7 +54,7 @@ async def login_for_access_token(request: Request):
     is_localhost = request.url.hostname in ("localhost", "127.0.0.1")
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
-        value=_API_KEY,
+        value=_get_api_key(),
         httponly=True,
         secure=not is_localhost,
         samesite="strict",

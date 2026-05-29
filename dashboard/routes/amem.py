@@ -6,11 +6,12 @@ directory to serve graph snapshots, memory notes, and search results to the fron
 
 import os
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Dict, Optional
 import asyncio
 import json
+import threading
 import re
 import sys
 
@@ -36,17 +37,15 @@ def _resolve_memory_dir(plan_id: str) -> Optional[Path]:
     """Resolve the centralized memory directory for a plan.
 
     Resolution order:
-    1. ~/.ostwin/memory/{plan_id}/          (Plan 009 format — no prefix)
-    2. ~/.ostwin/memory/memory-{plan_id}/   (legacy format)
+    1. ~/.ostwin/memory/memory-{plan_id}/   (current format)
+    2. ~/.ostwin/memory/{plan_id}/          (legacy format)
     3. Plan's working_dir/.memory/          (follows symlink)
     4. None
     """
-    # Plan 009: direct plan_id directory
-    direct = MEMORY_BASE_DIR / plan_id
-    if direct.exists():
-        return direct
-    # Legacy: memory-{plan_id} prefix
-    legacy = MEMORY_BASE_DIR / f"memory-{plan_id}"
+    current = MEMORY_BASE_DIR / f"memory-{plan_id.removeprefix('memory-')}"
+    if current.exists():
+        return current
+    legacy = MEMORY_BASE_DIR / plan_id.removeprefix("memory-")
     if legacy.exists():
         return legacy
     # Fallback: look up plan's working_dir and follow .memory symlink
@@ -317,6 +316,64 @@ async def get_memory_graph(plan_id: str, user: Annotated[dict, Depends(get_curre
     return await asyncio.to_thread(_build_graph, notes)
 
 
+# ── Merkle tree visualization ─────────────────────────────────────────
+
+
+def _transform_merkle_tree(node: dict, name: str = "(root)") -> dict:
+    """Convert the raw ``merkle_manifest.json`` nested dict into a
+    d3-hierarchy-compatible ``{name, hash, type, children}`` shape.
+    """
+    children = []
+    for key in sorted(k for k in node if k != "_hash"):
+        value = node[key]
+        if isinstance(value, str):
+            children.append(
+                {
+                    "name": key,
+                    "hash": value,
+                    "type": "leaf",
+                    "children": [],
+                }
+            )
+        elif isinstance(value, dict):
+            children.append(_transform_merkle_tree(value, key))
+    return {
+        "name": name,
+        "hash": node.get("_hash", ""),
+        "type": "dir",
+        "children": children,
+    }
+
+
+def _load_merkle_manifest(manifest_path: Path) -> dict:
+    """Load ``merkle_manifest.json`` and reshape for the frontend."""
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tree_data = raw.get("tree", {})
+    return {
+        "root_hash": raw.get("root_hash", ""),
+        "generated_at": raw.get("generated_at", ""),
+        "note_count": raw.get("note_count", 0),
+        "vectordb_root_hash": raw.get("vectordb_root_hash", ""),
+        "tree": _transform_merkle_tree(tree_data),
+    }
+
+
+@router.get("/api/amem/{plan_id}/merkle", responses={404: {"description": "Not found"}})
+async def get_merkle_tree(
+    plan_id: str,
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Return the Merkle integrity tree for a plan's memory namespace."""
+    mem_dir = _require_memory_dir(plan_id)
+    manifest_path = mem_dir / "merkle_manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No Merkle manifest found. Run a sync to generate one.",
+        )
+    return await asyncio.to_thread(_load_merkle_manifest, manifest_path)
+
+
 def _render_graph_png(graph_data: dict) -> bytes:
     """Render graph data as a PNG image. Runs in a thread (CPU-bound)."""
     import io
@@ -534,6 +591,7 @@ MEMORY_BASE_DIR = Path(os.environ.get("OSTWIN_MEMORY_DIR", str(Path.home() / ".o
 @router.get("/api/amem/namespaces")
 async def list_namespaces(user: Annotated[dict, Depends(get_current_user)]):
     """List all memory namespaces with stats."""
+
     # Heavy file system scanning — offload to thread pool
     def _scan_namespaces():
         if not MEMORY_BASE_DIR.exists():
@@ -547,7 +605,9 @@ async def list_namespaces(user: Annotated[dict, Depends(get_current_user)]):
             if ".archive-" in entry.name:
                 continue
 
-            plan_id = entry.name
+            # Strip the "memory-" prefix to get the canonical plan_id
+            raw_name = entry.name
+            plan_id = raw_name[len("memory-") :] if raw_name.startswith("memory-") else raw_name
             notes_dir = entry / "notes"
             notes_count = len(list(notes_dir.rglob("*.md"))) if notes_dir.exists() else 0
 
@@ -604,8 +664,8 @@ async def clear_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Clear all notes for a plan namespace."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
         raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     notes_dir = ns_dir / "notes"
@@ -673,8 +733,8 @@ async def archive_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Archive a namespace: rename to <plan_id>.archive-<date>, create fresh empty one."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
         raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     notes_dir = ns_dir / "notes"
@@ -713,13 +773,9 @@ async def export_namespace(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """Export a namespace as a .tar.gz download."""
-    ns_dir = MEMORY_BASE_DIR / plan_id
-    if not ns_dir.exists():
-        # Try via plan working_dir symlink
-        try:
-            ns_dir = _resolve_memory_dir(plan_id)
-        except HTTPException:
-            raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
+    ns_dir = _resolve_memory_dir(plan_id)
+    if ns_dir is None:
+        raise HTTPException(status_code=404, detail=f"Namespace '{plan_id}' not found")
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -731,3 +787,198 @@ async def export_namespace(
         media_type="application/gzip",
         headers={"Content-Disposition": f'attachment; filename="memory-{plan_id}.tar.gz"'},
     )
+
+
+# ── Embedding reindex (Plan 028) ──────────────────────────────────────
+
+_reindex_state: Dict[str, Any] = {
+    "status": "idle",
+    "current_plan": None,
+    "current_progress": "0/0",
+    "plans_completed": 0,
+    "plans_total": 0,
+    "elapsed_seconds": 0,
+}
+_reindex_lock = threading.Lock()
+
+
+def _scan_memory_configs(proposed_model: str) -> list:
+    """Scan all memory directories and compare embedding_model against proposed."""
+    plans = []
+    if not MEMORY_BASE_DIR.exists():
+        return plans
+
+    for entry in sorted(MEMORY_BASE_DIR.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        config_path = entry / "memory.config.json"
+        notes_dir = entry / "notes"
+
+        raw_name = entry.name
+        plan_id = raw_name[len("memory-"):] if raw_name.startswith("memory-") else raw_name
+
+        note_count = 0
+        if notes_dir.exists():
+            note_count = sum(1 for _ in notes_dir.rglob("*.md"))
+
+        if config_path.exists():
+            try:
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                current_model = cfg.get("embedding_model", "")
+                plan_name = cfg.get("plan_name", plan_id)
+                status = "match" if current_model == proposed_model else "mismatch"
+            except Exception:
+                current_model = "unknown"
+                plan_name = plan_id
+                status = "mismatch"
+        else:
+            current_model = "unknown"
+            plan_name = plan_id
+            status = "unknown"
+
+        plans.append({
+            "plan_id": plan_id,
+            "plan_name": plan_name,
+            "current_embedding_model": current_model,
+            "note_count": note_count,
+            "status": status,
+            "persist_dir": str(entry),
+        })
+
+    return plans
+
+
+@router.get("/api/amem/embedding-status", responses={200: {"description": "OK"}})
+async def get_embedding_status(
+    model: str = "",
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Check which plans need re-indexing if embedding model changes."""
+    from dashboard.agentic_memory.config import load_config
+    cfg = load_config()
+    current_model = cfg.embedding.model
+    proposed_model = model or current_model
+
+    plans = await asyncio.to_thread(_scan_memory_configs, proposed_model)
+
+    mismatch_notes = sum(p["note_count"] for p in plans if p["status"] != "match")
+
+    return {
+        "current_model": current_model,
+        "proposed_model": proposed_model,
+        "plans": [{k: v for k, v in p.items() if k != "persist_dir"} for p in plans],
+        "total_reindex_notes": mismatch_notes,
+        "estimated_seconds": mismatch_notes * 2,
+    }
+
+
+def _run_reindex(proposed_model: str, plans: list):
+    """Background re-index worker."""
+    import shutil
+    import time as _time
+    start = _time.monotonic()
+
+    with _reindex_lock:
+        _reindex_state["status"] = "running"
+        _reindex_state["plans_total"] = len(plans)
+        _reindex_state["plans_completed"] = 0
+
+    for plan_info in plans:
+        persist_dir = plan_info["persist_dir"]
+        plan_name = plan_info["plan_name"]
+        notes_dir = Path(persist_dir) / "notes"
+        vector_dir = Path(persist_dir) / "vectordb"
+
+        with _reindex_lock:
+            _reindex_state["current_plan"] = plan_name
+            _reindex_state["current_progress"] = f"0/{plan_info['note_count']}"
+
+        # Delete old vectordb
+        if vector_dir.exists():
+            shutil.rmtree(vector_dir, ignore_errors=True)
+        vector_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a temporary memory system to re-embed
+        try:
+            from dashboard.agentic_memory.memory_system import AgenticMemorySystem
+            from dashboard.agentic_memory.config import load_config
+            cfg = load_config()
+
+            sys = AgenticMemorySystem(
+                model_name=proposed_model,
+                embedding_backend=cfg.embedding.backend,
+                vector_backend=cfg.vector.backend,
+                persist_dir=persist_dir,
+            )
+
+            with _reindex_lock:
+                _reindex_state["current_progress"] = (
+                    f"{len(sys.memories)}/{plan_info['note_count']}"
+                )
+                _reindex_state["plans_completed"] += 1
+                _reindex_state["elapsed_seconds"] = int(_time.monotonic() - start)
+
+        except Exception as exc:
+            logger.error("Re-index failed for %s: %s", plan_name, exc)
+            with _reindex_lock:
+                _reindex_state["plans_completed"] += 1
+
+    with _reindex_lock:
+        _reindex_state["status"] = "completed"
+        _reindex_state["current_plan"] = None
+        _reindex_state["elapsed_seconds"] = int(_time.monotonic() - start)
+
+
+@router.post("/api/amem/reindex", responses={200: {"description": "OK"}})
+async def start_reindex(
+    request: Request,
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Trigger re-indexing of mismatched memory namespaces."""
+    body = await request.json()
+    proposed_model = body.get("model", "")
+    if not proposed_model:
+        raise HTTPException(400, "Missing 'model' in request body")
+
+    with _reindex_lock:
+        if _reindex_state["status"] == "running":
+            raise HTTPException(409, "Re-index already in progress")
+
+    plans = _scan_memory_configs(proposed_model)
+    mismatched = [p for p in plans if p["status"] != "match"]
+
+    if not mismatched:
+        return {"status": "no_changes", "message": "All plans already use this model"}
+
+    # Evict mismatched plans from pool so they reload with new config
+    try:
+        from dashboard.routes.memory_mcp import get_pool
+        pool = get_pool()
+        if pool:
+            for p in mismatched:
+                pool.evict(p["persist_dir"])
+    except Exception:
+        pass
+
+    # Run in background thread
+    thread = threading.Thread(
+        target=_run_reindex,
+        args=(proposed_model, mismatched),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "status": "started",
+        "plans_to_reindex": len(mismatched),
+        "total_notes": sum(p["note_count"] for p in mismatched),
+    }
+
+
+@router.get("/api/amem/reindex/status", responses={200: {"description": "OK"}})
+async def get_reindex_status(
+    user: Annotated[dict, Depends(get_current_user)] = None,
+):
+    """Poll re-index progress."""
+    with _reindex_lock:
+        return dict(_reindex_state)

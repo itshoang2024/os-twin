@@ -11,7 +11,7 @@ from dashboard.auth import get_current_user
 import dashboard.global_state as global_state
 
 from dashboard.api_utils import PLANS_DIR
-from dashboard.routes.plans import create_plan_on_disk
+from dashboard.plan_synthesis import synthesize_plan_from_thread
 from dashboard.asset_store import persist_images_from_message, list_thread_assets
 
 router = APIRouter(tags=["threads"])
@@ -257,43 +257,27 @@ async def promote_thread(thread_id: str, request: PromoteRequest, user: dict = D
         tlog.debug("  MSG[%d] %s: %s...", i, m.role, m.content[:120].replace('\n', '\\n'))
     
     try:
-        # Include asset context so the plan agent knows about uploaded files
+        # Surface uploaded asset metadata to the worker so it can reference files.
         assets = list_thread_assets(thread_id)
-        asset_context = ""
         if assets:
             asset_lines = [f"  - {a['path']} ({a['type']}, {a['size']} bytes)" for a in assets]
-            asset_context = f"\n\nUploaded assets for this project:\n" + "\n".join(asset_lines)
+            asset_context = "\n\nUploaded assets for this project:\n" + "\n".join(asset_lines)
             tlog.info("  Assets found: %d files", len(assets))
+            chat_history = chat_history + [{"role": "system", "content": asset_context}]
 
-        user_msg = f"Based on this brainstorming conversation, create a structured plan.{asset_context}"
-        from dashboard.plan_agent import refine_plan, plan_logger
-        tlog = plan_logger
-        tlog.info("  → calling refine_plan() with %d history turns", len(chat_history))
-        result = await refine_plan(
-            user_message=user_msg, 
-            plan_content="", 
-            chat_history=chat_history,
-            plans_dir=PLANS_DIR,
-            conversation_id=f"thread-{thread_id}",
-        )
-        
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
-        plan_content = result.get("plan")
-        if not plan_content:
-            plan_content = result.get("full_response", "Failed to generate plan content.")
-            
         title = request.title or thread.title
-        result = create_plan_on_disk(
+        tlog.info("  → synthesize_plan_from_thread() with %d history turns", len(chat_history))
+        result = await synthesize_plan_from_thread(
+            thread_id=thread_id,
+            chat_history=chat_history,
             title=title,
-            content=plan_content,
             working_dir=request.working_dir,
-            thread_id=thread_id
         )
         plan_id = result["plan_id"]
         store.set_promoted(thread_id, plan_id)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Promote failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

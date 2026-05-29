@@ -104,12 +104,12 @@ _seed_mcp_config() {
   # env vars on the dev machine), so on a fresh clone only mcp-builtin.json
   # (which IS tracked by git) is available as a seed.
   local seed_src=""
-  if [[ -f "$SCRIPT_DIR/mcp/config.json" ]]; then
+  if [[ -f "$SCRIPT_DIR/mcp/mcp-builtin.json" ]]; then
+    seed_src="$SCRIPT_DIR/mcp/mcp-builtin.json"
+  elif [[ -f "$SCRIPT_DIR/mcp/config.json" ]]; then
     seed_src="$SCRIPT_DIR/mcp/config.json"
   elif [[ -f "$SCRIPT_DIR/mcp/mcp-config.json" ]]; then
     seed_src="$SCRIPT_DIR/mcp/mcp-config.json"
-  elif [[ -f "$SCRIPT_DIR/mcp/mcp-builtin.json" ]]; then
-    seed_src="$SCRIPT_DIR/mcp/mcp-builtin.json"
   fi
   if [[ ! -f "$INSTALL_DIR/.agents/mcp/config.json" ]]; then
     if [[ -n "$seed_src" ]]; then
@@ -145,6 +145,9 @@ _seed_mcp_config() {
     for f in "$SCRIPT_DIR"/mcp/*.py "$SCRIPT_DIR"/mcp/*.sh "$SCRIPT_DIR"/mcp/requirements.txt; do
       [[ -f "$f" ]] && cp "$f" "$INSTALL_DIR/.agents/mcp/"
     done
+    rm -f \
+      "$INSTALL_DIR/.agents/mcp/obscura-browser-server.py" \
+      "$INSTALL_DIR/.agents/mcp/test_obscura_browser.py"
     ok "mcp/ preserved (scripts + catalog updated, new servers merged)"
   fi
 }
@@ -204,7 +207,15 @@ _sync_dashboard() {
     # Use incremental rsync with --delete instead of rm -rf + full copy.
     # Exclude node_modules (588MB) and frontend source files — only the
     # pre-built output in fe/out/ is needed at runtime.
+    # Preserve any legacy dashboard-local virtualenv on the receiver. Current
+    # installs use $INSTALL_DIR/.venv, but deleting dashboard/.venv during rsync
+    # can create noisy rsync receiver-delete warnings when files
+    # are in use.
     rsync -a --delete \
+      --filter='P .venv/***' \
+      --filter='P venv/***' \
+      --exclude='.venv/' \
+      --exclude='venv/' \
       --exclude='node_modules/' \
       --exclude='fe/src/' \
       --exclude='fe/.next/' \

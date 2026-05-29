@@ -6,6 +6,8 @@ import {
   getSession, 
   clearSession, 
   clearChatHistory,
+  clearActivePlan,
+  clearConversationState,
   setMode, 
   setPlan, 
   setWorkingDir,
@@ -98,6 +100,39 @@ describe('sessions', () => {
     it('sets the active plan ID', () => {
       setPlan('u1', 'telegram', 'plan-abc');
       expect(getSession('u1', 'telegram').activePlanId).to.equal('plan-abc');
+    });
+  });
+
+  describe('clearActivePlan', () => {
+    it('clears plan selection and returns to idle without clearing working_dir', () => {
+      setPlan('u1', 'telegram', 'plan-abc');
+      setMode('u1', 'telegram', 'editing');
+      setWorkingDir('u1', 'telegram', '/tmp/project');
+
+      clearActivePlan('u1', 'telegram');
+
+      const s = getSession('u1', 'telegram');
+      expect(s.activePlanId).to.be.null;
+      expect(s.mode).to.equal('idle');
+      expect(s.workingDir).to.equal('/tmp/project');
+    });
+  });
+
+  describe('clearConversationState', () => {
+    it('clears active plan, mode, chat history, and pending context', () => {
+      setPlan('u1', 'telegram', 'plan-abc');
+      setMode('u1', 'telegram', 'editing');
+      const s = getSession('u1', 'telegram');
+      s.chatHistory.push({ role: 'user', content: 'hello' });
+      s.pendingContext.push({ command: 'plans', result: 'Plan list', timestamp: Date.now() });
+
+      clearConversationState('u1', 'telegram');
+
+      const fresh = getSession('u1', 'telegram');
+      expect(fresh.activePlanId).to.be.null;
+      expect(fresh.mode).to.equal('idle');
+      expect(fresh.chatHistory).to.deep.equal([]);
+      expect(fresh.pendingContext).to.deep.equal([]);
     });
   });
 

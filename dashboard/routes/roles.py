@@ -462,10 +462,19 @@ async def get_available_providers(user: dict = Depends(get_current_user)):
 
 @router.post("/api/models/reload")
 async def reload_models(user: dict = Depends(get_current_user)):
-    """Force re-fetch models from models.dev and rebuild configured_models.json."""
+    """Force re-fetch models from models.dev and rebuild configured_models.json.
+
+    After a successful fetch the raw catalog is written to two locations:
+    1. ``~/.ostwin/.agents/models_dev_raw.json``  -- the home-directory cache.
+    2. ``.agents/models_dev_raw.json``            -- project-level install seed.
+
+    Both paths are reported in the response so callers can confirm the sync.
+    """
     from dashboard.lib.settings.models_dev_loader import (
         invalidate_cache,
         load_models_on_startup,
+        _HOME_RAW_PATH,
+        _project_raw_path,
     )
     invalidate_cache()
     result = load_models_on_startup()
@@ -474,11 +483,22 @@ async def reload_models(user: dict = Depends(get_current_user)):
         len(p.get("models", {}))
         for p in result.get("providers", {}).values()
     )
+
+    # Report which disk paths were populated
+    proj_path = _project_raw_path()
+    raw_paths = {
+        "home": str(_HOME_RAW_PATH),
+        "home_exists": _HOME_RAW_PATH.exists(),
+        "project": str(proj_path) if proj_path else None,
+        "project_exists": proj_path.exists() if proj_path else False,
+    }
+
     return {
         "status": "ok",
         "providers": provider_count,
         "models": model_count,
         "loaded_at": result.get("loaded_at"),
+        "raw_catalog": raw_paths,
     }
 
 
@@ -829,7 +849,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             }
         if any(k in combined for k in ("unauthenticated", "api key", "api_key", "401", "403", "invalid credentials")):
             provider = resolved_version.split("/")[0] if "/" in resolved_version else "unknown"
-            fix = "Run: gcloud auth application-default login\nVerify GOOGLE_CLOUD_PROJECT is set." if "vertex" in resolved_version.lower() or "google" in resolved_version.lower() \
+            fix = "Use Settings -> Provider Config to sign in with Google or upload a service-account JSON file, then verify GOOGLE_CLOUD_PROJECT is set." if "vertex" in resolved_version.lower() or "google" in resolved_version.lower() \
                 else f"Check Settings → Providers → {provider}: ensure your API key is saved and valid."
             return {"category": "auth", "error": "Authentication failed", "fix": fix, "raw_output": raw_snippet}
         if "not found" in combined and ("model" in combined or "404" in combined):
@@ -877,4 +897,3 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
         latency = int((time.time() - start) * 1000)
         logger.warning("test_model_connection error: version=%r resolved=%r error=%r", version, resolved_version, str(exc))
         return {"status": "fail", "latency_ms": latency, "category": "unknown", "error": str(exc), "fix": "Check the dashboard server logs for the full stack trace."}
-

@@ -1,0 +1,82 @@
+name: Sync Main To Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  sync-main-to-release:
+    name: Sync main into active release branches
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'hotfix/')
+
+    steps:
+      - name: Find active release branches and create sync PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HOTFIX_PR: ${{ github.event.pull_request.number }}
+          HOTFIX_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t release_branches < <(
+            gh pr list \
+              --repo "$REPO" \
+              --state open \
+              --json baseRefName,headRefName \
+              --jq '.[] | .baseRefName, .headRefName | select(startswith("release-"))' |
+              sort -u
+          )
+
+          if [[ "${#release_branches[@]}" -eq 0 ]]; then
+            echo "No active release branches found. Nothing to sync."
+            exit 0
+          fi
+
+          for release_branch in "${release_branches[@]}"; do
+            if [[ -z "$release_branch" ]]; then
+              continue
+            fi
+
+            ahead_by="$(
+              gh api "repos/${REPO}/compare/${release_branch}...main" --jq '.ahead_by'
+            )"
+            if [[ "$ahead_by" == "0" ]]; then
+              echo "$release_branch already contains main. Skipping."
+              continue
+            fi
+
+            existing_pr="$(
+              gh pr list \
+                --repo "$REPO" \
+                --state open \
+                --base "$release_branch" \
+                --head main \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+            if [[ -n "$existing_pr" ]]; then
+              echo "Sync PR #$existing_pr already exists for $release_branch. Skipping."
+              continue
+            fi
+
+            cat > sync-body.md <<EOF
+          Hotfix PR #${HOTFIX_PR} was merged into main: ${HOTFIX_TITLE}
+
+          This PR syncs main back into ${release_branch} so the release branch includes the production hotfix before continuing QA.
+          EOF
+
+            gh pr create \
+              --repo "$REPO" \
+              --base "$release_branch" \
+              --head main \
+              --title "chore: sync main into $release_branch after hotfix" \
+              --body-file sync-body.md
+          done

@@ -828,7 +828,7 @@ AGENTS: dict[str, str] = {
 }
 
 
-def _opencode_config(model: str = "google/gemini-2.5-pro") -> dict:
+def _opencode_config(model: str = "google-vertex/gemini-3.1-pro-preview-customtools") -> dict:
     # The ostwin agent speaks to the dashboard primarily through ostwin_* tools.
     # bash is enabled so that `!` command injections in .opencode/commands/*.md
     # can execute (e.g. curl calls to the dashboard API). The agent's system
@@ -840,8 +840,8 @@ def _opencode_config(model: str = "google/gemini-2.5-pro") -> dict:
     # land in ~/.ostwin/.agents/plans and metadata is indexed in zvec.
     # The ostwin-worker subagent has its own permission block that re-grants
     # filesystem tools. external_directory is pre-approved because the
-    # OpenCode server runs from ~/.ostwin/opencode_server while workers read
-    # and write ~/.ostwin/.agents/plans.
+    # OpenCode server may run from a project workdir while workers read and
+    # write ~/.ostwin/.agents/plans.
     return {
         "$schema": "https://opencode.ai/config.json",
         "agent": {
@@ -975,7 +975,7 @@ def _write_commands(commands_dir: Path) -> list[Path]:
 def generate_all(
     project_root: Optional[Path] = None,
     dashboard_port: str = DASHBOARD_PORT_DEFAULT,
-    model: str = "google/gemini-2.5-pro",
+    model: str = "google-vertex/gemini-3.1-pro-preview-customtools",
 ) -> list[Path]:
     project_root = project_root or _resolve_project_root()
     helpers = _api_helpers_inlined(dashboard_port)
@@ -1009,24 +1009,34 @@ def generate_all(
     # Connector-parity slash commands generated from the embedded registry.
     written.extend(_write_commands(commands_dir))
 
-    logger.info("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
+    logger.debug("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
     return written
 
 
 if __name__ == "__main__":
     import argparse
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Generate OpenCode tool files for Ostwin")
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--dashboard-port", default=DASHBOARD_PORT_DEFAULT)
-    parser.add_argument("--model", default="google/gemini-2.5-pro")
+    parser.add_argument("--model", default="google-vertex/gemini-3.1-pro-preview-customtools")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print generated file paths and debug logging",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
 
     files = generate_all(
         project_root=args.project_root,
         dashboard_port=args.dashboard_port,
         model=args.model,
     )
-    for f in files:
-        print(f"  wrote {f}")
+    if args.verbose:
+        for f in files:
+            print(f"  generated {f}")

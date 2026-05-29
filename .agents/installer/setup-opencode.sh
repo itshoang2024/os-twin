@@ -40,7 +40,7 @@ setup_opencode_permissions() {
 }
 
 generate_opencode_tools() {
-  local project_root="${OSTWIN_PROJECT_DIR:-${PROJECT_ROOT:-$INSTALL_DIR/opencode_server}}"
+  local project_root="$INSTALL_DIR/opencode_server"
   local dashboard_port="${DASHBOARD_PORT:-3366}"
 
   if ! command -v python3 &>/dev/null && ! [[ -x "$VENV_DIR/bin/python" ]]; then
@@ -51,16 +51,20 @@ generate_opencode_tools() {
   local py_cmd="python3"
   [[ -x "$VENV_DIR/bin/python" ]] && py_cmd="$VENV_DIR/bin/python"
 
-  mkdir -p "$project_root"
-  step "Generating OpenCode custom tools (ostwin_*) in ${project_root}..."
+  mkdir -p "$project_root" "$INSTALL_DIR/logs"
+  local log_file="$INSTALL_DIR/logs/opencode-tools.log"
 
+  # Tool generation is expected on every install; keep stdout/stderr out of the
+  # installer transcript unless something fails. The detailed generator output is
+  # still available for debugging in $log_file.
   if "$py_cmd" -m dashboard.opencode_tools \
       --project-root "$project_root" \
       --dashboard-port "$dashboard_port" \
-      2>&1; then
-    ok "OpenCode tools generated in ${project_root}/.opencode/tools/"
+      >"$log_file" 2>&1; then
+    return 0
   else
     warn "Failed to generate OpenCode tools"
+    info "Details: $log_file"
     info "Run manually: python -m dashboard.opencode_tools --project-root $project_root"
   fi
 }

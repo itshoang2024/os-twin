@@ -1176,7 +1176,7 @@ class OllamaEmbeddingClient(EmbeddingClient):
             result = response["embeddings"]
         except Exception as exc:
             logger.error("Ollama embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(result, target_dim)
@@ -1227,7 +1227,7 @@ class OpenAICompatibleEmbeddingClient(EmbeddingClient):
                 result = [item["embedding"] for item in data["data"]]
         except Exception as exc:
             logger.error("OpenAI-compatible embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(result, target_dim)
@@ -1277,7 +1277,7 @@ class GeminiEmbeddingClient(EmbeddingClient):
             embeddings = [e.values for e in result.embeddings]
         except Exception as exc:
             logger.error("Gemini embedding failed: %s", exc)
-            return [[] for _ in texts]
+            raise
 
         target_dim = self._dimension or DEFAULT_EMBEDDING_DIMENSION
         return self._truncate_to_dim(embeddings, target_dim)
@@ -1405,9 +1405,26 @@ def create_embedding_client(
     except Exception:
         providers_cfg = None
 
-    if model_provider in ("google", "google-genai", "google_gemini", "google-vertex"):
-        is_vertex = embed_provider == "google-vertex"
+    _GOOGLE_PROVIDERS = ("google", "google-genai", "google_gemini", "google-vertex", "gemini")
+
+    # loggging all config to create a client, model, provider, model_provider, embed_provider, api_key (masked), base_url, dimension
+    logger.debug("Creating embedding client with model=%r, provider=%r, model_provider=%r, embed_provider=%r, api_key=%s, base_url=%r, dimension=%r",
+                 model, provider, model_provider, embed_provider, "****" if api_key else None, base_url, dimension)
+
+    if model_provider in _GOOGLE_PROVIDERS or embed_provider in _GOOGLE_PROVIDERS:
+        is_vertex = embed_provider == "google-vertex" or model_provider == "google-vertex"
+        # Also check settings for vertex deployment mode,
+        # if not is_vertex and providers_cfg:
+        #     google_cfg = getattr(providers_cfg, "google", None)
+        #     if google_cfg and getattr(google_cfg, "deployment_mode", None) == "vertex":
+        #         is_vertex = True
+        # -> "deployment mode" is deprecated, dashboard setting covers the provider directly
+        
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        
+        # logging the decision to use GeminiEmbeddingClient for Google providers, along with the resolved API key (masked) and base URL
+        logger.debug("Using GeminiEmbeddingClient for provider %r (is_vertex=%r), resolved_api_key=%s, resolved_base_url=%r",
+                     embed_provider, is_vertex, "****" if resolved_key else None, base_url)
         client = GeminiEmbeddingClient(
             model=clean_model,
             api_key=resolved_key,

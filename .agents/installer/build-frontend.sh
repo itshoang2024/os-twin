@@ -65,8 +65,8 @@ _install_frontend_deps() {
         return 0
       fi
 
-      if [[ "$output" == *"ERR_PNPM_OUTDATED_LOCKFILE"* ]] && ! _frontend_ci_mode; then
-        warn "pnpm lockfile is out of date; retrying with --no-frozen-lockfile"
+      if [[ ( "$output" == *"ERR_PNPM_OUTDATED_LOCKFILE"* || "$output" == *"ERR_PNPM_LOCKFILE_CONFIG_MISMATCH"* ) ]] && ! _frontend_ci_mode; then
+        warn "pnpm lockfile/config is out of date; retrying with --no-frozen-lockfile"
         pnpm install --no-frozen-lockfile
         return $?
       fi
@@ -128,14 +128,40 @@ build_frontend() {
     return
   fi
 
+  local lock_dir="$fe_dir/.next-build.lock"
+  local waited=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    local lock_pid=""
+    [[ -f "$lock_dir/pid" ]] && lock_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      rm -rf "$lock_dir"
+      continue
+    fi
+    if (( waited == 0 )); then
+      warn "$label build is already running; waiting for .next build lock"
+    fi
+    if (( waited >= 900 )); then
+      warn "Timed out waiting for $label build lock at $lock_dir"
+      [[ "$required" == "true" || "$required" == "required" || "$required" == "--required" ]] && return 1
+      return 0
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  printf '%s\n' "$$" > "$lock_dir/pid" 2>/dev/null || true
+
+  local status=0
   step "Building $label ($pm) at $fe_dir..."
-  if (
+  (
     set -e
     cd "$fe_dir" || exit
     step "Installing npm dependencies..."
     _install_frontend_deps "$pm"
     "$pm" run build
-  ); then
+  ) || status=$?
+  rm -rf "$lock_dir"
+
+  if [[ "$status" -eq 0 ]]; then
     ok "$label build complete"
   else
     warn "$label build failed"

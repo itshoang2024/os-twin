@@ -19,8 +19,13 @@ from dashboard.api import app
 
 @pytest.fixture
 def client(monkeypatch):
-    """TestClient with auth overridden."""
-    monkeypatch.setattr("dashboard.auth._API_KEY", "test-key")
+    """TestClient with auth overridden.
+
+    ``dashboard.auth`` now reads ``OSTWIN_API_KEY`` from ``os.environ`` at
+    request time (see ``_get_api_key``), so we override the env var rather
+    than a module-level constant.
+    """
+    monkeypatch.setenv("OSTWIN_API_KEY", "test-key")
     return TestClient(app)
 
 

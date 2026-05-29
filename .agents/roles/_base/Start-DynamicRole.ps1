@@ -179,7 +179,7 @@ $agentModel = if ($roleDef -and $roleDef.Model) { $roleDef.Model } else { "googl
 $agentInstanceType = if ($roleDef -and $roleDef.InstanceType) { $roleDef.InstanceType } else { "worker" }
 
 # --- Resolve instance-specific config ---
-$instanceWorkingDir = ""
+$instanceWorkingDir = ''
 if ($instanceSuffix -and $config -and $config.$baseRole -and $config.$baseRole.instances.$instanceSuffix) {
     $instanceConfig = $config.$baseRole.instances.$instanceSuffix
     if ($instanceConfig.working_dir) { $instanceWorkingDir = $instanceConfig.working_dir }
@@ -187,6 +187,10 @@ if ($instanceSuffix -and $config -and $config.$baseRole -and $config.$baseRole.i
         $TimeoutSeconds = $instanceConfig.timeout_seconds
     }
     if ($instanceConfig.default_model) { $agentModel = $instanceConfig.default_model }
+}
+# Fallback: read working_dir from room config.json if not resolved from instance config
+if (-not $instanceWorkingDir -and $roomConfig -and $roomConfig.working_dir) {
+    $instanceWorkingDir = $roomConfig.working_dir
 }
 
 # --- Read per-role config file ({role}_{id}.json) ---
@@ -242,13 +246,17 @@ $taskDesc = if (Test-Path (Join-Path $RoomDir "brief.md")) {
     Get-Content (Join-Path $RoomDir "brief.md") -Raw
 } else { "No task description found." }
 
-# --- Parse working directory from brief.md ---
-$workingDir = Get-Location
+# --- Parse working directories from brief.md ---
+$workingDirs = @()
 $briefContent = $taskDesc
-if ($briefContent -match 'working_dir:\s*(.+)') {
-    $workingDir = $Matches[1].Trim()
+if ($briefContent -match '(?s)## Working Directories\s*\n(.*?)(?=\n## |\z)') {
+    $workingDirs = @(($Matches[1].Trim() -split '\n') |
+        ForEach-Object { ($_ -replace '^-\s*', '').Trim() } | Where-Object { $_ })
+}
+elseif ($briefContent -match 'working_dir:\s*(.+)') {
+    $workingDirs = @($Matches[1].Trim())
 } elseif ($briefContent -match '## Working Directory\s*\n(.+)') {
-    $workingDir = $Matches[1].Trim()
+    $workingDirs = @($Matches[1].Trim())
 }
 
 # --- Build system prompt via Build-SystemPrompt.ps1 ---
@@ -401,7 +409,7 @@ $triageSection
 Room: $roomName
 Task Ref: $taskRef
 Role: $baseRole
-Working Directory: $workingDir
+Working Directory: $(if ($workingDirs.Count -gt 0) { $workingDirs -join ', ' } else { Get-Location })
 $predecessorSection
 ## Instructions
 

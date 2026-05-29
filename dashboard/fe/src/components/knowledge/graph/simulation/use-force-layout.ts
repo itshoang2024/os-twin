@@ -19,8 +19,12 @@ export function useForceSimulation(
     if (hasWorker) {
       try {
         const workerUrl = new URL('./simulation.worker.ts', import.meta.url);
-        const worker = new Worker(workerUrl, { type: 'module' });
+        const worker = new Worker(workerUrl);
         workerRef.current = worker;
+
+        worker.onerror = (e) => {
+          console.error('[SIM WORKER ERROR]', e.message);
+        };
 
         worker.onmessage = (e: MessageEvent) => {
           const { type: msgType, isRunning, positions } = e.data;
@@ -51,7 +55,7 @@ export function useForceSimulation(
         workerRef.current = null;
       }
     }
-  }, [options]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!input || input.nodes.length === 0) {

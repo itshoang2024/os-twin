@@ -15,6 +15,55 @@ _START_CHANNELS_SH_LOADED=1
 # ─── install_channels ────────────────────────────────────────────────────────
 # Installs channel connector Node.js dependencies.
 
+_ensure_channel_pnpm_build_approvals() {
+  local chan_dir="$1"
+  local workspace="$chan_dir/pnpm-workspace.yaml"
+
+  if [[ ! -f "$workspace" ]]; then
+    cat > "$workspace" <<'YAML'
+allowBuilds:
+  '@discordjs/opus': true
+  esbuild: true
+YAML
+    return
+  fi
+
+  if ! grep -qE '^[[:space:]]*allowBuilds:' "$workspace"; then
+    cat >> "$workspace" <<'YAML'
+
+allowBuilds:
+  '@discordjs/opus': true
+  esbuild: true
+YAML
+    return
+  fi
+
+  _set_pnpm_allow_build "$workspace" "^[[:space:]]*'?@discordjs/opus'?[[:space:]]*:" "  '@discordjs/opus': true"
+  _set_pnpm_allow_build "$workspace" "^[[:space:]]*esbuild[[:space:]]*:" "  esbuild: true"
+}
+
+_set_pnpm_allow_build() {
+  local workspace="$1"
+  local key_regex="$2"
+  local line="$3"
+  local tmp="${workspace}.tmp.$$"
+
+  if grep -qE "$key_regex" "$workspace"; then
+    awk -v key_regex="$key_regex" -v line="$line" '
+      $0 ~ key_regex { print line; next }
+      { print }
+    ' "$workspace" > "$tmp" && mv "$tmp" "$workspace"
+  else
+    awk -v line="$line" '
+      { print }
+      !inserted && $0 ~ /^[[:space:]]*allowBuilds:/ {
+        print line
+        inserted = 1
+      }
+    ' "$workspace" > "$tmp" && mv "$tmp" "$workspace"
+  fi
+}
+
 install_channels() {
   # Install in ~/.ostwin/bot/ (primary) and source repo (for development)
   local bot_dirs=()
@@ -55,6 +104,7 @@ install_channels() {
     local start_time
     start_time=$(get_now)
     step "Installing channel dependencies in $CHAN_DIR with pnpm..."
+    _ensure_channel_pnpm_build_approvals "$CHAN_DIR"
     # shellcheck disable=SC2015
     (cd "$CHAN_DIR" && pnpm install) \
       && ok_time "Channel dependencies installed" "$(print_duration "$start_time")" \

@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import api from '../src/api';
 import { askAgent, type AgentResponse } from '../src/agent-bridge';
-import { getSession, clearSession } from '../src/sessions';
+import { getSession, clearSession, setMode, setPlan } from '../src/sessions';
 import { type AttachmentMeta } from '../src/connectors/base';
 
 function mockResponse(text: string, overrides?: Record<string, unknown>) {
@@ -86,6 +86,57 @@ describe('agent-bridge', () => {
       const result = await askAgent('test question', { userId: 'u1', platform: 'discord' });
 
       expect(result.text).to.include('OpenCode chat error');
+    });
+
+    it('does not inject active plan edit context while session is idle', async () => {
+      clearSession('idle-plan-u1', 'telegram');
+      setPlan('idle-plan-u1', 'telegram', 'old-plan');
+      const askOpenCodeStub = sandbox.stub(api, 'askOpenCode').resolves(mockResponse('ok'));
+
+      await askAgent('Make me a note-taking app', { userId: 'idle-plan-u1', platform: 'telegram' });
+
+      const sentMessage = askOpenCodeStub.firstCall.args[0].message;
+      expect(sentMessage).to.equal('Make me a note-taking app');
+      clearSession('idle-plan-u1', 'telegram');
+    });
+
+    it('injects active plan edit context only in editing mode', async () => {
+      clearSession('edit-plan-u1', 'telegram');
+      setPlan('edit-plan-u1', 'telegram', 'old-plan');
+      setMode('edit-plan-u1', 'telegram', 'editing');
+      const askOpenCodeStub = sandbox.stub(api, 'askOpenCode').resolves(mockResponse('ok'));
+
+      await askAgent('Add dark mode', { userId: 'edit-plan-u1', platform: 'telegram' });
+
+      const sentMessage = askOpenCodeStub.firstCall.args[0].message;
+      expect(sentMessage).to.include('User is editing plan old-plan');
+      expect(sentMessage).to.include('Add dark mode');
+      clearSession('edit-plan-u1', 'telegram');
+    });
+  });
+
+  describe('awaiting draft idea flow', () => {
+    it('routes the next free-text message through /draft with a fresh conversation', async () => {
+      clearSession('draft-u1', 'telegram');
+      setPlan('draft-u1', 'telegram', 'old-plan');
+      setMode('draft-u1', 'telegram', 'awaiting_idea');
+      const askOpenCodeStub = sandbox.stub(api, 'askOpenCode');
+      const askCommandStub = sandbox.stub(api, 'askOpenCodeCommand').resolves(mockResponse('Plan created', {
+        actions: [{ type: 'plan_created', plan_id: 'new-plan' }],
+      }));
+
+      const result = await askAgent('build a notes app', { userId: 'draft-u1', platform: 'telegram' });
+      const request = askCommandStub.firstCall.args[0];
+      const session = getSession('draft-u1', 'telegram');
+
+      expect(result.text).to.equal('Plan created');
+      expect(askOpenCodeStub.called).to.be.false;
+      expect(request.command).to.equal('draft');
+      expect(request.arguments).to.equal('build a notes app');
+      expect(request.conversation_id).to.match(/^connector:telegram:draft-u1:draft:/);
+      expect(session.mode).to.equal('idle');
+      expect(session.activePlanId).to.equal('new-plan');
+      clearSession('draft-u1', 'telegram');
     });
   });
 

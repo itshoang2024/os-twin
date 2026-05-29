@@ -9,7 +9,16 @@
 
 import api, { PlanAsset, ClawhubSkill, RoleInfo } from './api';
 import { registry } from './connectors/registry';
-import { getSession, clearSession, clearChatHistory, setPlan, setWorkingDir } from './sessions';
+import { connectorConversationId, draftConversationId } from './conversation-ids';
+import {
+  getSession,
+  clearSession,
+  clearActivePlan,
+  clearConversationState,
+  setMode,
+  setPlan,
+  setWorkingDir,
+} from './sessions';
 import { SlashCommandBuilder } from 'discord.js';
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -810,8 +819,9 @@ async function cmdViewPlan(planId: string): Promise<BotResponse> {
 
 async function cmdStartEditing(userId: string, platform: string, planId: string): Promise<BotResponse> {
   setPlan(userId, platform, planId);
+  setMode(userId, platform, 'editing');
 
-  const convId = `connector:${platform}:${userId}`;
+  const convId = connectorConversationId(platform, userId);
   const result = await api.askOpenCodeCommand({
     command: 'edit',
     arguments: planId,
@@ -1061,9 +1071,8 @@ async function _routeCommandInner(userId: string, platform: string, command: str
       clearSession(userId, platform);
       return [text('🛑 Session cleared. Active plan deselected.')];
     case 'clear': {
-      const session = getSession(userId, platform);
-      session.pendingContext = [];
-      const convId = `connector:${platform}:${userId}`;
+      clearConversationState(userId, platform);
+      const convId = connectorConversationId(platform, userId);
       api.endConversation(convId).catch(err => console.warn('[CLEAR] Failed to end OpenCode session:', err));
       return [text('🧹 Conversation history cleared. The AI will start fresh.')];
     }
@@ -1084,13 +1093,16 @@ async function _routeCommandInner(userId: string, platform: string, command: str
     case 'draft': {
       const idea = args.trim();
       if (!idea) {
-        return [text('✨ Usage: `/draft <your idea>`\nExample: `/draft build a todo app with authentication`\n\nOr just `@os-twin build me a todo app` — the AI will handle it.')];
+        clearActivePlan(userId, platform);
+        setMode(userId, platform, 'awaiting_idea');
+        return [text('✨ Send me the idea for the new plan.\nExample: `build a todo app with authentication`\n\nUse /cancel to stop drafting.')];
       }
+      clearActivePlan(userId, platform);
       // Run /draft as a real OpenCode slash command. The server resolves
       // .opencode/commands/draft.md (with $ARGUMENTS = idea) and invokes
       // the ostwin agent, which calls ostwin_create_plan. No fabricated
       // user message is injected into the session history.
-      const convId = `connector:${platform}:${userId}`;
+      const convId = draftConversationId(platform, userId);
       const result = await api.askOpenCodeCommand({
         command: 'draft',
         arguments: idea,

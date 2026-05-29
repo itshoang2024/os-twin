@@ -1,37 +1,30 @@
 {
   "_comment": "Default configuration for the Agentic Memory system. All values can be overridden by environment variables prefixed with MEMORY_.",
-
   "llm": {
     "backend": "openai-compatible",
-    "model": "google-vertex/gemini-3-flash-preview"
+    "model": "gemini-3-flash-preview"
   },
-
   "embedding": {
     "backend": "gemini",
     "model": "gemini-embedding-001"
   },
-
   "vector": {
     "backend": "zvec"
   },
-
   "search": {
     "similarity_weight": 0.8,
     "decay_half_life_days": 30.0
   },
-
   "evolution": {
     "max_links": 3,
     "context_aware": true,
     "context_aware_tree": false
   },
-
   "sync": {
     "auto_sync": true,
     "auto_sync_interval": 60,
     "conflict_resolution": "last_modified"
   },
-
   "disabled_tools": [
     "read_memory",
     "update_memory",
@@ -43,7 +36,6 @@
     "sync_to_disk",
     "graph_snapshot"
   ],
-
   "pool": {
     "_comment": "HTTP memory pool config (Plan 007). Only used when mounted in the dashboard.",
     "idle_timeout_s": 300,

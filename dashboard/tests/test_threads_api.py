@@ -60,30 +60,80 @@ def test_promote_thread_not_found(client):
     response = client.post("/api/plans/threads/pt-invalid/promote", json={})
     assert response.status_code == 404
 
-@patch("dashboard.routes.threads.refine_plan", new_callable=AsyncMock)
-def test_promote_thread(mock_refine_plan, client):
-    mock_refine_plan.return_value = {
-        "plan": "# Plan: Build a todo app\n\n## Goal\n..."
+@patch("dashboard.routes.threads.synthesize_plan_from_thread", new_callable=AsyncMock)
+def test_promote_thread(mock_synth, client):
+    mock_synth.return_value = {
+        "plan_id": "plan_abc",
+        "url": "/plans/plan_abc",
+        "title": "Todo App",
+        "working_dir": "/tmp/proj",
+        "filename": "plan_abc.md",
+        "epic_count": 4,
+        "worker_summary": "Drafted four epics.",
+        "child_session_id": "ses_1",
     }
-    
+
     res = client.post("/api/plans/threads", json={"message": "Build a todo app"})
     thread_id = res.json()["thread_id"]
-    
+
     response = client.post(f"/api/plans/threads/{thread_id}/promote", json={"title": "Todo App"})
     assert response.status_code == 200
     data = response.json()
-    assert "plan_id" in data
+    assert data["plan_id"] == "plan_abc"
     assert "url" in data
-    
+
     # Check thread status
     t_res = client.get(f"/api/plans/threads/{thread_id}")
     t_data = t_res.json()["thread"]
     assert t_data["status"] == "promoted"
     assert t_data["plan_id"] == data["plan_id"]
-    
+
     # Try to promote again
     res2 = client.post(f"/api/plans/threads/{thread_id}/promote", json={"title": "Todo App"})
     assert res2.status_code == 400
+
+
+@patch("dashboard.plan_agent.refine_plan", new_callable=AsyncMock)
+@patch("dashboard.routes.plans.create_plan_on_disk")
+@patch("dashboard.routes.threads.synthesize_plan_from_thread", new_callable=AsyncMock)
+def test_promote_thread_creates_only_one_plan(mock_synth, mock_create_on_disk, mock_refine, client):
+    """Regression: promote must not also call refine_plan + create_plan_on_disk
+    (the old code path that produced a duplicate empty plan)."""
+    mock_synth.return_value = {
+        "plan_id": "plan_single",
+        "url": "/plans/plan_single",
+        "title": "Todo App",
+        "working_dir": "/tmp/proj",
+        "filename": "plan_single.md",
+        "epic_count": 3,
+        "worker_summary": "ok",
+        "child_session_id": "ses_x",
+    }
+
+    res = client.post("/api/plans/threads", json={"message": "Build a todo app"})
+    thread_id = res.json()["thread_id"]
+    response = client.post(f"/api/plans/threads/{thread_id}/promote", json={"title": "Todo App"})
+
+    assert response.status_code == 200
+    mock_synth.assert_awaited_once()
+    # The legacy duplicate-plan entry points must NOT be reached from promote_thread.
+    assert mock_refine.await_count == 0, "refine_plan should not be called during promote"
+    mock_create_on_disk.assert_not_called()
+
+
+@patch("dashboard.routes.threads.synthesize_plan_from_thread", new_callable=AsyncMock)
+def test_promote_thread_surfaces_synth_failure(mock_synth, client):
+    mock_synth.side_effect = RuntimeError("worker produced no epics")
+
+    res = client.post("/api/plans/threads", json={"message": "Build a todo app"})
+    thread_id = res.json()["thread_id"]
+    response = client.post(f"/api/plans/threads/{thread_id}/promote", json={"title": "Todo App"})
+
+    assert response.status_code == 500
+    assert "worker produced no epics" in response.json()["detail"]
+    # Thread must remain un-promoted so the user can retry.
+    t_res = client.get(f"/api/plans/threads/{thread_id}")
+    assert t_res.json()["thread"]["status"] != "promoted"
 
 @patch("dashboard.routes.threads.brainstorm_stream")
 def test_stream_thread_message(mock_stream, client):

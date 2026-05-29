@@ -54,6 +54,61 @@ function Write-Fail  { param([string]$Msg) Write-Host "    [FAIL] $Msg" }
 function Write-Info  { param([string]$Msg) Write-Host "    $Msg" }
 function Write-Step  { param([string]$Msg) Write-Host "  -> $Msg" }
 
+function Remove-OstwinManagedLegacyOpencodeMcp {
+    param([string]$HomeDir)
+
+    if (-not $HomeDir) { return }
+
+    $legacyOpencodeFile = Join-Path (Join-Path $HomeDir ".opencode") "opencode.json"
+    if (-not (Test-Path $legacyOpencodeFile)) { return }
+
+    $managedServerNames = @(
+        "channel",
+        "warroom",
+        "memory",
+        "knowledge",
+        "obscura-browser",
+        "playwright",
+        "chrome-devtools",
+        "chrom-devtools"
+    )
+
+    try {
+        $legacyJson = Get-Content $legacyOpencodeFile -Raw | ConvertFrom-Json -AsHashtable
+        $removed = @()
+
+        foreach ($mcpKey in @("mcp", "mcpServers")) {
+            if (-not $legacyJson.ContainsKey($mcpKey)) { continue }
+            $mcpBlock = $legacyJson[$mcpKey]
+            if (-not ($mcpBlock -is [System.Collections.IDictionary])) { continue }
+
+            foreach ($serverName in $managedServerNames) {
+                if ($mcpBlock.Contains($serverName)) {
+                    $mcpBlock.Remove($serverName)
+                    $removed += "$mcpKey.$serverName"
+                }
+            }
+
+            if ($mcpBlock.Count -eq 0) {
+                $legacyJson.Remove($mcpKey)
+            }
+        }
+
+        if ($removed.Count -eq 0) { return }
+
+        $backupFile = "$legacyOpencodeFile.ostwin.bak"
+        if (-not (Test-Path $backupFile)) {
+            Copy-Item -Path $legacyOpencodeFile -Destination $backupFile -Force
+        }
+
+        $legacyJson | ConvertTo-Json -Depth 20 | Set-Content -Path $legacyOpencodeFile -Encoding UTF8
+        Write-Ok "Removed legacy ~/.opencode MCP overrides ($($removed -join ', '))"
+    }
+    catch {
+        Write-Warn "Could not clean legacy ~/.opencode/opencode.json MCP overrides: $_"
+    }
+}
+
 function Invoke-Ask {
     param([string]$Prompt)
     if ($Yes) { return $true }
@@ -241,6 +296,22 @@ if (Test-Path $ResolveScript) {
     }
 }
 
+# ─── Sync project role definitions to OpenCode agents directory ──────────────
+# Ensures that roles defined in .agents/roles/ and contributes/roles/ are
+# available as named agents for `opencode run --agent <role>`.
+# This runs on every init so contributed roles (e.g. security-specialist) are
+# always present even on a clean machine that hasn't run the full installer.
+
+$SyncAgentsScript = Join-Path $ScriptDir "plan" "Sync-ContributedAgents.ps1"
+if (Test-Path $SyncAgentsScript) {
+    Write-Step "Syncing role definitions to OpenCode agents..."
+    try {
+        & $SyncAgentsScript -ProjectDir $TargetDir
+    } catch {
+        Write-Warn "Agent sync returned non-zero (non-critical): $_"
+    }
+}
+
 # ─── Clone global opencode.json to project .opencode/ ────────────────────────
 # Ensures agents running in the project context (via Invoke-Agent.ps1) have the
 # full config: MCP servers, agent permissions, tools blocks, provider definitions.
@@ -302,6 +373,8 @@ elseif (-not (Test-Path $ProjectOpencodeFile)) {
     # Neither global nor project file exists — leave empty (compile may have failed)
     Write-Warn "No global or project opencode.json found"
 }
+
+Remove-OstwinManagedLegacyOpencodeMcp -HomeDir $HomeDir
 
 # ─── Bind plan_id to memory MCP URL ──────────────────────────────────────────
 # When -PlanId is provided, patch the memory-pool URL in .opencode/opencode.json

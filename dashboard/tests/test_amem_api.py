@@ -432,6 +432,54 @@ class TestPlanResolution:
         resp = client.get("/api/amem/this-plan-does-not-exist/graph")
         assert resp.status_code == 404
 
+    def test_resolve_memory_dir_accepts_memory_prefixed_plan_id(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        current = memory_base / "memory-4ae61a301661"
+        current.mkdir(parents=True)
+
+        assert amem._resolve_memory_dir("memory-4ae61a301661") == current
+
+    def test_resolve_memory_dir_prefers_current_over_legacy(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        legacy = memory_base / "4ae61a301661"
+        current = memory_base / "memory-4ae61a301661"
+        legacy.mkdir(parents=True)
+        current.mkdir(parents=True)
+
+        assert amem._resolve_memory_dir("4ae61a301661") == current
+
+    def test_resolve_memory_dir_falls_back_to_working_dir_memory(
+        self, tmp_path, monkeypatch
+    ):
+        from dashboard.routes import amem
+
+        memory_base = tmp_path / "memory"
+        plans_dir = tmp_path / "plans"
+        working_dir = tmp_path / "project"
+        project_memory = working_dir / ".memory"
+        memory_base.mkdir()
+        plans_dir.mkdir()
+        project_memory.mkdir(parents=True)
+        plan_id = "4ae61a301661"
+        (plans_dir / f"{plan_id}.meta.json").write_text(
+            json.dumps({"working_dir": str(working_dir)}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(amem, "MEMORY_BASE_DIR", memory_base)
+        monkeypatch.setattr(amem, "PLANS_DIR", plans_dir)
+
+        assert amem._resolve_memory_dir(plan_id) == project_memory.resolve()
+
 
 # ── Note parsing edge cases ──────────────────────────────────────────
 
@@ -511,3 +559,138 @@ class TestNoteParsing:
         data = client.get(f"/api/amem/{plan_id}/notes").json()
         assert len(data) == 1
         assert data[0]["path"] == "a/b/c"
+
+
+# ── Merkle tree endpoint ─────────────────────────────────────────────
+
+
+class TestMerkleEndpoint:
+    """Tests for ``GET /api/amem/{plan_id}/merkle``."""
+
+    def test_merkle_returns_404_when_no_manifest(self, memory_workspace):
+        """Should return 404 when no merkle_manifest.json exists."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+        resp = client.get(f"/api/amem/{plan_id}/merkle")
+        assert resp.status_code == 404
+        assert "No Merkle manifest" in resp.json()["detail"]
+
+    def test_merkle_returns_correct_shape(self, memory_workspace):
+        """Should return a properly transformed d3-hierarchy shape."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "aaaa1111bbbb2222",
+            "generated_at": "20260518150000",
+            "note_count": 2,
+            "vectordb_root_hash": "cccc3333dddd4444",
+            "tree": {
+                "_hash": "aaaa1111bbbb2222",
+                "devops": {
+                    "_hash": "eeee5555ffff6666",
+                    "pod-basics.md": "1111aaaa2222bbbb",
+                },
+                "unfiled-note.md": "9999xxxx0000yyyy",
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        resp = client.get(f"/api/amem/{plan_id}/merkle")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["root_hash"] == "aaaa1111bbbb2222"
+        assert data["note_count"] == 2
+        assert data["generated_at"] == "20260518150000"
+        assert data["vectordb_root_hash"] == "cccc3333dddd4444"
+
+        tree = data["tree"]
+        assert tree["name"] == "(root)"
+        assert tree["type"] == "dir"
+        assert tree["hash"] == "aaaa1111bbbb2222"
+
+    def test_merkle_tree_has_correct_children(self, memory_workspace):
+        """Should correctly transform directories and leaves."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "root_hash_value!",
+            "generated_at": "20260518160000",
+            "note_count": 3,
+            "vectordb_root_hash": "",
+            "tree": {
+                "_hash": "root_hash_value!",
+                "alpha": {
+                    "_hash": "alpha_hash_val!!",
+                    "note-a.md": "leaf_hash_a_val!",
+                    "note-b.md": "leaf_hash_b_val!",
+                },
+                "standalone.md": "standalone_hash!",
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        data = client.get(f"/api/amem/{plan_id}/merkle").json()
+        tree = data["tree"]
+
+        # Root should have 2 children: "alpha" dir and "standalone.md" leaf
+        children = tree["children"]
+        assert len(children) == 2
+
+        # Children are sorted by name
+        assert children[0]["name"] == "alpha"
+        assert children[0]["type"] == "dir"
+        assert children[0]["hash"] == "alpha_hash_val!!"
+        assert len(children[0]["children"]) == 2
+
+        assert children[1]["name"] == "standalone.md"
+        assert children[1]["type"] == "leaf"
+        assert children[1]["hash"] == "standalone_hash!"
+        assert len(children[1]["children"]) == 0
+
+    def test_merkle_leaves_have_correct_type(self, memory_workspace):
+        """All .md keys should become type=leaf, dict keys should become type=dir."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "r",
+            "generated_at": "20260518170000",
+            "note_count": 1,
+            "tree": {
+                "_hash": "r",
+                "deep": {
+                    "_hash": "d1",
+                    "nested": {
+                        "_hash": "d2",
+                        "leaf.md": "lh",
+                    },
+                },
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        data = client.get(f"/api/amem/{plan_id}/merkle").json()
+        # Navigate: root -> deep -> nested -> leaf.md
+        deep = data["tree"]["children"][0]
+        assert deep["type"] == "dir"
+        nested = deep["children"][0]
+        assert nested["type"] == "dir"
+        leaf = nested["children"][0]
+        assert leaf["type"] == "leaf"
+        assert leaf["name"] == "leaf.md"
+        assert leaf["hash"] == "lh"
+
+    def test_merkle_nonexistent_plan_returns_404(self, memory_workspace):
+        """A plan_id with no memory dir should return 404."""
+        client = TestClient(app)
+        resp = client.get("/api/amem/nonexistent-plan/merkle")
+        assert resp.status_code == 404

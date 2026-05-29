@@ -15,7 +15,8 @@
  */
 
 import api from './api';
-import { getSession, setPlan, clearSession, clearChatHistory, getStagedImages } from './sessions';
+import { connectorConversationId, draftConversationId } from './conversation-ids';
+import { getSession, setMode, setPlan, clearActivePlan, getStagedImages } from './sessions';
 import { type AttachmentMeta } from './connectors/base';
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -70,12 +71,49 @@ export async function askAgent(
   const agentCtx: AgentContext = ctx || { userId: 'unknown', platform: 'unknown' };
   const session = getSession(agentCtx.userId, agentCtx.platform);
 
-  const convId = `connector:${agentCtx.platform}:${agentCtx.userId}`;
+  const convId = connectorConversationId(agentCtx.platform, agentCtx.userId);
+
+  if (session.mode === 'awaiting_idea') {
+    const idea = question.trim();
+    if (!idea) {
+      return { text: 'Send me the idea for the new plan, or use /cancel to stop drafting.' };
+    }
+
+    clearActivePlan(agentCtx.userId, agentCtx.platform);
+    setMode(agentCtx.userId, agentCtx.platform, 'idle');
+
+    try {
+      const result = await api.askOpenCodeCommand({
+        command: 'draft',
+        arguments: idea,
+        conversation_id: draftConversationId(agentCtx.platform, agentCtx.userId),
+        user_id: agentCtx.userId,
+        platform: agentCtx.platform,
+      });
+
+      if ((result as any)._error) {
+        return { text: `⚠️ OpenCode command error: ${(result as any)._error}` };
+      }
+
+      for (const action of result.actions || []) {
+        if (action.type === 'plan_created' && action.plan_id) {
+          setPlan(agentCtx.userId, agentCtx.platform, action.plan_id);
+        }
+      }
+
+      return { text: result.text || 'No response.' };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[BRIDGE] OpenCode draft command error:', message);
+      return { text: '⚠️ Failed to draft a new plan.' };
+    }
+  }
 
   // Fast-path: skip API call for trivial messages when no active plan
   const hasAttachments = agentCtx.attachments && agentCtx.attachments.length > 0;
-  const hasActivePlan = session.activePlanId && session.activePlanId !== 'new';
-  if (!hasAttachments && !hasActivePlan) {
+  const hasActivePlan = !!(session.activePlanId && session.activePlanId !== 'new');
+  const isEditingPlan = session.mode === 'editing' && hasActivePlan;
+  if (!hasAttachments && !isEditingPlan) {
     const trivialType = detectTrivial(question);
     if (trivialType) {
       const responses = TRIVIAL_RESPONSES[trivialType] || ['Got it.'];
@@ -95,7 +133,7 @@ export async function askAgent(
   }
 
   // Inject active plan context so the OpenCode agent knows which plan to refine
-  if (hasActivePlan) {
+  if (isEditingPlan) {
     message = `[Context: User is editing plan ${session.activePlanId}. Use ostwin_refine_plan with plan_id="${session.activePlanId}" for any modifications.]\n\n${message}`;
   }
 

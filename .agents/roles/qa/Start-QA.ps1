@@ -90,6 +90,16 @@ else { "UNKNOWN" }
 
 $roomName = Split-Path $RoomDir -Leaf
 
+# --- Resolve working_dir from room config.json ---
+$instanceWorkingDir = ''
+$roomConfigFile = Join-Path $RoomDir "config.json"
+if (Test-Path $roomConfigFile) {
+    $roomConfig = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
+    if ($roomConfig.working_dir) {
+        $instanceWorkingDir = $roomConfig.working_dir
+    }
+}
+
 # --- Debug: show resolved config ---
 $qaModel = if ($qaConfigs) {
     $qaRoleConfig = Get-Content $qaConfigs[0].FullName -Raw | ConvertFrom-Json
@@ -117,6 +127,7 @@ $contextContent = @"
 ## Assignment
 - Task: $taskRef
 - Room: $roomName
+- Working Directory: $(if ($instanceWorkingDir) { $instanceWorkingDir } else { 'project root' })
 - Started: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
 "@
 $contextContent | Out-File -FilePath $contextFile -Encoding utf8 -Force
@@ -268,6 +279,7 @@ else {
 # --- Run the agent ---
 Write-Host "[QA] Invoking agent: qa, room=$roomName, timeout=${TimeoutSeconds}s"
 $result = & $invokeAgent -RoomDir $RoomDir -RoleName "qa" `
+    -WorkingDir $instanceWorkingDir `
     -Prompt $prompt -TimeoutSeconds $TimeoutSeconds
 Write-Host "[QA] Agent returned: exitCode=$($result.ExitCode), timedOut=$($result.TimedOut), outputLen=$($result.Output.Length)"
 

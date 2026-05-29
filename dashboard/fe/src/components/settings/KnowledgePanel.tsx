@@ -319,6 +319,12 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
     [allModels],
   );
 
+  // Filter to only embedding models for the embedding picker
+  const embedModels = useMemo(
+    () => allModels.filter((m) => m.id.toLowerCase().includes('embed')),
+    [allModels],
+  );
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const flashSavedMessage = (_msg: string, _isError = false, _ttl = 1800) => {
   };
@@ -693,8 +699,8 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
               </div>
             )}
 
-            {/* Model picker from configured providers */}
-            {draft.knowledge_embedding_backend === 'openai-compatible' && allModels.length > 0 && (
+            {/* Model picker from configured providers (embedding models only) */}
+            {draft.knowledge_embedding_backend === 'openai-compatible' && embedModels.length > 0 && (
               <div className="mt-3">
                 <label className="text-[9px] text-slate-500 mb-2 block">
                   Pick from configured providers:
@@ -702,7 +708,7 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
                 <ModelSelect
                   value={draft.knowledge_embedding_model || ''}
                   onChange={(m) => handleEmbedModelSelect(m)}
-                  models={allModels}
+                  models={embedModels}
                   showTier={true}
                   showContext={false}
                   placeholder="— Select from providers —"

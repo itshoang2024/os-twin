@@ -16,7 +16,7 @@ Each war-room works independently, but their code must work **together**. This s
 When multiple rooms consume or produce the same data type, compare field names, types, and optionality across rooms. Flag any divergence.
 
 **How to check:**
-1. `search_memory(query="User model interface schema")` — find all rooms' implementations
+1. `memory_search(query="User model interface schema")` — find all rooms' implementations
 2. Build a comparison table of fields across rooms
 3. Flag mismatches in types, naming, or optionality
 

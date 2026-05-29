@@ -224,6 +224,26 @@ export function clearChatHistory(userId: string | number, platform = 'telegram')
   _schedulePersist();
 }
 
+export function clearActivePlan(userId: string | number, platform = 'telegram'): void {
+  const session = getSession(userId, platform);
+  session.activePlanId = null;
+  session.activeEpicRef = undefined;
+  session.mode = 'idle';
+  session.lastActivity = Date.now();
+  _schedulePersist();
+}
+
+export function clearConversationState(userId: string | number, platform = 'telegram'): void {
+  const session = getSession(userId, platform);
+  session.activePlanId = null;
+  session.activeEpicRef = undefined;
+  session.mode = 'idle';
+  session.chatHistory = [];
+  session.pendingContext = [];
+  session.lastActivity = Date.now();
+  _schedulePersist();
+}
+
 export function setMode(userId: string | number, platform: string, mode: SessionMode): void {
   const session = getSession(userId, platform);
   session.mode = mode;

@@ -27,14 +27,13 @@
         "Authorization": "Bearer {env:OSTWIN_API_KEY}"
       }
     },
-    "obscura-browser": {
+    "chrome-devtools": {
       "type": "local",
       "command": [
-        "{env:OSTWIN_PYTHON}",
-        "{env:AGENT_DIR}/mcp/obscura-browser-server.py"
+        "obscura",
+        "mcp"
       ],
       "environment": {
-        "AGENT_OS_ROOT": ".",
         "PATH": "{env:PATH}"
       }
     },

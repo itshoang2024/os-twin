@@ -1,0 +1,35 @@
+{
+  "name": "security-specialist",
+  "description": "Security Specialist - evaluator for threat models, secure code review, OWASP Top 10 validation, dependency vulnerability management, security architecture, and compliance mapping",
+  "instance_type": "evaluator",
+  "capabilities": [
+    "security",
+    "threat-modeling",
+    "secure-code-review",
+    "dependency-vulnerability",
+    "security-architecture",
+    "compliance-mapping"
+  ],
+  "prompt_file": "ROLE.md",
+  "quality_gates": [
+    "threat-model-complete",
+    "owasp-a1-a10-reviewed",
+    "source-to-sink-traced",
+    "security-metrics-considered",
+    "vulnerabilities-triaged",
+    "compliance-mapped",
+    "no-critical-findings"
+  ],
+  "skill_refs": [
+    "threat-modeling",
+    "secure-code-review",
+    "dependency-vulnerability",
+    "security-architecture",
+    "compliance-mapping",
+    "brain-ops",
+    "war-room-communication"
+  ],
+  "cli": "agent",
+  "model": "google-vertex/zai-org/glm-5-maas",
+  "timeout": 3600
+}

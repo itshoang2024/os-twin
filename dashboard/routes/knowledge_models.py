@@ -442,6 +442,183 @@ class QueryResultResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Web Research Models
+# ---------------------------------------------------------------------------
+
+
+class ResearchRequest(BaseModel):
+    """Request body for POST /api/knowledge/namespaces/{namespace}/research."""
+
+    query: str = Field(
+        ...,
+        description="Research query or topic",
+        min_length=1,
+        max_length=500,
+        examples=["pixel art animation techniques 2024"],
+    )
+    engines: Optional[list[str]] = Field(
+        default=None,
+        description="SearXNG engines to target (e.g. youtube, github, google)",
+        examples=[["google", "youtube"], ["github"]],
+    )
+    categories: Optional[list[str]] = Field(
+        default=None,
+        description="SearXNG categories (e.g. videos, it, general, science)",
+        examples=[["it", "videos"], ["general"]],
+    )
+    max_results: int = Field(
+        default=10,
+        description="Maximum number of search results to fetch and ingest",
+        ge=1,
+        le=50,
+        examples=[10, 20],
+    )
+    summarize: bool = Field(
+        default=True,
+        description="Generate an LLM summary of findings",
+    )
+    language: str = Field(
+        default="en",
+        description="Search language code",
+        min_length=2,
+        max_length=5,
+        examples=["en", "ja", "de"],
+    )
+
+
+class ResearchSourceResponse(BaseModel):
+    """Per-source outcome in research results."""
+
+    url: str
+    title: str = ""
+    engine: str = ""
+    status: str = ""
+    chunks_added: int = 0
+    error: Optional[str] = None
+
+
+class ResearchResponse(BaseModel):
+    """Response for POST /api/knowledge/namespaces/{namespace}/research."""
+
+    query: str
+    namespace: str
+    engines_used: list[str] = Field(default_factory=list)
+    categories_used: list[str] = Field(default_factory=list)
+    sources: list[ResearchSourceResponse] = Field(default_factory=list)
+    total_chunks_added: int = 0
+    total_entities_added: int = 0
+    total_relations_added: int = 0
+    summary: Optional[str] = None
+    elapsed_seconds: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Web Research — Two-step async models
+# ---------------------------------------------------------------------------
+
+
+class ResearchSearchRequest(BaseModel):
+    """Request body for POST /api/knowledge/namespaces/{namespace}/research/search."""
+
+    query: str = Field(
+        ...,
+        description="Search query",
+        min_length=1,
+        max_length=500,
+        examples=["pixel art animation techniques 2024"],
+    )
+    engines: Optional[list[str]] = Field(
+        default=None,
+        description="SearXNG engines to target",
+        examples=[["google", "youtube"], ["github"]],
+    )
+    categories: Optional[list[str]] = Field(
+        default=None,
+        description="SearXNG categories",
+        examples=[["it", "videos"], ["general"]],
+    )
+    max_results: int = Field(
+        default=10,
+        description="Maximum number of search results to return",
+        ge=1,
+        le=50,
+    )
+    language: str = Field(
+        default="en",
+        description="Search language code",
+        min_length=2,
+        max_length=5,
+    )
+
+
+class SearchResultItemResponse(BaseModel):
+    """A single search result preview from SearXNG."""
+
+    title: str
+    url: str
+    snippet: str = ""
+    engine: str = ""
+    score: float = 0.0
+    thumbnail_url: str = ""
+    metadata: dict = Field(default_factory=dict)
+
+
+class ResearchSearchResponse(BaseModel):
+    """Response for POST /api/knowledge/namespaces/{namespace}/research/search."""
+
+    query: str
+    engines_used: list[str] = Field(default_factory=list)
+    categories_used: list[str] = Field(default_factory=list)
+    results: list[SearchResultItemResponse] = Field(default_factory=list)
+    elapsed_seconds: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ResearchIngestItem(BaseModel):
+    """A single item selected by the user for ingestion."""
+
+    url: str = Field(..., description="URL to fetch and ingest")
+    title: str = Field(default="", description="Title from search result")
+    engine: str = Field(default="", description="Source engine")
+    snippet: str = Field(default="", description="Search snippet for provenance")
+
+
+class ResearchIngestRequest(BaseModel):
+    """Request body for POST /api/knowledge/namespaces/{namespace}/research/ingest."""
+
+    items: list[ResearchIngestItem] = Field(
+        ...,
+        description="Selected search results to fetch and ingest",
+        min_length=1,
+        max_length=50,
+    )
+    query: str = Field(
+        ...,
+        description="Original search query (for provenance metadata)",
+        min_length=1,
+        max_length=500,
+    )
+    summarize: bool = Field(
+        default=True,
+        description="Generate an LLM summary after ingestion",
+    )
+    language: str = Field(
+        default="en",
+        description="Content language",
+        min_length=2,
+        max_length=5,
+    )
+
+
+class ResearchIngestJobResponse(BaseModel):
+    """Response for POST /api/knowledge/namespaces/{namespace}/research/ingest."""
+
+    job_id: str
+    namespace: str
+    status: str = "submitted"
+    message: str = ""
 
 
 __all__ = [
@@ -451,6 +628,10 @@ __all__ = [
     "QueryRequest",
     "RestoreNamespaceRequest",
     "RetentionPolicyRequest",  # EPIC-004
+    "ResearchRequest",
+    "ResearchSearchRequest",
+    "ResearchIngestItem",
+    "ResearchIngestRequest",
     # Responses
     "DeleteNamespaceResponse",
     "ImportFolderResponse",
@@ -468,4 +649,9 @@ __all__ = [
     "QueryResultResponse",
     "RefreshNamespaceResponse",
     "RetentionPolicyResponse",  # EPIC-004
+    "ResearchResponse",
+    "ResearchSourceResponse",
+    "ResearchSearchResponse",
+    "SearchResultItemResponse",
+    "ResearchIngestJobResponse",
 ]

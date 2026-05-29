@@ -1130,3 +1130,4 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -Because "duplicate --continue flags would be a regression"
         }
     }
+}

@@ -165,7 +165,7 @@ Per-epic format:
 Role: <role-name>            (preset name OR any custom role you invent)
 Objective: <mission>         (what this agent must achieve — be specific)
 Skills: <capabilities>       (comma-separated, guides the agent's focus)
-Working_dir: <path>          (scope the agent to a subdirectory)
+Working_dir: <path>            (scope the agent to a specific subdirectory)
 ```
 
 Think: **"What kind of expert would I hire specifically for this epic?"**
@@ -177,7 +177,7 @@ Think: **"What kind of expert would I hire specifically for this epic?"**
 Role: engineer
 Objective: Implement the core functionality with clean, tested code
 Skills: python, javascript, testing
-Working_dir: .
+Working_dir: src/
 
 #### Definition of Done
 - [ ] Core functionality implemented

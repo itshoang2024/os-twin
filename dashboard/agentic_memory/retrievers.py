@@ -650,6 +650,12 @@ class ZvecRetriever:
         enhanced_document = _build_enhanced_document(document, metadata)
         embedding = self.embedding_function([enhanced_document])[0]
 
+        if not embedding:
+            raise ValueError(
+                f"Embedding returned empty vector for doc {doc_id}. "
+                f"Check AI provider auth and model config."
+            )
+
         processed_metadata = self._prepare_zvec_metadata(metadata)
         doc = self._zvec.Doc(
             id=doc_id,

@@ -85,6 +85,42 @@ describe('commands', () => {
     });
   });
 
+  describe('routeCommand — draft', () => {
+    it('sets awaiting_idea mode when /draft has no args', async () => {
+      sessions.setPlan('u1', 'telegram', 'old-plan');
+      sessions.setMode('u1', 'telegram', 'editing');
+
+      const [resp] = await routeCommand('u1', 'telegram', 'draft');
+      const session = sessions.getSession('u1', 'telegram');
+
+      expect(resp.text).to.include('Send me the idea');
+      expect(session.mode).to.equal('awaiting_idea');
+      expect(session.activePlanId).to.equal(null);
+    });
+
+    it('uses a fresh OpenCode conversation for each explicit /draft idea', async () => {
+      const askCommandStub = sandbox.stub(api, 'askOpenCodeCommand').resolves({
+        text: 'Plan created: new-plan',
+        conversation_id: 'ignored',
+        actions: [{ type: 'plan_created', plan_id: 'new-plan' }],
+      });
+      sessions.setPlan('u1', 'telegram', 'old-plan');
+      sessions.setMode('u1', 'telegram', 'editing');
+
+      const [resp] = await routeCommand('u1', 'telegram', 'draft', 'build a note app');
+      const request = askCommandStub.firstCall.args[0];
+      const session = sessions.getSession('u1', 'telegram');
+
+      expect(resp.text).to.include('Plan created');
+      expect(request.command).to.equal('draft');
+      expect(request.arguments).to.equal('build a note app');
+      expect(request.conversation_id).to.match(/^connector:telegram:u1:draft:/);
+      expect(request.conversation_id).to.not.equal('connector:telegram:u1');
+      expect(session.activePlanId).to.equal('new-plan');
+      expect(session.mode).to.equal('idle');
+    });
+  });
+
   describe('cmdUnknown — typo fallback', () => {
     it('suggests the closest registered command for a 1-char typo', () => {
       // /drafft → /draft (edit distance 1)
@@ -601,13 +637,6 @@ describe('commands', () => {
     });
   });
 
-  describe('routeCommand — draft', () => {
-    it('returns usage text when no idea provided', async () => {
-      const [resp] = await routeCommand('u1', 'telegram', 'draft', '');
-      expect(resp.text).to.include('Usage');
-    });
-  });
-
   // ── Cross-platform ────────────────────────────────────────────
 
   describe('cross-platform', () => {
@@ -675,9 +704,16 @@ describe('commands', () => {
     });
 
     it('menu:edit:p1 sets active plan', async () => {
+      sandbox.stub(api, 'askOpenCodeCommand').resolves({
+        text: 'Editing plan p1',
+        conversation_id: 'ignored',
+        actions: [],
+      });
+
       const [resp] = await routeCallback('u1', 'telegram', 'menu:edit:p1');
-      expect(resp.text).to.include('Active plan set');
+      expect(resp.text).to.include('Editing plan');
       expect(sessions.getSession('u1', 'telegram').activePlanId).to.equal('p1');
+      expect(sessions.getSession('u1', 'telegram').mode).to.equal('editing');
     });
 
     it('menu:launch_prompt:p1 shows confirmation', async () => {

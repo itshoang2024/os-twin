@@ -27,7 +27,7 @@ const ToastItem = ({ toast }: { toast: ToastMessage }) => {
       initial={{ opacity: 0, y: 50, scale: 0.9 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-      className={`relative w-80 p-4 rounded-xl border-l-4 shadow-lg ${TOAST_COLORS[toast.type]} bg-white dark:bg-slate-900 flex gap-3 overflow-hidden group`}
+      className={`pointer-events-auto relative w-80 p-4 rounded-xl border-l-4 shadow-lg ${TOAST_COLORS[toast.type]} bg-white dark:bg-slate-900 flex gap-3 overflow-hidden group`}
     >
       <div className="flex-shrink-0">
         <span className="material-symbols-outlined text-xl">
@@ -66,7 +66,7 @@ export const ToastNotification = () => {
   const { toasts } = useNotificationStore();
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col-reverse gap-3 pointer-events-none">
+    <div className="fixed top-16 right-6 z-[100] flex flex-col gap-3 pointer-events-none">
       <AnimatePresence mode="popLayout">
         {toasts.map((toast) => (
           <div key={toast.id} className="pointer-events-auto">

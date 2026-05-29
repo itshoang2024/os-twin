@@ -115,14 +115,14 @@ else
   install_opencode
 fi
 
-# --- Obscura browser (backs built-in obscura-browser MCP) ---
-OBSCURA_PATH=$(check_obscura 2>/dev/null || true)
-if [[ -n "$OBSCURA_PATH" ]]; then
-  ok "obscura ($OBSCURA_PATH)"
+# --- Chrome DevTools browser runtime ---
+CHROME_DEVTOOLS_PATH=$(check_chrome_devtools 2>/dev/null || true)
+if [[ -n "$CHROME_DEVTOOLS_PATH" ]]; then
+  ok "chrome-devtools runtime ($CHROME_DEVTOOLS_PATH)"
 elif $SKIP_OPTIONAL; then
-  warn "obscura not found (skipped — --skip-optional)"
+  warn "chrome-devtools runtime not found (skipped — --skip-optional)"
 else
-  install_obscura
+  install_chrome_devtools
 fi
 
 # --- Ollama ---
@@ -150,6 +150,11 @@ if check_node; then
     step "Installing clawhub CLI..."
     npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
   fi
+  if ! $SKIP_OPTIONAL; then
+    install_agent_browser
+  elif ! check_agent_browser; then
+    warn "agent-browser not found (skipped — --skip-optional)"
+  fi
 else
   warn "Node.js not found"
   if ask "Install Node.js? (required for Dashboard UI)"; then
@@ -164,6 +169,11 @@ else
       if ! command -v clawhub &>/dev/null && command -v npm &>/dev/null; then
         step "Installing clawhub CLI..."
         npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
+      fi
+      if ! $SKIP_OPTIONAL; then
+        install_agent_browser
+      elif ! check_agent_browser; then
+        warn "agent-browser not found (skipped — --skip-optional)"
       fi
     else
       warn "Node.js installation failed"

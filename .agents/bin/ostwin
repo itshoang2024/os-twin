@@ -377,7 +377,8 @@ Commands:
   stop              Graceful shutdown of running manager
                      Options: --force
   dashboard         Launch web dashboard
-                     Options: --port PORT, --project-dir PATH
+                      Options: --port PORT, --project-dir PATH
+                      Subcommands: start, stop, restart, status, logs, autostart
   channel <sub>     Manage communication channels (telegram, discord, slack)
                      Subcommands: start, stop, status, logs, deploy,
                                   list, connect, disconnect, test, pair
@@ -399,6 +400,8 @@ Commands:
                                   search <query>, update [--all|<slug>], remove <slug>
   mcp               Manage MCP extensions
                      Subcommands: install, list, catalog, remove, sync
+  search-engine     Install and run local SearXNG search under ~/.ostwin
+                     Subcommands: install, configure, start, stop, status, settings
   reload-env        Reload ~/.ostwin/.env into MCP config env blocks
   test              Run test suites
                      Options: --suite NAME, --verbose
@@ -1233,6 +1236,102 @@ switch ($Command) {
                     Write-Host "No log file at $logFile" -ForegroundColor Yellow
                 }
             }
+            "autostart" {
+                $uninstall = $dashArgs -contains "--uninstall" -or $dashArgs -contains "-u"
+
+                if ($uninstall) {
+                    # ── Remove auto-start ──
+                    if ($IsWindows -or (-not $IsLinux -and -not $IsMacOS)) {
+                        # Windows: remove scheduled task
+                        try {
+                            $task = Get-ScheduledTask -TaskName "OstwinDashboard" -ErrorAction SilentlyContinue
+                            if ($task) {
+                                Unregister-ScheduledTask -TaskName "OstwinDashboard" -Confirm:$false
+                                Write-Host "Dashboard auto-start removed (Windows Task Scheduler)" -ForegroundColor Green
+                            } else {
+                                Write-Host "Dashboard auto-start not registered" -ForegroundColor Yellow
+                            }
+                        } catch {
+                            Write-Error "Failed to remove auto-start task: $_"
+                            exit 1
+                        }
+                    }
+                    elseif ($IsMacOS) {
+                        # macOS: unload and remove LaunchAgent
+                        $plistDest = Join-Path $HOME "Library/LaunchAgents/com.ostwin.dashboard.plist"
+                        if (Test-Path $plistDest) {
+                            & launchctl unload $plistDest 2>$null || true
+                            Remove-Item $plistDest -Force
+                            Write-Host "Dashboard auto-start removed (macOS LaunchAgent)" -ForegroundColor Green
+                        } else {
+                            Write-Host "Dashboard auto-start not registered" -ForegroundColor Yellow
+                        }
+                    }
+                    elseif ($IsLinux) {
+                        # Linux: disable and remove systemd user service
+                        if (Get-Command systemctl -ErrorAction SilentlyContinue) {
+                            & systemctl --user stop ostwin-dashboard 2>$null || true
+                            & systemctl --user disable ostwin-dashboard 2>$null || true
+                            $svcFile = Join-Path $HOME ".config/systemd/user/ostwin-dashboard.service"
+                            if (Test-Path $svcFile) { Remove-Item $svcFile -Force }
+                            & systemctl --user daemon-reload 2>$null || true
+                            Write-Host "Dashboard auto-start removed (Linux systemd)" -ForegroundColor Green
+                        } else {
+                            Write-Host "systemd not available" -ForegroundColor Red
+                            exit 1
+                        }
+                    }
+                    exit 0
+                }
+                else {
+                    # ── Register auto-start ──
+                    if ($IsWindows -or (-not $IsLinux -and -not $IsMacOS)) {
+                        # Windows: register scheduled task
+                        $dashboardPs1 = Join-Path $OstwinHome ".agents/dashboard.ps1"
+                        if (-not (Test-Path $dashboardPs1)) {
+                            Write-Error "dashboard.ps1 not found at $dashboardPs1"
+                            exit 1
+                        }
+                        $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+                        if (-not $pwshExe) { $pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
+                        if (-not $pwshExe) { Write-Error "PowerShell not found"; exit 1 }
+
+                        $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$dashboardPs1`" -Background -Port $dashPort -ProjectDir `"$OstwinHome`""
+                        try {
+                            $existing = Get-ScheduledTask -TaskName "OstwinDashboard" -ErrorAction SilentlyContinue
+                            if ($existing) { Unregister-ScheduledTask -TaskName "OstwinDashboard" -Confirm:$false -ErrorAction SilentlyContinue }
+                        } catch {}
+
+                        $action = New-ScheduledTaskAction -Execute $pwshExe -Argument $argList
+                        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+                        $trigger.Delay = "PT10S"
+                        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+                        Register-ScheduledTask -TaskName "OstwinDashboard" -Action $action -Trigger $trigger -Settings $settings -Description "Ostwin Dashboard auto-start" -Force | Out-Null
+                        Write-Host "Dashboard auto-start registered (Windows Task Scheduler)" -ForegroundColor Green
+                    }
+                    elseif ($IsMacOS) {
+                        # macOS: install LaunchAgent
+                        $installScript = Join-Path $OstwinHome ".agents/daemons/macos-dashboard/install.sh"
+                        if (Test-Path $installScript) {
+                            & bash $installScript
+                        } else {
+                            Write-Error "Auto-start installer not found: $installScript"
+                            exit 1
+                        }
+                    }
+                    elseif ($IsLinux) {
+                        # Linux: install systemd user service
+                        $installScript = Join-Path $OstwinHome ".agents/daemons/linux-dashboard/install.sh"
+                        if (Test-Path $installScript) {
+                            & bash $installScript
+                        } else {
+                            Write-Error "Auto-start installer not found: $installScript"
+                            exit 1
+                        }
+                    }
+                    exit 0
+                }
+            }
             default {
                 Write-Host ""
                 Write-Host "  ostwin dashboard — Manage the dashboard server" -ForegroundColor Cyan
@@ -1244,6 +1343,8 @@ switch ($Command) {
                 Write-Host "    ostwin dashboard status      Show running state + pool health"
                 Write-Host "    ostwin dashboard logs        Show last 50 log lines"
                 Write-Host "    ostwin dashboard logs -f     Follow log output"
+                Write-Host "    ostwin dashboard autostart   Register dashboard to start on login"
+                Write-Host "    ostwin dashboard autostart --uninstall  Remove login auto-start"
                 Write-Host ""
             }
         }
@@ -1639,6 +1740,26 @@ switch ($Command) {
                 exit 1
             }
         }
+    }
+
+    # -- search-engine -------------------------------------------------------
+    "search-engine" {
+        $searchScript = Join-Path $AgentsDir "search-engine.sh"
+        if (-not (Test-Path $searchScript)) {
+            $searchScript = Join-Path $OstwinHome ".agents/search-engine.sh"
+        }
+        if (-not (Test-Path $searchScript)) {
+            Write-Error "[ERROR] search-engine.sh not found."
+            Write-Error "  Searched: $AgentsDir and $OstwinHome/.agents/"
+            exit 1
+        }
+        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+            Write-Error "[ERROR] bash is required for search-engine management."
+            exit 1
+        }
+        $env:OSTWIN_HOME = $OstwinHome
+        & bash $searchScript @Arguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
     }
 
     # ── reload-env ───────────────────────────────────────────────────────────

@@ -533,11 +533,18 @@ class KnowledgeService:
         Query engines hold refs to the old LLM/embedder — they must be
         rebuilt too.  Vector stores and Kuzu graphs are model-independent
         and survive the invalidation.
+        The ingestor also caches embedder/LLM refs and must be rebuilt.
         """
         self._llm = None
         self._embedder = None
+        self._ingestor = None
         self._query_engines.clear()
         self._graph_rag_engines.clear()
+        # Also clear the global embedding client cache so stale singleton
+        # clients (keyed on old model name) are not reused.
+        from dashboard.llm_client import _embedding_cache, _embedding_cache_lock
+        with _embedding_cache_lock:
+            _embedding_cache.clear()
         logger.info("Knowledge model cache invalidated — next call will re-resolve settings")
 
     def shutdown(self) -> None:
@@ -1059,6 +1066,346 @@ class KnowledgeService:
     def get_job(self, job_id: str) -> Any:
         """Return the :class:`JobStatus` for ``job_id`` (or None if unknown)."""
         return self._get_job_manager().get(job_id)
+
+    # ---- Web Research (SearXNG) -----------------------------------------
+
+    def research(
+        self,
+        namespace: str,
+        query: str,
+        *,
+        engines: Optional[list[str]] = None,
+        categories: Optional[list[str]] = None,
+        max_results: int = 0,
+        summarize: bool = True,
+        language: str = "en",
+        actor: str = "anonymous",
+    ) -> dict:
+        """Execute a web research cycle using SearXNG and ingest into namespace.
+
+        Searches the web → fetches top pages → ingests content into the
+        knowledge namespace → optionally generates an LLM summary.
+
+        - Auto-creates the namespace when it doesn't exist.
+        - Uses concurrent-import protection.
+        - Runs in a dedicated thread (same pattern as import_text).
+
+        Returns a :class:`ResearchResult` serialized as a dict.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        from dashboard.knowledge.research.researcher import WebResearcher
+
+        start_time = time.perf_counter()
+
+        try:
+            # Auto-create namespace if needed
+            if self._nm.get(namespace) is None:
+                embedder = self._get_embedder()
+                self._nm.create(
+                    namespace,
+                    embedding_model=embedder.model_name,
+                    embedding_dimension=embedder.dimension(),
+                )
+
+            ingestor = self._get_ingestor()
+
+            # Build the researcher with all dependencies
+            researcher = WebResearcher(
+                ingestor=ingestor,
+                llm=self._get_llm(),
+            )
+
+            register_import(namespace, "__pending_research__")
+
+            def _run_research():
+                return researcher.run(
+                    query=query,
+                    namespace=namespace,
+                    engines=engines,
+                    categories=categories,
+                    max_results=max_results,
+                    summarize=summarize,
+                    language=language,
+                )
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(_run_research).result()
+            finally:
+                unregister_import(namespace)
+
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            _log_call(namespace, "research", "success", latency_ms, {"actor": actor, "query": query})
+            return result.model_dump() if hasattr(result, "model_dump") else result
+
+        except ImportInProgressError:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            _log_call(namespace, "research", "import_in_progress", latency_ms, {"actor": actor})
+            raise
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            _log_call(namespace, "research", "error", latency_ms, {"actor": actor, "error": str(exc)})
+            raise
+
+    def search_web(
+        self,
+        query: str,
+        *,
+        engines: Optional[list[str]] = None,
+        categories: Optional[list[str]] = None,
+        max_results: int = 10,
+        language: str = "en",
+    ) -> dict:
+        """Search the web via SearXNG and return preview results (no ingestion).
+
+        This is the fast first step of the two-step research flow.
+        Returns search results with titles, URLs, snippets, engines, and scores
+        so the user can pick which ones to ingest.
+        """
+        from dashboard.knowledge.research.searxng_client import SearXNGClient
+
+        start_time = time.perf_counter()
+        warnings: list[str] = []
+
+        client = SearXNGClient()
+        results = client.search(
+            query,
+            engines=engines,
+            categories=categories,
+            language=language,
+            max_results=max_results,
+        )
+
+        elapsed = time.perf_counter() - start_time
+        return {
+            "query": query,
+            "engines_used": engines or [],
+            "categories_used": categories or [],
+            "results": [
+                {
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                    "engine": r.engine,
+                    "score": r.score,
+                    "thumbnail_url": r.thumbnail_url,
+                    "metadata": r.metadata,
+                }
+                for r in results
+            ],
+            "elapsed_seconds": round(elapsed, 3),
+            "warnings": warnings,
+        }
+
+    def research_ingest(
+        self,
+        namespace: str,
+        query: str,
+        items: list[dict],
+        *,
+        summarize: bool = True,
+        language: str = "en",
+        actor: str = "anonymous",
+    ) -> str:
+        """Submit a background job to fetch and ingest selected research URLs.
+
+        This is the async second step of the two-step research flow.
+        Returns the job_id immediately; the caller polls via get_job().
+
+        Parameters
+        ----------
+        namespace : str
+            Target namespace. Auto-created if it doesn't exist.
+        query : str
+            Original search query (used for provenance metadata).
+        items : list[dict]
+            Selected items, each with keys: url, title, engine, snippet.
+        summarize : bool
+            Whether to generate an LLM summary after ingestion.
+        language : str
+            Content language code.
+        actor : str
+            Who initiated the operation.
+
+        Returns
+        -------
+        str
+            The job_id for tracking progress.
+        """
+        # Auto-create namespace if needed
+        if self._nm.get(namespace) is None:
+            embedder = self._get_embedder()
+            self._nm.create(
+                namespace,
+                embedding_model=embedder.model_name,
+                embedding_dimension=embedder.dimension(),
+            )
+
+        jm = self._get_job_manager()
+
+        # Register the import as in-progress BEFORE submitting the job.
+        # This closes the TOCTOU window: register_import() is atomic and
+        # will raise ImportInProgressError if another import is already
+        # running for this namespace.
+        register_import(namespace, "__pending__")
+
+        def _job_fn(emit):
+            try:
+                from dashboard.knowledge.research.page_fetcher import PageFetcher
+                from dashboard.knowledge.research.models import ResearchSourceResult
+                from dashboard.knowledge.jobs import JobEvent, JobState
+
+                fetcher = PageFetcher()
+                ingestor = self._get_ingestor()
+                total = len(items)
+                sources: list[dict] = []
+                batch_items: list[dict] = []
+
+                # Fetch each selected URL
+                for idx, item in enumerate(items):
+                    url = item["url"]
+                    title = item.get("title", "")
+                    engine = item.get("engine", "")
+                    snippet = item.get("snippet", "")
+
+                    emit(JobEvent(
+                        timestamp=datetime.now(timezone.utc),
+                        state=JobState.RUNNING,
+                        message=f"Fetching {idx + 1}/{total}: {title or url}",
+                        progress_current=idx,
+                        progress_total=total,
+                        detail={},
+                    ))
+
+                    fetch_result = fetcher.fetch(url)
+
+                    if not fetch_result.ok:
+                        sources.append({
+                            "url": url,
+                            "title": title,
+                            "engine": engine,
+                            "status": "error",
+                            "chunks_added": 0,
+                            "error": fetch_result.error or f"HTTP {fetch_result.status_code}",
+                        })
+                        continue
+
+                    if not fetch_result.markdown.strip():
+                        sources.append({
+                            "url": url,
+                            "title": title,
+                            "engine": engine,
+                            "status": "skipped",
+                            "chunks_added": 0,
+                            "error": "Empty content after conversion",
+                        })
+                        continue
+
+                    batch_items.append({
+                        "text": fetch_result.markdown,
+                        "source_url": url,
+                        "source_title": title,
+                        "metadata": {
+                            "source_engine": engine,
+                            "source_query": query,
+                            "source_snippet": snippet[:200] if snippet else "",
+                            "research_timestamp": time.time(),
+                            "engines_used": [engine] if engine else [],
+                        },
+                    })
+                    sources.append({
+                        "url": url,
+                        "title": title,
+                        "engine": engine,
+                        "status": "fetched",
+                        "chunks_added": 0,
+                        "error": None,
+                    })
+
+                # Ingest the batch
+                totals = {"chunks_added": 0, "entities_added": 0, "relations_added": 0}
+                if batch_items:
+                    emit(JobEvent(
+                        timestamp=datetime.now(timezone.utc),
+                        state=JobState.RUNNING,
+                        message=f"Ingesting {len(batch_items)} sources into {namespace}...",
+                        progress_current=total,
+                        progress_total=total,
+                        detail={},
+                    ))
+
+                    try:
+                        ingest_result = ingestor.ingest_research_batch(namespace, batch_items)
+                        totals["chunks_added"] = ingest_result.get("chunks_added", 0)
+                        totals["entities_added"] = ingest_result.get("entities_added", 0)
+                        totals["relations_added"] = ingest_result.get("relations_added", 0)
+
+                        # Update per-source status from ingest result
+                        per_source = ingest_result.get("per_source", {})
+                        for src in sources:
+                            if src["status"] == "fetched":
+                                chunks = per_source.get(src["url"], 0)
+                                src["chunks_added"] = chunks
+                                src["status"] = "ingested" if chunks > 0 else "skipped"
+                    except Exception as exc:
+                        logger.exception("research_ingest batch failed")
+                        for src in sources:
+                            if src["status"] == "fetched":
+                                src["status"] = "error"
+                                src["error"] = f"Ingestion failed: {exc}"
+
+                # Optional LLM summary
+                summary = None
+                if summarize:
+                    try:
+                        llm = self._get_llm()
+                        if llm and hasattr(llm, "is_available") and llm.is_available():
+                            ingested_sources = [s for s in sources if s["status"] == "ingested"]
+                            if ingested_sources:
+                                summary_prompt = (
+                                    f"Summarize the key findings from researching: '{query}'\n\n"
+                                    f"Sources ingested ({len(ingested_sources)}):\n"
+                                )
+                                for s in ingested_sources[:10]:
+                                    summary_prompt += f"- {s['title'] or s['url']}\n"
+                                summary = llm.complete(summary_prompt)
+                    except Exception as exc:
+                        logger.warning("Research summary generation failed: %s", exc)
+
+                return {
+                    "query": query,
+                    "namespace": namespace,
+                    "engines_used": list({s["engine"] for s in sources if s.get("engine")}),
+                    "categories_used": [],
+                    "sources": sources,
+                    "total_chunks_added": totals["chunks_added"],
+                    "total_entities_added": totals["entities_added"],
+                    "total_relations_added": totals["relations_added"],
+                    "summary": summary,
+                    "warnings": [],
+                }
+            finally:
+                unregister_import(namespace)
+
+        try:
+            job_id = jm.submit(
+                namespace,
+                "research_ingest",
+                _job_fn,
+                message=f"Research ingest: {query} ({len(items)} sources)",
+            )
+        except Exception:
+            # Submit failed — rollback the registration
+            unregister_import(namespace)
+            raise
+
+        # Update the registration with the real job_id
+        from dashboard.knowledge.audit import _active_imports, _active_imports_lock  # noqa: WPS433
+        with _active_imports_lock:
+            _active_imports[namespace] = job_id
+
+        _log_call(namespace, "research_ingest", "submitted", 0, {"actor": actor, "query": query, "count": len(items)})
+        return job_id
 
     def list_jobs(self, namespace: str) -> Any:
         """List jobs for ``namespace`` (newest first)."""

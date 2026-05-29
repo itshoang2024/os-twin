@@ -13,6 +13,10 @@ Covers:
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
+from dashboard.lib.settings import models_registry
+from dashboard.lib.settings.models_registry import ModelEntry
 from dashboard.lib.settings.opencode_sync import (
     sync_opencode_config,
     SyncResult,
@@ -26,6 +30,53 @@ from dashboard.models import (
 )
 
 
+# Mixed gemini/vertex catalog used by sync tests that depend on gemini-mode
+# models being available. The production _FALLBACK_CATALOG only carries
+# vertex-mode entries; gemini-mode comes from the dynamic models.dev catalog
+# at runtime. Injecting here keeps tests deterministic.
+@pytest.fixture
+def gemini_catalog(monkeypatch):
+    entries = [
+        ModelEntry(
+            "gemini/gemini-3-flash-preview",
+            "Gemini 3 Flash",
+            "1M",
+            "balanced",
+            mode="gemini",
+        ),
+        ModelEntry(
+            "gemini/gemini-3-pro-preview",
+            "Gemini 3 Pro",
+            "1M",
+            "flagship",
+            mode="gemini",
+        ),
+        ModelEntry(
+            "gemini/gemini-3-flash-lite-preview",
+            "Gemini 3 Flash Lite",
+            "1M",
+            "fast",
+            mode="gemini",
+        ),
+        ModelEntry(
+            "google-vertex/gemini-3.1-pro-preview",
+            "Vertex Gemini 3.1 Pro",
+            "1M",
+            "flagship",
+            mode="vertex",
+        ),
+        ModelEntry(
+            "google-vertex-anthropic/claude-sonnet-4-6@default",
+            "Vertex Claude Sonnet 4.6",
+            "200K",
+            "balanced",
+            mode="vertex",
+        ),
+    ]
+    monkeypatch.setitem(models_registry._FALLBACK_CATALOG, "Gemini", entries)
+    return entries
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _make_settings(
@@ -33,6 +84,8 @@ def _make_settings(
     google_enabled=True,
     google_mode="gemini",
     google_explicit=True,
+    google_project_id=None,
+    google_vertex_location=None,
     byteplus_enabled=True,
     byteplus_explicit=True,
 ) -> MasterSettings:
@@ -43,7 +96,12 @@ def _make_settings(
     When ``*_explicit=False``, the field is ``None`` (no config entry).
     """
     if google_explicit:
-        google = ProviderSettings(enabled=google_enabled, deployment_mode=google_mode)
+        google = ProviderSettings(
+            enabled=google_enabled,
+            deployment_mode=google_mode,
+            project_id=google_project_id,
+            vertex_location=google_vertex_location,
+        )
     else:
         google = None
 
@@ -81,7 +139,7 @@ def _sync(vault, settings, tmp_path, **kwargs):
 
 # ── Sync writes provider blocks ──────────────────────────────────────
 
-def test_sync_writes_gemini_and_byteplus(tmp_path):
+def test_sync_writes_gemini_and_byteplus(tmp_path, gemini_catalog):
     config_path = tmp_path / "opencode.json"
     vault = _make_vault({
         "providers/google": "AIzaSy-test-key",
@@ -372,7 +430,7 @@ def test_sync_works_without_explicit_provider_settings(tmp_path):
     assert data["provider"]["byteplus"]["options"]["apiKey"] == "bp-real-key"
 
 
-def test_sync_respects_enabled_models(tmp_path):
+def test_sync_respects_enabled_models(tmp_path, gemini_catalog):
     """When enabled_models is set, only those models appear in opencode.json."""
     config_path = tmp_path / "opencode.json"
     vault = _make_vault({
@@ -396,7 +454,7 @@ def test_sync_respects_enabled_models(tmp_path):
     assert "seed-2-0-pro-260328" in bp_models
 
 
-def test_sync_empty_enabled_models_includes_all(tmp_path):
+def test_sync_empty_enabled_models_includes_all(tmp_path, gemini_catalog):
     """Empty enabled_models list means all models."""
     config_path = tmp_path / "opencode.json"
     vault = _make_vault({"providers/google": "key"})
@@ -406,7 +464,7 @@ def test_sync_empty_enabled_models_includes_all(tmp_path):
     _sync(vault, settings, tmp_path, config_path=config_path)
 
     data = json.loads(config_path.read_text())
-    # Should have all 3 gemini-mode models
+    # All gemini-mode entries from the injected catalog (3 entries)
     assert len(data["provider"]["gemini"]["models"]) == 3
 
 
@@ -432,6 +490,195 @@ def test_sync_all_disabled_removes_provider_block(tmp_path):
     assert "provider" not in data
     # other keys preserved
     assert data["model"] == "anthropic/claude-sonnet-4-6"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Vertex AI sync (google-vertex + google-vertex-anthropic)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_sync_writes_google_vertex_in_vertex_mode(tmp_path, gemini_catalog):
+    """Vertex mode produces google-vertex + google-vertex-anthropic blocks."""
+    config_path = tmp_path / "opencode.json"
+    # Vault has no api key -- vertex doesn't need one (ADC / service account).
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id="my-gcp-project",
+        google_vertex_location="us-central1",
+        byteplus_enabled=False,
+    )
+
+    result = _sync(vault, settings, tmp_path, config_path=config_path)
+
+    assert result.error is None
+    assert "google-vertex" in result.synced
+    assert "google-vertex-anthropic" in result.synced
+    # The gemini API-mode provider must NOT appear in vertex mode.
+    assert "gemini" not in result.synced
+
+    data = json.loads(config_path.read_text())
+    block = data["provider"]
+    assert "google-vertex" in block
+    assert "google-vertex-anthropic" in block
+    assert "gemini" not in block
+
+
+def test_sync_vertex_uses_project_and_location(tmp_path, gemini_catalog):
+    """Vertex options carry project + location, not apiKey/baseURL."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id="my-gcp-project",
+        google_vertex_location="us-central1",
+        byteplus_enabled=False,
+    )
+
+    _sync(vault, settings, tmp_path, config_path=config_path)
+
+    data = json.loads(config_path.read_text())
+    for name in ("google-vertex", "google-vertex-anthropic"):
+        opts = data["provider"][name]["options"]
+        assert opts == {
+            "project": "my-gcp-project",
+            "location": "us-central1",
+        }
+        assert "apiKey" not in opts
+        assert "baseURL" not in opts
+
+
+def test_sync_vertex_defaults_location_to_global(tmp_path, gemini_catalog):
+    """When vertex_location is unset, options use 'global'."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id="my-gcp-project",
+        byteplus_enabled=False,
+    )
+
+    _sync(vault, settings, tmp_path, config_path=config_path)
+
+    data = json.loads(config_path.read_text())
+    assert data["provider"]["google-vertex"]["options"]["location"] == "global"
+
+
+def test_sync_skips_vertex_without_project_id(tmp_path, gemini_catalog):
+    """Vertex requires a project_id; without one, sync skips cleanly."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id=None,  # no project configured
+        byteplus_enabled=False,
+    )
+
+    result = _sync(vault, settings, tmp_path, config_path=config_path)
+
+    assert result.error is None
+    assert "google-vertex" not in result.synced
+    assert "google-vertex-anthropic" not in result.synced
+    assert "google-vertex" in result.skipped
+    assert "google-vertex-anthropic" in result.skipped
+
+    data = json.loads(config_path.read_text())
+    assert "google-vertex" not in data.get("provider", {})
+
+
+def test_sync_removes_stale_vertex_when_project_id_cleared(
+    tmp_path, gemini_catalog
+):
+    """If a previous sync wrote vertex but project_id is now empty, remove it."""
+    config_path = tmp_path / "opencode.json"
+    config_path.write_text(json.dumps({
+        "$schema": OPENCODE_SCHEMA,
+        "provider": {
+            "google-vertex": {
+                "options": {"project": "old", "location": "global"},
+                "models": {},
+            },
+        },
+    }))
+
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id="",
+        byteplus_enabled=False,
+    )
+
+    result = _sync(vault, settings, tmp_path, config_path=config_path)
+
+    assert "google-vertex" in result.removed
+    data = json.loads(config_path.read_text())
+    assert "google-vertex" not in data.get("provider", {})
+
+
+def test_sync_skips_vertex_providers_in_gemini_mode(tmp_path, gemini_catalog):
+    """Gemini mode must not produce vertex blocks even with a project_id."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({"providers/google": "AIzaSy-key"})
+    settings = _make_settings(
+        google_mode="gemini",
+        google_project_id="my-gcp-project",  # ignored in gemini mode
+        byteplus_enabled=False,
+    )
+
+    result = _sync(vault, settings, tmp_path, config_path=config_path)
+
+    assert "gemini" in result.synced
+    assert "google-vertex" not in result.synced
+    assert "google-vertex-anthropic" not in result.synced
+
+    data = json.loads(config_path.read_text())
+    assert "gemini" in data["provider"]
+    assert "google-vertex" not in data["provider"]
+    assert "google-vertex-anthropic" not in data["provider"]
+
+
+def test_sync_vertex_writes_models_with_id_prefix(tmp_path, gemini_catalog):
+    """Each vertex block holds only entries matching its id_prefix."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_mode="vertex",
+        google_project_id="my-gcp-project",
+        byteplus_enabled=False,
+    )
+
+    _sync(vault, settings, tmp_path, config_path=config_path)
+
+    data = json.loads(config_path.read_text())
+    v_models = data["provider"]["google-vertex"]["models"]
+    va_models = data["provider"]["google-vertex-anthropic"]["models"]
+
+    # google-vertex bucket has the Gemini-on-Vertex entry only
+    assert "gemini-3.1-pro-preview" in v_models
+    assert v_models["gemini-3.1-pro-preview"]["npm"] == "@ai-sdk/google-vertex"
+    # google-vertex-anthropic bucket has the Claude-on-Vertex entry only
+    assert any(key.startswith("claude-sonnet-4-6") for key in va_models)
+    assert all(
+        val["name"].startswith("google-vertex-anthropic:")
+        for val in va_models.values()
+    )
+
+
+def test_sync_skips_vertex_when_google_disabled(tmp_path, gemini_catalog):
+    """enabled=False overrides deployment_mode for vertex too."""
+    config_path = tmp_path / "opencode.json"
+    vault = _make_vault({})
+    settings = _make_settings(
+        google_enabled=False,
+        google_mode="vertex",
+        google_project_id="my-gcp-project",
+        byteplus_enabled=False,
+    )
+
+    result = _sync(vault, settings, tmp_path, config_path=config_path)
+
+    assert "google-vertex" not in result.synced
+    assert "google-vertex-anthropic" not in result.synced
 
 
 # ═══════════════════════════════════════════════════════════════════════

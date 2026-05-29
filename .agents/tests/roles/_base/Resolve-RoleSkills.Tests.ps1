@@ -473,4 +473,88 @@ Describe "Resolve-RoleSkills" {
             ($skills | Where-Object { $_.Name -eq "build-ui" }) | Should -Not -BeNullOrEmpty
         }
     }
+
+    # === PHASE 2.5: LEGAL GUARDRAIL EXPANSION ===
+    Context "Phase 2.5: Legal guardrail expansion" {
+
+        It "adds legal-common and source-document-intake for a legal NDA PDF task" {
+            New-TestSkill -Name "legal-nda-triage" -Location "global" `
+                -Frontmatter "---`nname: legal-nda-triage`ndescription: NDA triage and risk analysis for legal review`ntags: [legal, nda, contracts]`n---"
+            New-TestSkill -Name "legal-common" -Location "global" `
+                -Frontmatter "---`nname: legal-common`ndescription: Shared legal workflow guardrails and attorney-review gate`n---"
+            New-TestSkill -Name "source-document-intake" -Location "global" `
+                -Frontmatter "---`nname: source-document-intake`ndescription: Source document extraction, provenance, and citation discipline`n---"
+            New-PlanRoles -PlanId "legal-p1" -Roles @{ audit = @{ skill_refs = @("legal-nda-triage") } }
+            $roomDir = New-TestRoom `
+                -BriefContent "Review the uploaded NDA PDF for business and legal risks." `
+                -TasksContent "Summarize key clauses and escalation issues." `
+                -PlanId "legal-p1"
+
+            $skills = & $script:resolveScript -RoleName "audit" -RolePath $script:testRolePath `
+                -SkillsBaseDir $script:baseDir -RoomDir $roomDir
+
+            $names = $skills.Name
+            $names | Should -Contain "legal-common"
+            $names | Should -Contain "source-document-intake"
+            $names | Should -Contain "legal-nda-triage"
+        }
+
+        It "adds legal-common and source-document-intake for a vendor contract DOCX task" {
+            New-TestSkill -Name "legal-contract-review" -Location "global" `
+                -Frontmatter "---`nname: legal-contract-review`ndescription: Contract review and clause risk analysis for legal counsel`ntags: [legal, contracts, review]`n---"
+            New-TestSkill -Name "legal-common" -Location "global" `
+                -Frontmatter "---`nname: legal-common`ndescription: Shared legal workflow guardrails and attorney-review gate`n---"
+            New-TestSkill -Name "source-document-intake" -Location "global" `
+                -Frontmatter "---`nname: source-document-intake`ndescription: Source document extraction, provenance, and citation discipline`n---"
+            New-PlanRoles -PlanId "legal-p2" -Roles @{ audit = @{ skill_refs = @("legal-contract-review") } }
+            $roomDir = New-TestRoom `
+                -BriefContent "Review the attached vendor contract DOCX." `
+                -TasksContent "Find risky clauses and summarize issues for counsel." `
+                -PlanId "legal-p2"
+
+            $skills = & $script:resolveScript -RoleName "audit" -RolePath $script:testRolePath `
+                -SkillsBaseDir $script:baseDir -RoomDir $roomDir
+
+            $names = $skills.Name
+            $names | Should -Contain "legal-common"
+            $names | Should -Contain "source-document-intake"
+        }
+
+        It "adds legal-common but not source-document-intake for a DSAR task without source-doc signal" {
+            New-TestSkill -Name "legal-dsar-response" -Location "global" `
+                -Frontmatter "---`nname: legal-dsar-response`ndescription: DSAR response workflow and deadline management`ntags: [legal, privacy, dsar]`n---"
+            New-TestSkill -Name "legal-common" -Location "global" `
+                -Frontmatter "---`nname: legal-common`ndescription: Shared legal workflow guardrails and attorney-review gate`n---"
+            New-TestSkill -Name "source-document-intake" -Location "global" `
+                -Frontmatter "---`nname: source-document-intake`ndescription: Source document extraction, provenance, and citation discipline`n---"
+            New-PlanRoles -PlanId "legal-p3" -Roles @{ audit = @{ skill_refs = @("legal-dsar-response") } }
+            $roomDir = New-TestRoom `
+                -BriefContent "Handle a data subject access request and determine response workflow." `
+                -TasksContent "Classify DSAR, deadline, identity verification, systems search, exemptions." `
+                -PlanId "legal-p3"
+
+            $skills = & $script:resolveScript -RoleName "audit" -RolePath $script:testRolePath `
+                -SkillsBaseDir $script:baseDir -RoomDir $roomDir
+
+            $names = $skills.Name
+            $names | Should -Contain "legal-common"
+            $names | Should -Not -Contain "source-document-intake"
+        }
+
+        It "does not add legal-common for a non-legal PDF task" {
+            New-TestSkill -Name "legal-common" -Location "global" `
+                -Frontmatter "---`nname: legal-common`ndescription: Shared legal workflow guardrails and attorney-review gate`n---"
+            New-TestSkill -Name "source-document-intake" -Location "global" `
+                -Frontmatter "---`nname: source-document-intake`ndescription: Source document extraction, provenance, and citation discipline`n---"
+            $roomDir = New-TestRoom `
+                -BriefContent "Analyze the uploaded quarterly report PDF for financial metrics." `
+                -TasksContent "Extract revenue figures and growth rates from the report."
+
+            $skills = & $script:resolveScript -RoleName "audit" -RolePath $script:testRolePath `
+                -SkillsBaseDir $script:baseDir -RoomDir $roomDir
+
+            $names = $skills.Name
+            $names | Should -Not -Contain "legal-common"
+        }
+    }
 }
