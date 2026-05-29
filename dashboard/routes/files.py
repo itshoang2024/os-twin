@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import base64
+import fnmatch
 import mimetypes
 import re
 import subprocess
@@ -16,11 +17,47 @@ from dashboard.auth import get_current_user
 router = APIRouter(tags=["files"], prefix="/api/plans/{plan_id}/files")
 logger = logging.getLogger(__name__)
 
+# Directories/files hidden from the project file browser.  These are
+# generated caches, dependency folders, build artifacts, and local tool state
+# for common Python, JavaScript/TypeScript, and Java projects.  The list is
+# intentionally separate from SENSITIVE_* below: ignored entries are hidden to
+# keep the tree usable, while sensitive entries are blocked from direct reads.
 IGNORE_PATTERNS = {
-    '.git', 'node_modules', '__pycache__', '.next', '.venv', 'venv',
-    '.env', 'dist', 'build', '.DS_Store', '.idea', '.vscode', '.tox',
-    '.pytest_cache', '.mypy_cache', 'coverage', '.coverage', 'htmlcov',
-    '.turbo', '.cache', '.parcel-cache',
+    # VCS / OS / editor noise
+    '.git', '.hg', '.svn', '.DS_Store', 'Thumbs.db', '.idea', '.vscode',
+    # Local agent/tooling state that can flood the tree
+    '.opencode', '.codegraph',
+    # Python environments, caches, and build output
+    '__pycache__', '.venv', 'venv', 'env', 'ENV', '.tox', '.nox',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache', '.pyre', '.pytype',
+    '.hypothesis', '.eggs', '__pypackages__', 'pip-wheel-metadata',
+    'htmlcov', '.coverage',
+    # JavaScript/TypeScript dependencies, framework caches, and build output
+    'node_modules', '.next', '.nuxt', '.svelte-kit', '.astro', '.vite',
+    '.turbo', '.parcel-cache', '.cache', '.npm', '.pnpm-store',
+    'bower_components', 'coverage', 'dist', 'build', 'out',
+    'storybook-static', '.serverless', '.webpack', '.angular', '.expo',
+    # Java/JVM build output and IDE metadata
+    'target', '.gradle', '.settings', '.classpath', '.project',
+}
+
+IGNORE_GLOB_PATTERNS = {
+    # Python bytecode/distribution artifacts
+    '*.pyc', '*.pyo', '*.pyd', '*.egg', '*.egg-info', '*.dist-info', '*.whl',
+    # Java/JVM compiled artifacts
+    '*.class', '*.jar', '*.war', '*.ear', 'hs_err_pid*', 'replay_pid*',
+    # JavaScript/TypeScript incremental/cache/log artifacts
+    '*.tsbuildinfo', '.eslintcache', '.stylelintcache',
+    'npm-debug.log*', 'yarn-debug.log*', 'yarn-error.log*', 'pnpm-debug.log*',
+    # Generic temporary/editor files
+    '*.log', '*.tmp', '*.temp', '*.swp', '*.swo', '*~', '.#*',
+}
+
+IGNORE_RELATIVE_PATH_PATTERNS = {
+    # Yarn Berry keeps useful config under .yarn but cache payloads can be huge.
+    '.yarn/cache', '.yarn/unplugged', '.yarn/build-state.yml', '.yarn/install-state.gz',
+    # Maven/Gradle caches are dependency payloads, not project source.
+    '.m2/repository', '.gradle/caches', '.gradle/wrapper/dists',
 }
 
 # P1-6: Expanded sensitive file blocklist with pattern matching.
@@ -229,6 +266,47 @@ def _validate_path(working_dir: Path, relative_path: str) -> Path:
     return target
 
 
+def _relative_display_path(target: Path, working_dir: Path) -> str:
+    """Return the API/display relative path for a target inside working_dir."""
+    rel_path = os.path.relpath(target, working_dir)
+    return "" if rel_path == "." else rel_path
+
+
+def _matches_ignore_pattern(name: str, rel_path: str) -> bool:
+    """Check exact-name, filename-glob, and selected relative-path ignore rules."""
+    rel_posix = rel_path.replace(os.sep, "/")
+    rel_parts = [part for part in rel_posix.split("/") if part and part != "."]
+
+    # Ignore any entry beneath an ignored directory, even if the caller asks for
+    # a nested path directly (for example: .next/server or node_modules/pkg).
+    for part in rel_parts or [name]:
+        if part in IGNORE_PATTERNS:
+            return True
+
+        if any(fnmatch.fnmatchcase(part, pattern) for pattern in IGNORE_GLOB_PATTERNS):
+            return True
+
+    for pattern in IGNORE_RELATIVE_PATH_PATTERNS:
+        if rel_posix == pattern or fnmatch.fnmatchcase(rel_posix, f"{pattern}/*"):
+            return True
+
+    return False
+
+
+def _is_ignored_path(target: Path, working_dir: Path) -> bool:
+    """Return True when target should be hidden from file-tree/list responses."""
+    try:
+        rel_path = _relative_display_path(target, working_dir)
+    except ValueError:
+        rel_path = target.name
+    return _matches_ignore_pattern(target.name, rel_path)
+
+
+def _iter_visible_entries(directory: Path, working_dir: Path) -> List[Path]:
+    """Iterate directory entries after applying file-browser ignore rules."""
+    return [entry for entry in directory.iterdir() if not _is_ignored_path(entry, working_dir)]
+
+
 def _is_sensitive_file(target_file: Path) -> bool:
     """Check if a file should be blocked from direct access.
     
@@ -259,11 +337,11 @@ def _is_sensitive_file(target_file: Path) -> bool:
     
     return False
 
-def _get_entry_data(p: Path) -> dict:
+def _get_entry_data(p: Path, working_dir: Path) -> dict:
     """Helper to format directory/file entries."""
     if p.is_dir():
         try:
-            children_count = len([x for x in p.iterdir() if x.name not in IGNORE_PATTERNS])
+            children_count = len(_iter_visible_entries(p, working_dir))
         except PermissionError:
             children_count = 0
         return {
@@ -294,12 +372,17 @@ async def list_files(
     if not target_dir.is_dir():
         raise HTTPException(status_code=400, detail="Requested path is not a directory")
         
+    rel_path = _relative_display_path(target_dir, working_dir)
+    if rel_path and _is_ignored_path(target_dir, working_dir):
+        return {
+            "path": rel_path,
+            "entries": []
+        }
+
     entries = []
     try:
-        for p in target_dir.iterdir():
-            if p.name in IGNORE_PATTERNS:
-                continue
-            entries.append(_get_entry_data(p))
+        for p in _iter_visible_entries(target_dir, working_dir):
+            entries.append(_get_entry_data(p, working_dir))
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied")
         
@@ -307,8 +390,7 @@ async def list_files(
     entries.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
     
     # Calculate relative path for response
-    rel_path = os.path.relpath(target_dir, working_dir)
-    if rel_path == ".": rel_path = ""
+    rel_path = _relative_display_path(target_dir, working_dir)
     
     return {
         "path": rel_path,
@@ -481,10 +563,8 @@ async def get_file_tree(
     def _build_tree(p: Path, depth: int) -> List[dict]:
         items = []
         try:
-            for entry in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-                if entry.name in IGNORE_PATTERNS:
-                    continue
-                
+            visible_entries = _iter_visible_entries(p, working_dir)
+            for entry in sorted(visible_entries, key=lambda x: (not x.is_dir(), x.name.lower())):
                 rel_path = os.path.relpath(entry, working_dir)
                 item = {
                     "name": entry.name,
@@ -494,7 +574,7 @@ async def get_file_tree(
                 if entry.is_dir():
                     # Count visible children for the UI expand indicator
                     try:
-                        child_count = len([c for c in entry.iterdir() if c.name not in IGNORE_PATTERNS])
+                        child_count = len(_iter_visible_entries(entry, working_dir))
                     except PermissionError:
                         child_count = 0
                     item["children_count"] = child_count

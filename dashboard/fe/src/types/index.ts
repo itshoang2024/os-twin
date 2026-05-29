@@ -339,6 +339,9 @@ export interface FileTreeNode {
   name: string;
   type: 'file' | 'directory';
   path: string;
+  size?: number;
+  extension?: string;
+  children_count?: number;
   children?: FileTreeNode[];
 }
 

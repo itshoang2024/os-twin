@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useFileTree, useFileList } from '@/hooks/use-files';
 import { FileTreeNode } from '@/types';
+import { getFileIconMeta } from './file-icons';
 
 interface FileTreeProps {
   planId: string;
@@ -72,6 +73,7 @@ function TreeNode({
   const isExpanded = expandedPaths.has(node.path);
   const isSelected = selectedPath === node.path;
   const isDirectory = node.type === 'directory';
+  const iconMeta = getFileIconMeta(node.path || node.name, { isDirectory, isExpanded });
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -98,10 +100,12 @@ function TreeNode({
         } ${isDirectory ? 'visible' : 'invisible'}`}>
           expand_more
         </span>
-        <span className={`material-symbols-outlined text-[16px] ${
-          isDirectory ? 'text-amber-500' : 'text-blue-400'
-        }`}>
-          {isDirectory ? (isExpanded ? 'folder_open' : 'folder') : 'description'}
+        <span
+          className={`material-symbols-outlined text-[16px] ${iconMeta.colorClass}`}
+          title={iconMeta.label}
+          aria-hidden="true"
+        >
+          {iconMeta.icon}
         </span>
         <span className="truncate">{node.name}</span>
       </div>
@@ -158,6 +162,9 @@ function ChildNodes({
         name: e.name,
         type: e.type,
         path: path ? `${path}/${e.name}` : e.name,
+        size: e.size,
+        extension: e.extension,
+        children_count: e.children_count,
         // directories from the listing don't come with children → will lazy-fetch on expand
         children: undefined,
       } as FileTreeNode));

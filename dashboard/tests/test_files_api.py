@@ -68,6 +68,69 @@ def test_list_files_subdir(test_workspace, monkeypatch):
     assert len(data["entries"]) == 1
     assert data["entries"][0]["name"] == "main.py"
 
+def test_file_browser_ignores_standard_generated_entries(test_workspace, monkeypatch):
+    monkeypatch.setattr("dashboard.routes.files.PLANS_DIR", test_workspace["plans_dir"])
+    client = TestClient(app)
+
+    ignored_dirs = [
+        ".opencode", ".codegraph", "node_modules", ".next", "__pycache__",
+        ".pytest_cache", ".ruff_cache", ".gradle", "target", "dist",
+        "build", "coverage",
+    ]
+    for dirname in ignored_dirs:
+        generated_dir = test_workspace["working_dir"] / dirname
+        generated_dir.mkdir()
+        (generated_dir / "generated.txt").write_text("ignore me", encoding="utf-8")
+        if dirname == ".next":
+            (generated_dir / "server").mkdir()
+
+    for filename in [
+        "module.pyc", "Example.class", "npm-debug.log", ".eslintcache",
+        "types.tsbuildinfo", "debug.log",
+    ]:
+        (test_workspace["working_dir"] / filename).write_text("ignore me", encoding="utf-8")
+
+    (test_workspace["working_dir"] / ".gitignore").write_text("node_modules\n", encoding="utf-8")
+    (test_workspace["working_dir"] / "src" / "__pycache__").mkdir()
+    (test_workspace["working_dir"] / "src" / "main.pyc").write_text("ignore me", encoding="utf-8")
+
+    response = client.get(f"/api/plans/{test_workspace['plan_id']}/files")
+    assert response.status_code == 200
+    names = [entry["name"] for entry in response.json()["entries"]]
+
+    for hidden_name in ignored_dirs + [
+        "module.pyc", "Example.class", "npm-debug.log", ".eslintcache",
+        "types.tsbuildinfo", "debug.log",
+    ]:
+        assert hidden_name not in names
+
+    # Ignore config files are still useful project files; generated artifacts are hidden.
+    assert ".gitignore" in names
+
+    src_entry = next(entry for entry in response.json()["entries"] if entry["name"] == "src")
+    assert src_entry["children_count"] == 1
+
+    src_response = client.get(f"/api/plans/{test_workspace['plan_id']}/files?path=src")
+    assert src_response.status_code == 200
+    assert [entry["name"] for entry in src_response.json()["entries"]] == ["main.py"]
+
+    ignored_response = client.get(f"/api/plans/{test_workspace['plan_id']}/files?path=.next")
+    assert ignored_response.status_code == 200
+    assert ignored_response.json()["entries"] == []
+
+    nested_ignored_response = client.get(f"/api/plans/{test_workspace['plan_id']}/files?path=.next/server")
+    assert nested_ignored_response.status_code == 200
+    assert nested_ignored_response.json()["entries"] == []
+
+    tree_response = client.get(f"/api/plans/{test_workspace['plan_id']}/files/tree")
+    assert tree_response.status_code == 200
+    tree_names = [entry["name"] for entry in tree_response.json()["tree"]]
+    assert ".opencode" not in tree_names
+    assert ".codegraph" not in tree_names
+    assert "node_modules" not in tree_names
+    assert ".next" not in tree_names
+
+
 def test_get_content_text(test_workspace, monkeypatch):
     monkeypatch.setattr("dashboard.routes.files.PLANS_DIR", test_workspace["plans_dir"])
     client = TestClient(app)
