@@ -126,6 +126,9 @@ class AgenticMemorySystem:
             _llm_backend = llm_backend if llm_backend is not None else "gemini"
             _llm_model = llm_model if llm_model is not None else "gemini-3-flash-preview"
 
+        self.llm_backend = _llm_backend
+        self.llm_model = _llm_model
+
         self.memories = {}
         self.persist_dir = persist_dir
         self.context_aware_analysis = context_aware_analysis
@@ -201,6 +204,24 @@ class AgenticMemorySystem:
             self._completion_fn = self._resolve_completion_fn(_llm_model)
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
+
+    def _get_integrity(self) -> IntegrityProvider:
+        """Return the Merkle integrity provider, creating it for legacy/test instances.
+
+        Some tests and older callers construct ``AgenticMemorySystem`` via
+        ``object.__new__`` to bypass heavy initialization.  Release branches now
+        require the integrity provider, so lazily create it when it is missing
+        instead of failing with ``AttributeError``.
+        """
+        integrity = getattr(self, "_integrity", None)
+        if integrity is None:
+            integrity = IntegrityTracker(persist_dir=getattr(self, "persist_dir", None))
+            self._integrity = integrity
+            try:
+                integrity.load_or_rebuild(getattr(self, "memories", {}))
+            except Exception:
+                logger.debug("Failed to bootstrap integrity tracker lazily", exc_info=True)
+        return integrity
 
     @staticmethod
     def _resolve_completion_fn(
@@ -302,6 +323,19 @@ class AgenticMemorySystem:
             new_backend = cfg.embedding.backend
             new_model = cfg.embedding.model
 
+            # MasterSettings.memory overrides config.default.json
+            try:
+                from dashboard.lib.settings.resolver import get_settings_resolver
+
+                mem = get_settings_resolver().get_master_settings().memory
+                if mem:
+                    if getattr(mem, "embedding_backend", ""):
+                        new_backend = mem.embedding_backend
+                    if getattr(mem, "embedding_model", ""):
+                        new_model = mem.embedding_model
+            except Exception:
+                pass
+
             if new_backend != self.embedding_backend or new_model != self.model_name:
                 logger.info(
                     "Embedding settings changed: %s/%s → %s/%s, recreating retriever",
@@ -319,7 +353,8 @@ class AgenticMemorySystem:
                     os.makedirs(self._vector_dir, exist_ok=True)
                 self.retriever = self._create_retriever()
 
-                # Re-embed all notes
+                # Re-embed all notes into the rebuilt vector index so searches
+                # keep working immediately after an embedding backend/model change.
                 reindexed = 0
                 for nid, note in self.memories.items():
                     try:
@@ -328,6 +363,13 @@ class AgenticMemorySystem:
                         reindexed += 1
                     except Exception as exc:
                         logger.warning("Re-embed failed for %s: %s", nid, exc)
+
+                if hasattr(old_retriever, "close"):
+                    try:
+                        old_retriever.close()
+                    except Exception:
+                        logger.debug("Failed to close old retriever after embedding hot-reload", exc_info=True)
+
                 logger.info("Hot-reload re-embed: %d/%d notes", reindexed, len(self.memories))
                 self._save_memory_config()
 
@@ -358,6 +400,8 @@ class AgenticMemorySystem:
         if plan_id.startswith("memory-"):
             plan_id = plan_id[len("memory-"):]
         plan_name = self._resolve_plan_name(plan_id)
+        if not hasattr(self, "_memory_config_created_at"):
+            self._memory_config_created_at = datetime.now().isoformat(timespec="seconds")
         data = {
             "version": 1,
             "plan_id": plan_id,
@@ -515,7 +559,7 @@ class AgenticMemorySystem:
             f.write(note.to_markdown())
 
         # Update the Merkle tree for this leaf.
-        self._integrity.notify_save(note.id, note.filepath, note.content_hash)
+        self._get_integrity().notify_save(note.id, note.filepath, note.content_hash)
 
     def _resolve_conflict(self, note_a: MemoryNote, note_b: MemoryNote) -> MemoryNote:
         """Pick the winner between two conflicting notes.
@@ -614,7 +658,7 @@ class AgenticMemorySystem:
                         break
 
             # Update the Merkle tree.
-            self._integrity.notify_delete(memory_id, note.filepath)
+            self._get_integrity().notify_delete(memory_id, note.filepath)
 
     def _load_notes(self):
         """Load all MemoryNotes from markdown files in the notes directory tree."""
@@ -637,7 +681,7 @@ class AgenticMemorySystem:
         self._rebuild_backlinks()
 
         # Bootstrap the Merkle integrity manifest (load persisted or rebuild).
-        self._integrity.load_or_rebuild(self.memories)
+        self._get_integrity().load_or_rebuild(self.memories)
 
     def _rebuild_backlinks(self):
         """Derive all backlinks from forward links. Also prunes dead links."""
@@ -1340,7 +1384,7 @@ class AgenticMemorySystem:
         #    falls back to vectordb aggregate hash comparison (O(1) check),
         #    then full scan (O(N)) only when needed.
         vectors_repaired = 0
-        dirty_ids = self._integrity.get_dirty_ids()
+        dirty_ids = self._get_integrity().get_dirty_ids()
 
         if dirty_ids:
             # Fast path: only check notes that changed this session
@@ -1349,8 +1393,8 @@ class AgenticMemorySystem:
         else:
             # After restart: compare vectordb aggregate hash
             expected_hashes = {nid: n.content_hash for nid, n in self.memories.items()}
-            stored_vdb_hash = self._integrity.vectordb_root_hash  # read BEFORE mutating
-            expected_vdb_hash = self._integrity.compute_vectordb_hash(expected_hashes)
+            stored_vdb_hash = self._get_integrity().vectordb_root_hash  # read BEFORE mutating
+            expected_vdb_hash = self._get_integrity().compute_vectordb_hash(expected_hashes)
 
             if expected_vdb_hash == stored_vdb_hash and stored_vdb_hash:
                 # O(1) — vectordb consistent, skip full scan
@@ -1493,7 +1537,7 @@ class AgenticMemorySystem:
 
         # Step 2: write only dirty notes (Merkle-guided selective writes).
         written = 0
-        dirty_ids: Set[str] = self._integrity.get_dirty_ids()
+        dirty_ids: Set[str] = self._get_integrity().get_dirty_ids()
         if dirty_ids:
             for note_id in dirty_ids:
                 note = self.memories.get(note_id)
@@ -1509,8 +1553,8 @@ class AgenticMemorySystem:
 
         # Step 3: compute vectordb aggregate hash, then persist manifest.
         all_hashes = {nid: n.content_hash for nid, n in self.memories.items()}
-        self._integrity.compute_vectordb_hash(all_hashes)
-        self._integrity.flush()
+        self._get_integrity().compute_vectordb_hash(all_hashes)
+        self._get_integrity().flush()
         self._dirty = False
 
         # Update per-memory config with current state
@@ -1696,7 +1740,7 @@ class AgenticMemorySystem:
         if not self._notes_dir or old_filepath == new_filepath:
             return
         # Remove the old path from the merkle tree to avoid phantom leaves.
-        self._integrity.notify_delete("", old_filepath)
+        self._get_integrity().notify_delete("", old_filepath)
         old_full_path = os.path.join(self._notes_dir, old_filepath)
         if not os.path.exists(old_full_path):
             return

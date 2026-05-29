@@ -1,6 +1,6 @@
 """Dashboard API routes for Agentic Memory.
 
-Reads memory data from the centralized ~/.ostwin/memory/memory-{plan_id}/
+Reads memory data from the centralized ~/.ostwin/memory/{plan_id}/
 directory to serve graph snapshots, memory notes, and search results to the frontend.
 """
 
@@ -779,7 +779,7 @@ async def export_namespace(
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        tar.add(str(ns_dir), arcname=f"memory-{plan_id}")
+        tar.add(str(ns_dir), arcname=plan_id)
     buf.seek(0)
 
     return StreamingResponse(

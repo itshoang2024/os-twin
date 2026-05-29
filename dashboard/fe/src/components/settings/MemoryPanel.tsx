@@ -450,6 +450,12 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
     [allModels],
   );
 
+  // Detect if selected model uses cloud auth (no endpoint/key needed)
+  const selectedLlmModel = allModels.find((m) => m.id === draft.llm_model);
+  const llmUsesCloudAuth = selectedLlmModel?.provider_id === 'google';
+  const selectedEmbedModel = allModels.find((m) => m.id === draft.embedding_model);
+  const embedUsesCloudAuth = selectedEmbedModel?.provider_id === 'google';
+
   // ── LLM handlers ─────────────────────────────────────────────────────
 
   const handleLlmBackendChange = (backend: string) => {
@@ -703,8 +709,15 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               </div>
             )}
 
-            {/* OpenAI-compatible specific fields */}
-            {draft.llm_backend === 'openai-compatible' && (
+            {/* Vertex AI model — no endpoint/key needed */}
+            {draft.llm_backend === 'openai-compatible' && llmUsesCloudAuth && (
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200 flex items-start gap-2">
+                <span className="material-symbols-outlined text-blue-600 text-sm mt-0.5">verified</span>
+                <p className="text-xs text-blue-800">This model uses Vertex AI — authenticated via your cloud credentials. No endpoint or API key needed.</p>
+              </div>
+            )}
+            {/* Other models — show endpoint/key fields */}
+            {draft.llm_backend === 'openai-compatible' && !llmUsesCloudAuth && (
               <div className="mt-4 space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <div>
                   <label className="text-[9px] font-semibold text-slate-600 mb-1 block">API Endpoint URL</label>
@@ -873,8 +886,15 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               </div>
             )}
 
-            {/* OpenAI-compatible specific fields */}
-            {draft.embedding_backend === 'openai-compatible' && (
+            {/* Vertex AI model — no endpoint/key needed */}
+            {draft.embedding_backend === 'openai-compatible' && embedUsesCloudAuth && (
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200 flex items-start gap-2">
+                <span className="material-symbols-outlined text-blue-600 text-sm mt-0.5">verified</span>
+                <p className="text-xs text-blue-800">This model uses Vertex AI — authenticated via your cloud credentials. No endpoint or API key needed.</p>
+              </div>
+            )}
+            {/* Other models — show endpoint/key fields */}
+            {draft.embedding_backend === 'openai-compatible' && !embedUsesCloudAuth && (
               <div className="mt-4 space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <div>
                   <label className="text-[9px] font-semibold text-slate-600 mb-1 block">API Endpoint URL</label>

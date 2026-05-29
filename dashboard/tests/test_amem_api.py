@@ -2,7 +2,7 @@
 
 Tests the /api/amem/{plan_id}/... endpoints that serve memory graph data,
 note listings, individual notes, and statistics from the centralized
-~/.ostwin/memory/memory-{plan_id}/ directory.
+~/.ostwin/memory/{plan_id}/ directory.
 """
 
 import json
@@ -76,7 +76,7 @@ Just a simple note with no metadata.
 
 def _make_memory_dir(memory_base: Path, plan_id: str) -> Path:
     """Create the centralized memory directory for a plan_id."""
-    mem_dir = memory_base / f"memory-{plan_id}"
+    mem_dir = memory_base / plan_id
     return mem_dir
 
 
@@ -393,7 +393,7 @@ class TestMemoryStats:
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats").json()
         assert "memory_dir" in data
-        assert f"memory-{memory_workspace['plan_id']}" in data["memory_dir"]
+        assert memory_workspace["plan_id"] in data["memory_dir"]
 
     def test_stats_empty_memory(self, empty_memory_workspace, monkeypatch):
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"])
@@ -494,7 +494,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
         (notes_dir / "no-heading.md").write_text("Just content, no heading.", encoding="utf-8")
@@ -512,7 +512,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
         (notes_dir / "empty-tags.md").write_text("# Test\n\n**Tags**: \n\nContent here.", encoding="utf-8")
@@ -530,7 +530,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
         (notes_dir / "note.md").write_text("# Real Note\nContent.", encoding="utf-8")
@@ -550,7 +550,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        deep_dir = memory_base / f"memory-{plan_id}" / "notes" / "a" / "b" / "c"
+        deep_dir = memory_base / plan_id / "notes" / "a" / "b" / "c"
         deep_dir.mkdir(parents=True)
         (deep_dir / "deep-note.md").write_text("# Deep\nContent.", encoding="utf-8")
 
