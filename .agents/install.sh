@@ -9,6 +9,7 @@
 #   ./install.sh --yes         # Non-interactive — auto-approve all installs
 #   ./install.sh --dir /path   # Install to custom location (default: ~/.ostwin)
 #   ./install.sh --channel        # Also install & start the channel connectors (Telegram + Discord + Slack)
+#   ./install.sh --search-engine  # Also install local SearXNG under ~/.ostwin/search-engine
 #   ./install.sh --dashboard-only  # Install dashboard API + frontend only
 #   ./install.sh --no-opencode-config  # Skip writing to ~/.config/opencode/opencode.json
 #   ./install.sh --no-start       # Install only; do not start OpenCode/dashboard services
@@ -44,7 +45,7 @@ INSTALL_DIR="${HOME}/.ostwin"
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")"
 # shellcheck disable=SC2034
 AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false
-START_CHANNEL=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
+START_CHANNEL=false; INSTALL_SEARCH_ENGINE=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
 # shellcheck disable=SC2034
 PYTHON_VERSION=""
 # shellcheck disable=SC2034
@@ -60,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --skip-optional)  SKIP_OPTIONAL=true; shift ;;
     --dashboard-only) DASHBOARD_ONLY=true; AUTO_YES=true; shift ;;
     --channel)        START_CHANNEL=true; shift ;;
+    --search-engine|--with-search-engine) INSTALL_SEARCH_ENGINE=true; shift ;;
     --no-opencode-config) SKIP_OPENCODE_CONFIG=true; shift ;;
     --no-start|--skip-start) START_SERVICES=false; shift ;;
     --help|-h)        head -23 "$0" | tail -21; exit 0 ;;
@@ -79,8 +81,13 @@ fi
 # ─── Source all modules ──────────────────────────────────────────────────────
 for _mod in lib.sh versions.conf detect-os.sh check-deps.sh install-deps.sh \
             install-files.sh setup-venv.sh setup-env.sh setup-models.sh patch-mcp.sh \
+<<<<<<< Updated upstream
             build-frontend.sh setup-path.sh setup-opencode.sh sync-agents.sh \
             start-opencode-server.sh start-dashboard.sh start-searxng.sh start-channels.sh \
+=======
+            build-frontend.sh setup-search-engine.sh setup-path.sh setup-opencode.sh sync-agents.sh \
+            start-opencode-server.sh start-dashboard.sh start-channels.sh \
+>>>>>>> Stashed changes
             setup-autostart.sh verify.sh; do
   # shellcheck disable=SC1090
   source "$INSTALLER_DIR/$_mod"
@@ -130,14 +137,21 @@ header "5. Setting up Python environment"
 setup_venv
 header "5b. Setting up .env"
 setup_env
-header "5c. Initializing models catalog"
+if $INSTALL_SEARCH_ENGINE; then
+  header "5c. Installing local search engine (SearXNG)"
+  setup_search_engine || warn "Search engine install failed (non-fatal)"
+else
+  header "5c. Local search engine (skipped)"
+  info "Run later with: ostwin search-engine install"
+fi
+header "5d. Initializing models catalog"
 if $FIRST_INSTALL; then
   setup_models --force
 else
   setup_models
 fi
 patch_mcp_config; sync_opencode_agents; compute_build_hash
-header "5d. OpenCode agent permissions"
+header "5e. OpenCode agent permissions"
 if $SKIP_OPENCODE_CONFIG; then
   info "Skipping OpenCode config (--no-opencode-config)"
 else
@@ -161,13 +175,11 @@ fi
 
 header "8. Verification"
 verify_components
-header "8a. Generating OpenCode tools"
 generate_opencode_tools
 section_9_start=$(get_now)
 if $START_SERVICES; then
-  header "9. Starting OpenCode server"
   start_opencode_server || warn "OpenCode server failed to start (non-fatal)"
-  header "9a. Starting dashboard"
+  header "9. Starting dashboard"
   start_dashboard || warn "Dashboard failed to start (non-fatal)"
   publish_skills || warn "Skill publishing failed (non-fatal)"
   header "9b. Starting SearXNG (metasearch engine)"

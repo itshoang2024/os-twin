@@ -207,7 +207,15 @@ _sync_dashboard() {
     # Use incremental rsync with --delete instead of rm -rf + full copy.
     # Exclude node_modules (588MB) and frontend source files — only the
     # pre-built output in fe/out/ is needed at runtime.
+    # Preserve any legacy dashboard-local virtualenv on the receiver. Current
+    # installs use $INSTALL_DIR/.venv, but deleting dashboard/.venv during rsync
+    # can create noisy rsync receiver-delete warnings when files
+    # are in use.
     rsync -a --delete \
+      --filter='P .venv/***' \
+      --filter='P venv/***' \
+      --exclude='.venv/' \
+      --exclude='venv/' \
       --exclude='node_modules/' \
       --exclude='fe/src/' \
       --exclude='fe/.next/' \
