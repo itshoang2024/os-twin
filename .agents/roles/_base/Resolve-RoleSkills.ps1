@@ -394,6 +394,30 @@ if ($RoomDir -and (Test-Path $RoomDir) -and $ApiKey -and $taskContext.Length -gt
 }
 
 # =======================================================================
+# PHASE 2.5: LEGAL GUARDRAIL EXPANSION
+# Ensures legal-common is present whenever legal-* skills are resolved,
+# and adds source-document-intake when a legal workflow and source-doc
+# signals both appear in the task context.
+# =======================================================================
+$hasLegalSkill = @($allRefs | Where-Object { $_ -match '^legal-' -and $_ -ine 'legal-common' }).Count -gt 0
+if ($hasLegalSkill -or ($taskContext -imatch '\blegal\b')) {
+    $guardSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($r in $allRefs) { $guardSet.Add($r) | Out-Null }
+
+    if ($hasLegalSkill -and -not $guardSet.Contains('legal-common')) {
+        $allRefs += 'legal-common'
+        $guardSet.Add('legal-common') | Out-Null
+        Write-Verbose "Phase 2.5: added legal-common (legal workflow guardrail)"
+    }
+
+    $sourceDocPattern = 'pdf|docx|pptx|xlsx|uploaded|attached|contract|exhibit|filing|policy|evidence|clause'
+    if (($taskContext -imatch $sourceDocPattern) -and -not $guardSet.Contains('source-document-intake')) {
+        $allRefs += 'source-document-intake'
+        Write-Verbose "Phase 2.5: added source-document-intake (legal + source-doc signal)"
+    }
+}
+
+# =======================================================================
 # PHASE 3: LOCAL RESOLUTION (stage each ref to disk)
 # =======================================================================
 
