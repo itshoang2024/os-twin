@@ -606,7 +606,7 @@ def reset_mcp_session_manager() -> None:
 
 
 @mcp.tool()
-async def knowledge_web_research(
+async def web_research(
     namespace: str,
     query: str,
     engines: list[str] | None = None,
