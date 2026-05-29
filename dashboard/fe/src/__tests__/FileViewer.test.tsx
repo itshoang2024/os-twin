@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import FileViewer from '../components/plan/files/FileViewer';
 import { useFileContent } from '../hooks/use-files';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 
 vi.mock('../hooks/use-files', () => ({
   useFileContent: vi.fn(),
@@ -27,7 +27,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders empty state when no path is selected', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: undefined,
       isLoading: false,
       isError: undefined,
@@ -38,7 +38,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders loading state', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: undefined,
       isLoading: true,
       isError: undefined,
@@ -50,7 +50,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders error state when fetch fails', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: undefined,
       isLoading: false,
       isError: new Error('Not found'),
@@ -62,7 +62,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders error state when content is null', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: null,
       isLoading: false,
       isError: undefined,
@@ -73,7 +73,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders text file content', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent(),
       isLoading: false,
       isError: undefined,
@@ -81,11 +81,12 @@ describe('FileViewer Component', () => {
 
     render(<FileViewer planId={planId} path="src/main.ts" />);
     expect(screen.getByText('main.ts')).toBeInTheDocument();
+    expect(screen.getByTitle('TypeScript')).toHaveTextContent('code');
     expect(document.querySelector('.hljs')).toBeTruthy();
   });
 
   it('renders file size information', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({ content: 'hello', size: 5, mime_type: 'text/plain' }),
       isLoading: false,
       isError: undefined,
@@ -96,7 +97,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders truncated indicator when file is truncated', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'src/big.ts',
         content: 'partial content...',
@@ -113,7 +114,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders binary file message for base64 non-image content', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'data.bin',
         content: 'AQID',
@@ -132,7 +133,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders image for image mime types', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'logo.png',
         content: 'iVBORw0KGgoAAAANSUhEUg==',
@@ -151,7 +152,7 @@ describe('FileViewer Component', () => {
   });
 
   it('renders large file fallback when content is null and truncated', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'big.pdf',
         content: null,
@@ -165,13 +166,14 @@ describe('FileViewer Component', () => {
     });
 
     render(<FileViewer planId={planId} path="big.pdf" />);
+    expect(screen.getByTitle('PDF')).toHaveTextContent('picture_as_pdf');
     expect(screen.getByText('File too large to preview')).toBeInTheDocument();
     expect(screen.getByText(/exceeds the 2 MB preview limit/)).toBeInTheDocument();
     expect(screen.getByText('Download File').closest('a')?.getAttribute('href')).toContain('/download');
   });
 
   it('renders TOO LARGE badge for truncated null-content files', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'huge.bin',
         content: null,
@@ -189,7 +191,7 @@ describe('FileViewer Component', () => {
   });
 
   it('binary fallback download link uses download_url from API', () => {
-    (useFileContent as any).mockReturnValue({
+    (useFileContent as Mock).mockReturnValue({
       content: makeContent({
         path: 'data.bin',
         content: 'AQID',
