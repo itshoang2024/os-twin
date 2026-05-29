@@ -147,6 +147,33 @@ describe('TemplatePicker', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('tablist uses flex-wrap and not overflow-x-auto', () => {
+    render(<TemplatePicker categories={mockCategories} onSelectTemplate={() => {}} />);
+    const tablist = screen.getByRole('tablist');
+    expect(tablist.className).toContain('flex-wrap');
+    expect(tablist.className).not.toContain('overflow-x-auto');
+  });
+
+  it('renders all 9 categories including Documents and Creative without hiding any', () => {
+    const nineCategories = [
+      { id: 'engineering', name: 'Engineering', icon: 'engineering', description: '', templates: [] },
+      { id: 'marketing',   name: 'Marketing',   icon: 'campaign',    description: '', templates: [] },
+      { id: 'sales',       name: 'Sales',        icon: 'handshake',   description: '', templates: [] },
+      { id: 'support',     name: 'Support',      icon: 'support_agent', description: '', templates: [] },
+      { id: 'operations',  name: 'Operations',   icon: 'settings',    description: '', templates: [] },
+      { id: 'research',    name: 'Research',     icon: 'science',     description: '', templates: [] },
+      { id: 'compliance',  name: 'Compliance',   icon: 'verified',    description: '', templates: [] },
+      { id: 'documents',   name: 'Documents',    icon: 'description', description: '', templates: [] },
+      { id: 'creative',    name: 'Creative',     icon: 'palette',     description: '', templates: [] },
+    ];
+    render(<TemplatePicker categories={nineCategories} onSelectTemplate={() => {}} />);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(9);
+    expect(screen.getByRole('tab', { name: /Engineering/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Documents/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Creative/i })).toBeInTheDocument();
+  });
+
   it('renders a Documents tab when included in categories', () => {
     const categoriesWithDocs = [
       ...mockCategories,

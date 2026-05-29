@@ -58,7 +58,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
       <div
         role="tablist"
         aria-label="Plan template categories"
-        className="flex overflow-x-auto items-center pb-2 border-b border-[var(--color-border)] mb-6"
+        className="flex flex-wrap items-center pb-2 border-b border-[var(--color-border)] mb-6"
         onKeyDown={handleKeyDown}
       >
         {categories.map((cat, idx) => (
@@ -74,7 +74,7 @@ export const TemplatePicker: React.FC<TemplatePickerProps> = ({
               setActiveTabId(cat.id);
               setFocusedTabIndex(idx);
             }}
-            className={`flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium transition-all border-b-2 -mb-[2px] ${
+            className={`flex items-center justify-center gap-1 whitespace-nowrap px-2.5 py-2 text-sm font-medium transition-all border-b-2 -mb-[2px] ${
               activeTabId === cat.id
                 ? 'border-[var(--color-primary)] text-[var(--color-primary)]'
                 : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-main)] hover:border-[var(--color-border)]'

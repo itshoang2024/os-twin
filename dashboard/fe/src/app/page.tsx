@@ -120,8 +120,8 @@ export default function DashboardHomePage() {
         <span className="material-symbols-outlined text-[var(--color-text-muted)] text-sm">expand_more</span>
       </div>
 
+      {/* Greeting + input kept narrow for readability */}
       <div className="w-full max-w-4xl flex flex-col items-center">
-        {/* Greeting */}
         <div className="flex flex-col items-center text-center mb-6">
           <BrandIcon size={48} className="mb-4 text-primary" />
           <h1 className="text-[38px] md:text-[46px] lg:text-[54px] leading-tight font-[var(--font-display)] font-bold text-[var(--color-text-main)] tracking-tight">
@@ -139,17 +139,21 @@ export default function DashboardHomePage() {
           attachedTemplate={attachedTemplate}
           onRemoveTemplate={handleRemoveTemplate}
         />
+      </div>
 
-        {/* Template Picker */}
-        {templateCatalog.length > 0 && (
+      {/* Template picker gets a wider container so all 9 tabs can fit */}
+      {templateCatalog.length > 0 && (
+        <div className="w-full max-w-5xl">
           <TemplatePicker
             categories={templateCatalog}
             onSelectTemplate={handleSelectTemplate}
             loadingTemplateId={loadingTemplateId}
           />
-        )}
+        </div>
+      )}
 
-        {/* Recent Projects & Activity */}
+      {/* Recent Projects & Activity */}
+      <div className="w-full max-w-4xl">
         <div className="w-full max-w-5xl">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
