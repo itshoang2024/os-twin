@@ -202,8 +202,10 @@ ostwin mcp catalog                # Browse MCP extensions
 ostwin mcp install <git-url> --name custom-server
 ostwin mcp list                   # Show installed extensions
 
+./build.sh --search-engine --search-engine-mode docker
+./build.sh --search-engine --search-engine-mode local
 ostwin search-engine install      # Install local SearXNG under ~/.ostwin
-ostwin search-engine start        # Run local search on http://127.0.0.1:8888
+ostwin search-engine start        # Run local search on http://127.0.0.1:6633
 
 ostwin dashboard start            # Launch web dashboard
 ostwin health                     # System health check

@@ -41,6 +41,16 @@ func TestNormalizeAppliesProfiles(t *testing.T) {
 			in:   Options{Profile: "minimal", Port: 3366, InstallDir: "/tmp/ostwin"},
 			want: Options{Profile: "minimal", Port: 3366, InstallDir: "/tmp/ostwin", SkipOptional: true, NoStart: true, Repo: defaultRepo, Ref: defaultRef},
 		},
+		{
+			name: "search engine defaults to docker mode",
+			in:   Options{Profile: "full", Port: 3366, InstallDir: "/tmp/ostwin", SearchEngine: true},
+			want: Options{Profile: "full", Port: 3366, InstallDir: "/tmp/ostwin", SearchEngine: true, SearchEngineMode: "docker", Repo: defaultRepo, Ref: defaultRef},
+		},
+		{
+			name: "search engine mode implies search engine install",
+			in:   Options{Profile: "full", Port: 3366, InstallDir: "/tmp/ostwin", SearchEngineMode: "local"},
+			want: Options{Profile: "full", Port: 3366, InstallDir: "/tmp/ostwin", SearchEngine: true, SearchEngineMode: "local", Repo: defaultRepo, Ref: defaultRef},
+		},
 	}
 
 	for _, tt := range tests {
@@ -78,6 +88,7 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 		DashboardOnly:    true,
 		Channel:          true,
 		SearchEngine:     true,
+		SearchEngineMode: "local",
 		SkipOptional:     true,
 		NoOpenCodeConfig: true,
 		NoStart:          true,
@@ -97,8 +108,8 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 				t.Fatalf("Windows args missing %q in %q", token, joined)
 			}
 		}
-		if len(invocation.Warnings) != 2 {
-			t.Fatalf("Warnings = %#v, want 2 unsupported-option warnings", invocation.Warnings)
+		if len(invocation.Warnings) != 3 {
+			t.Fatalf("Warnings = %#v, want 3 unsupported-option warnings", invocation.Warnings)
 		}
 		return
 	}
@@ -106,7 +117,51 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 	if invocation.Command != "bash" {
 		t.Fatalf("Command = %q, want bash", invocation.Command)
 	}
-	for _, token := range []string{"--yes", "--dir", "/tmp/ostwin", "--source-dir", root, "--port", "8080", "--dashboard-only", "--channel", "--search-engine", "--skip-optional", "--no-opencode-config", "--no-start"} {
+	for _, token := range []string{"--yes", "--dir", "/tmp/ostwin", "--source-dir", root, "--port", "8080", "--dashboard-only", "--channel", "--search-engine", "--search-engine-mode", "local", "--skip-optional", "--no-opencode-config", "--no-start"} {
+		if !strings.Contains(joined, token) {
+			t.Fatalf("Unix args missing %q in %q", token, joined)
+		}
+	}
+}
+
+func TestNormalizeRejectsInvalidSearchEngineMode(t *testing.T) {
+	opts := Options{
+		Profile:          "full",
+		Port:             3366,
+		InstallDir:       "/tmp/ostwin",
+		SearchEngine:     true,
+		SearchEngineMode: "podman",
+	}
+	if err := opts.Normalize(); err == nil {
+		t.Fatal("Normalize() error = nil, want invalid search engine mode error")
+	}
+}
+
+func TestBuildInvocationSearchEngineModeImpliesSearchEngine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-only assertion")
+	}
+
+	root := t.TempDir()
+	agentsDir := filepath.Join(root, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, "install.sh"), []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	invocation, err := BuildInvocation(root, Options{
+		InstallDir:       "/tmp/ostwin",
+		Port:             3366,
+		SearchEngineMode: "local",
+	})
+	if err != nil {
+		t.Fatalf("BuildInvocation() error = %v", err)
+	}
+
+	joined := strings.Join(invocation.Args, " ")
+	for _, token := range []string{"--search-engine", "--search-engine-mode", "local"} {
 		if !strings.Contains(joined, token) {
 			t.Fatalf("Unix args missing %q in %q", token, joined)
 		}

@@ -42,6 +42,7 @@ type Options struct {
 	DashboardOnly    bool
 	Channel          bool
 	SearchEngine     bool
+	SearchEngineMode string
 	SkipOptional     bool
 	NoOpenCodeConfig bool
 	NoStart          bool
@@ -86,6 +87,20 @@ func (o *Options) Normalize() error {
 	}
 	if o.Profile == "" {
 		o.Profile = "full"
+	}
+	o.SearchEngineMode = strings.ToLower(strings.TrimSpace(o.SearchEngineMode))
+	if o.SearchEngineMode != "" {
+		o.SearchEngine = true
+	}
+	if o.SearchEngine && o.SearchEngineMode == "" {
+		o.SearchEngineMode = "docker"
+	}
+	if o.SearchEngineMode != "" {
+		switch o.SearchEngineMode {
+		case "local", "docker":
+		default:
+			return fmt.Errorf("search engine mode must be local or docker, got %q", o.SearchEngineMode)
+		}
 	}
 	if o.Port < 1 || o.Port > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535, got %d", o.Port)
@@ -228,8 +243,12 @@ func buildUnixInvocation(root string, opts Options) (Invocation, error) {
 	if opts.Channel {
 		args = append(args, "--channel")
 	}
-	if opts.SearchEngine {
+	searchEngine := opts.SearchEngine || strings.TrimSpace(opts.SearchEngineMode) != ""
+	if searchEngine {
 		args = append(args, "--search-engine")
+		if mode := strings.ToLower(strings.TrimSpace(opts.SearchEngineMode)); mode != "" {
+			args = append(args, "--search-engine-mode", mode)
+		}
 	}
 	if opts.SkipOptional {
 		args = append(args, "--skip-optional")
@@ -269,8 +288,11 @@ func buildWindowsInvocation(root string, opts Options) (Invocation, error) {
 	}
 
 	warnings := []string{}
-	if opts.SearchEngine {
+	if opts.SearchEngine || strings.TrimSpace(opts.SearchEngineMode) != "" {
 		warnings = append(warnings, "--search-engine is currently supported only by the macOS/Linux installer")
+	}
+	if strings.TrimSpace(opts.SearchEngineMode) != "" {
+		warnings = append(warnings, "--search-engine-mode is currently supported only by the macOS/Linux installer")
 	}
 	if opts.NoOpenCodeConfig {
 		warnings = append(warnings, "--no-opencode-config is currently supported only by the macOS/Linux installer")

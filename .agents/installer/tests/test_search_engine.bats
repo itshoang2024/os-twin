@@ -42,7 +42,7 @@ teardown() {
     'use_default_settings: true' \
     'server:' \
     '  secret_key: "ultrasecretkey"' \
-    '  port: 8888' \
+    '  port: 6633' \
     '  bind_address: "127.0.0.1"' \
     'search:' \
     '  formats:' \
@@ -69,4 +69,23 @@ teardown() {
   run env OSTWIN_HOME="$TMP_OSTWIN_HOME" bash "$SEARCH_SCRIPT" configure --port nope
   [ "$status" -ne 0 ]
   [[ "$output" == *"Invalid port"* ]]
+}
+
+@test "status reports live PID that is not serving expected URL" {
+  mkdir -p "$TMP_OSTWIN_HOME/search-engine" "$TMP_OSTWIN_HOME/bin"
+  sleep 30 &
+  live_pid="$!"
+  printf '%s\n' "$live_pid" > "$TMP_OSTWIN_HOME/search-engine/searxng.pid"
+  cat > "$TMP_OSTWIN_HOME/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 7
+EOF
+  chmod +x "$TMP_OSTWIN_HOME/bin/curl"
+
+  run env OSTWIN_HOME="$TMP_OSTWIN_HOME" PATH="$TMP_OSTWIN_HOME/bin:$PATH" bash "$SEARCH_SCRIPT" status
+
+  kill "$live_pid" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"process exists"* ]]
+  [[ "$output" == *"not responding on http://127.0.0.1:6633"* ]]
 }
