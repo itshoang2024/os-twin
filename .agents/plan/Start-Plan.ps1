@@ -817,7 +817,7 @@ if (-not $Resume -and -not $DryRun -and (Test-Path $reviewDeps)) {
         WarRoomsDir = $warRoomsDir
         PlanFile    = $PlanFile
     }
-    if ($config.manager -and $config.manager.auto_approve_deps -eq $true) {
+    if ($NonInteractive -or ($config.manager -and $config.manager.auto_approve_deps -eq $true)) {
         $depReviewArgs['AutoApprove'] = $true
     }
     & $reviewDeps @depReviewArgs
