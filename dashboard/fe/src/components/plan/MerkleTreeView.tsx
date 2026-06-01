@@ -77,6 +77,22 @@ function getAncestorPath(node: HNode): HNode[] {
   return path;
 }
 
+function collectAutoCollapsedPaths(tree: MerkleNode): Set<string> {
+  const paths = new Set<string>();
+
+  function walk(node: MerkleNode, path: string, depth: number) {
+    if (depth >= 3 && node.type === 'dir' && node.children.length > 0) {
+      paths.add(path);
+    }
+    for (const child of node.children) {
+      walk(child, `${path}/${child.name}`, depth + 1);
+    }
+  }
+
+  walk(tree, tree.name, 0);
+  return paths;
+}
+
 // ── MerkleIntegrityBar ───────────────────────────────────────────────
 
 function MerkleIntegrityBar({ data }: { data: MerkleData }) {
@@ -159,6 +175,18 @@ function MerkleNodeDetail({
   node: HNode | null;
   onGoToNote?: (leafName: string) => void;
 }) {
+  const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const selectedHash = node?.data.hash ?? '';
+  const copied = copiedHash === selectedHash;
+
+  const copyHash = useCallback(() => {
+    if (!selectedHash) return;
+    navigator.clipboard.writeText(selectedHash).then(() => {
+      setCopiedHash(selectedHash);
+      setTimeout(() => setCopiedHash(null), 1500);
+    });
+  }, [selectedHash]);
+
   if (!node) {
     return (
       <div className="h-full flex items-center justify-center p-4">
@@ -172,14 +200,6 @@ function MerkleNodeDetail({
   const d = node.data;
   const ancestors = getAncestorPath(node);
   const { leaves, dirs } = d.type === 'dir' ? countChildren(d) : { leaves: 0, dirs: 0 };
-  const [copied, setCopied] = useState(false);
-
-  const copyHash = useCallback(() => {
-    navigator.clipboard.writeText(d.hash).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [d.hash]);
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
@@ -316,7 +336,9 @@ function MerkleTreeDiagram({
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(
+    () => collectAutoCollapsedPaths(tree)
+  );
   const dragging = useRef(false);
   const lastPointer = useRef({ x: 0, y: 0 });
 
@@ -343,7 +365,7 @@ function MerkleTreeDiagram({
   }, []);
 
   // Build the d3 hierarchy with collapse support
-  const { root, nodes, links } = useMemo(() => {
+  const { nodes, links } = useMemo(() => {
     // Deep clone tree data and apply collapse
     function applyCollapse(node: MerkleNode, path: string): MerkleNode {
       if (collapsedPaths.has(path) && node.type === 'dir') {
@@ -373,22 +395,6 @@ function MerkleTreeDiagram({
 
     return { root: root as HNode, nodes, links };
   }, [tree, dimensions.width, collapsedPaths]);
-
-  // Auto-collapse deep subtrees on first render
-  useEffect(() => {
-    const toCollapse = new Set<string>();
-    function walk(node: d3Hierarchy.HierarchyNode<MerkleNode>, path: string, depth: number) {
-      if (depth >= 3 && node.data.type === 'dir' && node.data.children.length > 0) {
-        toCollapse.add(path);
-      }
-      for (const c of node.children || []) {
-        walk(c, `${path}/${c.data.name}`, depth + 1);
-      }
-    }
-    const tempRoot = d3Hierarchy.hierarchy(tree);
-    walk(tempRoot, tree.name, 0);
-    if (toCollapse.size > 0) setCollapsedPaths(toCollapse);
-  }, [tree]);
 
   // Toggle collapse on a directory node
   const toggleCollapse = useCallback((node: HNode) => {
@@ -445,11 +451,6 @@ function MerkleTreeDiagram({
     const factor = e.deltaY > 0 ? 0.95 : 1.05;
     setZoom((z) => Math.min(2.5, Math.max(0.3, z * factor)));
   }, []);
-
-  // Compute SVG internal height
-  const treeHeight = nodes.length > 0
-    ? Math.max(...nodes.map(n => n.x)) - Math.min(...nodes.map(n => n.x)) + MARGIN.top + MARGIN.bottom + 40
-    : 400;
 
   // Link path generator (horizontal tree: swap x/y)
   const linkPath = useCallback((d: d3Hierarchy.HierarchyPointLink<MerkleNode>) => {
@@ -644,6 +645,7 @@ export default function MerkleTreeView({
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}
         >
           <MerkleTreeDiagram
+            key={data.root_hash}
             tree={data.tree}
             selectedNode={selectedNode}
             searchQuery={searchQuery}

@@ -6,12 +6,12 @@
 
 services:
   searxng:
-    image: searxng/searxng:latest
+    image: "${SEARXNG_IMAGE:-searxng/searxng:latest}"
     container_name: ostwin-searxng
     ports:
-      - "${SEARXNG_PORT:-6633}:8080"
+      - "127.0.0.1:${SEARXNG_PORT:-6633}:8080"
     volumes:
-      - ./searxng:/etc/searxng:rw
+      - "${SEARXNG_CONFIG_DIR:-./searxng}:/etc/searxng:rw"
     environment:
       - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-6633}/
     cap_drop:

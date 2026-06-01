@@ -104,7 +104,7 @@ export function useResearchSearch(namespace: string | null) {
     setSearchError(null);
 
     try {
-      const raw = await apiPost<ResearchSearchResponse | SearchResultItem[]>(
+      const response = await apiPost<ResearchSearchResponse>(
         `${KNOWLEDGE_BASE}/namespaces/${namespace}/research/search`,
         {
           query: params.query,
@@ -114,10 +114,6 @@ export function useResearchSearch(namespace: string | null) {
           language: params.language ?? 'en',
         }
       );
-      // api-client auto-unwraps responses with a "results" key into the bare array
-      const response: ResearchSearchResponse = Array.isArray(raw)
-        ? { results: raw, query: params.query, elapsed_seconds: 0, warnings: [], engines_used: params.engines || [], categories_used: params.categories || [] }
-        : (raw as ResearchSearchResponse);
       setResults(response.results);
       setSearchMeta({
         query: response.query,
