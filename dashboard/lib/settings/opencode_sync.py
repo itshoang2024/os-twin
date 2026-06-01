@@ -101,7 +101,7 @@ def sync_opencode_config(
         settings = get_settings_resolver().get_master_settings()
 
     oc = _sync_opencode_json(vault, settings, config_path or OPENCODE_CONFIG_PATH)
-    aj = _sync_auth_json(vault, auth_path or AUTH_JSON_PATH)
+    aj = _sync_auth_json(vault, settings, auth_path or AUTH_JSON_PATH)
 
     # Merge into a flat SyncResult for backward compat
     all_synced = oc.synced + aj.synced
@@ -206,7 +206,7 @@ def _sync_opencode_json(vault, settings, target: Path) -> TargetResult:
 # ── auth.json sync (native API-key providers) ────────────────────────
 
 
-def _sync_auth_json(vault, target: Path) -> TargetResult:
+def _sync_auth_json(vault, settings, target: Path) -> TargetResult:
     synced: List[str] = []
     removed: List[str] = []
     skipped: List[str] = []
@@ -215,6 +215,11 @@ def _sync_auth_json(vault, target: Path) -> TargetResult:
 
     # 1) Sync providers with explicit registry definitions
     for name, adef in AUTH_JSON_PROVIDERS.items():
+        provider_settings = getattr(settings.providers, name, None)
+        if name == "openai" and getattr(provider_settings, "auth_mode", None) == "codex_oauth":
+            skipped.append(name)
+            continue
+
         try:
             api_key = vault.get(adef.vault_scope, adef.vault_key)
         except Exception as exc:
@@ -225,7 +230,11 @@ def _sync_auth_json(vault, target: Path) -> TargetResult:
             continue
 
         if not api_key:
-            if adef.auth_json_key in existing:
+            if (
+                adef.auth_json_key in existing
+                and isinstance(existing.get(adef.auth_json_key), dict)
+                and existing[adef.auth_json_key].get("type") == "api"
+            ):
                 del existing[adef.auth_json_key]
                 removed.append(name)
             else:
