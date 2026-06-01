@@ -10,36 +10,35 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 ensure_js_package_manager() {
-  if command -v bun &>/dev/null; then
-    ok "JavaScript package manager: bun"
+  if check_bun; then
+    local bun_ver
+    bun_ver=$(bun --version 2>&1 | head -1 || echo "installed")
+    ok "Bun $bun_ver"
     return 0
   fi
-  if command -v npm &>/dev/null; then
-    ok "JavaScript package manager: npm"
+
+  warn "Bun not found"
+  if install_bun; then
     return 0
   fi
-  warn "No JavaScript package manager found (expected bun or npm)"
+
+  warn "Bun is required for JavaScript installs and bot startup"
   return 1
 }
 
 install_clawhub_cli() {
   command -v clawhub &>/dev/null && return 0
 
-  if command -v bun &>/dev/null; then
-    step "Installing clawhub CLI with bun..."
-    if bun add -g clawhub 2>/dev/null; then
-      local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
-      [[ -d "$bun_bin" && ":$PATH:" != *":$bun_bin:"* ]] && export PATH="$bun_bin:$PATH"
-      return 0
-    fi
-    warn "clawhub bun install failed; retrying with npm if available"
+  if ! check_bun; then
+    ensure_js_package_manager || return 0
   fi
 
-  if command -v npm &>/dev/null; then
-    step "Installing clawhub CLI with npm..."
-    npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
+  step "Installing clawhub CLI with bun..."
+  if bun add -g clawhub 2>/dev/null; then
+    local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
+    [[ -d "$bun_bin" && ":$PATH:" != *":$bun_bin:"* ]] && export PATH="$bun_bin:$PATH"
   else
-    warn "Skipping clawhub CLI — neither bun nor npm was found"
+    warn "clawhub bun install failed"
   fi
 }
 

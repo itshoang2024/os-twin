@@ -3,7 +3,7 @@
 # install-deps.sh — Dependency installers
 #
 # Provides: install_brew, install_uv, install_python, install_pwsh,
-#           install_node, install_opencode, install_agent_browser,
+#           install_node, install_bun, install_opencode, install_agent_browser,
 #           install_chrome_devtools, install_pester
 #
 # Requires: lib.sh, versions.conf, detect-os.sh (OS, ARCH, PKG_MGR),
@@ -215,6 +215,41 @@ install_node() {
   rm -f /tmp/node.tar.gz
   export PATH="$HOME/.local/bin:$PATH"
   ok "Node.js $node_ver installed to $node_dir"
+}
+
+# ─── Bun ─────────────────────────────────────────────────────────────────────
+
+install_bun() {
+  if check_bun; then
+    local bun_ver
+    bun_ver=$(bun --version 2>&1 | head -1 || echo "installed")
+    ok "Bun $bun_ver"
+    return 0
+  fi
+
+  step "Installing Bun JavaScript runtime/package manager..."
+  case "$OS" in
+    macos|linux)
+      curl -fsSL https://bun.com/install | bash
+      ;;
+    *)
+      fail "Cannot install Bun on $(uname -s) with this installer"
+      return 1
+      ;;
+  esac
+
+  export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  hash -r 2>/dev/null || true
+
+  if check_bun; then
+    local bun_ver
+    bun_ver=$(bun --version 2>&1 | head -1 || echo "installed")
+    ok "Bun $bun_ver installed"
+  else
+    fail "Bun installation failed"
+    return 1
+  fi
 }
 
 # ─── opencode ────────────────────────────────────────────────────────────────

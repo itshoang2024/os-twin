@@ -2,10 +2,10 @@
 # Install-Deps.ps1 — Dependency installers (Windows-specific)
 #
 # Provides: Install-UV, Install-Python, Install-Pwsh, Install-Node,
-#           Install-OpenCode, Install-ChromeDevTools, Install-Pester
+#           Install-Bun, Install-OpenCode, Install-ChromeDevTools, Install-Pester
 #
 # Requires: Lib.ps1, Versions.ps1, Detect-OS.ps1 ($script:PkgMgr, $script:ARCH),
-#           Check-Deps.ps1 (Check-UV, Check-OpenCode, Check-ChromeDevTools)
+#           Check-Deps.ps1 (Check-UV, Check-Bun, Check-OpenCode, Check-ChromeDevTools)
 # ──────────────────────────────────────────────────────────────────────────────
 
 if ($script:_InstallDepsPs1Loaded) { return }
@@ -210,6 +210,64 @@ function Install-Node {
 
     # Refresh PATH
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + $env:PATH
+}
+
+# ─── Bun (JavaScript runtime/package manager) ────────────────────────────────
+
+function Install-Bun {
+    [CmdletBinding()]
+    param()
+
+    if (Check-Bun) {
+        $bunVer = (& bun --version 2>&1) | Select-Object -First 1
+        if (-not $bunVer) { $bunVer = "installed" }
+        Write-Ok "Bun $bunVer"
+        return
+    }
+
+    Write-Step "Installing Bun..."
+
+    $powershellCmd = Get-Command powershell -ErrorAction SilentlyContinue
+    if (-not $powershellCmd) {
+        $powershellCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    }
+    if (-not $powershellCmd) {
+        Write-Fail "Cannot install Bun: PowerShell executable not found"
+        throw "Bun installation failed"
+    }
+
+    # Official Windows installer. Equivalent manual command:
+    # powershell -c "irm bun.sh/install.ps1|iex"
+    $psArgs = @("-NoProfile", "-Command", "irm bun.sh/install.ps1|iex")
+    if ((Split-Path -Leaf $powershellCmd.Source) -match '^powershell(\.exe)?$') {
+        $psArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm bun.sh/install.ps1|iex")
+    }
+    & $powershellCmd.Source @psArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Bun installer failed (exit $LASTEXITCODE)"
+        throw "Bun installation failed"
+    }
+
+    if (-not $env:BUN_INSTALL) {
+        $env:BUN_INSTALL = Join-Path $env:USERPROFILE ".bun"
+    }
+    $bunBin = Join-Path $env:BUN_INSTALL "bin"
+
+    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    $machinePath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
+    $pathParts = @($bunBin, $userPath, $machinePath, $env:PATH) | Where-Object { $_ }
+    $env:PATH = ($pathParts -join ";")
+
+    if (Check-Bun) {
+        $bunVer = (& bun --version 2>&1) | Select-Object -First 1
+        if (-not $bunVer) { $bunVer = "installed" }
+        Write-Ok "Bun $bunVer installed"
+    }
+    else {
+        Write-Fail "Bun installed but not in PATH"
+        Write-Info "Restart your terminal or add $bunBin to PATH"
+        throw "Bun not available in PATH — installation cannot continue"
+    }
 }
 
 # ─── opencode ────────────────────────────────────────────────────────────────

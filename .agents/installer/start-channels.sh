@@ -4,7 +4,7 @@
 #
 # Provides: install_channels, start_channels
 #
-# Requires: lib.sh, check-deps.sh (check_node),
+# Requires: lib.sh, check-deps.sh (check_node, check_bun),
 #           globals: INSTALL_DIR, SOURCE_DIR, SCRIPT_DIR
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -13,31 +13,14 @@
 _START_CHANNELS_SH_LOADED=1
 
 # ─── install_channels ────────────────────────────────────────────────────────
-# Installs channel connector Node.js dependencies.
+# Installs channel connector dependencies with Bun.
 
 _channel_ci_mode() {
   [[ "${CI:-}" == "1" || "${CI:-}" == "true" || "${CI:-}" == "TRUE" ]]
 }
 
 _select_channel_pm() {
-  local project_dir="$1"
-
-  if [[ ( -f "$project_dir/bun.lockb" || -f "$project_dir/bun.lock" ) ]] && command -v bun &>/dev/null; then
-    echo "bun"
-    return 0
-  fi
-  if [[ ( -f "$project_dir/package-lock.json" || -f "$project_dir/npm-shrinkwrap.json" ) ]] && command -v npm &>/dev/null; then
-    echo "npm"
-    return 0
-  fi
-  if command -v npm &>/dev/null; then
-    echo "npm"
-    return 0
-  fi
-  if command -v bun &>/dev/null; then
-    echo "bun"
-    return 0
-  fi
+  command -v bun &>/dev/null && { echo "bun"; return 0; }
   return 1
 }
 
@@ -63,24 +46,8 @@ _install_channel_deps() {
       fi
       bun install
       ;;
-    npm)
-      if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
-        if output="$(npm ci 2>&1)"; then
-          [[ -n "$output" ]] && printf '%s\n' "$output"
-          return 0
-        fi
-        if ! _channel_ci_mode; then
-          warn "npm lockfile install failed; retrying with npm install"
-          [[ -n "$output" ]] && printf '%s\n' "$output" >&2
-          npm install
-          return $?
-        fi
-        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
-        return 1
-      fi
-      npm install --no-package-lock
-      ;;
     *)
+      warn "Unsupported JavaScript package manager for channels: $pm"
       return 1
       ;;
   esac
@@ -89,12 +56,12 @@ _install_channel_deps() {
 install_channels() {
   # Install in ~/.ostwin/bot/ (primary) and source repo (for development)
   local bot_dirs=()
-  
+
   # Primary: installed bot directory
   if [[ -f "$INSTALL_DIR/bot/package.json" ]]; then
     bot_dirs+=("$INSTALL_DIR/bot")
   fi
-  
+
   # Secondary: source repo for development
   for candidate in \
     "${SOURCE_DIR}/bot" \
@@ -116,20 +83,24 @@ install_channels() {
     warn "Node.js not found — cannot install channel connectors"
     info "Install Node.js and re-run"
     return
+  elif ! check_bun; then
+    warn "Bun not found — cannot install channel connectors"
+    info "Install Bun and re-run"
+    return
   fi
 
   for CHAN_DIR in "${bot_dirs[@]}"; do
     local channel_pm=""
-    channel_pm="$(_select_channel_pm "$CHAN_DIR" || true)"
+    channel_pm="$(_select_channel_pm || true)"
     if [[ -z "$channel_pm" ]]; then
-      warn "No JavaScript package manager (bun/npm) found — cannot install channel connectors in $CHAN_DIR"
-      info "Install bun or npm and re-run"
+      warn "No Bun runtime found — cannot install channel connectors in $CHAN_DIR"
+      info "Install Bun and re-run"
       continue
     fi
 
     local start_time
     start_time=$(get_now)
-    step "Installing channel dependencies in $CHAN_DIR with $channel_pm..."
+    step "Installing channel dependencies in $CHAN_DIR with Bun..."
     # shellcheck disable=SC2015
     (cd "$CHAN_DIR" && _install_channel_deps "$channel_pm") \
       && ok_time "Channel dependencies installed" "$(print_duration "$start_time")" \
@@ -137,7 +108,7 @@ install_channels() {
 
     # tsx should come from bot/package.json devDependencies after install.
     if [[ ! -f "$CHAN_DIR/node_modules/.bin/tsx" ]]; then
-      warn "tsx not found after $channel_pm install"
+      warn "tsx not found after Bun install"
     else
       ok "tsx available in $CHAN_DIR"
     fi
@@ -152,6 +123,11 @@ install_channels() {
 
 start_channels() {
   if [[ -z "${CHAN_DIR:-}" ]]; then
+    return
+  fi
+
+  if ! command -v bun &>/dev/null; then
+    warn "Bun not found — cannot start channels"
     return
   fi
 
@@ -176,7 +152,7 @@ start_channels() {
   if [[ -n "${DISCORD_TOKEN:-}" ]] && [[ -n "${DISCORD_CLIENT_ID:-}" ]]; then
     step "Registering Discord slash commands..."
     # shellcheck disable=SC2015
-    (cd "$CHAN_DIR" && npx tsx src/deploy-commands.ts 2>/dev/null) \
+    (cd "$CHAN_DIR" && bun run deploy 2>/dev/null) \
       && ok "Discord commands registered" || warn "Discord command registration failed (non-critical)"
   fi
 
@@ -186,7 +162,7 @@ start_channels() {
     cd "$CHAN_DIR" || exit
     # shellcheck disable=SC1090
     [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
-    nohup npm start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
+    nohup bun run start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
     echo $! > "$chan_pid_file"
     echo "$!"
   ) | { read -r chan_pid; ok "Channels started (PID $chan_pid) — log: $INSTALL_DIR/logs/channel.log"; }

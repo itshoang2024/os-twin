@@ -248,6 +248,27 @@ _GLOBAL_CLAWHUB_LOCK = _CLAWHUB_WORKDIR / ".clawhub" / "lock.json"
 # Strict pattern: only allow alphanumeric, hyphens, underscores, dots, and @scopes
 _SAFE_SKILL_NAME = re.compile(r"^(@[a-zA-Z0-9_-]+/)?[a-zA-Z0-9._-]+$")
 
+def _build_clawhub_install_command(skill_name: str) -> List[str]:
+    """Build the Bun-based ClawHub install command.
+
+    Prefer an already-installed clawhub CLI (typically installed with
+    `bun add -g clawhub`). If it is not on PATH, use Bun's package executor as
+    the only fallback; npm/npx/pnpm are intentionally not used here.
+    """
+    clawhub = shutil.which("clawhub")
+    base_cmd = [clawhub] if clawhub else ["bun", "x", "clawhub"]
+    return [
+        *base_cmd,
+        "install",
+        skill_name,
+        "--workdir",
+        str(_CLAWHUB_WORKDIR),
+        "--dir",
+        "skills",
+        "--no-input",
+    ]
+
+
 # Global install lock — prevents concurrent installs from racing
 _install_lock = asyncio.Lock()
 
@@ -1162,15 +1183,7 @@ async def clawhub_install(
             # Use --workdir and --dir so clawhub installs into
             # ~/.ostwin/.agents/skills/<slug> regardless of its own global defaults.
             proc = await asyncio.create_subprocess_exec(
-                "npx",
-                "clawhub",
-                "install",
-                skill_name,
-                "--workdir",
-                str(_CLAWHUB_WORKDIR),
-                "--dir",
-                "skills",
-                "--no-input",
+                *_build_clawhub_install_command(skill_name),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -1224,5 +1237,5 @@ async def clawhub_install(
         except FileNotFoundError:
             raise HTTPException(
                 status_code=500,
-                detail="clawhub CLI not found. Run: pnpm add -g clawhub",
+                detail="clawhub CLI/Bun not found. Install Bun, then run: bun add -g clawhub",
             )
