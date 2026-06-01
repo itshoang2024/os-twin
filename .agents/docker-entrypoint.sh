@@ -90,6 +90,10 @@ source_env_hook "$INSTALL_DIR/.env.sh"
 source_env_hook "$APP_DIR/.env.sh"
 source_env_hook "$APP_DIR/.agents/.env.sh"
 
+# Force-disable Claude Code skill loading for every opencode invocation.
+# Set after loading env hooks so project/user env cannot re-enable it.
+export OPENCODE_DISABLE_CLAUDE_CODE=1
+
 PROJECT_DIR="${OSTWIN_PROJECT_DIR:-$APP_DIR}"
 mkdir -p "$PROJECT_DIR"
 export OSTWIN_PROJECT_DIR="$PROJECT_DIR"
@@ -112,7 +116,7 @@ if [[ "${OSTWIN_START_OPENCODE:-true}" == "true" ]]; then
   echo "[entrypoint] Starting opencode serve on ${OPENCODE_HOST}:${OPENCODE_PORT}"
   (
     cd "$PROJECT_DIR"
-    exec opencode serve --hostname "$OPENCODE_HOST" --port "$OPENCODE_PORT"
+    OPENCODE_DISABLE_CLAUDE_CODE=1 exec opencode serve --hostname "$OPENCODE_HOST" --port "$OPENCODE_PORT"
   ) > "$LOG_DIR/opencode-server.log" 2>&1 &
   OPENCODE_PID=$!
   echo "$OPENCODE_PID" > "$INSTALL_DIR/opencode.pid"

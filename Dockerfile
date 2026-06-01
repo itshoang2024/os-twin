@@ -7,6 +7,7 @@ ENV PATH="/root/.local/bin:/root/.cargo/bin:/root/.ostwin/.venv/bin:/root/.ostwi
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV OPENCODE_BASE_URL=http://127.0.0.1:4096
+ENV OPENCODE_DISABLE_CLAUDE_CODE=1
 ENV LARK_WEBHOOK_URL ""
 
 # Set the working directory

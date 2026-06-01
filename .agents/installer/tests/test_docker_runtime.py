@@ -28,6 +28,7 @@ def test_runtime_entrypoint_starts_and_supervises_services():
     entrypoint = (ROOT / ".agents" / "docker-entrypoint.sh").read_text()
 
     assert "opencode serve" in entrypoint
+    assert "OPENCODE_DISABLE_CLAUDE_CODE=1" in entrypoint
     assert "uvicorn dashboard.api:app" in entrypoint
     assert "wait -n" in entrypoint
 

@@ -53,6 +53,10 @@ $HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 Import-EnvFileAgent -Path (Join-Path $HomeDir ".ostwin" ".env")
 Import-EnvFileAgent -Path (Join-Path $AgentsDir ".env")
 
+# Force-disable Claude Code skill loading for every opencode run.
+# Set after loading env files so local overrides cannot re-enable it.
+$env:OPENCODE_DISABLE_CLAUDE_CODE = "1"
+
 # --- Self-register PID for orchestration tracking ---
 if ($env:AGENT_OS_PID_FILE) {
     $PID | Set-Content -Path $env:AGENT_OS_PID_FILE
