@@ -5,6 +5,7 @@ import re
 import asyncio
 import httpx
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -247,6 +248,27 @@ _GLOBAL_CLAWHUB_LOCK = _CLAWHUB_WORKDIR / ".clawhub" / "lock.json"
 # Strict pattern: only allow alphanumeric, hyphens, underscores, dots, and @scopes
 _SAFE_SKILL_NAME = re.compile(r"^(@[a-zA-Z0-9_-]+/)?[a-zA-Z0-9._-]+$")
 
+def _build_clawhub_install_command(skill_name: str) -> List[str]:
+    """Build the Bun-based ClawHub install command.
+
+    Prefer an already-installed clawhub CLI (typically installed with
+    `bun add -g clawhub`). If it is not on PATH, use Bun's package executor as
+    the only fallback; npm/npx/pnpm are intentionally not used here.
+    """
+    clawhub = shutil.which("clawhub")
+    base_cmd = [clawhub] if clawhub else ["bun", "x", "clawhub"]
+    return [
+        *base_cmd,
+        "install",
+        skill_name,
+        "--workdir",
+        str(_CLAWHUB_WORKDIR),
+        "--dir",
+        "skills",
+        "--no-input",
+    ]
+
+
 # Global install lock — prevents concurrent installs from racing
 _install_lock = asyncio.Lock()
 
@@ -264,6 +286,144 @@ class ClawhubInstallRequest(BaseModel):
                 "Invalid skill name. Only alphanumeric characters, hyphens, underscores, dots, and @scoped names are allowed."
             )
         return v
+
+
+class SkillMigrationConflictStrategy(str, Enum):
+    skip = "skip"
+    overwrite = "overwrite"
+    fail = "fail"
+
+
+class SkillMigrationApplyRequest(BaseModel):
+    delete_source: bool = True
+    conflict_strategy: SkillMigrationConflictStrategy = SkillMigrationConflictStrategy.skip
+    dry_run: bool = False
+
+
+_MIGRATION_SOURCE_ROOTS: Optional[List[Path]] = None
+
+
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolved(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
+
+
+def _prune_empty_skill_parents(skill_dir: Path, source_root: Path) -> None:
+    current = _resolved(skill_dir).parent
+    source_root = _resolved(source_root)
+
+    while current != source_root and _path_is_relative_to(current, source_root):
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _migration_target_root() -> Path:
+    return _resolved(_GLOBAL_SKILLS_DIR)
+
+
+def _migration_source_roots() -> List[Path]:
+    if _MIGRATION_SOURCE_ROOTS is not None:
+        candidates = _MIGRATION_SOURCE_ROOTS
+    else:
+        candidates = [
+            PROJECT_ROOT / ".agents" / "skills",
+            AGENTS_DIR / "skills",
+            PROJECT_ROOT / ".deepagents" / "skills",
+            Path.home() / ".agents" / "skills",
+            Path.home() / ".deepagents" / "agent" / "skills",
+        ]
+
+    target = _migration_target_root()
+    roots: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        root = _resolved(candidate)
+        if root == target:
+            continue
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return roots
+
+
+def _skill_migration_plan() -> Dict[str, Any]:
+    target_root = _migration_target_root()
+    sources = []
+    items = []
+    total_skills = 0
+    conflict_count = 0
+    planned_targets: set[str] = set()
+
+    for source_root in _migration_source_roots():
+        source_summary = {
+            "source_path": str(source_root),
+            "exists": source_root.exists(),
+            "skill_count": 0,
+        }
+        if source_root.exists():
+            for skill_md in source_root.rglob("SKILL.md"):
+                skill_dir = _resolved(skill_md.parent)
+                if not _path_is_relative_to(skill_dir, source_root):
+                    continue
+                relative_path = skill_dir.relative_to(source_root)
+                if any(part in ("references", ".versions") for part in relative_path.parts):
+                    continue
+
+                skill_data = parse_skill_md(skill_dir)
+                if not skill_data:
+                    continue
+
+                target_path = target_root / relative_path
+                target_key = str(_resolved(target_path))
+                conflict = target_path.exists() or target_key in planned_targets
+                if conflict:
+                    conflict_count += 1
+                planned_targets.add(target_key)
+                source_summary["skill_count"] += 1
+                total_skills += 1
+                items.append(
+                    {
+                        "name": skill_data.get("name") or skill_dir.name,
+                        "source_root": str(source_root),
+                        "source_path": str(skill_dir),
+                        "target_path": str(target_path),
+                        "relative_path": str(relative_path),
+                        "conflict": conflict,
+                    }
+                )
+        sources.append(source_summary)
+
+    if total_skills == 0:
+        message = "No project-local or legacy skills were found to migrate."
+        recommended_action = "none"
+    elif conflict_count:
+        message = f"Found {total_skills} skill(s) to migrate, including {conflict_count} target conflict(s)."
+        recommended_action = "preview_conflicts"
+    else:
+        message = f"Found {total_skills} skill(s) that can be migrated to the global Ostwin skill store."
+        recommended_action = "migrate"
+
+    return {
+        "target_path": str(target_root),
+        "source_summaries": sources,
+        "total_skills": total_skills,
+        "conflicts": conflict_count,
+        "items": items,
+        "recommended_action": recommended_action,
+        "message": message,
+    }
 
 
 def _map_clawhub_result(entry: dict) -> dict:
@@ -413,6 +573,120 @@ async def clawhub_installed(user: dict = Depends(get_current_user)):
                     installed[child.name] = {"slug": child.name}
 
     return list(installed.values())
+
+
+@router.get("/api/skills/migration/status")
+async def skill_migration_status(user: dict = Depends(get_current_user)):
+    """Report project-local and legacy skills that can move to the global store."""
+    return _skill_migration_plan()
+
+
+@router.post("/api/skills/migration/preview")
+async def skill_migration_preview(user: dict = Depends(get_current_user)):
+    """Preview migrating local skill folders into ~/.ostwin/.agents/skills."""
+    return _skill_migration_plan()
+
+
+@router.post("/api/skills/migration/apply")
+async def skill_migration_apply(
+    req: SkillMigrationApplyRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Copy migratable skill folders into the canonical Ostwin global skill store."""
+    confirm = (request.headers.get("x-confirm-migrate") or "").lower()
+    if confirm != "true":
+        raise HTTPException(
+            status_code=403,
+            detail="Migration requires confirmation. Set header X-Confirm-Migrate: true.",
+        )
+
+    plan = _skill_migration_plan()
+    if req.conflict_strategy == SkillMigrationConflictStrategy.fail and plan["conflicts"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Migration conflicts detected.",
+                "conflicts": [item for item in plan["items"] if item["conflict"]],
+            },
+        )
+
+    target_root = _migration_target_root()
+    result: Dict[str, Any] = {
+        "target_path": str(target_root),
+        "dry_run": req.dry_run,
+        "copied": [],
+        "skipped": [],
+        "overwritten": [],
+        "deleted": [],
+        "errors": [],
+        "sync_result": None,
+    }
+
+    if not req.dry_run:
+        target_root.mkdir(parents=True, exist_ok=True)
+
+    for item in plan["items"]:
+        source_path = _resolved(Path(item["source_path"]))
+        target_path = _resolved(Path(item["target_path"]))
+
+        if not _path_is_relative_to(target_path, target_root):
+            result["errors"].append(
+                {"item": item, "error": "Target path is outside the migration target root."}
+            )
+            continue
+
+        conflict = target_path.exists()
+        if conflict and req.conflict_strategy == SkillMigrationConflictStrategy.fail:
+            result["errors"].append(
+                {
+                    "item": item,
+                    "error": "Target path already exists; conflict_strategy=fail prevents overwrite.",
+                }
+            )
+            continue
+
+        if conflict and req.conflict_strategy == SkillMigrationConflictStrategy.skip:
+            result["skipped"].append(item)
+            continue
+
+        try:
+            if req.dry_run:
+                if conflict and req.conflict_strategy == SkillMigrationConflictStrategy.overwrite:
+                    result["overwritten"].append(item)
+                else:
+                    result["copied"].append(item)
+                continue
+
+            if conflict:
+                if not _path_is_relative_to(target_path, target_root):
+                    raise ValueError("Refusing to overwrite outside target root")
+                shutil.rmtree(target_path)
+                result["overwritten"].append(item)
+            else:
+                result["copied"].append(item)
+
+            shutil.copytree(source_path, target_path)
+            copied_skill = parse_skill_md(target_path)
+            if not (target_path / "SKILL.md").exists() or not copied_skill:
+                raise ValueError("Copied skill failed SKILL.md verification")
+
+            if req.delete_source:
+                shutil.rmtree(source_path)
+                source_root = _resolved(Path(item.get("source_root", source_path)))
+                if source_path != source_root:
+                    _prune_empty_skill_parents(source_path, source_root)
+                result["deleted"].append(item)
+        except Exception as exc:
+            result["errors"].append({"item": item, "error": str(exc)})
+
+    if not req.dry_run and global_state.store:
+        try:
+            result["sync_result"] = global_state.store.sync_skills(SKILLS_DIRS)
+        except Exception as exc:
+            result["sync_result"] = {"error": str(exc)}
+
+    return result
 
 
 @router.patch("/api/skills/{name}/toggle", response_model=Skill)
@@ -909,15 +1183,7 @@ async def clawhub_install(
             # Use --workdir and --dir so clawhub installs into
             # ~/.ostwin/.agents/skills/<slug> regardless of its own global defaults.
             proc = await asyncio.create_subprocess_exec(
-                "npx",
-                "clawhub",
-                "install",
-                skill_name,
-                "--workdir",
-                str(_CLAWHUB_WORKDIR),
-                "--dir",
-                "skills",
-                "--no-input",
+                *_build_clawhub_install_command(skill_name),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -971,5 +1237,5 @@ async def clawhub_install(
         except FileNotFoundError:
             raise HTTPException(
                 status_code=500,
-                detail="clawhub CLI not found. Run: pnpm add -g clawhub",
+                detail="clawhub CLI/Bun not found. Install Bun, then run: bun add -g clawhub",
             )

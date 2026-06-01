@@ -93,6 +93,9 @@ ensure_brew_paths() {
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     export PATH="$HOME/.local/bin:$PATH"
   fi
+  if [[ ":$PATH:" != *":$HOME/.bun/bin:"* ]]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
   # Refresh command hash
   hash -r 2>/dev/null || rehash 2>/dev/null || true
 }

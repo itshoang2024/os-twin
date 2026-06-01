@@ -51,6 +51,7 @@ ENV_FILE = INSTALL_DIR / ".env"
 ENV_SH_FILE = INSTALL_DIR / ".env.sh"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4096"
+OPENCODE_DISABLE_CLAUDE_CODE = "1"
 
 # Serialize concurrent restarts so two credential changes can't race-spawn.
 _restart_lock = threading.Lock()
@@ -224,6 +225,10 @@ def _build_child_env(project_dir: Path) -> dict[str, str]:
     _normalize_vertex_aliases(env)
     _isolate_cloudsdk_fallback(env)
     env["OSTWIN_PROJECT_DIR"] = str(project_dir)
+    # Always disable Claude Code skill loading for every opencode child process.
+    # This is intentionally forced after loading user env files so local overrides
+    # cannot re-enable Claude Code skills for the managed runtime.
+    env["OPENCODE_DISABLE_CLAUDE_CODE"] = OPENCODE_DISABLE_CLAUDE_CODE
     return env
 
 

@@ -12,6 +12,62 @@
 if ($script:_BuildFrontendPs1Loaded) { return }
 $script:_BuildFrontendPs1Loaded = $true
 
+function Test-FrontendCiMode {
+    [CmdletBinding()]
+    param()
+
+    $env:CI -in @("1", "true", "TRUE")
+}
+
+function Install-FrontendDependencies {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$PackageManager
+    )
+
+    switch ($PackageManager) {
+        "bun" {
+            if ((Test-Path "bun.lockb") -or (Test-Path "bun.lock")) {
+                $installOutput = & bun install --frozen-lockfile 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $installOutput | ForEach-Object { Write-Host $_ }
+                    return
+                }
+                if (-not (Test-FrontendCiMode)) {
+                    Write-Warn "Bun lockfile install failed; retrying without --frozen-lockfile"
+                    $installOutput | ForEach-Object { Write-Host $_ }
+                    & bun install
+                    return
+                }
+                $installOutput | ForEach-Object { Write-Host $_ }
+                throw "bun install --frozen-lockfile failed"
+            }
+            & bun install
+        }
+        "npm" {
+            if ((Test-Path "package-lock.json") -or (Test-Path "npm-shrinkwrap.json")) {
+                $installOutput = & npm ci 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $installOutput | ForEach-Object { Write-Host $_ }
+                    return
+                }
+                if (-not (Test-FrontendCiMode)) {
+                    Write-Warn "npm lockfile install failed; retrying with npm install"
+                    $installOutput | ForEach-Object { Write-Host $_ }
+                    & npm install
+                    return
+                }
+                $installOutput | ForEach-Object { Write-Host $_ }
+                throw "npm ci failed"
+            }
+            & npm install
+        }
+        default {
+            throw "Unsupported JavaScript package manager: $PackageManager"
+        }
+    }
+}
+
 function Build-Frontend {
     [CmdletBinding()]
     param(
@@ -46,15 +102,15 @@ function Build-Frontend {
         return
     }
 
-    # Pick the package manager that matches the committed lockfile.
+    # Installer builds intentionally support only Bun and npm. Prefer the
+    # package manager with a committed lockfile, then fall back to npm because
+    # Node.js includes it by default.
     $pm = ""
     $lockPrefs = @(
-        @{ File = "pnpm-lock.yaml"; Tool = "pnpm" },
-        @{ File = "package-lock.json"; Tool = "npm" },
-        @{ File = "npm-shrinkwrap.json"; Tool = "npm" },
-        @{ File = "yarn.lock"; Tool = "yarn" },
         @{ File = "bun.lockb"; Tool = "bun" },
-        @{ File = "bun.lock"; Tool = "bun" }
+        @{ File = "bun.lock"; Tool = "bun" },
+        @{ File = "package-lock.json"; Tool = "npm" },
+        @{ File = "npm-shrinkwrap.json"; Tool = "npm" }
     )
 
     foreach ($pref in $lockPrefs) {
@@ -67,7 +123,7 @@ function Build-Frontend {
     }
 
     if (-not $pm) {
-        foreach ($tool in @("pnpm", "npm", "yarn", "bun")) {
+        foreach ($tool in @("npm", "bun")) {
             if (Get-Command $tool -ErrorAction SilentlyContinue) {
                 $pm = $tool
                 break
@@ -76,8 +132,8 @@ function Build-Frontend {
     }
 
     if (-not $pm) {
-        Write-Warn "No package manager (bun/pnpm/npm/yarn) found — skipping $Label build"
-        Write-Info "Install Node.js and a package manager to enable $Label"
+        Write-Warn "No package manager (bun/npm) found — skipping $Label build"
+        Write-Info "Install Bun or npm to enable $Label"
         if ($Required) {
             throw "No package manager found for required $Label build"
         }
@@ -89,45 +145,8 @@ function Build-Frontend {
     try {
         Set-Location $feDir
 
-        Write-Step "Installing npm dependencies..."
-        switch ($pm) {
-            "pnpm" {
-                $installOutput = & pnpm install --frozen-lockfile 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    $installText = ($installOutput | Out-String)
-                    $isCi = $env:CI -in @("1", "true", "TRUE")
-                    if ($installText -like "*ERR_PNPM_OUTDATED_LOCKFILE*" -and -not $isCi) {
-                        Write-Warn "pnpm lockfile is out of date; retrying with --no-frozen-lockfile"
-                        & pnpm install --no-frozen-lockfile
-                    }
-                    else {
-                        $installOutput | ForEach-Object { Write-Host $_ }
-                        throw "pnpm install --frozen-lockfile failed"
-                    }
-                }
-                else {
-                    $installOutput | ForEach-Object { Write-Host $_ }
-                }
-            }
-            "npm" {
-                if ((Test-Path "package-lock.json") -or (Test-Path "npm-shrinkwrap.json")) {
-                    & npm ci
-                }
-                else {
-                    & npm install
-                }
-            }
-            "yarn" {
-                & yarn install --frozen-lockfile
-            }
-            "bun" {
-                & bun install --frozen-lockfile
-            }
-            default {
-                & $pm install
-            }
-        }
-
+        Write-Step "Installing JavaScript dependencies with $pm..."
+        Install-FrontendDependencies -PackageManager $pm
         if ($LASTEXITCODE -ne 0) {
             throw "$pm install failed"
         }

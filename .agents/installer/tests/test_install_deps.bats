@@ -34,6 +34,10 @@ setup() {
   declare -f install_node > /dev/null
 }
 
+@test "install_bun function is defined" {
+  declare -f install_bun > /dev/null
+}
+
 @test "install_opencode function is defined" {
   declare -f install_opencode > /dev/null
 }
@@ -49,7 +53,7 @@ setup() {
 @test "install_agent_browser installs CLI and runs post-install setup" {
   local body
   body=$(declare -f install_agent_browser)
-  [[ "$body" == *'pnpm add -g "agent-browser@$AGENT_BROWSER_VERSION"'* ]]
+  [[ "$body" == *"_install_global_js_package"* ]]
   [[ "$body" == *"agent-browser install"* ]]
 }
 
@@ -60,12 +64,13 @@ setup() {
   [[ "$body" == *"AGENT_BROWSER_VERSION"* ]]
 }
 
-@test "install_agent_browser uses pnpm instead of npm" {
-  local body
-  body=$(declare -f install_agent_browser)
-  [[ "$body" == *"command -v pnpm"* ]]
-  [[ "$body" != *"npm install -g"* ]]
-  [[ "$body" != *"npm prefix"* ]]
+@test "install_agent_browser prefers bun and never uses pnpm" {
+  local selector helper
+  selector=$(declare -f _select_global_js_pm)
+  helper=$(declare -f _install_global_js_package)
+  [[ "$selector" == *"command -v bun"* ]]
+  [[ "$helper" == *'bun add -g "$package_spec"'* ]]
+  [[ "$selector$helper" != *"pnpm"* ]]
 }
 
 @test "install_chrome_devtools does not enable stealth by default" {

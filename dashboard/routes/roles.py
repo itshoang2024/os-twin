@@ -826,7 +826,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             capture_output=True,
             text=True,
             timeout=60,
-            env={**__import__("os").environ},
+            env={**__import__("os").environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"},
         )
         return (
             result.returncode,
