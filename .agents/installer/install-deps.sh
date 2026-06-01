@@ -336,6 +336,57 @@ install_chrome_devtools() {
 
 # ─── agent-browser (Browser automation CLI) ─────────────────────────────────
 
+_select_global_js_pm() {
+  if command -v bun &>/dev/null; then
+    echo "bun"
+    return 0
+  fi
+  if command -v npm &>/dev/null; then
+    echo "npm"
+    return 0
+  fi
+  return 1
+}
+
+_add_js_global_bin_to_path() {
+  local pm="$1"
+
+  case "$pm" in
+    bun)
+      local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
+      if [[ -d "$bun_bin" && ":$PATH:" != *":$bun_bin:"* ]]; then
+        export PATH="$bun_bin:$PATH"
+      fi
+      ;;
+    npm)
+      local npm_prefix=""
+      npm_prefix=$(npm config get prefix 2>/dev/null || true)
+      if [[ -n "$npm_prefix" && "$npm_prefix" != "undefined" && "$npm_prefix" != "null" && -d "$npm_prefix/bin" && ":$PATH:" != *":$npm_prefix/bin:"* ]]; then
+        export PATH="$npm_prefix/bin:$PATH"
+      fi
+      ;;
+  esac
+}
+
+_install_global_js_package() {
+  local pm="$1"
+  local package_spec="$2"
+
+  case "$pm" in
+    bun)
+      _add_js_global_bin_to_path bun
+      bun add -g "$package_spec"
+      ;;
+    npm)
+      npm install -g "$package_spec" 2>/dev/null || sudo npm install -g "$package_spec" 2>/dev/null
+      _add_js_global_bin_to_path npm
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 install_agent_browser() {
   if check_agent_browser; then
     local ab_ver
@@ -344,32 +395,28 @@ install_agent_browser() {
     return 0
   fi
 
-  if ! command -v pnpm &>/dev/null; then
-    warn "Skipping agent-browser — pnpm not found"
+  local js_pm=""
+  js_pm="$(_select_global_js_pm || true)"
+  if [[ -z "$js_pm" ]]; then
+    warn "Skipping agent-browser — neither bun nor npm was found"
     return 0
   fi
 
-  local pnpm_bin_dir
-  pnpm_bin_dir=$(pnpm config get global-bin-dir 2>/dev/null || true)
-  if [[ -z "$pnpm_bin_dir" || "$pnpm_bin_dir" == "undefined" || "$pnpm_bin_dir" == "null" ]]; then
-    pnpm_bin_dir="${PNPM_HOME:-$HOME/.local/bin}"
-    mkdir -p "$pnpm_bin_dir"
-    export PNPM_HOME="$pnpm_bin_dir"
-    pnpm config set global-bin-dir "$pnpm_bin_dir" >/dev/null 2>&1 || true
+  step "Installing agent-browser CLI with $js_pm..."
+  if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
+    if [[ "$js_pm" == "bun" && -n "$(command -v npm 2>/dev/null || true)" ]]; then
+      warn "agent-browser bun install failed; retrying with npm"
+      js_pm="npm"
+      if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
+        warn "agent-browser npm install failed; browser automation CLI will require manual install"
+        return 0
+      fi
+    else
+      warn "agent-browser $js_pm install failed; browser automation CLI will require manual install"
+      return 0
+    fi
   fi
-
-  if [[ -n "${PNPM_HOME:-}" && -d "$PNPM_HOME" && ":$PATH:" != *":$PNPM_HOME:"* ]]; then
-    export PATH="$PNPM_HOME:$PATH"
-  fi
-  if [[ -n "$pnpm_bin_dir" && "$pnpm_bin_dir" != "undefined" && -d "$pnpm_bin_dir" && ":$PATH:" != *":$pnpm_bin_dir:"* ]]; then
-    export PATH="$pnpm_bin_dir:$PATH"
-  fi
-
-  step "Installing agent-browser CLI with pnpm..."
-  if ! pnpm add -g "agent-browser@$AGENT_BROWSER_VERSION" 2>/dev/null; then
-    warn "agent-browser pnpm install failed; browser automation CLI will require manual install"
-    return 0
-  fi
+  _add_js_global_bin_to_path "$js_pm"
 
   if check_agent_browser; then
     step "Running agent-browser post-install setup..."

@@ -9,6 +9,40 @@
 # Not a standalone module — requires all globals set by install.sh.
 # ──────────────────────────────────────────────────────────────────────────────
 
+ensure_js_package_manager() {
+  if command -v bun &>/dev/null; then
+    ok "JavaScript package manager: bun"
+    return 0
+  fi
+  if command -v npm &>/dev/null; then
+    ok "JavaScript package manager: npm"
+    return 0
+  fi
+  warn "No JavaScript package manager found (expected bun or npm)"
+  return 1
+}
+
+install_clawhub_cli() {
+  command -v clawhub &>/dev/null && return 0
+
+  if command -v bun &>/dev/null; then
+    step "Installing clawhub CLI with bun..."
+    if bun add -g clawhub 2>/dev/null; then
+      local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
+      [[ -d "$bun_bin" && ":$PATH:" != *":$bun_bin:"* ]] && export PATH="$bun_bin:$PATH"
+      return 0
+    fi
+    warn "clawhub bun install failed; retrying with npm if available"
+  fi
+
+  if command -v npm &>/dev/null; then
+    step "Installing clawhub CLI with npm..."
+    npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
+  else
+    warn "Skipping clawhub CLI — neither bun nor npm was found"
+  fi
+}
+
 if $DASHBOARD_ONLY; then
   header "2. Checking dependencies (dashboard-only — minimal)"
   # Only ensure uv + Python are available (needed for dashboard venv)
@@ -32,14 +66,8 @@ if $DASHBOARD_ONLY; then
   if check_node; then
     NODE_VERSION=$(node --version 2>&1 | head -1)
     ok "Node.js $NODE_VERSION"
-    if ! command -v pnpm &>/dev/null && command -v npm &>/dev/null; then
-      step "Installing pnpm..."
-      npm install -g pnpm 2>/dev/null || sudo npm install -g pnpm 2>/dev/null || true
-    fi
-    if ! command -v clawhub &>/dev/null && command -v npm &>/dev/null; then
-      step "Installing clawhub CLI..."
-      npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
-    fi
+    ensure_js_package_manager || true
+    install_clawhub_cli
   else
     fail "Node.js required for dashboard"
     exit 1
@@ -142,14 +170,8 @@ fi
 if check_node; then
   NODE_VERSION=$(node --version 2>&1 | head -1)
   ok "Node.js $NODE_VERSION"
-  if ! command -v pnpm &>/dev/null && command -v npm &>/dev/null; then
-    step "Installing pnpm..."
-    npm install -g pnpm 2>/dev/null || sudo npm install -g pnpm 2>/dev/null || true
-  fi
-  if ! command -v clawhub &>/dev/null && command -v npm &>/dev/null; then
-    step "Installing clawhub CLI..."
-    npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
-  fi
+  ensure_js_package_manager || true
+  install_clawhub_cli
   if ! $SKIP_OPTIONAL; then
     install_agent_browser
   elif ! check_agent_browser; then
@@ -162,14 +184,8 @@ else
     if check_node; then
       NODE_VERSION=$(node --version 2>&1 | head -1)
       ok "Node.js $NODE_VERSION installed"
-      if ! command -v pnpm &>/dev/null && command -v npm &>/dev/null; then
-        step "Installing pnpm..."
-        npm install -g pnpm 2>/dev/null || sudo npm install -g pnpm 2>/dev/null || true
-      fi
-      if ! command -v clawhub &>/dev/null && command -v npm &>/dev/null; then
-        step "Installing clawhub CLI..."
-        npm install -g clawhub 2>/dev/null || sudo npm install -g clawhub 2>/dev/null || true
-      fi
+      ensure_js_package_manager || true
+      install_clawhub_cli
       if ! $SKIP_OPTIONAL; then
         install_agent_browser
       elif ! check_agent_browser; then
