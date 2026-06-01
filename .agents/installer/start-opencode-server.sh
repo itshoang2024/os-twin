@@ -39,6 +39,7 @@ _opencode_service_invoke() {
     warn "No Python interpreter found — cannot manage opencode-serve"
     return 1
   fi
+  OPENCODE_DISABLE_CLAUDE_CODE=1 \
   OSTWIN_HOME="$INSTALL_DIR" \
   PYTHONPATH="$INSTALL_DIR${PYTHONPATH:+:$PYTHONPATH}" \
     "$py" -m dashboard.lib.opencode_service "$subcmd"

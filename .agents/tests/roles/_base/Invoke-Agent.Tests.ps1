@@ -71,6 +71,18 @@ Describe "Invoke-Agent" {
 
             $result.OutputFile | Should -Match "qa-output\.txt$"
         }
+
+
+        It "forces Claude Code skills off for launched agent commands" {
+            $envMock = Join-Path $TestDrive "env-mock-$(Get-Random).ps1"
+            'Write-Output "CLAUDE_CODE=$env:OPENCODE_DISABLE_CLAUDE_CODE"' | Out-File $envMock -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "test" `
+                -AgentCmd "pwsh -NoProfile -File $envMock" -TimeoutSeconds 5
+
+            $result.Output | Should -Match "CLAUDE_CODE=1"
+        }
     }
 
     Context "Timeout handling" {

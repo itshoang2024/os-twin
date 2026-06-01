@@ -63,6 +63,17 @@ Describe "Install-Node" {
     }
 }
 
+Describe "Install-Bun" {
+    It "Should define the function" {
+        Get-Command Install-Bun | Should -Not -BeNullOrEmpty
+    }
+
+    It "Should have CmdletBinding" {
+        $cmd = Get-Command Install-Bun
+        $cmd.CmdletBinding | Should -Be $true
+    }
+}
+
 Describe "Install-OpenCode" {
     It "Should define the function" {
         Get-Command Install-OpenCode | Should -Not -BeNullOrEmpty

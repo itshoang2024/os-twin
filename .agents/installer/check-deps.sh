@@ -2,8 +2,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # check-deps.sh — Dependency presence checks (pure — no installs)
 #
-# Provides: check_python, check_pwsh, check_node, check_uv, check_opencode,
-#           check_agent_browser, check_chrome_devtools, check_brew
+# Provides: check_python, check_pwsh, check_node, check_bun, check_uv,
+#           check_opencode, check_agent_browser, check_chrome_devtools,
+#           check_brew
 #
 # Requires: lib.sh (version_gte), versions.conf (MIN_PYTHON_VERSION, MIN_PWSH_VERSION)
 #
@@ -60,6 +61,12 @@ check_pwsh() {
 
 check_node() {
   command -v node &>/dev/null
+}
+
+# ─── Bun (JavaScript package/runtime manager) ───────────────────────────────
+
+check_bun() {
+  command -v bun &>/dev/null
 }
 
 # ─── uv (Python package manager) ────────────────────────────────────────────

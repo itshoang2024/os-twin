@@ -3,10 +3,11 @@ FROM python:3.11-slim-bookworm
 
 # Force the installer to use /root/.ostwin instead of assuming $HOME
 ENV OSTWIN_HOME=/root/.ostwin
-ENV PATH="/root/.local/bin:/root/.cargo/bin:/root/.ostwin/.venv/bin:/root/.ostwin/.agents/bin:$PATH"
+ENV PATH="/root/.bun/bin:/root/.local/bin:/root/.cargo/bin:/root/.ostwin/.venv/bin:/root/.ostwin/.agents/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV OPENCODE_BASE_URL=http://127.0.0.1:4096
+ENV OPENCODE_DISABLE_CLAUDE_CODE=1
 ENV LARK_WEBHOOK_URL ""
 
 # Set the working directory
@@ -31,7 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -f /tmp/powershell.deb \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install OpenCode CLI
+# 2. Install Bun and OpenCode CLI
+RUN curl -fsSL https://bun.com/install | bash
 RUN curl -fsSL https://opencode.ai/install | bash
 
 # 3. Setup OSTwin Home & Virtual Environment
@@ -55,14 +57,13 @@ RUN TMPDIR=/tmp UV_PROJECT_ENVIRONMENT=/root/.ostwin/.venv \
         --index-strategy unsafe-best-match \
         --prerelease=allow
 
-# 6. Cache Node Dependencies (Frontend)
-RUN npm install -g pnpm@10.26.0
-COPY dashboard/fe/package.json dashboard/fe/pnpm-lock.yaml /app/dashboard/fe/
-RUN cd /app/dashboard/fe && pnpm install --frozen-lockfile
+# 6. Cache Bun Dependencies (Frontend)
+COPY dashboard/fe/package.json dashboard/fe/bun.lock /app/dashboard/fe/
+RUN cd /app/dashboard/fe && bun install --frozen-lockfile
 
 # 7. Build Frontend
 COPY dashboard/fe /app/dashboard/fe
-RUN cd /app/dashboard/fe && pnpm run build
+RUN cd /app/dashboard/fe && bun run build
 
 # 8. Copy remaining source
 COPY . /app

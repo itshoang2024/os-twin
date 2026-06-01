@@ -132,6 +132,13 @@ Describe "Check-Node" {
     }
 }
 
+Describe "Check-Bun" {
+    It "Should return a boolean" {
+        $result = Check-Bun
+        $result | Should -BeOfType [bool]
+    }
+}
+
 Describe "Check-UV" {
     It "Should return a boolean" {
         $result = Check-UV

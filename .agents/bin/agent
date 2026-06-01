@@ -36,6 +36,10 @@ _load_env_file() {
 _load_env_file "$HOME/.ostwin/.env"
 _load_env_file "$AGENTS_DIR/.env"
 
+# Force-disable Claude Code skill loading for every opencode run.
+# Set after loading env files so local overrides cannot re-enable it.
+export OPENCODE_DISABLE_CLAUDE_CODE=1
+
 # --- Self-register PID for orchestration tracking ---
 # AGENT_OS_PID_FILE is set by Invoke-Agent.ps1 when launching via the
 # orchestration system. When run standalone, this is a no-op.
@@ -52,4 +56,4 @@ if ! command -v opencode &>/dev/null; then
 fi
 
 # --- Execute opencode run with all arguments ---
-exec opencode run "$@"
+OPENCODE_DISABLE_CLAUDE_CODE=1 exec opencode run "$@"

@@ -3,12 +3,55 @@
 #
 # Provides: Install-Channels, Start-Channels
 #
-# Requires: Lib.ps1, Check-Deps.ps1 (Check-Node),
+# Requires: Lib.ps1, Check-Deps.ps1 (Check-Node, Check-Bun),
 #           globals: $script:InstallDir, $script:SourceDir, $script:ScriptDir
 # ──────────────────────────────────────────────────────────────────────────────
 
 if ($script:_StartChannelsPs1Loaded) { return }
 $script:_StartChannelsPs1Loaded = $true
+
+function Test-ChannelCiMode {
+    [CmdletBinding()]
+    param()
+
+    $env:CI -in @("1", "true", "TRUE")
+}
+
+function Invoke-ChannelBunInstall {
+    [CmdletBinding()]
+    param()
+
+    if ((Test-Path "bun.lockb") -or (Test-Path "bun.lock")) {
+        $installOutput = & bun install --frozen-lockfile 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        if (-not (Test-ChannelCiMode)) {
+            Write-Warn "Bun lockfile install failed; retrying without --frozen-lockfile"
+            $installOutput | ForEach-Object { Write-Host $_ }
+            & bun install 2>&1 | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        }
+        $installOutput | ForEach-Object { Write-Host $_ }
+        return $false
+    }
+
+    & bun install 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Get-LocalTsxPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)][string]$Directory
+    )
+
+    foreach ($name in @("tsx.cmd", "tsx.exe", "tsx")) {
+        $candidate = Join-Path $Directory (Join-Path "node_modules\.bin" $name)
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return ""
+}
 
 function Install-Channels {
     [CmdletBinding()]
@@ -40,19 +83,18 @@ function Install-Channels {
         return
     }
 
-    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-        Write-Warn "pnpm not found — cannot install channel connectors"
-        Write-Info "Install pnpm and re-run"
+    if (-not (Check-Bun)) {
+        Write-Warn "Bun not found — cannot install channel connectors"
+        Write-Info "Install Bun and re-run"
         return
     }
 
-    Write-Step "Installing channel dependencies in $($script:ChanDir) with pnpm..."
+    Write-Step "Installing channel dependencies in $($script:ChanDir) with Bun..."
     $originalDir = Get-Location
     try {
         Set-Location $script:ChanDir
-        & pnpm install --silent 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "Channel dependency install failed (exit $LASTEXITCODE)"
+        if (-not (Invoke-ChannelBunInstall)) {
+            Write-Warn "Channel dependency install failed"
             return
         }
         Write-Ok "Channel dependencies installed"
@@ -64,10 +106,10 @@ function Install-Channels {
         Set-Location $originalDir
     }
 
-    # Check tsx availability
-    $tsxPath = Join-Path $script:ChanDir "node_modules\.bin\tsx.cmd"
-    if (-not (Test-Path $tsxPath)) {
-        Write-Warn "tsx not found after pnpm install"
+    # tsx should come from bot/package.json devDependencies after install.
+    $tsxPath = Get-LocalTsxPath -Directory $script:ChanDir
+    if (-not $tsxPath) {
+        Write-Warn "tsx not found after Bun install"
     }
     else {
         Write-Ok "tsx available"
@@ -81,6 +123,12 @@ function Start-Channels {
     param()
 
     if (-not $script:ChanDir) { return }
+
+    $bunCommand = Get-Command bun -ErrorAction SilentlyContinue
+    if (-not $bunCommand) {
+        Write-Warn "Bun not found — cannot start channels"
+        return
+    }
 
     # Load .env
     $envFile = Join-Path $script:InstallDir ".env"
@@ -127,7 +175,7 @@ function Start-Channels {
         $originalDir = Get-Location
         try {
             Set-Location $script:ChanDir
-            & npx tsx src/deploy-commands.ts 2>$null
+            & $bunCommand.Source run deploy 2>$null
             Write-Ok "Discord commands registered"
         }
         catch {
@@ -147,18 +195,9 @@ function Start-Channels {
     $chanLogFile = Join-Path $logsDir "channel.log"
     $chanErrorLog = Join-Path $logsDir "channel-error.log"
 
-    # Run tsx directly instead of `npm start` to avoid npm's intermediate node
-    # wrapper processes. This gives us the real application PID via -PassThru.
-    # bot/package.json "start" is: tsx src/index.ts
-    $tsxCmd = Join-Path $script:ChanDir "node_modules\.bin\tsx.cmd"
-    if (-not (Test-Path $tsxCmd)) {
-        Write-Warn "tsx not found — cannot start channels"
-        return
-    }
-
-    # Bat wrapper handles stdout/stderr redirection; tsx.cmd is the entry point.
+    # Run through Bun so bot/channel lifecycle never depends on npm/pnpm wrappers.
     $batFile = Join-Path $logsDir "_start-channel.cmd"
-    $batContent = "@echo off`r`ncd /d `"$($script:ChanDir)`"`r`n`"$tsxCmd`" src/index.ts >`"$chanLogFile`" 2>`"$chanErrorLog`""
+    $batContent = "@echo off`r`ncd /d `"$($script:ChanDir)`"`r`n`"$($bunCommand.Source)`" run start >`"$chanLogFile`" 2>`"$chanErrorLog`""
 
     # Write with UTF-8 without BOM (handles non-ASCII paths correctly)
     [System.IO.File]::WriteAllText($batFile, $batContent, [System.Text.UTF8Encoding]::new($false))
@@ -167,14 +206,13 @@ function Start-Channels {
         -ArgumentList "/c", "`"$batFile`"" `
         -WindowStyle Hidden -PassThru
 
-    # Resolve the real node PID by walking the process tree from the cmd.exe wrapper.
+    # Resolve the real runtime PID by walking the process tree from the cmd.exe wrapper.
     Start-Sleep -Seconds 3
     $wrapperPid = $chanWrapper.Id
     $chanPid = $wrapperPid  # fallback: use wrapper if tree walk fails
 
     try {
-        # Walk cmd.exe → tsx.cmd → node.exe via WMI parent-child relationship
-        # Find the actual channel process (node/tsx) by matching executable, not just last visited
+        # Walk cmd.exe → bun.exe → node/tsx if spawned; match the first runtime process.
         $frontier = @($wrapperPid)
         $foundPid = $null
         while ($frontier.Count -gt 0 -and -not $foundPid) {
@@ -184,7 +222,7 @@ function Start-Channels {
                 foreach ($child in $children) {
                     $nextFrontier += $child.ProcessId
                     $exeName = $child.Name
-                    if ($exeName -match '^(node|tsx)(\.exe)?$') {
+                    if ($exeName -match '^(bun|node|tsx)(\.exe)?$') {
                         $foundPid = $child.ProcessId
                         break
                     }
