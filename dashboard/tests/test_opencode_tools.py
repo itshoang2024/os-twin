@@ -10,6 +10,7 @@ def test_ostwin_config_allows_external_directories():
 
     assert config["permission"]["external_directory"] == {"*": "allow"}
     assert config["agent"]["ostwin"]["tools"]["read"] is False
+    assert "model" not in config["agent"]["ostwin"]
 
 
 def test_worker_agent_allows_external_directory_reads():
@@ -18,6 +19,7 @@ def test_worker_agent_allows_external_directory_reads():
     assert "external_directory: allow" in body
     assert "read: allow" in body
     assert "write: allow" in body
+    assert "model:" not in body
 
 
 def test_generated_helpers_bound_worker_wait_time():
@@ -28,6 +30,13 @@ def test_generated_helpers_bound_worker_wait_time():
     assert "Worker session" in helpers
     assert 'ocFetch("/session", "POST", { parentID: ctx.sessionID }, "15")' in helpers
     assert "finished without text" in helpers
+
+
+def test_create_plan_tool_returns_dashboard_route_metadata():
+    create_tool = opencode_tools._tool_create_plan()
+
+    assert 'const planUrl = createRes.url || `/plans/${planId}`' in create_tool
+    assert '"url":${JSON.stringify(planUrl)}' in create_tool
 
 
 def test_generate_all_writes_permission_and_timeout_contract(tmp_path):
@@ -45,9 +54,10 @@ def test_generate_all_writes_permission_and_timeout_contract(tmp_path):
     config = json.loads((tmp_path / "opencode.json").read_text())
     assert config["permission"]["external_directory"] == {"*": "allow"}
     assert config["permission"]["read"] == "deny"
+    assert "model" not in config["agent"]["ostwin"]
 
     worker = (tmp_path / ".opencode/agent/ostwin-worker.md").read_text()
-    assert "model: google/gemini-test" in worker
+    assert "model:" not in worker
     assert "external_directory: allow" in worker
 
     refine_tool = (tmp_path / ".opencode/tools/ostwin_refine_plan.ts").read_text()

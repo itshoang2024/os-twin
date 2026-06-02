@@ -316,6 +316,7 @@ def _tool_create_plan() -> str:
           if (!createRes.plan_id) return `Error creating plan: ${JSON.stringify(createRes)}`
           const planId = createRes.plan_id
           const workingDir = createRes.working_dir
+          const planUrl = createRes.url || `/plans/${planId}`
 
           // 2. Fetch the plan-architect system prompt (worker mode: writes file directly).
           const promptRes = await apiGet("/api/plan-refine-prompt?mode=worker")
@@ -352,7 +353,7 @@ def _tool_create_plan() -> str:
             epicCount = (planContent.match(/EPIC-\\d{3}/g) || []).length
           } catch {}
 
-          return `{"plan_id":${JSON.stringify(planId)}}\\nPlan created: ${planId}\\n  Title: ${args.idea}\\n  Status: draft\\n  Epic count: ${epicCount}\\n  Worker summary: ${summary}`
+          return `{"plan_id":${JSON.stringify(planId)},"url":${JSON.stringify(planUrl)}}\\nPlan created: ${planId}\\n  Title: ${args.idea}\\n  Status: draft\\n  Epic count: ${epicCount}\\n  Worker summary: ${summary}`
         } catch (e: any) {
           return `Error creating plan: ${e.message || e}`
         }
@@ -737,7 +738,7 @@ TOOLS: dict[str, str] = {
 }
 
 
-def _agent_ostwin_worker(model: str) -> str:
+def _agent_ostwin_worker(_model: Optional[str] = None) -> str:
     """Markdown definition for the generic ostwin-worker subagent.
 
     The worker runs as a child OpenCode session of the caller's `ostwin`
@@ -753,9 +754,9 @@ def _agent_ostwin_worker(model: str) -> str:
     ostwin_* tools are denied to avoid the worker re-entering its parent's
     behaviour (e.g. a worker recursively calling ostwin_create_plan).
 
-    The ``model`` argument matches whatever the master agent is configured
-    with at generation time, so flipping ``--model`` flips both agents in
-    lockstep and avoids the worker silently running on a stale default.
+    Model selection is intentionally omitted. OpenCode should inherit or fall
+    back to the current model instead of pinning generated Ostwin agents to a
+    fixed provider.
     """
     return textwrap.dedent(f"""\
     ---
@@ -764,7 +765,6 @@ def _agent_ostwin_worker(model: str) -> str:
       plan markdown, scaffolding, etc.) as a child of the master ostwin
       session, so tool-driven work doesn't create sibling root sessions.
     mode: subagent
-    model: {model}
     tools:
       read: true
       write: true
@@ -828,7 +828,7 @@ AGENTS: dict[str, str] = {
 }
 
 
-def _opencode_config(model: str = "google-vertex/gemini-3.1-pro-preview-customtools") -> dict:
+def _opencode_config(_model: Optional[str] = None) -> dict:
     # The ostwin agent speaks to the dashboard primarily through ostwin_* tools.
     # bash is enabled so that `!` command injections in .opencode/commands/*.md
     # can execute (e.g. curl calls to the dashboard API). The agent's system
@@ -846,7 +846,6 @@ def _opencode_config(model: str = "google-vertex/gemini-3.1-pro-preview-customto
         "$schema": "https://opencode.ai/config.json",
         "agent": {
             "ostwin": {
-                "model": model,
                 "tools": {
                     "ostwin_*": True,
                     "bash": True,
@@ -912,13 +911,12 @@ def _render_command_md(spec: dict[str, str]) -> str:
     return f"{fm}\n{body}"
 
 
-def _write_agents(agents_dir: Path, model: str) -> list[Path]:
+def _write_agents(agents_dir: Path, model: Optional[str] = None) -> list[Path]:
     """Write `.opencode/agent/<name>.md` for every entry in AGENTS.
 
-    ``model`` is forwarded to each agent body builder so subagent frontmatter
-    stays in sync with whatever model the master is configured with at
-    generation time (driven by ``generate_all(model=...)`` / the ``--model``
-    CLI flag).
+    ``model`` is accepted for compatibility with older callers but is no
+    longer written into generated agent frontmatter. OpenCode should inherit
+    the current model instead.
     """
     agents_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
@@ -975,7 +973,7 @@ def _write_commands(commands_dir: Path) -> list[Path]:
 def generate_all(
     project_root: Optional[Path] = None,
     dashboard_port: str = DASHBOARD_PORT_DEFAULT,
-    model: str = "google-vertex/gemini-3.1-pro-preview-customtools",
+    model: Optional[str] = None,
 ) -> list[Path]:
     project_root = project_root or _resolve_project_root()
     helpers = _api_helpers_inlined(dashboard_port)
@@ -1009,24 +1007,38 @@ def generate_all(
     # Connector-parity slash commands generated from the embedded registry.
     written.extend(_write_commands(commands_dir))
 
-    logger.info("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
+    logger.debug("[OPENCODE_TOOLS] Generated %d files in %s", len(written), project_root)
     return written
 
 
 if __name__ == "__main__":
     import argparse
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Generate OpenCode tool files for Ostwin")
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--dashboard-port", default=DASHBOARD_PORT_DEFAULT)
-    parser.add_argument("--model", default="google-vertex/gemini-3.1-pro-preview-customtools")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Accepted for backward compatibility; generated agents inherit the current OpenCode model.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print generated file paths and debug logging",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
 
     files = generate_all(
         project_root=args.project_root,
         dashboard_port=args.dashboard_port,
         model=args.model,
     )
-    for f in files:
-        print(f"  wrote {f}")
+    if args.verbose:
+        for f in files:
+            print(f"  generated {f}")

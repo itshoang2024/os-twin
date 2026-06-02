@@ -13,8 +13,7 @@ Per-epic format:
 ```
 Roles: @<role1>, @<role2>, ...    (dynamically chosen agents for this epic's workflow)
 Objective: <mission>            (what this war-room must achieve — be specific)
-Lifecycle:                      (REQUIRED: Dynamically map the closed-loop transitions between the chosen roles, including specific 
-working_dir: <path>             (scope agents to a subdirectory)
+working_dir: <path>              (scope agents to a specific subdirectory)
 ```
 
 {{AVAILABLE_ROLES}}
@@ -65,7 +64,7 @@ Capabilities: accessibility, security   (adds a11y-review + security-review stag
 ```
 
 Capability-to-stage mapping:
-- `security` -> `security-review` (by `security-auditor`)
+- `security` -> `security-review` (by `security-specialist`)
 - `database` -> `schema-review` (by `database-architect`)
 - `architecture` -> `architect-review` (by `architect`)
 - `infrastructure` -> `infra-review` (by `devops`)

@@ -72,6 +72,15 @@ foreach ($entry in $PlanParsed) {
                 $roleFound = $true
             }
         }
+        # 4. Check contributes/roles/<role>/ inside the project directory.
+        #    Contributed roles are fully defined — do NOT auto-scaffold them.
+        if (-not $roleFound) {
+            $contributePath = Join-Path $ProjectDir "contributes" "roles" $currentRole
+            if (Test-Path $contributePath) {
+                $rolePath = $contributePath
+                $roleFound = $true
+            }
+        }
         if (-not $roleFound) {
             # --- Auto-scaffold dynamic role ---
             # Create role at ~/.ostwin/.agents/roles/<role>/ and

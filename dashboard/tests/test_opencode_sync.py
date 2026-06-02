@@ -86,6 +86,9 @@ def _make_settings(
     google_explicit=True,
     google_project_id=None,
     google_vertex_location=None,
+    openai_enabled=True,
+    openai_auth_mode=None,
+    openai_explicit=False,
     byteplus_enabled=True,
     byteplus_explicit=True,
 ) -> MasterSettings:
@@ -110,7 +113,12 @@ def _make_settings(
     else:
         bp = None
 
-    providers = ProvidersNamespace(google=google, byteplus=bp)
+    if openai_explicit or openai_auth_mode is not None:
+        openai = ProviderSettings(enabled=openai_enabled, auth_mode=openai_auth_mode)
+    else:
+        openai = None
+
+    providers = ProvidersNamespace(google=google, openai=openai, byteplus=bp)
     return MasterSettings(providers=providers)
 
 
@@ -706,6 +714,79 @@ def test_auth_json_writes_api_keys(tmp_path):
     assert "xai" in result.synced
     assert result.auth_json is not None
     assert "anthropic" in result.auth_json.synced
+
+
+def test_auth_json_preserves_openai_oauth_when_codex_mode(tmp_path):
+    """Codex OAuth mode must not overwrite OpenAI OAuth with an API key entry."""
+    auth_path = tmp_path / "auth.json"
+    oauth_entry = {
+        "type": "oauth",
+        "access": "access-token",
+        "refresh": "refresh-token",
+        "expires": 123,
+    }
+    auth_path.write_text(json.dumps({"openai": oauth_entry}))
+
+    vault = _make_vault({"providers/openai": "sk-openai-real"})
+    settings = _make_settings(
+        google_enabled=False,
+        byteplus_enabled=False,
+        openai_auth_mode="codex_oauth",
+    )
+
+    result = _sync(vault, settings, tmp_path, auth_path=auth_path)
+    auth = json.loads(auth_path.read_text())
+
+    assert auth["openai"] == oauth_entry
+    assert "openai" not in result.auth_json.synced
+    assert "openai" in result.auth_json.skipped
+
+
+def test_auth_json_does_not_delete_openai_oauth_when_key_missing(tmp_path):
+    """Missing OpenAI API key should only remove API-key entries, not OAuth entries."""
+    auth_path = tmp_path / "auth.json"
+    oauth_entry = {
+        "type": "oauth",
+        "access": "access-token",
+        "refresh": "refresh-token",
+        "expires": 9999999999,
+        "accountId": "acct-test",
+    }
+    auth_path.write_text(json.dumps({"openai": oauth_entry}))
+
+    vault = _make_vault({})
+    settings = _make_settings(google_enabled=False, byteplus_enabled=False)
+
+    result = _sync(vault, settings, tmp_path, auth_path=auth_path)
+    auth = json.loads(auth_path.read_text())
+
+    assert auth["openai"] == oauth_entry
+    assert "openai" not in result.auth_json.removed
+    assert "openai" in result.auth_json.skipped
+
+
+def test_auth_json_preserves_openai_oauth_over_stale_vault_key(tmp_path):
+    """A stale dashboard vault key should not replace OpenCode OAuth auth."""
+    auth_path = tmp_path / "auth.json"
+    oauth_entry = {
+        "type": "oauth",
+        "access": "access-token",
+        "refresh": "refresh-token",
+        "expires": 9999999999,
+        "accountId": "acct-test",
+    }
+    auth_path.write_text(json.dumps({"openai": oauth_entry}))
+
+    vault = _make_vault({"providers/openai": "sk-stale-dashboard-key"})
+    settings = _make_settings(google_enabled=False, byteplus_enabled=False)
+
+    result = _sync(vault, settings, tmp_path, auth_path=auth_path)
+    auth = json.loads(auth_path.read_text())
+
+    assert auth["openai"] == oauth_entry
+    assert "key" not in auth["openai"]
+    assert "openai" not in result.auth_json.synced
+    assert "openai" in result.auth_json.skipped
 
 
 def test_auth_json_removes_stale_entries(tmp_path):

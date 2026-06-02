@@ -573,4 +573,34 @@ Set up health checks, Swagger docs, global error handling, and Docker-based loca
             }
         }
     }
+
+    Context "WorkingDir support" {
+        It "stores absolute working_dir in config.json" {
+            & $script:NewWarRoom -RoomId "room-wd-01" -TaskRef "EPIC-001" `
+                                 -TaskDescription "Feature" -WarRoomsDir $script:warRoomsDir `
+                                 -WorkingDir "/tmp/project/src"
+
+            $config = Get-Content (Join-Path $script:warRoomsDir "room-wd-01" "config.json") -Raw | ConvertFrom-Json
+            $config.working_dir | Should -BeOfType [string]
+            $config.working_dir | Should -Be "/tmp/project/src"
+        }
+
+        It "defaults to current directory when no WorkingDir provided" {
+            & $script:NewWarRoom -RoomId "room-wd-03" -TaskRef "TASK-001" `
+                                 -TaskDescription "No dirs" -WarRoomsDir $script:warRoomsDir
+
+            $config = Get-Content (Join-Path $script:warRoomsDir "room-wd-03" "config.json") -Raw | ConvertFrom-Json
+            $config.working_dir | Should -Not -BeNullOrEmpty
+        }
+
+        It "preserves absolute paths without Resolve-Path failure" {
+            $nonExistentDir = "/tmp/nonexistent-project-$(Get-Random)/src"
+            & $script:NewWarRoom -RoomId "room-wd-04" -TaskRef "EPIC-003" `
+                                 -TaskDescription "Future dir" -WarRoomsDir $script:warRoomsDir `
+                                 -WorkingDir $nonExistentDir
+
+            $config = Get-Content (Join-Path $script:warRoomsDir "room-wd-04" "config.json") -Raw | ConvertFrom-Json
+            $config.working_dir | Should -Be $nonExistentDir
+        }
+    }
 }

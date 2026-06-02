@@ -101,10 +101,15 @@ function ConvertFrom-PlanMarkdown {
             $epicObjective = $Matches[1].Trim()
         }
 
-        # --- Extract per-epic working directory override ---
-        $epicWorkingDir = ""
+        # --- Extract per-epic working directory override (single path only) ---
+        $epicWorkingDir = ''
         if ($epicSection -match $workingDirPattern) {
-            $epicWorkingDir = $Matches[1].Trim()
+            $rawDirs = @(($Matches[1].Trim() -split ',') |
+                ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            if ($rawDirs.Count -gt 1) {
+                throw "PLAN ERROR: Epic '$epicTitle' has multiple Working_dir values ('$($rawDirs -join ', ')'). Only a single working directory per epic is supported."
+            }
+            if ($rawDirs.Count -eq 1) { $epicWorkingDir = $rawDirs[0] }
         }
 
         # --- Extract description body ---
@@ -269,7 +274,7 @@ function ConvertFrom-PlanMarkdown {
                     Type             = 'task'
                     Roles            = @("engineer")
                     HasExplicitRoles = $false
-                    EpicWorkingDir   = ""
+                    EpicWorkingDir   = ''
                     Pipeline         = ""
                     Capabilities     = @()
                     Skills           = @()

@@ -241,7 +241,7 @@ Describe "Deadlock Exploitation Tests" {
                 -Because "custom state 'reporting' needs 'reporter' - manager now spawns correctly"
         }
 
-        It "Resolve-Pipeline generates multi-role lifecycle with position-based review state for security-auditor" {
+        It "Resolve-Pipeline generates multi-role lifecycle with security-specialist review state for security capability" {
             $resolvePipeline = Join-Path $script:agentsDir "lifecycle" "Resolve-Pipeline.ps1"
             if (-not (Test-Path $resolvePipeline)) { Set-ItResult -Skipped "Resolve-Pipeline.ps1 not found" }
 
@@ -254,12 +254,11 @@ Describe "Deadlock Exploitation Tests" {
 
             $lc = Get-Content $lifecycleFile -Raw | ConvertFrom-Json
 
-            # Position-based naming (principle 5): security-auditor is Roles[1] → "review" state
-            # (NOT the old "security-auditor-review" pattern)
+            # Security work stays with the worker role; security review is handled by security-specialist.
             $lc.states.'review' | Should -Not -BeNullOrEmpty
-            $lc.states.'review'.role | Should -Be "security-auditor"
+            $lc.states.'review'.role | Should -Be "security-specialist"
             $lc.states.'review'.role | Should -Not -Be "engineer" `
-                -Because "security-auditor review role differs from room assigned_role"
+                -Because "security-specialist review role differs from room assigned_role"
         }
     }
 

@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { usePlanContext } from './PlanWorkspace';
 import { apiGet } from '@/lib/api-client';
+
+const MerkleTreeView = lazy(() => import('./MerkleTreeView'));
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -845,6 +847,7 @@ export default function MemoryTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [memoryView, setMemoryView] = useState<'graph' | 'merkle'>('graph');
 
   // Resizable side-panel widths (persisted to localStorage)
   const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
@@ -1014,6 +1017,32 @@ export default function MemoryTab() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* View toggle: Graph / Merkle */}
+          <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+            <button
+              className="px-2.5 py-1.5 text-[11px] font-medium flex items-center gap-1 transition-colors"
+              style={{
+                background: memoryView === 'graph' ? 'var(--color-primary)' : 'transparent',
+                color: memoryView === 'graph' ? 'white' : 'var(--color-text-muted)',
+              }}
+              onClick={() => setMemoryView('graph')}
+            >
+              <span className="material-symbols-outlined text-[14px]">hub</span>
+              Graph
+            </button>
+            <button
+              className="px-2.5 py-1.5 text-[11px] font-medium flex items-center gap-1 transition-colors"
+              style={{
+                background: memoryView === 'merkle' ? 'var(--color-primary)' : 'transparent',
+                color: memoryView === 'merkle' ? 'white' : 'var(--color-text-muted)',
+              }}
+              onClick={() => setMemoryView('merkle')}
+            >
+              <span className="material-symbols-outlined text-[14px]">account_tree</span>
+              Merkle
+            </button>
+          </div>
+
           <div className="relative">
             <span className="material-symbols-outlined text-[16px] absolute left-2.5 top-1/2 -translate-y-1/2"
               style={{ color: 'var(--color-text-muted)' }}>
@@ -1085,87 +1114,111 @@ export default function MemoryTab() {
         </div>
       </div>
 
-      {/* Main content: graph + sidebar */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left: note list */}
-        <div className="flex-shrink-0 flex flex-col gap-2 overflow-y-auto pr-2"
-          style={{ scrollbarWidth: 'thin', width: leftWidth }}>
-          {/* Groups legend */}
-          <div className="space-y-1 mb-2">
-            {graphData.groups.map(g => (
-              <div key={g.id} className="flex items-center gap-2 px-2 py-1">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: g.color }} />
-                <span className="text-[11px] truncate" style={{ color: 'var(--color-text-muted)' }}>
-                  {g.label}
-                </span>
-              </div>
+      {/* Main content: conditional on view toggle */}
+      {memoryView === 'merkle' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <Suspense fallback={
+            <div className="h-full flex items-center justify-center">
+              <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: 'var(--color-border)', borderTopColor: 'transparent' }} />
+            </div>
+          }>
+            <MerkleTreeView
+              planId={planId!}
+              searchQuery={searchQuery}
+              onGoToNote={(leafName) => {
+                // Switch to graph view and try to find the note by filename
+                setMemoryView('graph');
+                const matchingNode = graphData?.nodes.find(
+                  n => n.path?.endsWith(leafName) || n.title?.toLowerCase() === leafName.replace(/\.md$/, '').replace(/-/g, ' ')
+                );
+                if (matchingNode) setSelectedNodeId(matchingNode.id);
+              }}
+            />
+          </Suspense>
+        </div>
+      ) : (
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Left: note list */}
+          <div className="flex-shrink-0 flex flex-col gap-2 overflow-y-auto pr-2"
+            style={{ scrollbarWidth: 'thin', width: leftWidth }}>
+            {/* Groups legend */}
+            <div className="space-y-1 mb-2">
+              {graphData.groups.map(g => (
+                <div key={g.id} className="flex items-center gap-2 px-2 py-1">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: g.color }} />
+                  <span className="text-[11px] truncate" style={{ color: 'var(--color-text-muted)' }}>
+                    {g.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Note list */}
+            {filteredNodes.map(node => (
+               <button
+                key={node.id}
+                className="group w-full text-left px-3 py-2.5 rounded-xl border transition-all"
+                style={{
+                  borderColor: selectedNodeId === node.id ? 'var(--color-primary)' : 'var(--color-border)',
+                  background: selectedNodeId === node.id ? 'var(--color-primary-muted)' : 'transparent',
+                }}
+                onClick={() => setSelectedNodeId(node.id)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: node.color }} />
+                  <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-text-main)' }}>
+                    {node.title}
+                  </span>
+                  <span
+                    className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-500 transition-opacity cursor-pointer flex-shrink-0"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    title="Delete this note"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!window.confirm(`Delete "${node.title}"?`)) return;
+                      try {
+                        await fetch(`/api/amem/${planId}/notes/${node.id}`, { method: 'DELETE' });
+                        fetchData();
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    delete
+                  </span>
+                </div>
+                <p className="text-[10px] mt-0.5 truncate ml-4" style={{ color: 'var(--color-text-muted)' }}>
+                  {node.pathLabel}
+                </p>
+              </button>
             ))}
           </div>
 
-          {/* Note list */}
-          {filteredNodes.map(node => (
-             <button
-              key={node.id}
-              className="group w-full text-left px-3 py-2.5 rounded-xl border transition-all"
-              style={{
-                borderColor: selectedNodeId === node.id ? 'var(--color-primary)' : 'var(--color-border)',
-                background: selectedNodeId === node.id ? 'var(--color-primary-muted)' : 'transparent',
-              }}
-              onClick={() => setSelectedNodeId(node.id)}
-            >
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: node.color }} />
-                <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-text-main)' }}>
-                  {node.title}
-                </span>
-                <span
-                  className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-500 transition-opacity cursor-pointer flex-shrink-0"
-                  style={{ color: 'var(--color-text-muted)' }}
-                  title="Delete this note"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (!window.confirm(`Delete "${node.title}"?`)) return;
-                    try {
-                      await fetch(`/api/amem/${planId}/notes/${node.id}`, { method: 'DELETE' });
-                      fetchData();
-                    } catch { /* ignore */ }
-                  }}
-                >
-                  delete
-                </span>
-              </div>
-              <p className="text-[10px] mt-0.5 truncate ml-4" style={{ color: 'var(--color-text-muted)' }}>
-                {node.pathLabel}
-              </p>
-            </button>
-          ))}
+          {/* Splitter: left ↔ center */}
+          <Splitter onDrag={handleLeftDrag} />
+
+          {/* Center: graph */}
+          <div className="flex-1 min-w-0 rounded-2xl border overflow-hidden mx-2"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}>
+            <MemoryGraph
+              data={graphData}
+              selectedId={selectedNodeId}
+              hoveredId={hoveredNodeId}
+              searchQuery={searchQuery}
+              onSelect={setSelectedNodeId}
+              onHover={setHoveredNodeId}
+            />
+          </div>
+
+          {/* Splitter: center ↔ right */}
+          <Splitter onDrag={handleRightDrag} />
+
+          {/* Right: detail panel */}
+          <div className="flex-shrink-0 rounded-2xl border overflow-hidden ml-2"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface-hover)', width: rightWidth }}>
+            <NoteDetail note={selectedNode} />
+          </div>
         </div>
-
-        {/* Splitter: left ↔ center */}
-        <Splitter onDrag={handleLeftDrag} />
-
-        {/* Center: graph */}
-        <div className="flex-1 min-w-0 rounded-2xl border overflow-hidden mx-2"
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}>
-          <MemoryGraph
-            data={graphData}
-            selectedId={selectedNodeId}
-            hoveredId={hoveredNodeId}
-            searchQuery={searchQuery}
-            onSelect={setSelectedNodeId}
-            onHover={setHoveredNodeId}
-          />
-        </div>
-
-        {/* Splitter: center ↔ right */}
-        <Splitter onDrag={handleRightDrag} />
-
-        {/* Right: detail panel */}
-        <div className="flex-shrink-0 rounded-2xl border overflow-hidden ml-2"
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface-hover)', width: rightWidth }}>
-          <NoteDetail note={selectedNode} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

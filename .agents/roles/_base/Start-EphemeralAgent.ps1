@@ -87,7 +87,10 @@ function Cleanup-And-Exit {
 $TaskRef = $roomConfig.task_ref
 $TaskTitle = $roomConfig.assignment.title
 $TaskDesc = $roomConfig.assignment.description
-$WorkingDir = $roomConfig.working_dir
+$WorkingDir = ''
+if ($roomConfig.PSObject.Properties['working_dir'] -and $roomConfig.working_dir) {
+    $WorkingDir = $roomConfig.working_dir
+}
 
 # Get the latest instruction from channel
 $latestFix = ""

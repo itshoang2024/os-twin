@@ -192,7 +192,11 @@ const AUTOSAVE_DELAY = 800; // ms debounce
 export default function RolesConfigTab() {
   const { planId } = usePlanContext();
   const { skills = [], isLoading: skillsLoading } = useSkills();
-  const { allModels: configuredModels, providers: configuredProviders } = useConfiguredModels();
+  const {
+    allModels: configuredModels,
+    providers: configuredProviders,
+    mutate: mutateConfiguredModels,
+  } = useConfiguredModels();
   const { addToast } = useNotificationStore();
 
   const [roles, setRoles] = useState<RoleConfig[]>([]);
@@ -233,6 +237,20 @@ export default function RolesConfigTab() {
       })
       .finally(() => setIsLoading(false));
   }, [planId]);
+
+  const refreshModelCatalog = useCallback(async () => {
+    await mutateConfiguredModels();
+    const registry = await apiGet<ModelsRegistry>('/models/registry').catch(() => ({}));
+    setModelsRegistry(registry && typeof registry === 'object' ? (registry as ModelsRegistry) : ({} as ModelsRegistry));
+  }, [mutateConfiguredModels]);
+
+  useEffect(() => {
+    const handler = () => {
+      void refreshModelCatalog();
+    };
+    window.addEventListener('ostwin:models-updated', handler);
+    return () => window.removeEventListener('ostwin:models-updated', handler);
+  }, [refreshModelCatalog]);
 
   // ── Fetch effective settings for each role ─────────────────────────
   const fetchEffective = useCallback(async () => {
@@ -281,8 +299,9 @@ export default function RolesConfigTab() {
   useEffect(() => {
     if (lastMessage && (lastMessage.type === 'settings_updated' || lastMessage.event === 'settings_updated')) {
       fetchEffective();
+      void refreshModelCatalog();
     }
-  }, [lastMessage, fetchEffective]);
+  }, [lastMessage, fetchEffective, refreshModelCatalog]);
 
   // ── Autosave: persist a single role's config ───────────────────────
   const saveRole = useCallback(async (roleName: string) => {
@@ -317,7 +336,8 @@ export default function RolesConfigTab() {
 
   // Cleanup timers on unmount
   useEffect(() => {
-    return () => { Object.values(saveTimers.current).forEach(clearTimeout); };
+    const timers = saveTimers.current;
+    return () => { Object.values(timers).forEach(clearTimeout); };
   }, []);
 
   // ── Field update + autosave ────────────────────────────────────────

@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import FileTree from '../components/plan/files/FileTree';
 import { useFileTree, useFileList } from '../hooks/use-files';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 
 vi.mock('../hooks/use-files', () => ({
   useFileTree: vi.fn(),
@@ -15,7 +15,7 @@ describe('FileTree Component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (useFileList as any).mockReturnValue({
+    (useFileList as Mock).mockReturnValue({
       entries: [],
       isLoading: false,
       isError: undefined,
@@ -23,7 +23,7 @@ describe('FileTree Component', () => {
   });
 
   it('renders loading state', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: undefined,
       isLoading: true,
       isError: undefined,
@@ -34,7 +34,7 @@ describe('FileTree Component', () => {
   });
 
   it('renders error state', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: undefined,
       isLoading: false,
       isError: new Error('Failed'),
@@ -45,7 +45,7 @@ describe('FileTree Component', () => {
   });
 
   it('renders file entries', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: [
         { name: 'README.md', type: 'file', path: 'README.md' },
         { name: 'package.json', type: 'file', path: 'package.json' },
@@ -59,8 +59,26 @@ describe('FileTree Component', () => {
     expect(screen.getByText('package.json')).toBeInTheDocument();
   });
 
+  it('renders extension-specific file icons', () => {
+    (useFileTree as Mock).mockReturnValue({
+      tree: [
+        { name: 'README.md', type: 'file', path: 'README.md', extension: '.md' },
+        { name: 'package.json', type: 'file', path: 'package.json', extension: '.json' },
+        { name: 'logo.png', type: 'file', path: 'logo.png', extension: '.png' },
+      ],
+      isLoading: false,
+      isError: undefined,
+    });
+
+    render(<FileTree planId={planId} onSelectFile={mockOnSelectFile} selectedPath={null} />);
+
+    expect(screen.getByTitle('Markdown')).toHaveTextContent('article');
+    expect(screen.getByTitle('Package manifest')).toHaveTextContent('deployed_code');
+    expect(screen.getByTitle('Image')).toHaveTextContent('image');
+  });
+
   it('renders directory entries', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: [
         {
           name: 'src',
@@ -80,7 +98,7 @@ describe('FileTree Component', () => {
   });
 
   it('calls onSelectFile when a file is clicked', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: [
         { name: 'README.md', type: 'file', path: 'README.md' },
       ],
@@ -94,7 +112,7 @@ describe('FileTree Component', () => {
   });
 
   it('expands a directory on click', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: [
         {
           name: 'src',
@@ -120,7 +138,7 @@ describe('FileTree Component', () => {
   });
 
   it('renders "Project Files" header', () => {
-    (useFileTree as any).mockReturnValue({
+    (useFileTree as Mock).mockReturnValue({
       tree: [],
       isLoading: false,
       isError: undefined,

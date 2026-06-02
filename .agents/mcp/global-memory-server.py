@@ -61,34 +61,31 @@ _memory_lock = threading.Lock()
 
 def _get_all_plan_dirs() -> list[Path]:
     """Return all plan directories under MEMORY_BASE_DIR.
-    
-    Discovers directories using both naming conventions:
-    - memory-<plan_id>  (current convention, used by init.sh/init.ps1)
-    - <plan_id>         (legacy convention, from older init.ps1 versions)
-    
+
+    Convention: ~/.ostwin/memory/<plan_id>/
     Directories starting with underscore (e.g., _global, _default) are excluded.
+    Legacy ``memory-<plan_id>`` directories are also discovered for migration.
     """
     if not MEMORY_BASE_DIR.is_dir():
         return []
     excluded = {"_global", "_default"}
     return [
-        d for d in MEMORY_BASE_DIR.iterdir()
+        d
+        for d in MEMORY_BASE_DIR.iterdir()
         if d.is_dir() and d.name not in excluded and not d.name.startswith(".")
     ]
 
 
 def _dir_to_plan_id(dir_name: str) -> str:
     """Extract plan_id from a MEMORY_BASE_DIR subdirectory name.
-    
-    Handles both naming conventions:
-    - memory-<plan_id> → <plan_id>  (current convention)
-    - <plan_id>        → <plan_id>  (legacy convention)
-    - _global          → _global     (special namespace)
+
+    Convention: directory name IS the plan_id.
+    Legacy ``memory-`` prefix is stripped for backward compat.
     """
     if dir_name == "_global":
         return "_global"
     if dir_name.startswith("memory-"):
-        return dir_name[len("memory-"):]
+        return dir_name[len("memory-") :]
     return dir_name
 
 
@@ -99,17 +96,16 @@ def _get_global_dir() -> Path:
 
 def _plan_id_to_dir(plan_id: str) -> Path:
     """Resolve a plan_id to its MEMORY_BASE_DIR subdirectory.
-    
-    Checks both naming conventions:
-    - memory-<plan_id>  (current, preferred)
-    - <plan_id>         (legacy fallback)
+
+    Convention: ~/.ostwin/memory/<plan_id>/
+    Falls back to legacy ``memory-<plan_id>`` for backward compat.
     """
-    # Try current convention first
-    current = MEMORY_BASE_DIR / f"memory-{plan_id}"
+    # Current convention: bare plan_id
+    current = MEMORY_BASE_DIR / plan_id
     if current.is_dir():
         return current
-    # Legacy fallback
-    legacy = MEMORY_BASE_DIR / plan_id
+    # Legacy fallback: memory-<plan_id>
+    legacy = MEMORY_BASE_DIR / f"memory-{plan_id}"
     if legacy.is_dir():
         return legacy
     # Return current convention path even if it doesn't exist yet
@@ -127,10 +123,14 @@ def _get_or_create_memory_system(persist_dir: Path) -> Any:
             return _memory_systems[persist_str]
 
         if AgenticMemorySystem is None:
-            from dashboard.agentic_memory.memory_system import AgenticMemorySystem as _AMS
+            from dashboard.agentic_memory.memory_system import (
+                AgenticMemorySystem as _AMS,
+            )
+
             AgenticMemorySystem = _AMS
 
         from dashboard.agentic_memory.config import load_config
+
         cfg = load_config()
 
         system = AgenticMemorySystem(
@@ -177,7 +177,9 @@ Query examples:
 
 
 @mcp.tool()
-def global_memory_search(query: str, k: int = 10, plans: Optional[list[str]] = None) -> str:
+def global_memory_search(
+    query: str, k: int = 10, plans: Optional[list[str]] = None
+) -> str:
     """Search memories across ALL plans/projects.
 
     This searches the global memory pool and all plan-specific memories,
@@ -215,22 +217,24 @@ def global_memory_search(query: str, k: int = 10, plans: Optional[list[str]] = N
             plan_id = _dir_to_plan_id(plan_dir.name)
             for r in results:
                 note = system.read(r["id"])
-                all_results.append({
-                    "plan_id": plan_id,
-                    "id": r["id"],
-                    "name": note.name if note else None,
-                    "path": note.path if note else None,
-                    "content": r["content"],
-                    "tags": r.get("tags", []),
-                    "keywords": r.get("keywords", []),
-                    "links": note.links if note else [],
-                })
+                all_results.append(
+                    {
+                        "plan_id": plan_id,
+                        "id": r["id"],
+                        "name": note.name if note else None,
+                        "path": note.path if note else None,
+                        "content": r["content"],
+                        "tags": r.get("tags", []),
+                        "keywords": r.get("keywords", []),
+                        "links": note.links if note else [],
+                    }
+                )
         except Exception as e:
             logger.warning("Failed to search %s: %s", plan_dir, e)
 
     # Sort by relevance (could implement cross-namespace ranking here)
     # For now, just return up to k*len(dirs) results
-    return json.dumps(all_results[:k * len(dirs_to_search)], ensure_ascii=False)
+    return json.dumps(all_results[: k * len(dirs_to_search)], ensure_ascii=False)
 
 
 @mcp.tool()
@@ -282,7 +286,7 @@ def global_memory_stats() -> str:
             "total_memories": 0,
             "total_links": 0,
             "namespace_count": 0,
-        }
+        },
     }
 
     all_dirs = [_get_global_dir()] + _get_all_plan_dirs()
@@ -299,20 +303,24 @@ def global_memory_stats() -> str:
             links = sum(len(m.links) for m in system.memories.values())
             paths = sorted({m.path for m in system.memories.values() if m.path})
 
-            stats["namespaces"].append({
-                "plan_id": plan_id,
-                "total_memories": total,
-                "total_links": links,
-                "unique_paths": len(paths),
-            })
+            stats["namespaces"].append(
+                {
+                    "plan_id": plan_id,
+                    "total_memories": total,
+                    "total_links": links,
+                    "unique_paths": len(paths),
+                }
+            )
             stats["aggregate"]["total_memories"] += total
             stats["aggregate"]["total_links"] += links
             stats["aggregate"]["namespace_count"] += 1
         except Exception as e:
-            stats["namespaces"].append({
-                "plan_id": plan_id,
-                "error": str(e),
-            })
+            stats["namespaces"].append(
+                {
+                    "plan_id": plan_id,
+                    "error": str(e),
+                }
+            )
 
     return json.dumps(stats, ensure_ascii=False)
 
@@ -346,16 +354,20 @@ def global_memory_list_plans() -> str:
                 for f in notes_dir.rglob("*.md"):
                     last_mod = max(last_mod, f.stat().st_mtime)
 
-            plans.append({
-                "plan_id": plan_id,
-                "memory_count": len(system.memories),
-                "last_modified": last_mod,
-            })
+            plans.append(
+                {
+                    "plan_id": plan_id,
+                    "memory_count": len(system.memories),
+                    "last_modified": last_mod,
+                }
+            )
         except Exception as e:
-            plans.append({
-                "plan_id": plan_id,
-                "error": str(e),
-            })
+            plans.append(
+                {
+                    "plan_id": plan_id,
+                    "error": str(e),
+                }
+            )
 
     return json.dumps(plans, ensure_ascii=False)
 
@@ -395,7 +407,9 @@ def global_memory_grep(pattern: str, flags: Optional[str] = None) -> str:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.stdout:
-                for line in result.stdout.strip().split("\n")[:20]:  # Limit per namespace
+                for line in result.stdout.strip().split("\n")[
+                    :20
+                ]:  # Limit per namespace
                     # Replace full path with plan_id
                     line = line.replace(str(notes_dir) + "/", f"[{plan_id}]/")
                     results.append(line)
@@ -443,21 +457,24 @@ def global_memory_read(memory_id: str, plan_id: Optional[str] = None) -> str:
             note = system.read(memory_id)
 
             if note:
-                found_plan_id = plan_dir.name.replace("memory-", "") if plan_dir.name != "_global" else "_global"
-                return json.dumps({
-                    "plan_id": found_plan_id,
-                    "id": note.id,
-                    "name": note.name,
-                    "path": note.path,
-                    "content": note.content,
-                    "summary": note.summary,
-                    "keywords": note.keywords,
-                    "tags": note.tags,
-                    "links": note.links,
-                    "backlinks": note.backlinks,
-                    "timestamp": note.timestamp,
-                    "retrieval_count": note.retrieval_count,
-                }, ensure_ascii=False)
+                found_plan_id = _dir_to_plan_id(plan_dir.name)
+                return json.dumps(
+                    {
+                        "plan_id": found_plan_id,
+                        "id": note.id,
+                        "name": note.name,
+                        "path": note.path,
+                        "content": note.content,
+                        "summary": note.summary,
+                        "keywords": note.keywords,
+                        "tags": note.tags,
+                        "links": note.links,
+                        "backlinks": note.backlinks,
+                        "timestamp": note.timestamp,
+                        "retrieval_count": note.retrieval_count,
+                    },
+                    ensure_ascii=False,
+                )
         except Exception as e:
             logger.debug("Failed to read from %s: %s", plan_dir, e)
 

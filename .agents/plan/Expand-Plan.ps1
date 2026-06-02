@@ -141,6 +141,7 @@ Maximize the detail in this plan. Your output MUST be a single markdown block re
 3. **Definition of Done (DoD)**: List at least 5 crystal-clear, verifiable conditions (e.g., "Unit test coverage >= 80%", "Lint clean", "Documentation updated").
 4. **Acceptance Criteria (AC)**: List at least 5 testable scenarios (e.g., "User can login with valid JWT", "System rejects expired tokens with 401").
 5. **Dependencies**: Identify if this TRULY depends on other EPICs from the plan. Only list an EPIC as a dependency if this epic genuinely cannot start until that other epic is finished (e.g. it consumes APIs or schemas defined there). Do NOT assume every epic depends on the one before it — parallel work is preferred when possible. Format as: depends_on: [EPIC-NNN] or depends_on: [] if none.
+6. **Working Directory**: Analyze which subdirectory of the project this epic will primarily work in. Add a `Working_dir:` directive with a single relative path scoping the agent to only the relevant part of the codebase. Example: `Working_dir: dashboard/` or `Working_dir: bot/src/`. Only ONE path is allowed per epic. If the epic spans the entire project, omit this directive.
 
 ## Format Requirement
 Return ONLY the refined markdown starting with '$headingPrefix $epicRef - $epicTitle'. Use a single hyphen '-' as the separator. Do not include any other text, chatter, or preamble.

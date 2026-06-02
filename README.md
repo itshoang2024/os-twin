@@ -32,11 +32,12 @@
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/AnomalyCo/agent-os.git
-cd agent-os
+# 1. Install with the two-stage bootstrapper
+curl -fsSL https://twin.igot-ai/install.sh | bash
 
-# 2. Install
+# 2. Or install from a local clone
+git clone https://github.com/igot-ai/os-twin.git
+cd os-twin
 .agents/install.sh           # macOS / Linux
 .agents\install.ps1          # Windows (PowerShell 7+)
 
@@ -66,7 +67,48 @@ The installer auto-detects missing dependencies and installs them.
 
 ## Installation
 
-### macOS
+### Recommended Bootstrapper
+
+```bash
+curl -fsSL https://twin.igot-ai/install.sh | bash
+curl -fsSL https://twin.igot-ai/install.sh | bash -s -- --yes
+```
+
+The bootstrapper prefers the packaged Go `ostwin-installer` release. That binary provides the guided terminal flow, downloads the matching release source archive, and delegates to the native platform installer. If the release binary is unavailable, `install.sh` safely falls back to the source-archive Bash installer. Integrity mismatches fail closed and do not fall back.
+
+Release artifacts are published by GoReleaser:
+
+```text
+install.sh
+checksums.txt
+ostwin-installer_darwin_amd64.tar.gz
+ostwin-installer_darwin_arm64.tar.gz
+ostwin-installer_linux_amd64.tar.gz
+ostwin-installer_linux_arm64.tar.gz
+ostwin-installer_windows_amd64.tar.gz
+ostwin-installer_windows_arm64.tar.gz
+```
+
+The direct GitHub release entrypoint is also valid:
+
+```bash
+curl -fsSL https://github.com/igot-ai/os-twin/releases/latest/download/install.sh | bash
+```
+
+Useful forwarded options:
+
+```bash
+--yes
+--profile full|dashboard|minimal
+--dir ~/.ostwin
+--port 3366
+--skip-optional
+--no-start
+```
+
+### Local Clone Installers
+
+#### macOS
 
 ```bash
 .agents/install.sh           # Interactive
@@ -75,7 +117,7 @@ The installer auto-detects missing dependencies and installs them.
 
 Uses **Homebrew** (auto-installed if missing). Installs everything to `~/.ostwin/`, adds `ostwin` to your PATH.
 
-### Linux
+#### Linux
 
 ```bash
 .agents/install.sh           # Interactive
@@ -84,7 +126,7 @@ Uses **Homebrew** (auto-installed if missing). Installs everything to `~/.ostwin
 
 Supports Ubuntu/Debian, Fedora/RHEL, Arch, openSUSE. Auto-detects your package manager.
 
-### Windows
+#### Windows
 
 ```powershell
 .agents\install.ps1          # Interactive
@@ -106,6 +148,16 @@ Fully native PowerShell — no WSL or Cygwin needed. Uses winget, Chocolatey, or
 
 </details>
 
+### Installer Development
+
+```bash
+cd installer
+go run ./cmd/ostwin-installer --source-dir .. --dry-run --yes
+go test ./...
+```
+
+Release packaging is defined in `.goreleaser.yml` and automated by `.github/workflows/installer-release.yml`. Tagging `vX.Y.Z` publishes the packaged installer archives, `checksums.txt`, and the curl-friendly `install.sh` release asset.
+
 ### Post-Install: API Keys
 
 Edit `~/.ostwin/.env` (or `%USERPROFILE%\.ostwin\.env` on Windows):
@@ -115,6 +167,16 @@ GOOGLE_API_KEY=your-key-here
 OPENAI_API_KEY=your-key-here
 ANTHROPIC_API_KEY=your-key-here
 ```
+
+### Optional: Local Search Engine
+
+```bash
+ostwin search-engine install
+ostwin search-engine start
+```
+
+This installs SearXNG into `~/.ostwin/search-engine/` and writes a managed
+settings file that enables Google, Bing, and JSON search responses.
 
 ## CLI Reference
 
@@ -139,6 +201,11 @@ ostwin skills list                # Show installed skills
 ostwin mcp catalog                # Browse MCP extensions
 ostwin mcp install <git-url> --name custom-server
 ostwin mcp list                   # Show installed extensions
+
+./build.sh --search-engine --search-engine-mode docker
+./build.sh --search-engine --search-engine-mode local
+ostwin search-engine install      # Install local SearXNG under ~/.ostwin
+ostwin search-engine start        # Run local search on http://127.0.0.1:6633
 
 ostwin dashboard start            # Launch web dashboard
 ostwin health                     # System health check
@@ -186,6 +253,7 @@ All state lives in `.agents/` — plans, war-rooms, roles, skills, and the share
 | `~/.ostwin/plans/` | Plan files and metadata |
 | `~/.ostwin/.env` | API keys and secrets |
 | `~/.ostwin/.agents/skills/` | Globally installed skills |
+| `~/.ostwin/search-engine/` | Optional local SearXNG install and settings |
 | `~/.ostwin/.zvec/` | Vector embeddings cache |
 
 ## Contributing

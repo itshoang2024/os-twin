@@ -226,9 +226,14 @@ if (Test-Path $configPath) {
         }
     }
 
-    # WorkingDir: instance → parameter
-    if (-not $WorkingDir -and $instanceConfig -and $instanceConfig.working_dir) {
-        $WorkingDir = $instanceConfig.working_dir
+    # WorkingDir: parameter → instance config → room config.json
+    if (-not $WorkingDir -and $instanceConfig) {
+        if ($instanceConfig.PSObject.Properties['working_dir'] -and $instanceConfig.working_dir) {
+            $WorkingDir = $instanceConfig.working_dir
+        }
+    }
+    if (-not $WorkingDir -and $roomCfg -and $roomCfg.PSObject.Properties['working_dir'] -and $roomCfg.working_dir) {
+        $WorkingDir = $roomCfg.working_dir
     }
 
     # no_mcp: instance → role → default false
@@ -256,9 +261,14 @@ if (Test-Path $configPath) {
         }
         $searchDir = $parentDir
     }
-    # Fallback: env variable or WorkingDir
+    # Fallback: env variable
     if (-not $ProjectDir -and $env:PROJECT_DIR) { $ProjectDir = $env:PROJECT_DIR }
     if (-not $ProjectDir -and $WorkingDir) { $ProjectDir = $WorkingDir }
+
+    # --- Override ProjectDir with WorkingDir when scoped ---
+    if ($WorkingDir) {
+        $ProjectDir = $WorkingDir
+    }
 
     # --- CLI resolution: (1) explicit -AgentCmd  →  (2) Role-specific env (e.g. ARCHITECT_CMD)  →  (3) OSTWIN_AGENT_CMD  →  (4) "opencode run" ---
     # No bin/agent binary lookup — the full flow is managed by the bash/powershell wrapper.
@@ -274,6 +284,10 @@ if (Test-Path $configPath) {
 }
 
 if (-not $AgentCmd) { $AgentCmd = "opencode run" }
+
+# Always disable Claude Code skill loading for opencode run.
+# Wrappers also force this after sourcing user env hooks so it cannot be re-enabled downstream.
+$env:OPENCODE_DISABLE_CLAUDE_CODE = "1"
 
 # --- Role.json model + max_retries fallback (runs even when config.json is absent) ---
 # If no model was resolved from -Model param, plan.roles.json, or config.json,
@@ -325,7 +339,6 @@ if (-not $ProjectDir) {
         $searchDir2 = $parentDir2
     }
     if (-not $ProjectDir -and $env:PROJECT_DIR) { $ProjectDir = $env:PROJECT_DIR }
-    if (-not $ProjectDir -and $WorkingDir) { $ProjectDir = $WorkingDir }
 }
 
 # --- Skill Staging: project-local .agents/skills/ (shared across rooms) ---
@@ -562,6 +575,7 @@ if ('$winOpencodeConfig') { `$env:OPENCODE_CONFIG = '$winOpencodeConfig' }
 # Source user-controlled pre-exec hook
 `$envSh = Join-Path `$env:USERPROFILE '.ostwin' '.env.sh'
 if (Test-Path `$envSh) { . `$envSh }
+`$env:OPENCODE_DISABLE_CLAUDE_CODE = '1'
 
 # Write PID
 `$PID | Out-File -FilePath '$winPidFile' -Encoding ascii -NoNewline
@@ -618,6 +632,7 @@ $envExportLines
 # Static vars belong in `$safeOstwinHome`/.env; this file is for shell logic.
 if [ -f "`$HOME/.ostwin/.env.sh" ]; then . "`$HOME/.ostwin/.env.sh"; fi
 if [ -f '$safeOstwinHome/.env.sh' ]; then . '$safeOstwinHome/.env.sh'; fi
+export OPENCODE_DISABLE_CLAUDE_CODE=1
 $cwdLine
 # Write PID before exec — `$`$ survives exec, so this is the real agent PID.
 # bin/agent also writes this (harmless overwrite); this fallback ensures

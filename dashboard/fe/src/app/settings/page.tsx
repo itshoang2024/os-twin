@@ -8,6 +8,7 @@ import { LiveStatusBadge } from '@/components/settings/LiveStatusBadge';
 import { SettingsSidebar } from '@/components/settings/SettingsSidebar';
 import { ProviderCard } from '@/components/settings/ProviderCard';
 import { BytedanceProviderCard } from '@/components/settings/BytedanceProviderCard';
+import { OpenAICodexPanel } from '@/components/settings/OpenAICodexPanel';
 import { DynamicProviderCard } from '@/components/settings/DynamicProviderCard';
 import { AddProviderModal } from '@/components/settings/AddProviderModal';
 import { VaultSecretModal } from '@/components/settings/VaultSecretModal';
@@ -114,6 +115,9 @@ function SettingsPageContent() {
 
   const handleVaultSubmit = async (secret: string) => {
     await updateVault(vaultScope, vaultKey, secret);
+    if (vaultScope === 'providers' && vaultKey === 'openai') {
+      await updateProvider('openai', openaiSettings, { enabled: true, auth_mode: 'api_key' });
+    }
     const raw = await apiGet<{ keys?: Record<string, { is_set: boolean }> } & Record<string, { is_set: boolean }>>('/settings/vault/providers');
     const entries = raw.keys ?? raw;
     const status: Record<string, boolean> = {};
@@ -336,16 +340,11 @@ function SettingsPageContent() {
                   modelRegistry={getRegistryForProvider('anthropic')}
                   models={allModelIds}
                 />
-                <ProviderCard
-                  name="openai"
+                <OpenAICodexPanel
                   provider={openaiSettings}
-                  variant="compact"
-                  onToggle={(enabled) => updateProvider('openai', openaiSettings, { enabled })}
-                  onModelChange={(model) => updateProvider('openai', openaiSettings, { default_model: model })}
                   onVaultClick={() => handleVaultClick('openai')}
                   vaultSet={vaultStatus['openai'] || false}
-                  modelRegistry={getRegistryForProvider('openai')}
-                  models={allModelIds}
+                  onSettingsChange={(updates) => updateProvider('openai', openaiSettings, updates)}
                 />
               </div>
 
@@ -522,26 +521,4 @@ function SettingsPageContent() {
       />
     </div>
   );
-}
-
-// Helper functions
-function formatCtx(ctx: number): string {
-  if (ctx >= 1_000_000) {
-    const val = ctx / 1_000_000;
-    return `${val % 1 === 0 ? val : val.toFixed(1)}M`;
-  }
-  if (ctx >= 1_000) {
-    const val = ctx / 1_000;
-    return `${val % 1 === 0 ? val : val.toFixed(1)}K`;
-  }
-  return String(ctx);
-}
-
-function classifyTier(model: { reasoning?: boolean; cost?: { input?: number } }): string {
-  if (model.reasoning) return 'reasoning';
-  const inputCost = model.cost?.input ?? 0;
-  if (inputCost >= 10) return 'flagship';
-  if (inputCost >= 1) return 'balanced';
-  if (inputCost > 0) return 'fast';
-  return 'unknown';
 }

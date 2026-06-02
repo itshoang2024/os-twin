@@ -1,0 +1,47 @@
+version: 2
+
+project_name: ostwin-installer
+dist: dist/installer
+
+builds:
+  - id: ostwin-installer
+    dir: installer
+    main: ./cmd/ostwin-installer
+    binary: ostwin-installer
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{ .Version }}"
+      - "-X main.commit={{ .Commit }}"
+      - "-X main.date={{ .Date }}"
+      - "-X main.sourceRef={{ .Tag }}"
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: ostwin-installer
+    ids:
+      - ostwin-installer
+    formats:
+      - tar.gz
+    name_template: "ostwin-installer_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  extra_files:
+    - glob: ./install.sh
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

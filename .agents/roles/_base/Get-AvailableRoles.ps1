@@ -37,7 +37,7 @@ if (Test-Path $registryPath) {
                 Name         = $r.name
                 Runner       = $runnerPath
                 Model        = if ($r.default_model) { $r.default_model } else { 'google-vertex/gemini-3-flash-preview' }
-                Timeout      = 600
+                Timeout      = if ($r.timeout) { $r.timeout } elseif ($r.timeout_seconds) { $r.timeout_seconds } else { 600 }
                 Capabilities = if ($r.capabilities) { @($r.capabilities) } else { @() }
                 Source       = 'registry'
             })

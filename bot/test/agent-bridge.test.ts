@@ -130,6 +130,8 @@ describe('agent-bridge', () => {
       const session = getSession('draft-u1', 'telegram');
 
       expect(result.text).to.equal('Plan created');
+      expect(result.planId).to.equal('new-plan');
+      expect(result.destinationUrl).to.equal('/plans/new-plan');
       expect(askOpenCodeStub.called).to.be.false;
       expect(request.command).to.equal('draft');
       expect(request.arguments).to.equal('build a notes app');
@@ -144,12 +146,14 @@ describe('agent-bridge', () => {
     it('updates session activePlanId when plan_created action received', async () => {
       clearSession('action-u1', 'discord');
       sandbox.stub(api, 'askOpenCode').resolves(mockResponse('Plan created!', {
-        actions: [{ type: 'plan_created', plan_id: 'my-cool-plan' }],
+        actions: [{ type: 'plan_created', plan_id: 'my-cool-plan', url: '/plans/my-cool-plan?tab=epics' }],
       }));
 
       const result = await askAgent('build me a todo app', { userId: 'action-u1', platform: 'discord' });
 
       expect(result.text).to.equal('Plan created!');
+      expect(result.planId).to.equal('my-cool-plan');
+      expect(result.destinationUrl).to.equal('/plans/my-cool-plan?tab=epics');
       const session = getSession('action-u1', 'discord');
       expect(session.activePlanId).to.equal('my-cool-plan');
       clearSession('action-u1', 'discord');

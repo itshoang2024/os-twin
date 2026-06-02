@@ -50,6 +50,12 @@ from dashboard.routes.knowledge_models import (
     RefreshNamespaceResponse,
     BackupNamespaceResponse,
     RestoreNamespaceRequest,
+    ResearchRequest,
+    ResearchResponse,
+    ResearchSearchRequest,
+    ResearchSearchResponse,
+    ResearchIngestRequest,
+    ResearchIngestJobResponse,
     RetentionPolicyRequest,
     RetentionPolicyResponse,
 )
@@ -1376,6 +1382,125 @@ async def set_retention_endpoint(
         raise _map_error(exc)
 
 
+# ---------------------------------------------------------------------------
+# Web Research
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/namespaces/{namespace}/research",
+    responses={
+        200: {"description": "Research results"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found"},
+        409: {"description": "Import already in progress"},
+    },
+    summary="Research a topic and ingest into namespace",
+)
+async def research_namespace(
+    namespace: str,
+    request: ResearchRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search the web using SearXNG, fetch top pages, and ingest into the namespace.
+
+    Requires the SearXNG service to be available. Auto-creates the namespace
+    if it doesn't already exist.
+    """
+    try:
+        actor = _get_actor(user)
+        service = _get_service()
+        result = await asyncio.to_thread(
+            service.research,
+            namespace,
+            request.query,
+            engines=request.engines,
+            categories=request.categories,
+            max_results=request.max_results,
+            summarize=request.summarize,
+            language=request.language,
+            actor=actor,
+        )
+        return result
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/research/search",
+    responses={
+        200: {"description": "Search results preview"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Authentication required"},
+    },
+    summary="Search the web and return result previews (no ingestion)",
+)
+async def research_search(
+    namespace: str,
+    request: ResearchSearchRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search the web via SearXNG and return previews for the user to select.
+
+    This is the fast first step of the two-step research flow.
+    No content is fetched or ingested — only search metadata is returned.
+    """
+    try:
+        service = _get_service()
+        result = await asyncio.to_thread(
+            service.search_web,
+            request.query,
+            engines=request.engines,
+            categories=request.categories,
+            max_results=request.max_results,
+            language=request.language,
+        )
+        return result
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/research/ingest",
+    responses={
+        200: {"description": "Job submitted"},
+        400: {"description": "Invalid request"},
+        401: {"description": "Authentication required"},
+        409: {"description": "Import already in progress"},
+    },
+    summary="Fetch and ingest selected research URLs (async job)",
+)
+async def research_ingest(
+    namespace: str,
+    request: ResearchIngestRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Submit a background job to fetch and ingest selected search results.
+
+    Returns a job_id immediately. Poll via GET /namespaces/{ns}/jobs/{job_id}
+    to track progress.
+    """
+    try:
+        actor = _get_actor(user)
+        service = _get_service()
+        job_id = await asyncio.to_thread(
+            service.research_ingest,
+            namespace,
+            request.query,
+            [item.model_dump() for item in request.items],
+            summarize=request.summarize,
+            language=request.language,
+            actor=actor,
+        )
+        return ResearchIngestJobResponse(
+            job_id=job_id,
+            namespace=namespace,
+            status="submitted",
+            message=f"Research ingest job submitted: {len(request.items)} sources",
+        )
+    except Exception as exc:
+        raise _map_error(exc)
 
 
 __all__ = ["router"]
