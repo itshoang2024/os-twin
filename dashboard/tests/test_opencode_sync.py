@@ -708,6 +708,53 @@ def test_auth_json_writes_api_keys(tmp_path):
     assert "anthropic" in result.auth_json.synced
 
 
+def test_auth_json_preserves_openai_oauth_without_vault_key(tmp_path):
+    """An OpenCode OAuth login should not be removed when vault has no key."""
+    auth_path = tmp_path / "auth.json"
+    oauth_entry = {
+        "type": "oauth",
+        "access": "access-token",
+        "refresh": "refresh-token",
+        "expires": 9999999999,
+        "accountId": "acct-test",
+    }
+    auth_path.write_text(json.dumps({"openai": oauth_entry}))
+
+    vault = _make_vault({})
+    settings = _make_settings(google_enabled=False, byteplus_enabled=False)
+
+    result = _sync(vault, settings, tmp_path, auth_path=auth_path)
+    auth = json.loads(auth_path.read_text())
+
+    assert auth["openai"] == oauth_entry
+    assert "openai" not in result.auth_json.removed
+    assert "openai" in result.auth_json.skipped
+
+
+def test_auth_json_preserves_openai_oauth_over_stale_vault_key(tmp_path):
+    """A stale dashboard vault key should not replace OpenCode OAuth auth."""
+    auth_path = tmp_path / "auth.json"
+    oauth_entry = {
+        "type": "oauth",
+        "access": "access-token",
+        "refresh": "refresh-token",
+        "expires": 9999999999,
+        "accountId": "acct-test",
+    }
+    auth_path.write_text(json.dumps({"openai": oauth_entry}))
+
+    vault = _make_vault({"providers/openai": "sk-stale-dashboard-key"})
+    settings = _make_settings(google_enabled=False, byteplus_enabled=False)
+
+    result = _sync(vault, settings, tmp_path, auth_path=auth_path)
+    auth = json.loads(auth_path.read_text())
+
+    assert auth["openai"] == oauth_entry
+    assert "key" not in auth["openai"]
+    assert "openai" not in result.auth_json.synced
+    assert "openai" in result.auth_json.skipped
+
+
 def test_auth_json_removes_stale_entries(tmp_path):
     """When a vault key is removed, the auth.json entry is deleted."""
     auth_path = tmp_path / "auth.json"

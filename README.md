@@ -74,26 +74,7 @@ curl -fsSL https://twin.igot-ai/install.sh | bash
 curl -fsSL https://twin.igot-ai/install.sh | bash -s -- --yes
 ```
 
-The bootstrapper prefers the packaged Go `ostwin-installer` release. That binary provides the guided terminal flow, downloads the matching release source archive, and delegates to the native platform installer. If the release binary is unavailable, `install.sh` safely falls back to the source-archive Bash installer. Integrity mismatches fail closed and do not fall back.
-
-Release artifacts are published by GoReleaser:
-
-```text
-install.sh
-checksums.txt
-ostwin-installer_darwin_amd64.tar.gz
-ostwin-installer_darwin_arm64.tar.gz
-ostwin-installer_linux_amd64.tar.gz
-ostwin-installer_linux_arm64.tar.gz
-ostwin-installer_windows_amd64.tar.gz
-ostwin-installer_windows_arm64.tar.gz
-```
-
-The direct GitHub release entrypoint is also valid:
-
-```bash
-curl -fsSL https://github.com/igot-ai/os-twin/releases/latest/download/install.sh | bash
-```
+The bootstrapper downloads the matching source archive and delegates directly to the native platform installer.
 
 Useful forwarded options:
 
@@ -151,12 +132,11 @@ Fully native PowerShell — no WSL or Cygwin needed. Uses winget, Chocolatey, or
 ### Installer Development
 
 ```bash
-cd installer
-go run ./cmd/ostwin-installer --source-dir .. --dry-run --yes
-go test ./...
+bash -n install.sh build.sh .agents/install.sh
+npx --yes bats .agents/installer/tests/test_*.bats
 ```
 
-Release packaging is defined in `.goreleaser.yml` and automated by `.github/workflows/installer-release.yml`. Tagging `vX.Y.Z` publishes the packaged installer archives, `checksums.txt`, and the curl-friendly `install.sh` release asset.
+Installer tests for the native Bash and PowerShell entrypoints run through the main CI workflows.
 
 ### Post-Install: API Keys
 
