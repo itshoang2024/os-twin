@@ -115,6 +115,9 @@ function SettingsPageContent() {
 
   const handleVaultSubmit = async (secret: string) => {
     await updateVault(vaultScope, vaultKey, secret);
+    if (vaultScope === 'providers' && vaultKey === 'openai') {
+      await updateProvider('openai', openaiSettings, { enabled: true, auth_mode: 'api_key' });
+    }
     const raw = await apiGet<{ keys?: Record<string, { is_set: boolean }> } & Record<string, { is_set: boolean }>>('/settings/vault/providers');
     const entries = raw.keys ?? raw;
     const status: Record<string, boolean> = {};
@@ -339,6 +342,8 @@ function SettingsPageContent() {
                 />
                 <OpenAICodexPanel
                   provider={openaiSettings}
+                  onVaultClick={() => handleVaultClick('openai')}
+                  vaultSet={vaultStatus['openai'] || false}
                   onSettingsChange={(updates) => updateProvider('openai', openaiSettings, updates)}
                 />
               </div>

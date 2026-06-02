@@ -315,7 +315,7 @@ ostwin mcp test chrome-devtools
 ostwin mcp sync
 ```
 
-Resolves MCP server references from `role.json` `mcp_refs` and generates the agent permission configuration in `~/.config/opencode/opencode.json`. Run this after installing new MCP extensions or updating role configurations.
+Resolves MCP server references from `role.json` `mcp_refs` and generates the agent permission configuration in `~/.ostwin/.opencode/opencode.json`. Run this after installing new MCP extensions or updating role configurations.
 
 ## ostwin memory
 

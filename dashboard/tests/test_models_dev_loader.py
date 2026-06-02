@@ -173,29 +173,30 @@ def test_reads_auth_json_providers(fake_auth_json):
     assert providers["openai"]["has_key"] is True
 
 
-def test_reads_openai_oauth_auth_json_provider(tmp_path):
+def test_reads_auth_json_oauth_provider_over_vault(tmp_path):
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(json.dumps({
         "openai": {
             "type": "oauth",
             "access": "access-token",
             "refresh": "refresh-token",
-            "expires": 9999999999999,
+            "expires": 9999999999,
+            "accountId": "acct-test",
         }
     }))
 
-    class EmptyVault:
+    class FakeVault:
         def list_keys(self, scope):
-            return {}
+            return {"openai": {"is_set": True}}
 
+    env = {
+        "OSTWIN_CONFIG_PATH": str(tmp_path / "missing-config.json"),
+        "OSTWIN_VAULT_BACKEND": "env",
+    }
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", auth_path):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
-            with patch("dashboard.lib.settings.vault.get_vault", return_value=EmptyVault()):
-                with patch.dict(
-                    os.environ,
-                    {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json", "OSTWIN_VAULT_BACKEND": "env"},
-                    clear=True,
-                ):
+            with patch("dashboard.lib.settings.vault.get_vault", return_value=FakeVault()):
+                with patch.dict(os.environ, env, clear=True):
                     providers = _read_configured_providers()
 
     assert providers["openai"]["type"] == "oauth"
@@ -252,14 +253,19 @@ def test_google_detected_from_api_key(tmp_path):
 
 
 def test_google_not_detected_without_env():
+    class EmptyVault:
+        def list_keys(self, scope):
+            return {}
+
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
-            with patch.dict(
-                os.environ,
-                {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json"},
-                clear=True,
-            ):
-                providers = _read_configured_providers()
+            with patch("dashboard.lib.settings.vault.get_vault", return_value=EmptyVault()):
+                with patch.dict(
+                    os.environ,
+                    {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json"},
+                    clear=True,
+                ):
+                    providers = _read_configured_providers()
 
     assert "google" not in providers
 

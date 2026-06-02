@@ -5,8 +5,8 @@ On every server startup this module:
 
 1. Fetches the full model catalog from ``https://models.dev/api.json``.
 2. Reads ``~/.local/share/opencode/auth.json`` to discover which providers
-   the user has API keys for.
-3. Reads ``~/.config/opencode/opencode.json`` for any custom providers.
+   the user has API keys or OAuth sessions for.
+3. Reads the Ostwin-managed opencode.json for any custom providers.
 4. Filters the catalog to only include models from configured providers.
 5. Writes the result to ``~/.ostwin/.agents/configured_models.json``
    so it can be served without re-fetching.
@@ -29,13 +29,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from dashboard.lib.opencode_paths import get_managed_opencode_config_path
+
 logger = logging.getLogger(__name__)
 
 MODELS_DEV_URL = "https://models.dev/api.json"
 MODELS_DEV_LOGO_URL = "https://models.dev/logos/{provider}.svg"
 
 AUTH_JSON_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
-OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
+OPENCODE_CONFIG_PATH = get_managed_opencode_config_path()
 CONFIGURED_MODELS_PATH = (
     Path.home() / ".ostwin" / ".agents" / "configured_models.json"
 )
@@ -721,10 +723,14 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
                     continue
                 auth_type = entry.get("type")
                 if auth_type in {"api", "oauth"}:
+                    if auth_type == "oauth":
+                        has_key = bool(entry.get("access") or entry.get("refresh"))
+                    else:
+                        has_key = bool(entry.get("key"))
                     providers[provider_id] = {
                         "type": auth_type,
                         "source": "auth.json",
-                        "has_key": bool(entry.get("key") or entry.get("access")),
+                        "has_key": has_key,
                     }
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read auth.json: %s", exc)

@@ -28,6 +28,7 @@ Responsibilities consolidated here (previously split across bash):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
@@ -41,6 +42,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
+from dashboard.lib.opencode_paths import get_managed_opencode_config_path
+
 logger = logging.getLogger(__name__)
 
 INSTALL_DIR = Path(os.environ.get("OSTWIN_HOME", str(Path.home() / ".ostwin")))
@@ -49,6 +52,7 @@ LOG_FILE = INSTALL_DIR / "logs" / "opencode-server.log"
 SERVER_DIR = INSTALL_DIR / "opencode_server"
 ENV_FILE = INSTALL_DIR / ".env"
 ENV_SH_FILE = INSTALL_DIR / ".env.sh"
+MANAGED_OPENCODE_CONFIG = get_managed_opencode_config_path(INSTALL_DIR)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4096"
 OPENCODE_DISABLE_CLAUDE_CODE = "1"
@@ -264,6 +268,68 @@ def _generate_opencode_tools(env: dict[str, str], project_dir: Path) -> None:
         logger.debug("[OPENCODE_SERVICE] tool generation skipped: %s", exc)
 
 
+def _merge_mapping(base: object, override: object) -> object:
+    """Merge two JSON mapping values, with ``override`` taking precedence."""
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        merged.update(override)
+        return merged
+    return override
+
+
+def _merge_managed_opencode_config(project_dir: Path) -> None:
+    """Fold Ostwin-managed config into the server-local opencode.json.
+
+    ``opencode serve`` runs from ``opencode_server`` so the generated dashboard
+    tools/commands config remains primary. The managed config under
+    ``~/.ostwin/.opencode`` supplies MCP, provider, and role permission blocks
+    without touching the user's global OpenCode config.
+    """
+    runtime_config = project_dir / "opencode.json"
+    if not MANAGED_OPENCODE_CONFIG.exists() or not runtime_config.exists():
+        return
+
+    try:
+        managed = json.loads(MANAGED_OPENCODE_CONFIG.read_text())
+        runtime = json.loads(runtime_config.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("[OPENCODE_SERVICE] could not merge managed config: %s", exc)
+        return
+
+    if not isinstance(managed, dict) or not isinstance(runtime, dict):
+        return
+
+    original = dict(runtime)
+    runtime["$schema"] = managed.get(
+        "$schema",
+        runtime.get("$schema", "https://opencode.ai/config.json"),
+    )
+
+    for key in ("mcp", "tools", "provider", "model"):
+        if key in managed:
+            runtime[key] = managed[key]
+
+    if "agent" in managed:
+        runtime["agent"] = _merge_mapping(
+            managed.get("agent", {}),
+            runtime.get("agent", {}),
+        )
+
+    if "permission" in managed:
+        runtime["permission"] = _merge_mapping(
+            managed.get("permission", {}),
+            runtime.get("permission", {}),
+        )
+
+    if runtime == original:
+        return
+
+    try:
+        runtime_config.write_text(json.dumps(runtime, indent=2) + "\n")
+    except OSError as exc:
+        logger.warning("[OPENCODE_SERVICE] could not write merged config: %s", exc)
+
+
 # ── Public API ────────────────────────────────────────────────────────
 
 
@@ -341,6 +407,7 @@ def start() -> Optional[int]:
     env = _build_child_env(SERVER_DIR)
 
     _generate_opencode_tools(env, SERVER_DIR)
+    _merge_managed_opencode_config(SERVER_DIR)
 
     log_handle = open(LOG_FILE, "a")
     try:
