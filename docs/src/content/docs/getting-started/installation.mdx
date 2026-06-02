@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Prerequisites
 
@@ -18,51 +18,85 @@ import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 | **pnpm** | 9+ | `pnpm --version` |
 
 :::tip
-On macOS, install PowerShell with `brew install powershell/tap/powershell`. On Linux, follow the [Microsoft docs](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux).
+The packaged bootstrapper and native installers can install or validate many runtime dependencies for you. Go is only required when developing or testing the packaged `ostwin-installer` binary locally.
 :::
 
 ## Install OSTwin
 
 <Tabs>
-  <TabItem label="Full Install">
-    The install script sets up all dependencies, creates virtual environments, and configures the runtime:
+  <TabItem label="Recommended">
+    Use the public bootstrapper for normal installs:
 
     ```bash
-    git clone https://github.com/igot-ai/os-twin.git
-    cd os-twin
-    pwsh Install.ps1
+    curl -fsSL https://twin.igot-ai/install.sh | bash
+    curl -fsSL https://twin.igot-ai/install.sh | bash -s -- --yes
     ```
 
-    This will:
-    - Create a Python virtual environment at `.venv/`
-    - Install Python dependencies for MCP servers
-    - Install Node.js dependencies for the bot and dashboard
-    - Validate all prerequisites are met
-    - Set up the `.agents/` directory structure
+    The bootstrapper first tries the packaged Go `ostwin-installer` release. That binary provides the guided terminal flow, downloads the matching source archive, and delegates to the native platform installer.
+
+    If the packaged release binary is unavailable, `install.sh` falls back to the source-archive Bash installer. Checksum mismatches fail closed and do not fall back.
+
+    Useful forwarded options:
+
+    ```bash
+    --yes
+    --profile full|dashboard|minimal
+    --dir ~/.ostwin
+    --port 3366
+    --skip-optional
+    --no-start
+    ```
   </TabItem>
-  <TabItem label="Source Mode">
-    If you want to set up components individually:
+  <TabItem label="Local Clone">
+    If you already cloned the repository, run the native installer directly:
 
     ```bash
     git clone https://github.com/igot-ai/os-twin.git
     cd os-twin
-
-    # Python MCP servers
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-
-    # Dashboard (Next.js frontend)
-    cd dashboard && pnpm install && cd ..
-
-    # Dashboard (FastAPI backend)
-    cd api && pip install -r requirements.txt && cd ..
-
-    # Bot
-    cd bot && pnpm install && cd ..
+    .agents/install.sh
     ```
+
+    Non-interactive install:
+
+    ```bash
+    .agents/install.sh --yes
+    ```
+
+    Windows uses the PowerShell native installer:
+
+    ```powershell
+    .agents\install.ps1
+    .agents\install.ps1 -Yes
+    ```
+  </TabItem>
+  <TabItem label="Installer Dev">
+    To test the packaged Go installer wrapper from a local checkout:
+
+    ```bash
+    cd installer
+    go run ./cmd/ostwin-installer --source-dir .. --dry-run --yes
+    go run ./cmd/ostwin-installer --source-dir ..
+    go test ./...
+    ```
+
+    Release packaging is defined in `.goreleaser.yml` and automated by `.github/workflows/installer-release.yml`.
   </TabItem>
 </Tabs>
+
+## Release Artifacts
+
+Tagged releases publish these installer assets:
+
+```text
+install.sh
+checksums.txt
+ostwin-installer_darwin_amd64.tar.gz
+ostwin-installer_darwin_arm64.tar.gz
+ostwin-installer_linux_amd64.tar.gz
+ostwin-installer_linux_arm64.tar.gz
+ostwin-installer_windows_amd64.tar.gz
+ostwin-installer_windows_arm64.tar.gz
+```
 
 ## API Key Setup
 
@@ -100,34 +134,42 @@ After installation, OSTwin uses the following directory structure:
 |------|---------|
 | `.agents/skills/` | Skill definitions organized by role |
 | `.agents/roles/` | Role definitions (`role.json` + `ROLE.md`) |
-| `.agents/war-rooms/` | Active war-room directories (created at runtime) |
+| `.agents/war-rooms/` | Active war-room directories, created at runtime |
 | `.agents/memory/` | Shared memory ledger |
 | `.agents/roles/registry.json` | Role registry mapping |
-| `Engine.ps1` | Main orchestration engine |
 | `api/` | FastAPI dashboard backend |
 | `dashboard/` | Next.js dashboard frontend |
 | `bot/` | TypeScript conversational bot |
 
 ## Verify Installation
 
-Run the built-in verification:
+Run the health check from a local checkout:
 
 ```bash
-pwsh -Command "& { . ./Engine.ps1 -Verify }"
+.agents/health.sh
 ```
 
-This checks that all prerequisites are installed, API keys are set, and the directory structure is correct.
+On Windows:
+
+```powershell
+.agents\health.ps1
+```
+
+This checks key prerequisites and installed runtime state.
 
 ## Uninstall
 
-To remove OSTwin completely:
+To remove OSTwin:
 
 ```bash
-# Remove the cloned repository and all runtime data
-rm -rf os-twin
+.agents/uninstall.sh
 ```
 
-Since OSTwin is fully self-contained in its repository directory, removing it cleans up everything. No global packages or system-level changes are made during installation.
+On Windows:
+
+```powershell
+.agents\uninstall.ps1
+```
 
 ## Next Steps
 
