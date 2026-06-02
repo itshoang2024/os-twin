@@ -1,10 +1,12 @@
-# SearXNG settings for ostwin
+# SearXNG fallback settings for direct local docker compose usage.
+# The installer generates a per-install config with a random secret key and
+# points docker compose at that directory via SEARXNG_CONFIG_DIR.
 # see https://docs.searxng.org/admin/settings/settings.html
 
 use_default_settings: true
 
 server:
-  secret_key: "ostwin-dev-searxng-key"
+  secret_key: "replace-this-with-a-random-local-secret"
   bind_address: "0.0.0.0"
   port: 8080
 

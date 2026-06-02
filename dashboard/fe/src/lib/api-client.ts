@@ -52,11 +52,12 @@ async function request<T>(
   }
 
   const json = await response.json();
+  const preserveWrappedResponse = path.includes('/research/search');
 
   // Unwrap backend responses that wrap arrays in named keys.
   // e.g. { plans: [...], count: N } → [...] so SWR hooks get Plan[] directly.
   // Skip unwrap for detail endpoints (e.g. { plan: {}, epics: [] }).
-  if (json && typeof json === 'object' && !Array.isArray(json)) {
+  if (!preserveWrappedResponse && json && typeof json === 'object' && !Array.isArray(json)) {
     const UNWRAP_KEYS = ['plans', 'epics', 'roles', 'skills', 'notifications', 'versions', 'goals', 'results', 'entries', 'tree'];
     const DETAIL_KEYS = ['plan', 'epic', 'role', 'skill', 'version'];
     const jsonKeys = Object.keys(json);

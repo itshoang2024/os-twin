@@ -57,6 +57,33 @@ _searxng_manager_script() {
   return 1
 }
 
+_prepare_searxng_docker_config() {
+  local _config_dir="${SEARXNG_CONFIG_DIR:-${INSTALL_DIR}/search-engine/docker-etc}"
+  local _settings="${_config_dir}/settings.yml"
+  local _script
+
+  mkdir -p "$_config_dir"
+
+  if [[ -f "$_settings" ]] \
+    && ! grep -Eq "ostwin-dev-searxng-key|replace-this-with-a-random-local-secret" "$_settings"; then
+    export SEARXNG_CONFIG_DIR="$_config_dir"
+    return 0
+  fi
+
+  if ! _script="$(_searxng_manager_script)"; then
+    warn "search-engine.sh not found; cannot generate SearXNG Docker settings"
+    return 1
+  fi
+
+  info "Generating per-install SearXNG Docker settings"
+  OSTWIN_HOME="$INSTALL_DIR" \
+    OSTWIN_SEARCH_HOME="${INSTALL_DIR}/search-engine" \
+    SEARXNG_SETTINGS_PATH="$_settings" \
+    bash "$_script" configure --port 8080 --bind 0.0.0.0
+
+  export SEARXNG_CONFIG_DIR="$_config_dir"
+}
+
 _searxng_manual_installed() {
   [[ -x "${INSTALL_DIR:-}/search-engine/searx-pyenv/bin/python" ]] \
     && [[ -d "${INSTALL_DIR:-}/search-engine/searxng-src" ]]
@@ -119,6 +146,11 @@ start_searxng() {
 
   if [[ ! -f "$_compose_file" ]]; then
     _start_searxng_manual "SearXNG compose file not found"
+    return $?
+  fi
+
+  if ! _prepare_searxng_docker_config; then
+    _start_searxng_manual "Unable to prepare SearXNG Docker settings"
     return $?
   fi
 

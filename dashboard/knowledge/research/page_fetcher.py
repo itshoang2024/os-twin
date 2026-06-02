@@ -14,7 +14,10 @@ import fnmatch
 import ipaddress
 import logging
 import socket
-from typing import Optional
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Iterator, Optional
 from urllib.parse import urlparse
 
 from dashboard.knowledge.research.config import (
@@ -32,6 +35,14 @@ _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 # Maximum number of redirects to follow (validated at each hop).
 _MAX_REDIRECTS = 5
+_DNS_PIN_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _ResolvedTarget:
+    hostname: str
+    port: int
+    addrinfos: tuple
 
 
 def _is_private_ip(ip_str: str) -> bool:
@@ -44,9 +55,52 @@ def _is_private_ip(ip_str: str) -> bool:
             or addr.is_link_local
             or addr.is_reserved
             or addr.is_multicast
+            or addr.is_unspecified
         )
     except ValueError:
         return True  # Unparseable → reject
+
+
+def _normalize_hostname(hostname: object) -> str:
+    if isinstance(hostname, bytes):
+        hostname = hostname.decode("ascii", errors="ignore")
+    return str(hostname).lower().rstrip(".")
+
+
+def _resolve_url_target(url: str) -> tuple[Optional[_ResolvedTarget], Optional[str]]:
+    """Validate URL scheme and resolved IP addresses.
+
+    Returns a resolved target plus an error string. The resolved target is used
+    to pin the later HTTP connection to the addresses that passed validation.
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        return None, f"Blocked scheme: {parsed.scheme!r}"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return None, "No hostname in URL"
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addrinfos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        return None, f"DNS resolution failed for {hostname}: {exc}"
+
+    if not addrinfos:
+        return None, f"DNS resolution returned no addresses for {hostname}"
+
+    for _family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip = sockaddr[0]
+        if _is_private_ip(ip):
+            return None, f"URL resolves to non-public address ({hostname} → {ip})"
+
+    return _ResolvedTarget(
+        hostname=_normalize_hostname(hostname),
+        port=port,
+        addrinfos=tuple(addrinfos),
+    ), None
 
 
 def _validate_url_target(url: str) -> Optional[str]:
@@ -54,30 +108,41 @@ def _validate_url_target(url: str) -> Optional[str]:
 
     Returns an error string if the URL is unsafe, or None if safe.
     """
-    parsed = urlparse(url)
+    _target, error = _resolve_url_target(url)
+    return error
 
-    if parsed.scheme not in _ALLOWED_SCHEMES:
-        return f"Blocked scheme: {parsed.scheme!r}"
 
-    hostname = parsed.hostname
-    if not hostname:
-        return "No hostname in URL"
+@contextmanager
+def _pin_dns_resolution(target: _ResolvedTarget) -> Iterator[None]:
+    """Pin httpx's DNS lookup to the addresses already SSRF-validated.
 
+    httpx does not expose a sync resolver hook, so the fetcher temporarily
+    overrides ``socket.getaddrinfo`` while opening the connection. A lock keeps
+    concurrent research fetches from observing the wrong pinned target.
+    """
+    original_getaddrinfo = socket.getaddrinfo
+    hostnames = {_normalize_hostname(target.hostname)}
     try:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        addrinfos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        return f"DNS resolution failed for {hostname}: {exc}"
+        hostnames.add(_normalize_hostname(target.hostname.encode("idna").decode("ascii")))
+    except UnicodeError:
+        pass
 
-    if not addrinfos:
-        return f"DNS resolution returned no addresses for {hostname}"
+    def pinned_getaddrinfo(host, port, *args, **kwargs):
+        try:
+            requested_port = int(port)
+        except (TypeError, ValueError):
+            requested_port = target.port
 
-    for _family, _type, _proto, _canonname, sockaddr in addrinfos:
-        ip = sockaddr[0]
-        if _is_private_ip(ip):
-            return f"URL resolves to non-public address ({hostname} → {ip})"
+        if _normalize_hostname(host) in hostnames and requested_port == target.port:
+            return list(target.addrinfos)
+        return original_getaddrinfo(host, port, *args, **kwargs)
 
-    return None
+    with _DNS_PIN_LOCK:
+        socket.getaddrinfo = pinned_getaddrinfo
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
 
 
 class PageFetcher:
@@ -129,7 +194,7 @@ class PageFetcher:
             return FetchResult(url=url, error="URL matched blocklist", status_code=0)
 
         # SSRF guard: validate scheme and resolved destination IP
-        ssrf_err = _validate_url_target(url)
+        current_target, ssrf_err = _resolve_url_target(url)
         if ssrf_err:
             return FetchResult(url=url, error=ssrf_err, status_code=0)
 
@@ -143,13 +208,16 @@ class PageFetcher:
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
                 follow_redirects=False,
+                trust_env=False,
             ) as client:
                 # Manually follow redirects to validate each hop
                 current_url = url
                 redirects_followed = 0
 
                 while True:
-                    with client.stream("GET", current_url) as response:
+                    if current_target is None:
+                        return FetchResult(url=url, error="No resolved target", status_code=0)
+                    with _pin_dns_resolution(current_target), client.stream("GET", current_url) as response:
                         status_code = response.status_code
 
                         # Handle redirects with SSRF validation on each hop
@@ -173,7 +241,7 @@ class PageFetcher:
                             # Resolve relative redirects
                             next_url = str(response.url.join(location))
                             # Validate the redirect target
-                            hop_err = _validate_url_target(next_url)
+                            next_target, hop_err = _resolve_url_target(next_url)
                             if hop_err:
                                 return FetchResult(
                                     url=url,
@@ -182,6 +250,7 @@ class PageFetcher:
                                     error=f"Redirect blocked: {hop_err}",
                                 )
                             current_url = next_url
+                            current_target = next_target
                             continue  # Follow the redirect
 
                         final_url = str(response.url)
@@ -209,27 +278,40 @@ class PageFetcher:
 
                         # Check Content-Length header if available
                         content_length = response.headers.get("content-length")
-                        if content_length and int(content_length) > self._max_size:
+                        try:
+                            content_length_value = int(content_length) if content_length else 0
+                        except ValueError:
+                            content_length_value = 0
+                        if content_length_value > self._max_size:
                             return FetchResult(
                                 url=url,
                                 final_url=final_url,
                                 status_code=status_code,
                                 content_type=mime_type,
-                                content_length=int(content_length),
-                                error=f"Content too large: {content_length} bytes (max {self._max_size})",
+                                content_length=content_length_value,
+                                error=f"Content too large: {content_length_value} bytes (max {self._max_size})",
                             )
 
                         # Read body with size limit
                         chunks: list[bytes] = []
                         total_read = 0
+                        too_large = False
                         for chunk in response.iter_bytes(chunk_size=65536):
                             total_read += len(chunk)
                             if total_read > self._max_size:
-                                remaining = self._max_size - (total_read - len(chunk))
-                                if remaining > 0:
-                                    chunks.append(chunk[:remaining])
+                                too_large = True
                                 break
                             chunks.append(chunk)
+
+                        if too_large:
+                            return FetchResult(
+                                url=url,
+                                final_url=final_url,
+                                status_code=status_code,
+                                content_type=mime_type,
+                                content_length=total_read,
+                                error=f"Content too large: streamed more than {self._max_size} bytes",
+                            )
 
                         body = b"".join(chunks)
 
