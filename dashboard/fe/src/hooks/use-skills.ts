@@ -38,9 +38,82 @@ export function useSkills(category?: string, role?: string, query?: string, incl
   };
 }
 
+
+export interface SkillMigrationSourceSummary {
+  source_path: string;
+  exists: boolean;
+  skill_count: number;
+}
+
+export interface SkillMigrationItem {
+  name: string;
+  source_path: string;
+  target_path: string;
+  relative_path: string;
+  conflict: boolean;
+}
+
+export interface SkillMigrationPreview {
+  target_path: string;
+  source_summaries: SkillMigrationSourceSummary[];
+  total_skills: number;
+  conflicts: number;
+  items: SkillMigrationItem[];
+  recommended_action: string;
+  message: string;
+}
+
+export type SkillMigrationStatus = SkillMigrationPreview;
+
+export interface SkillMigrationApplyRequest {
+  delete_source?: boolean;
+  conflict_strategy?: 'skip' | 'overwrite' | 'fail';
+  dry_run?: boolean;
+}
+
+export interface SkillMigrationApplyResult {
+  target_path: string;
+  dry_run: boolean;
+  copied: SkillMigrationItem[];
+  skipped: SkillMigrationItem[];
+  overwritten: SkillMigrationItem[];
+  deleted: SkillMigrationItem[];
+  errors: Array<{ item?: SkillMigrationItem; error: string }>;
+  sync_result: unknown;
+}
+
+export function useSkillMigration() {
+  const { data, error, mutate, isLoading } = useSWR<SkillMigrationStatus>('/skills/migration/status');
+
+  const previewMigration = async () => {
+    const result = await apiPost<SkillMigrationPreview>('/skills/migration/preview', {});
+    mutate(result, false);
+    return result;
+  };
+
+  const applyMigration = async (request: SkillMigrationApplyRequest) => {
+    const result = await apiPost<SkillMigrationApplyResult>(
+      '/skills/migration/apply',
+      request,
+      { headers: { 'X-Confirm-Migrate': 'true' } },
+    );
+    await mutate();
+    return result;
+  };
+
+  return {
+    status: data,
+    isLoading,
+    isError: error,
+    refresh: mutate,
+    previewMigration,
+    applyMigration,
+  };
+}
+
 export function useSkillValidation() {
   const validateSkill = async (content: string) => {
-    return await apiPost<{valid: boolean, errors: string[], warnings: string[], markers: any[]}>('/skills/validate', { content });
+    return await apiPost<{valid: boolean, errors: string[], warnings: string[], markers: unknown[]}>('/skills/validate', { content });
   };
 
   return { validateSkill };

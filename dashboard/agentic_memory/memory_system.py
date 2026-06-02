@@ -1510,8 +1510,9 @@ class AgenticMemorySystem:
     def sync_to_disk(self) -> Dict:
         """Sync: merge disk state, then write changed notes to disk.
 
-        1. Calls ``merge_from_disk()`` to reconcile disk ↔ memory
-           (skipped if nothing has changed since last sync — F12).
+        1. Calls ``merge_from_disk()`` to reconcile disk ↔ memory when
+           local state is dirty or the on-disk Merkle tree differs from
+           the in-memory tree.
         2. Writes only the notes that changed since the last sync
            (tracked by the Merkle integrity system).  Falls back to
            writing all notes when per-note tracking is unavailable.
@@ -1525,15 +1526,29 @@ class AgenticMemorySystem:
         if not self._notes_dir:
             return {"error": "No persist_dir configured"}
 
-        # Skip merge if nothing changed locally (F12: dirty-flag optimization).
-        # We still merge if dirty because merge_from_disk also picks up
-        # external edits from other processes.
         # Use getattr for backward compat (test fixtures may bypass __init__).
         is_dirty = getattr(self, "_dirty", True)
-        if is_dirty:
+        disk_changed = True
+        if not is_dirty:
+            try:
+                disk_changed = self._get_integrity().diff_against_disk(self._notes_dir).has_changes
+            except Exception:
+                logger.debug("Failed to diff Merkle tree against disk; merging defensively", exc_info=True)
+                disk_changed = True
+
+        if is_dirty or disk_changed:
             merge_result = self.merge_from_disk()
         else:
-            merge_result = {"skipped": True, "reason": "no local changes"}
+            merge_result = {"skipped": True, "reason": "no local or disk changes"}
+
+        merge_needs_writeback = bool(
+            merge_result.get("memory_only", 0)
+            or merge_result.get("updated_from_memory", 0)
+        )
+        merge_changed_memory_from_disk = bool(
+            merge_result.get("added_from_disk", 0)
+            or merge_result.get("updated_from_disk", 0)
+        )
 
         # Step 2: write only dirty notes (Merkle-guided selective writes).
         written = 0
@@ -1544,12 +1559,15 @@ class AgenticMemorySystem:
                 if note:
                     self._save_note(note, touch_modified=False)
                     written += 1
-        elif is_dirty:
+        elif is_dirty or merge_needs_writeback:
             # Fallback: _dirty is True but per-note tracking was bypassed
-            # (e.g. merge_from_disk added notes). Write everything.
+            # or merge found in-memory notes that must be written back.
             for note in self.memories.values():
                 self._save_note(note, touch_modified=False)
                 written += 1
+
+        if merge_changed_memory_from_disk:
+            self._get_integrity().build_from_notes(self.memories)
 
         # Step 3: compute vectordb aggregate hash, then persist manifest.
         all_hashes = {nid: n.content_hash for nid, n in self.memories.items()}

@@ -666,6 +666,7 @@ async def test_all_mcp_servers(user: dict = Depends(get_current_user)):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(test_dir),
+            env={**os.environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"},
         )
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=120

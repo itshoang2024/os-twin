@@ -63,7 +63,6 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
   const [summarize, setSummarize] = useState(true);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const [completedResult, setCompletedResult] = useState<ResearchJobResult | null>(null);
 
   // Hooks
   const { results, searchMeta, isSearching, searchError, search, clearResults } =
@@ -75,53 +74,45 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
   // Elapsed timer for searching
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isJobComplete = Boolean(jobStatus && ['completed', 'failed'].includes(jobStatus.state));
+  const activePanelState: PanelState = isJobComplete ? 'complete' : panelState;
+  const completedResult = jobStatus?.state === 'completed' && jobStatus.result
+    ? jobStatus.result as unknown as ResearchJobResult
+    : null;
 
-  // Track state transitions
+  // Track elapsed search time while the hook is actively searching.
   useEffect(() => {
     if (isSearching) {
-      setPanelState('searching');
-      setElapsed(0);
       timerRef.current = setInterval(() => setElapsed(e => e + 0.1), 100);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-  }, [isSearching]);
 
-  useEffect(() => {
-    if (results.length > 0 && !isSearching && panelState === 'searching') {
-      setPanelState('previewing');
-      // Select all by default
-      setSelectedUrls(new Set(results.map(r => r.url)));
-    }
-  }, [results, isSearching, panelState]);
-
-  useEffect(() => {
-    if (jobId && !isSubmitting) {
-      setPanelState('ingesting');
-    }
-  }, [jobId, isSubmitting]);
-
-  useEffect(() => {
-    if (jobStatus && ['completed', 'failed'].includes(jobStatus.state)) {
-      setPanelState('complete');
-      if (jobStatus.state === 'completed' && jobStatus.result) {
-        setCompletedResult(jobStatus.result as unknown as ResearchJobResult);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-    }
-  }, [jobStatus]);
+    };
+  }, [isSearching]);
 
   // Handlers
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return;
+    setPanelState('searching');
+    setElapsed(0);
+    setSelectedUrls(new Set());
     try {
-      await search({
+      const response = await search({
         query: query.trim(),
         engines: selectedEngines.length > 0 ? selectedEngines : undefined,
         categories: selectedCategories.length > 0 ? selectedCategories : undefined,
         max_results: maxResults,
         language,
       });
+      setPanelState('previewing');
+      setSelectedUrls(new Set(response.results.map(r => r.url)));
       // Add to history
       setSearchHistory(prev => {
         const updated = [query.trim(), ...prev.filter(q => q !== query.trim())];
@@ -144,6 +135,7 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
 
     if (items.length === 0) return;
 
+    setPanelState('ingesting');
     try {
       await ingest(items, query, { summarize, language });
       onJobStart?.();
@@ -157,7 +149,6 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
     clearResults();
     resetIngest();
     setSelectedUrls(new Set());
-    setCompletedResult(null);
     setQuery('');
   }, [clearResults, resetIngest]);
 
@@ -227,7 +218,7 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
       {/* Content */}
       <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
         {/* ─── Search Form ─────────────────────────────────────────── */}
-        {(panelState === 'idle' || panelState === 'searching') && (
+        {(activePanelState === 'idle' || activePanelState === 'searching') && (
           <SearchForm
             query={query}
             onQueryChange={setQuery}
@@ -249,7 +240,7 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
         )}
 
         {/* ─── Results Preview ─────────────────────────────────────── */}
-        {panelState === 'previewing' && (
+        {activePanelState === 'previewing' && (
           <ResultsPreview
             results={results}
             searchMeta={searchMeta}
@@ -267,7 +258,7 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
         )}
 
         {/* ─── Ingest Progress ─────────────────────────────────────── */}
-        {panelState === 'ingesting' && (
+        {activePanelState === 'ingesting' && (
           jobPollError ? (
             <div className="space-y-4">
               <div className="flex items-center gap-2 p-3 rounded-lg border" style={{ borderColor: 'var(--color-danger)' }}>
@@ -299,7 +290,7 @@ export default function ResearchPanel({ selectedNamespace, onJobStart }: Researc
         )}
 
         {/* ─── Completed Results ───────────────────────────────────── */}
-        {panelState === 'complete' && (
+        {activePanelState === 'complete' && (
           <CompletedView
             jobStatus={jobStatus}
             result={completedResult}

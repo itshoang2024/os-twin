@@ -16,18 +16,22 @@ def test_docker_cmd_uses_runtime_entrypoint():
     assert 'CMD ["bash", ".agents/docker-entrypoint.sh"]' in dockerfile
 
 
-def test_docker_frontend_uses_committed_pnpm_lockfile():
+def test_docker_frontend_uses_committed_bun_lockfile():
     dockerfile = (ROOT / "Dockerfile").read_text()
 
-    assert "dashboard/fe/pnpm-lock.yaml" in dockerfile
-    assert "pnpm install --frozen-lockfile" in dockerfile
-    assert "pnpm run build" in dockerfile
+    assert "/root/.bun/bin" in dockerfile
+    assert "curl -fsSL https://bun.com/install | bash" in dockerfile
+    assert "dashboard/fe/bun.lock" in dockerfile
+    assert "bun install --frozen-lockfile" in dockerfile
+    assert "bun run build" in dockerfile
+    assert "pnpm install" not in dockerfile
 
 
 def test_runtime_entrypoint_starts_and_supervises_services():
     entrypoint = (ROOT / ".agents" / "docker-entrypoint.sh").read_text()
 
     assert "opencode serve" in entrypoint
+    assert "OPENCODE_DISABLE_CLAUDE_CODE=1" in entrypoint
     assert "uvicorn dashboard.api:app" in entrypoint
     assert "wait -n" in entrypoint
 

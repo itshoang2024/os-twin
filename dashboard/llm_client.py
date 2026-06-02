@@ -1419,9 +1419,9 @@ def create_embedding_client(
         #     if google_cfg and getattr(google_cfg, "deployment_mode", None) == "vertex":
         #         is_vertex = True
         # -> "deployment mode" is deprecated, dashboard setting covers the provider directly
-        
+
         resolved_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        
+
         # logging the decision to use GeminiEmbeddingClient for Google providers, along with the resolved API key (masked) and base URL
         logger.debug("Using GeminiEmbeddingClient for provider %r (is_vertex=%r), resolved_api_key=%s, resolved_base_url=%r",
                      embed_provider, is_vertex, "****" if resolved_key else None, base_url)

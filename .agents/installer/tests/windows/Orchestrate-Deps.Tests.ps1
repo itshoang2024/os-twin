@@ -13,6 +13,11 @@ Describe "Invoke-DependencyOrchestration" {
         Get-Command Invoke-DependencyOrchestration | Should -Not -BeNullOrEmpty
     }
 
+    It "Should define Bun JavaScript tooling helpers" {
+        Get-Command Ensure-JsPackageManager | Should -Not -BeNullOrEmpty
+        Get-Command Install-ClawhubCli | Should -Not -BeNullOrEmpty
+    }
+
     Context "Dashboard-only mode" {
         It "Should handle dashboard-only flow" {
             $script:DashboardOnly = $true

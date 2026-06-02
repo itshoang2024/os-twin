@@ -31,7 +31,7 @@ setup() {
   [[ "$output" == *"Required Build not found"* ]]
 }
 
-@test "build_frontend prefers package manager matching pnpm lockfile" {
+@test "build_frontend prefers package manager matching bun lockfile" {
   local root="$BATS_TEST_TMPDIR/frontend-pm"
   local fe_dir="$root/source/dashboard/fe"
   local bin_dir="$root/bin"
@@ -39,9 +39,9 @@ setup() {
 
   mkdir -p "$fe_dir" "$bin_dir"
   printf '{"scripts":{"build":"next build"}}\n' > "$fe_dir/package.json"
-  touch "$fe_dir/pnpm-lock.yaml"
+  touch "$fe_dir/bun.lock"
 
-  for tool in bun pnpm npm yarn; do
+  for tool in bun npm; do
     cat > "$bin_dir/$tool" <<'EOF'
 #!/usr/bin/env bash
 echo "$(basename "$0") $*" >> "$CALL_LOG"
@@ -59,9 +59,9 @@ EOF
 
   local calls
   calls="$(cat "$CALL_LOG")"
-  [[ "$calls" == *"pnpm install --frozen-lockfile"* ]]
-  [[ "$calls" == *"pnpm run build"* ]]
-  [[ "$calls" != *"bun "* ]]
+  [[ "$calls" == *"bun install --frozen-lockfile"* ]]
+  [[ "$calls" == *"bun run build"* ]]
+  [[ "$calls" != *"npm "* ]]
 }
 
 @test "build_frontend returns nonzero when required build fails" {
@@ -71,16 +71,16 @@ EOF
 
   mkdir -p "$fe_dir" "$bin_dir"
   printf '{"scripts":{"build":"next build"}}\n' > "$fe_dir/package.json"
-  touch "$fe_dir/pnpm-lock.yaml"
+  touch "$fe_dir/bun.lock"
 
-  cat > "$bin_dir/pnpm" <<'EOF'
+  cat > "$bin_dir/bun" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "run" && "$2" == "build" ]]; then
   exit 7
 fi
 exit 0
 EOF
-  chmod +x "$bin_dir/pnpm"
+  chmod +x "$bin_dir/bun"
 
   export SOURCE_DIR="$root/source"
   export SCRIPT_DIR="$root/source/.agents"
@@ -98,16 +98,16 @@ EOF
 
   mkdir -p "$fe_dir" "$bin_dir"
   printf '{"scripts":{"build":"next build"}}\n' > "$fe_dir/package.json"
-  touch "$fe_dir/pnpm-lock.yaml"
+  touch "$fe_dir/bun.lock"
 
-  cat > "$bin_dir/pnpm" <<'EOF'
+  cat > "$bin_dir/bun" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "run" && "$2" == "build" ]]; then
   exit 7
 fi
 exit 0
 EOF
-  chmod +x "$bin_dir/pnpm"
+  chmod +x "$bin_dir/bun"
 
   export SOURCE_DIR="$root/source"
   export SCRIPT_DIR="$root/source/.agents"

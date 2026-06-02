@@ -15,7 +15,7 @@ import hashlib
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -201,25 +201,46 @@ class WebResearcher:
     ) -> dict[str, FetchResult]:
         """Fetch pages concurrently with a total timeout budget."""
         fetch_results: dict[str, FetchResult] = {}
-        max_workers = min(RESEARCH_MAX_CONCURRENT_FETCHES, len(search_results))
+        if not search_results:
+            return fetch_results
 
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="research-fetch") as pool:
+        max_workers = max(1, min(RESEARCH_MAX_CONCURRENT_FETCHES, len(search_results)))
+
+        pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="research-fetch")
+        try:
             future_to_url = {
                 pool.submit(self._fetcher.fetch, sr.url): sr.url
                 for sr in search_results
             }
 
             deadline = time.perf_counter() + remaining_timeout
-            for future in as_completed(future_to_url, timeout=max(1.0, remaining_timeout)):
-                url = future_to_url[future]
-                try:
-                    fetch_results[url] = future.result()
-                except Exception as exc:
-                    fetch_results[url] = FetchResult(url=url, error=str(exc))
+            try:
+                for future in as_completed(future_to_url, timeout=max(0.1, remaining_timeout)):
+                    url = future_to_url[future]
+                    try:
+                        fetch_results[url] = future.result()
+                    except Exception as exc:
+                        fetch_results[url] = FetchResult(url=url, error=str(exc))
 
-                if time.perf_counter() > deadline:
-                    logger.warning("Research fetch timeout reached, stopping remaining fetches")
-                    break
+                    if time.perf_counter() > deadline:
+                        logger.warning("Research fetch timeout reached, stopping remaining fetches")
+                        break
+            except FuturesTimeoutError:
+                logger.warning("Research fetch timeout reached before all pages completed")
+
+            for future, url in future_to_url.items():
+                if url in fetch_results:
+                    continue
+                if future.done():
+                    try:
+                        fetch_results[url] = future.result()
+                    except Exception as exc:
+                        fetch_results[url] = FetchResult(url=url, error=str(exc))
+                else:
+                    future.cancel()
+                    fetch_results[url] = FetchResult(url=url, error="fetch timeout")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return fetch_results
 

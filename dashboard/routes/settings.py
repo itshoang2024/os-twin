@@ -33,6 +33,12 @@ from dashboard.lib.settings.google_oauth import (
     get_adc_path,
     OAuthSession,
 )
+from dashboard.lib.settings.openai_codex_auth import (
+    CodexOAuthStartResponse,
+    CodexSessionStatus,
+    get_codex_session_status,
+    start_codex_oauth,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -832,6 +838,33 @@ async def restart_opencode(
         healthy=healthy,
         message="restarted" if healthy else "started but health check timed out",
     )
+
+
+# ── OpenAI Codex / OpenCode OAuth Flow ────────────────────────────────
+
+
+@router.get("/openai/codex/session", response_model=CodexSessionStatus)
+async def openai_codex_session(
+    user: dict = Depends(get_current_user),
+):
+    """Return whether the local OpenCode OpenAI OAuth credential exists."""
+    return get_codex_session_status()
+
+
+@router.post("/openai/codex/oauth/start", response_model=CodexOAuthStartResponse)
+async def openai_codex_oauth_start(
+    user: dict = Depends(get_current_user),
+):
+    """Start the dashboard-owned browser OAuth flow for OpenAI Codex.
+
+    OpenAI's Codex CLI OAuth client redirects to localhost:1455, so the
+    dashboard starts a local one-shot callback listener and saves the resulting
+    OpenCode credential after state validation.
+    """
+    try:
+        return start_codex_oauth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────

@@ -482,6 +482,31 @@ class TestDirtyFlag:
         result = system.sync_to_disk()
         assert result["merge"].get("skipped") is True
 
+    def test_clean_sync_merges_external_disk_note(self, tmp_path):
+        system = _create_system(persist_dir=str(tmp_path))
+        system.add_note("Existing note", skip_evolution=True)
+        system.sync_to_disk()
+        assert system._dirty is False
+
+        notes_dir = os.path.join(str(tmp_path), "notes")
+        external_note = MemoryNote(
+            content="Written by another process",
+            id="external-note-id",
+            name="External Note",
+        )
+        filepath = os.path.join(notes_dir, external_note.filepath)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(external_note.to_markdown())
+
+        result = system.sync_to_disk()
+
+        assert result["merge"]["added_from_disk"] == 1
+        assert system.read("external-note-id") is not None
+
+        second_result = system.sync_to_disk()
+        assert second_result["merge"].get("skipped") is True
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 11. _build_note_metadata

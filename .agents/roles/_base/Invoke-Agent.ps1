@@ -285,6 +285,10 @@ if (Test-Path $configPath) {
 
 if (-not $AgentCmd) { $AgentCmd = "opencode run" }
 
+# Always disable Claude Code skill loading for opencode run.
+# Wrappers also force this after sourcing user env hooks so it cannot be re-enabled downstream.
+$env:OPENCODE_DISABLE_CLAUDE_CODE = "1"
+
 # --- Role.json model + max_retries fallback (runs even when config.json is absent) ---
 # If no model was resolved from -Model param, plan.roles.json, or config.json,
 # try role.json as the last config-based source before the hardcoded default.
@@ -571,6 +575,7 @@ if ('$winOpencodeConfig') { `$env:OPENCODE_CONFIG = '$winOpencodeConfig' }
 # Source user-controlled pre-exec hook
 `$envSh = Join-Path `$env:USERPROFILE '.ostwin' '.env.sh'
 if (Test-Path `$envSh) { . `$envSh }
+`$env:OPENCODE_DISABLE_CLAUDE_CODE = '1'
 
 # Write PID
 `$PID | Out-File -FilePath '$winPidFile' -Encoding ascii -NoNewline
@@ -627,6 +632,7 @@ $envExportLines
 # Static vars belong in `$safeOstwinHome`/.env; this file is for shell logic.
 if [ -f "`$HOME/.ostwin/.env.sh" ]; then . "`$HOME/.ostwin/.env.sh"; fi
 if [ -f '$safeOstwinHome/.env.sh' ]; then . '$safeOstwinHome/.env.sh'; fi
+export OPENCODE_DISABLE_CLAUDE_CODE=1
 $cwdLine
 # Write PID before exec — `$`$ survives exec, so this is the real agent PID.
 # bin/agent also writes this (harmless overwrite); this fallback ensures

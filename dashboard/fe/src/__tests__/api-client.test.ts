@@ -103,6 +103,26 @@ describe('api-client response unwrapping', () => {
     expect(result).toHaveLength(0);
   });
 
+  it('preserves research search metadata instead of unwrapping results', async () => {
+    const backendResponse = {
+      query: 'vector databases',
+      engines_used: ['google'],
+      categories_used: ['it'],
+      results: [{ title: 'Result', url: 'https://example.com', snippet: '' }],
+      elapsed_seconds: 1.23,
+      warnings: ['partial'],
+    };
+    mockFetch(backendResponse);
+
+    const { fetcher } = await import('@/lib/api-client');
+    const result = await fetcher('/knowledge/namespaces/default/research/search') as typeof backendResponse;
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.results).toHaveLength(1);
+    expect(result.elapsed_seconds).toBe(1.23);
+    expect(result.warnings).toEqual(['partial']);
+  });
+
   it('respects NEXT_PUBLIC_API_BASE_URL if set', async () => {
     vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'https://api.test.com/v1');
     vi.resetModules();

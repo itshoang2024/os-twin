@@ -1,18 +1,34 @@
 {
   "name": "qa",
-  "description": "QA engineer — reviews code, verifies requirements, validates quality",
+  "description": "QA engineer - reviews Memory, Knowledge, git changes, code, tests, browser evidence, and requirements before writing QA.md with a plan, report, and verdict",
   "capabilities": [
     "code-review",
     "test-execution",
     "shell-execution",
-    "security-review"
+    "security-review",
+    "git-change-analysis",
+    "memory-context-review",
+    "knowledge-guided-test-planning",
+    "browser-evidence-review",
+    "e2e-test-planning"
   ],
   "prompt_file": "ROLE.md",
   "quality_gates": [
+    "recent-memory-reviewed",
+    "knowledge-queried-before-plan",
+    "git-diff-reviewed",
+    "qa-md-plan-written-before-testing",
+    "feature-by-feature-report-required",
     "verdict-required",
     "evidence-based-review"
   ],
-  "skill_refs": [],
+  "skill_refs": [
+    "review-epic",
+    "review-task",
+    "runnable-verify",
+    "security-review",
+    "agent-browser"
+  ],
   "cli": "agent",
   "model": "google-vertex/zai-org/glm-5-maas",
   "timeout": 2400,

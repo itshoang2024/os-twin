@@ -272,6 +272,11 @@ Describe "Start-Channels.ps1 regression tests" {
     It "Should use UTF-8 without BOM for .cmd file creation" {
         $script:StartChannelsContent | Should -Match '\[System\.IO\.File\]::WriteAllText.*UTF8Encoding' -Because ".cmd files should use UTF-8 without BOM for path safety"
     }
+
+    It "Should start channels through Bun instead of npm/pnpm/npx" {
+        $script:StartChannelsContent | Should -Match 'bun.*run start|run start' -Because "Channel startup should use Bun"
+        $script:StartChannelsContent | Should -Not -Match 'pnpm install|npm start|npx tsx' -Because "Channel flow should not depend on pnpm/npm/npx wrappers"
+    }
 }
 
 Describe "Setup-Venv.ps1 regression tests" {
