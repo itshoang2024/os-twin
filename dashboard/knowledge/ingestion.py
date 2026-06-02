@@ -685,6 +685,7 @@ class Ingestor:
                 "relations_added": 0,
                 "chunks_added": 0,
                 "chunks_skipped": 0,
+                "candidate_count": 0,
             }
 
         embed_t0 = time.monotonic()
@@ -761,11 +762,13 @@ class Ingestor:
         # so they are aligned with the llama-index contract.
         entities_added = 0
         relations_added = 0
+        candidate_count = 0
         for ext in getattr(graph_index, "kg_extractors", []):
             m = getattr(ext, "metrics", None)
             if m is not None:
                 entities_added += getattr(m, "total_entities", 0)
                 relations_added += getattr(m, "total_relationships", 0)
+                candidate_count += getattr(m, "candidate_count", 0)
 
         # Fallback: if extractor metrics are zero (e.g. extractor didn't
         # run or metrics attribute missing), compute delta from Kuzu graph
@@ -844,6 +847,7 @@ class Ingestor:
             "relations_added": relations_added,
             "chunks_added": len(text_nodes),
             "chunks_skipped": 0,
+            "candidate_count": candidate_count,
         }
 
     # ---- run -----------------------------------------------------------
@@ -937,6 +941,7 @@ class Ingestor:
         total_chunks = 0
         total_entities = 0
         total_relations = 0
+        total_candidates = 0
         errors: list[str] = []
 
         for i, fe in enumerate(files, start=1):
@@ -1069,6 +1074,7 @@ class Ingestor:
             total_chunks += counts["chunks_added"]
             total_entities += counts["entities_added"]
             total_relations += counts["relations_added"]
+            total_candidates += counts.get("candidate_count", 0)
             t_file_total = time.monotonic() - t_parse_start
             # Record metrics for this file
             metrics.counter("ingest_files_total").inc()
@@ -1089,6 +1095,7 @@ class Ingestor:
                         "status": "processed",
                         "chunks": counts["chunks_added"],
                         "entities": counts["entities_added"],
+                        "candidates": counts.get("candidate_count", 0),
                     },
                 )
             )
@@ -1141,6 +1148,7 @@ class Ingestor:
             "chunks_added": total_chunks,
             "entities_added": total_entities,
             "relations_added": total_relations,
+            "candidate_count": total_candidates,
             "errors": errors,
             "elapsed_seconds": round(elapsed, 3),
         }
@@ -1222,6 +1230,7 @@ class Ingestor:
                 "chunks_added": 0,
                 "entities_added": 0,
                 "relations_added": 0,
+                "candidate_count": 0,
                 "errors": [],
                 "elapsed_seconds": round(elapsed, 3),
             }
@@ -1263,6 +1272,7 @@ class Ingestor:
                 "chunks_added": 0,
                 "entities_added": 0,
                 "relations_added": 0,
+                "candidate_count": 0,
                 "errors": [],
                 "elapsed_seconds": round(elapsed, 3),
             }
@@ -1291,6 +1301,7 @@ class Ingestor:
                 "chunks_added": 0,
                 "entities_added": 0,
                 "relations_added": 0,
+                "candidate_count": 0,
                 "errors": [],
                 "elapsed_seconds": round(elapsed, 3),
             }
@@ -1325,6 +1336,7 @@ class Ingestor:
                 "chunks_added": 0,
                 "entities_added": 0,
                 "relations_added": 0,
+                "candidate_count": 0,
                 "errors": [f"inline://{source_label}: embed/extract failed: {exc}"],
                 "elapsed_seconds": round(elapsed, 3),
             }
@@ -1332,6 +1344,7 @@ class Ingestor:
         total_chunks = counts["chunks_added"]
         total_entities = counts["entities_added"]
         total_relations = counts["relations_added"]
+        total_candidates = counts.get("candidate_count", 0)
 
         try:
             self._nm.update_stats(
@@ -1376,6 +1389,7 @@ class Ingestor:
                 "status": "processed",
                 "chunks": total_chunks,
                 "entities": total_entities,
+                "candidates": total_candidates,
             },
         ))
 
@@ -1385,6 +1399,7 @@ class Ingestor:
             "chunks_added": total_chunks,
             "entities_added": total_entities,
             "relations_added": total_relations,
+            "candidate_count": total_candidates,
             "errors": [],
             "elapsed_seconds": round(elapsed, 3),
         }
@@ -1431,6 +1446,7 @@ class Ingestor:
         total_chunks = 0
         total_entities = 0
         total_relations = 0
+        total_candidates = 0
         errors: list[str] = []
         per_source: dict[str, int] = {}
 
@@ -1507,6 +1523,7 @@ class Ingestor:
                 total_chunks += item_chunks
                 total_entities += counts["entities_added"]
                 total_relations += counts["relations_added"]
+                total_candidates += counts.get("candidate_count", 0)
                 per_source[source_url] = item_chunks
             except Exception as exc:
                 logger.error("Research ingest failed for %s: %s", source_url, exc)

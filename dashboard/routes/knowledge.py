@@ -34,9 +34,16 @@ from typing_extensions import Annotated
 from dashboard.auth import get_current_user
 from dashboard.knowledge.metrics import get_metrics_registry
 from dashboard.routes.knowledge_models import (
+    BackupNamespaceResponse,
     CreateNamespaceRequest,
     DeleteNamespaceResponse,
+    DomainPackInstalledResponse,
+    DomainPackListResponse,
+    DomainPackOperationResponse,
+    DomainPackRequest,
+    DomainPackValidateResponse,
     ErrorResponse,
+    EnterpriseMapProjectionResponse,
     GraphCountsResponse,
     ImportFolderRequest,
     ImportFolderResponse,
@@ -45,17 +52,30 @@ from dashboard.routes.knowledge_models import (
     JobStatusResponse,
     NamespaceJobsResponse,
     NamespaceMetaResponse,
+    OntologyCandidateActionRequest,
+    OntologyCandidateBulkRequest,
+    OntologyCandidateListResponse,
+    OntologyCandidateResponse,
+    OntologyProfileDiffRequest,
+    OntologyProfileDiffResponse,
+    OntologyProfileHistoryListResponse,
+    OntologyProfileHistoryRecordResponse,
+    OntologyProfileRequest,
+    OntologyProfileResponse,
+    OntologyResetDefaultResponse,
+    OntologySummaryResponse,
+    OntologyValidateRequest,
+    OntologyValidateResponse,
     QueryRequest,
     QueryResultResponse,
     RefreshNamespaceResponse,
-    BackupNamespaceResponse,
-    RestoreNamespaceRequest,
+    ResearchIngestJobResponse,
+    ResearchIngestRequest,
     ResearchRequest,
     ResearchResponse,
     ResearchSearchRequest,
     ResearchSearchResponse,
-    ResearchIngestRequest,
-    ResearchIngestJobResponse,
+    RestoreNamespaceRequest,
     RetentionPolicyRequest,
     RetentionPolicyResponse,
 )
@@ -193,6 +213,16 @@ def _map_error(exc: Exception) -> HTTPException:
                 error=f"Not a directory: {exc}",
                 code="NOT_A_DIRECTORY",
                 detail={"path": str(exc)},
+            ).model_dump(),
+        )
+
+    if isinstance(exc, KeyError):
+        return HTTPException(
+            status_code=404,
+            detail=ErrorResponse(
+                error=str(exc),
+                code="NOT_FOUND",
+                detail={},
             ).model_dump(),
         )
 
@@ -339,8 +369,25 @@ def _namespace_meta_to_response(meta: Any) -> NamespaceMetaResponse:
         stats=meta.stats.model_dump(),
         imports=[imp.model_dump() for imp in meta.imports],
         retention=RetentionPolicyResponse(**retention_data),
+        ontology_profile_version=getattr(meta, "ontology_profile_version", None),
     )
 
+
+
+
+def _ontology_profile_to_response(data: dict[str, Any]) -> OntologyProfileResponse:
+    """Convert service ontology profile payload to response model."""
+    return OntologyProfileResponse(**data)
+
+
+def _ontology_validate_to_response(data: dict[str, Any]) -> OntologyValidateResponse:
+    """Convert service ontology validation payload to response model."""
+    return OntologyValidateResponse(**data)
+
+
+def _ontology_summary_to_response(data: dict[str, Any]) -> OntologySummaryResponse:
+    """Convert service ontology summary payload to response model."""
+    return OntologySummaryResponse(**data)
 
 def _job_status_to_response(status: Any) -> JobStatusResponse:
     """Convert JobStatus from dashboard.knowledge to response model."""
@@ -499,6 +546,511 @@ async def delete_namespace(
         raise _map_error(exc)
 
 
+@router.get(
+    "/namespaces/{namespace}/ontology/profile",
+    response_model=OntologyProfileResponse,
+    responses={
+        200: {"description": "Active ontology profile or default suggestion metadata"},
+        400: {"description": "Invalid namespace identifier", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Get namespace ontology profile",
+)
+async def get_ontology_profile(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileResponse:
+    """Return the active ontology profile or deterministic default suggestion metadata."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.get_ontology_profile_with_default, namespace)
+        return _ontology_profile_to_response(data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.put(
+    "/namespaces/{namespace}/ontology/profile",
+    response_model=OntologyProfileResponse,
+    responses={
+        200: {"description": "Ontology profile saved"},
+        400: {"description": "Invalid profile payload", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Create or update namespace ontology profile",
+)
+async def put_ontology_profile(
+    namespace: str,
+    request: OntologyProfileRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileResponse:
+    """Validate and persist an ontology profile for the namespace."""
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        profile = await asyncio.to_thread(
+            service.save_ontology_profile_payload,
+            namespace,
+            request.profile,
+            actor=actor,
+            reason=request.reason,
+            validation_override=request.validation_override,
+        )
+        data = {
+            "namespace": namespace,
+            "profile": profile.model_dump(mode="json"),
+            "profile_exists": True,
+            "default_suggested": False,
+            "default_profile": None,
+            "validation_issues": [],
+        }
+        return _ontology_profile_to_response(data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/profile/history",
+    response_model=OntologyProfileHistoryListResponse,
+    summary="List ontology profile history",
+)
+async def list_ontology_profile_history(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileHistoryListResponse:
+    """Return profile version history without embedding full snapshots in each list item."""
+    try:
+        service = _get_service()
+        history = await asyncio.to_thread(service.list_ontology_profile_history, namespace)
+        return OntologyProfileHistoryListResponse(
+            namespace=namespace,
+            history=[OntologyProfileHistoryRecordResponse(**record) for record in history],
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/profile/history/{version_or_id}",
+    response_model=OntologyProfileHistoryRecordResponse,
+    summary="Read ontology profile history record",
+)
+async def get_ontology_profile_history(
+    namespace: str,
+    version_or_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileHistoryRecordResponse:
+    """Return one immutable profile history record, including its saved snapshot."""
+    try:
+        service = _get_service()
+        record = await asyncio.to_thread(service.get_ontology_profile_history, namespace, version_or_id)
+        return OntologyProfileHistoryRecordResponse(**record)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/profile/diff",
+    response_model=OntologyProfileDiffResponse,
+    summary="Diff ontology profile versions or payloads",
+)
+async def diff_ontology_profile(
+    namespace: str,
+    request: OntologyProfileDiffRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileDiffResponse:
+    """Preview added, removed, and changed ontology definitions without saving."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(
+            service.diff_ontology_profiles,
+            namespace,
+            base_profile=request.base_profile,
+            target_profile=request.target_profile,
+            base_version=request.base_version,
+            target_version=request.target_version,
+        )
+        return OntologyProfileDiffResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/profile/history/{version_or_id}/preview",
+    response_model=OntologyProfileDiffResponse,
+    summary="Preview ontology profile rollback",
+)
+async def preview_ontology_profile_rollback(
+    namespace: str,
+    version_or_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyProfileDiffResponse:
+    """Preview rollback to a historical profile without mutating current storage."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.preview_ontology_profile_rollback, namespace, version_or_id)
+        return OntologyProfileDiffResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/validate",
+    response_model=OntologyValidateResponse,
+    responses={
+        200: {"description": "Validation completed without saving"},
+        400: {"description": "Invalid validation payload", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Validate ontology payload without saving",
+)
+async def validate_ontology(
+    namespace: str,
+    request: OntologyValidateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyValidateResponse:
+    """Validate a profile, node, edge, or pack manifest without mutating storage."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.validate_ontology_payload, namespace, request.model_dump())
+        return _ontology_validate_to_response(data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/reset-default",
+    response_model=OntologyResetDefaultResponse,
+    responses={
+        200: {"description": "Default ontology profile created or replaced"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Reset namespace ontology profile to default seed data",
+)
+async def reset_default_ontology_profile(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyResetDefaultResponse:
+    """Create or replace the active ontology profile with deterministic default seed data."""
+    try:
+        service = _get_service()
+        profile, replaced_existing = await asyncio.to_thread(service.reset_default_ontology_profile, namespace)
+        return OntologyResetDefaultResponse(
+            namespace=namespace,
+            profile=profile.model_dump(mode="json"),
+            replaced_existing=replaced_existing,
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/summary",
+    response_model=OntologySummaryResponse,
+    responses={
+        200: {"description": "Ontology profile summary counters"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Summarize namespace ontology profile",
+)
+async def get_ontology_summary(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologySummaryResponse:
+    """Return counts for concept types, relation types, aliases, candidates, and issues."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.get_ontology_summary, namespace)
+        return _ontology_summary_to_response(data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/enterprise-map",
+    response_model=EnterpriseMapProjectionResponse,
+    responses={
+        200: {"description": "Graph-backed ontology projection for enterprise map surfaces"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Get namespace enterprise map ontology projection",
+)
+async def get_ontology_enterprise_map(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    limit: int = Query(default=200, ge=1, le=500, description="Maximum graph nodes to project"),
+) -> EnterpriseMapProjectionResponse:
+    """Return a bounded graph projection composed with the active ontology profile."""
+    try:
+        service = _get_service()
+        return await asyncio.to_thread(service.ontology_enterprise_map, namespace, limit=limit)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/ontology/packs",
+    response_model=DomainPackListResponse,
+    responses={
+        200: {"description": "Available built-in domain packs"},
+        401: {"description": "Authentication required"},
+    },
+    summary="List available ontology domain packs",
+)
+async def list_available_domain_packs(
+    user: Annotated[dict, Depends(get_current_user)],
+) -> DomainPackListResponse:
+    """Return installable domain pack manifests bundled with the backend."""
+    try:
+        service = _get_service()
+        packs = await asyncio.to_thread(service.list_available_domain_packs)
+        return DomainPackListResponse(packs=packs)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/packs",
+    response_model=DomainPackInstalledResponse,
+    responses={
+        200: {"description": "Installed pack state for namespace"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="List installed domain packs for a namespace",
+)
+async def list_installed_domain_packs(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> DomainPackInstalledResponse:
+    """Return namespace-local domain pack lifecycle state."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.list_installed_domain_packs, namespace)
+        return DomainPackInstalledResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/packs/validate",
+    response_model=DomainPackValidateResponse,
+    responses={
+        200: {"description": "Pack validation preview completed"},
+        400: {"description": "Invalid pack or validation conflict", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Validate a domain pack install without saving",
+)
+async def validate_domain_pack(
+    namespace: str,
+    request: DomainPackRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> DomainPackValidateResponse:
+    """Preview compatibility, conflicts, and merged profile without mutating storage."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.validate_domain_pack_install, namespace, request.pack_id)
+        return DomainPackValidateResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/packs/install",
+    response_model=DomainPackOperationResponse,
+    responses={
+        200: {"description": "Domain pack installed or upgraded"},
+        400: {"description": "Pack conflict", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Install or upgrade a namespace domain pack",
+)
+async def install_domain_pack(
+    namespace: str,
+    request: DomainPackRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> DomainPackOperationResponse:
+    """Install or upgrade a pack and persist the merged ontology profile/state."""
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        data = await asyncio.to_thread(service.install_domain_pack, namespace, request.pack_id, actor=actor)
+        return DomainPackOperationResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/packs/uninstall",
+    response_model=DomainPackOperationResponse,
+    responses={
+        200: {"description": "Domain pack disabled and pack-owned additions removed when safe"},
+        400: {"description": "Pack is not installed or cannot be uninstalled", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Uninstall a namespace domain pack",
+)
+async def uninstall_domain_pack(
+    namespace: str,
+    request: DomainPackRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> DomainPackOperationResponse:
+    """Disable a pack and remove pack-owned ontology additions unless retained by another pack."""
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        data = await asyncio.to_thread(service.uninstall_domain_pack, namespace, request.pack_id, actor=actor)
+        return DomainPackOperationResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/candidates",
+    response_model=OntologyCandidateListResponse,
+    summary="List ontology review candidates",
+)
+async def list_ontology_candidates(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    status: str | None = Query(default=None),
+    candidate_type: str | None = Query(default=None),
+) -> OntologyCandidateListResponse:
+    try:
+        service = _get_service()
+        candidates = await asyncio.to_thread(
+            service.list_ontology_candidates,
+            namespace,
+            status=status,
+            candidate_type=candidate_type,
+        )
+        return OntologyCandidateListResponse(
+            namespace=namespace,
+            candidates=[OntologyCandidateResponse(**candidate) for candidate in candidates],
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/candidates/{candidate_id}/approve",
+    response_model=OntologyCandidateResponse,
+    summary="Approve ontology candidate as a new enum",
+)
+async def approve_ontology_candidate(
+    namespace: str,
+    candidate_id: str,
+    request: OntologyCandidateActionRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyCandidateResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        candidate = await asyncio.to_thread(
+            service.approve_ontology_candidate,
+            namespace,
+            candidate_id,
+            reviewed_by=actor,
+            canonical_id=request.canonical_id,
+            payload=request.payload,
+        )
+        return OntologyCandidateResponse(**candidate)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/candidates/{candidate_id}/map",
+    response_model=OntologyCandidateResponse,
+    summary="Map ontology candidate to an existing enum",
+)
+async def map_ontology_candidate(
+    namespace: str,
+    candidate_id: str,
+    request: OntologyCandidateActionRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyCandidateResponse:
+    try:
+        if not request.canonical_id:
+            raise ValueError("canonical_id is required")
+        service = _get_service()
+        actor = _get_actor(user)
+        candidate = await asyncio.to_thread(
+            service.map_ontology_candidate,
+            namespace,
+            candidate_id,
+            request.canonical_id,
+            reviewed_by=actor,
+        )
+        return OntologyCandidateResponse(**candidate)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/candidates/{candidate_id}/reject",
+    response_model=OntologyCandidateResponse,
+    summary="Reject ontology candidate",
+)
+async def reject_ontology_candidate(
+    namespace: str,
+    candidate_id: str,
+    request: OntologyCandidateActionRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyCandidateResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        candidate = await asyncio.to_thread(
+            service.reject_ontology_candidate,
+            namespace,
+            candidate_id,
+            reviewed_by=actor,
+            reason=request.reason,
+        )
+        return OntologyCandidateResponse(**candidate)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/candidates/bulk",
+    response_model=OntologyCandidateListResponse,
+    summary="Bulk review ontology candidates",
+)
+async def bulk_update_ontology_candidates(
+    namespace: str,
+    request: OntologyCandidateBulkRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyCandidateListResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        candidates = await asyncio.to_thread(
+            service.bulk_update_ontology_candidates,
+            namespace,
+            request.actions,
+            reviewed_by=actor,
+        )
+        return OntologyCandidateListResponse(
+            namespace=namespace,
+            candidates=[OntologyCandidateResponse(**candidate) for candidate in candidates],
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
 @router.post(
     "/namespaces/{namespace}/import",
     response_model=ImportFolderResponse,
@@ -587,6 +1139,7 @@ async def import_text(
             entities_added=result["entities_added"],
             relations_added=result["relations_added"],
             elapsed_seconds=result["elapsed_seconds"],
+            candidate_count=result.get("candidate_count", 0),
         )
     except HTTPException:
         raise
@@ -838,6 +1391,27 @@ async def get_namespace_graph(
 # ---------------------------------------------------------------------------
 
 
+class ExplorerOntologyFilters(BaseModel):
+    """Optional ontology-aware filters shared by explorer requests."""
+
+    layer: list[str] | None = Field(default=None, description="Ontology layer IDs to include")
+    abstraction_level: list[str] | None = Field(default=None, description="Abstraction level IDs to include")
+    concept_type: list[str] | None = Field(default=None, description="Canonical concept type IDs to include")
+    relationship_family: list[str] | None = Field(default=None, description="Relationship families to include")
+    relationship_type: list[str] | None = Field(default=None, description="Canonical relationship type IDs to include")
+    pack_id: list[str] | None = Field(default=None, description="Pack IDs to include")
+    lifecycle_state: list[str] | None = Field(default=None, description="Lifecycle states to include")
+    owner: list[str] | None = Field(default=None, description="Owners to include")
+    metadata: dict[str, Any] | None = Field(default=None, description="Exact-match metadata field filters")
+
+    def to_filter_dict(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in self.model_dump(exclude_none=True).items()
+            if value not in ([], {})
+        }
+
+
 class ExplorerExpandRequest(BaseModel):
     """Request body for POST /api/knowledge/namespaces/{namespace}/explorer/expand."""
 
@@ -852,6 +1426,10 @@ class ExplorerExpandRequest(BaseModel):
         description="Number of hops to expand (1-3)",
         ge=1,
         le=3,
+    )
+    filters: ExplorerOntologyFilters | None = Field(
+        default=None,
+        description="Optional ontology-aware filters applied to the returned subgraph",
     )
 
 
@@ -869,6 +1447,10 @@ class ExplorerSearchRequest(BaseModel):
         description="Max seed results from vector search",
         ge=1,
         le=100,
+    )
+    filters: ExplorerOntologyFilters | None = Field(
+        default=None,
+        description="Optional ontology-aware filters applied to search context",
     )
 
 
@@ -943,6 +1525,7 @@ async def explorer_expand(
             namespace,
             node_ids=request.node_ids,
             depth=request.depth,
+            filters=request.filters.to_filter_dict() if request.filters else None,
         )
     except Exception as exc:
         raise _map_error(exc)
@@ -969,6 +1552,7 @@ async def explorer_search(
             namespace,
             query=request.query,
             limit=request.limit,
+            filters=request.filters.to_filter_dict() if request.filters else None,
         )
     except Exception as exc:
         raise _map_error(exc)

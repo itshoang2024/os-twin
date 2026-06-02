@@ -1,0 +1,156 @@
+{
+  "aliases": {
+    "reports_on": "measures",
+    "substantiates": "produces",
+    "tracks": "measures"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "esg_metric": {
+      "abstraction_level": "implementation",
+      "color": "#16a34a",
+      "description": "Environmental, social, or governance metric",
+      "id": "esg_metric",
+      "label": "ESG Metric",
+      "metadata_schema": {},
+      "shape": "diamond"
+    },
+    "sustainability_goal": {
+      "abstraction_level": "capability",
+      "color": "#15803d",
+      "description": "Target outcome for ESG reporting or operations",
+      "id": "sustainability_goal",
+      "label": "Sustainability Goal",
+      "metadata_schema": {},
+      "shape": "hexagon"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "measures",
+          "source": "carbon_intensity",
+          "source_type": "esg_metric",
+          "target": "emissions_goal",
+          "target_type": "sustainability_goal"
+        }
+      ],
+      "id": "carbon_fixture",
+      "nodes": [
+        {
+          "id": "carbon_intensity",
+          "type": "esg_metric"
+        },
+        {
+          "id": "emissions_goal",
+          "type": "sustainability_goal"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "esg_metric": {
+        "color": "#16a34a",
+        "concept_type": "esg_metric",
+        "label_template": "{label}",
+        "shape": "diamond"
+      },
+      "sustainability_goal": {
+        "color": "#15803d",
+        "concept_type": "sustainability_goal",
+        "label_template": "{label}",
+        "shape": "hexagon"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "esg",
+        "label": "ESG",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "measures": {
+        "group": "traceability",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "measures",
+        "weight": 0.7
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "esg_reporting_standard_recommended"
+    ]
+  },
+  "metadata_fields": {
+    "reporting_standard": {
+      "description": "ESG reporting framework or standard",
+      "field_type": "string",
+      "id": "reporting_standard",
+      "label": "Reporting Standard"
+    }
+  },
+  "migration_notes": [
+    "Adds domain-specific concept, relationship aliases, metadata, validation, and seed fixtures."
+  ],
+  "name": "ESG",
+  "pack_id": "esg",
+  "relationship_types": {
+    "measures": {
+      "allowed_source_types": [
+        "esg_metric",
+        "evidence"
+      ],
+      "allowed_target_types": [
+        "sustainability_goal",
+        "capability"
+      ],
+      "description": "Metric measures or evidences a sustainability goal",
+      "family": "traceability",
+      "id": "measures",
+      "is_directed": true,
+      "is_system": false,
+      "label": "Measures",
+      "style": "solid",
+      "weight": 0.7
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "esg_reporting_standard_recommended",
+      "label": "ESG reporting standard recommended",
+      "message": "ESG metrics should include reporting_standard metadata.",
+      "params": {
+        "concept_type": "esg_metric",
+        "field": "reporting_standard"
+      },
+      "rule_type": "required_metadata",
+      "severity": "info"
+    }
+  ],
+  "version": "1.0.0"
+}

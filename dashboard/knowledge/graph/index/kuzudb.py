@@ -129,6 +129,7 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
     database_path: str = Field(default="")
     index: str = Field(default="")
     ws_id: str = Field(default="")
+    ontology_profile: Optional[Any] = Field(default=None)
     kuzu_database_cache: ClassVar[dict[str, Any]] = {}
 
     def __init__(
@@ -144,6 +145,7 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
         self.index = self._sanitize_table_name(index)
         self.ws_id = ws_id
         self.database_path = database_path or KUZU_DATABASE_PATH
+        self.ontology_profile = data.get("ontology_profile")
         self._database()
 
     def _database(self) -> Any:
@@ -374,6 +376,7 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
         """Get all nodes with optional label type filter and vector similarity search."""
         label_type = kwargs.get("label_type", None)
         context_ = kwargs.get("context", "")
+        limit = kwargs.get("limit", None)
 
         category_id = kwargs.get("category_id", None)
 
@@ -460,6 +463,12 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
                 WHERE {where_clause}
                 RETURN n
             """
+            if limit is not None:
+                try:
+                    safe_limit = max(1, min(5000, int(limit)))
+                    query = f"{query}\nLIMIT {safe_limit}"
+                except (TypeError, ValueError):
+                    logger.debug("Ignoring invalid get_all_nodes limit: %r", limit)
             # Check if user wants NetworkX graph instead of node list
             if kwargs.get("graph", False):
                 try:
@@ -1138,8 +1147,25 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
         conn = self.connection
         t0 = _time.monotonic()
         try:
+            # Normalize relationship labels for ontology-aware namespaces while
+            # preserving the original label in relation_properties for legacy UI
+            # compatibility and audit/debugging.
+            relation_label = str(relation.label)
+            relation_properties = dict(relation.properties or {})
+            if self.ontology_profile is not None:
+                try:
+                    from dashboard.knowledge.ontology.normalizer import normalize_relation  # noqa: WPS433
+
+                    resolved = normalize_relation(relation_label, self.ontology_profile)
+                    relation_properties.setdefault("original_label", relation_label)
+                    relation_properties.setdefault("relationship_type", resolved.normalized)
+                    relation_properties.setdefault("normalization_source", resolved.source)
+                    relation_label = resolved.normalized
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Could not normalize relation label %s: %s", relation_label, exc)
+
             # Convert properties to JSON string
-            properties_json = json.dumps(relation.properties) if relation.properties else "{}"
+            properties_json = json.dumps(relation_properties) if relation_properties else "{}"
 
             # Use parameterized queries for safer execution
             conn.execute(
@@ -1156,7 +1182,7 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
                 {
                     "source_id": str(relation.source_id),
                     "target_id": str(relation.target_id),
-                    "relation_label": str(relation.label),
+                    "relation_label": relation_label,
                     "relation_properties": properties_json,
                     "index_": self.index,
                     "ws_id": self.ws_id,
@@ -1165,7 +1191,7 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
             dt = _time.monotonic() - t0
             logger.debug(
                 "[TRACE] kuzu/add_relation: %.3fs, %s -[%s]-> %s",
-                dt, relation.source_id, relation.label, relation.target_id,
+                dt, relation.source_id, relation_label, relation.target_id,
             )
 
         except Exception as e:
@@ -1683,8 +1709,21 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
                 # Ensure minimum weight for connectivity
                 G.edges[source, target]["weight"] = max(final_weight, 0.1)
 
-    def _get_relationship_weight(self, relation_type: str) -> float:
-        """Get importance weight for different relationship types."""
+    @staticmethod
+    def get_relationship_weight(relation_type: str, ontology_profile: Optional[Any] = None) -> float:
+        """Get relationship weight from ontology profile, falling back to legacy defaults."""
+        normalized = str(relation_type or "RELATES").strip().lower()
+        if ontology_profile is not None:
+            try:
+                from dashboard.knowledge.ontology.normalizer import normalize_relation  # noqa: WPS433
+
+                resolved = normalize_relation(normalized, ontology_profile)
+                relationship = resolved.canonical or ontology_profile.relationship_types.get(resolved.normalized)
+                if relationship is not None:
+                    return float(relationship.weight)
+            except Exception as exc:  # noqa: BLE001 - profile lookup must not break graph queries
+                logger.debug("Falling back to legacy relationship weight for %s: %s", relation_type, exc)
+
         relationship_weights = {
             "CONTAINS": 1.5,
             "RELATED_TO": 1.2,
@@ -1694,8 +1733,11 @@ class KuzuLabelledPropertyGraph(LabelledPropertyGraph):
             "ASSOCIATES": 0.8,
             "RELATES": 0.7,  # Default/generic relation
         }
+        return relationship_weights.get(str(relation_type or "RELATES").upper(), 0.7)
 
-        return relationship_weights.get(relation_type.upper(), 0.7)
+    def _get_relationship_weight(self, relation_type: str) -> float:
+        """Get importance weight for relationship types using this namespace profile."""
+        return self.get_relationship_weight(relation_type, self.ontology_profile)
 
     @kuzu_retry_decorator
     def get_nodes_with_relationships(

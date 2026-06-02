@@ -1,7 +1,6 @@
 'use client';
 
 import { useSearchParams, usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
 import KnowledgeTabCore from '@/components/knowledge/KnowledgeTabCore';
 
 /**
@@ -28,26 +27,17 @@ export default function NamespaceDetailContent() {
   // usePathname() may return the static-export placeholder path (/knowledge/_)
   // during initial hydration. Fall back to window.location.pathname which always
   // reflects the real browser URL.
-  const [namespaceName, setNamespaceName] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return extractNamespace(window.location.pathname);
-    }
-    return extractNamespace(pathname);
-  });
-
-  // Re-sync when Next.js router updates pathname (e.g. client-side navigation)
-  useEffect(() => {
-    const resolved = extractNamespace(pathname) || (typeof window !== 'undefined' ? extractNamespace(window.location.pathname) : '');
-    if (resolved && resolved !== namespaceName) {
-      setNamespaceName(resolved);
-    }
-  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  const namespaceName = typeof window !== 'undefined'
+    ? extractNamespace(window.location.pathname) || extractNamespace(pathname)
+    : extractNamespace(pathname);
 
   // Optional tab query param: /knowledge/my-ns?tab=import
   const tabParam = searchParams.get('tab');
   const defaultTab = tabParam === 'import' ? 'import' as const
     : tabParam === 'research' ? 'research' as const
     : tabParam === 'nexus' ? 'nexus' as const
+    : tabParam === 'ontology' ? 'ontology' as const
+    : tabParam === 'enterprise-map' ? 'enterprise-map' as const
     : undefined;
 
   if (!namespaceName) {

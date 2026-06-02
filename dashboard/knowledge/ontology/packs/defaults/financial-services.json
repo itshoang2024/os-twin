@@ -1,0 +1,165 @@
+{
+  "aliases": {
+    "complies_with": "regulated_by",
+    "requires_approval": "depends_on",
+    "supervised_by": "regulated_by"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "financial_product": {
+      "abstraction_level": "capability",
+      "color": "#0f766e",
+      "description": "Banking, lending, insurance, or investment product",
+      "id": "financial_product",
+      "label": "Financial Product",
+      "metadata_schema": {
+        "regulatory_regime": {
+          "description": "Primary supervisory regime or framework",
+          "field_type": "string",
+          "id": "regulatory_regime",
+          "label": "Regulatory Regime"
+        }
+      },
+      "shape": "rounded_rectangle"
+    },
+    "regulatory_obligation": {
+      "abstraction_level": "implementation",
+      "color": "#9333ea",
+      "description": "Compliance obligation governing a product, process, or control",
+      "id": "regulatory_obligation",
+      "label": "Regulatory Obligation",
+      "metadata_schema": {},
+      "shape": "document"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "regulated_by",
+          "source": "loan_product",
+          "source_type": "financial_product",
+          "target": "kyc_obligation",
+          "target_type": "regulatory_obligation"
+        }
+      ],
+      "id": "loan_origination_fixture",
+      "nodes": [
+        {
+          "id": "loan_product",
+          "type": "financial_product"
+        },
+        {
+          "id": "kyc_obligation",
+          "type": "regulatory_obligation"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "financial_product": {
+        "color": "#0f766e",
+        "concept_type": "financial_product",
+        "label_template": "{label}",
+        "shape": "rounded_rectangle"
+      },
+      "regulatory_obligation": {
+        "color": "#9333ea",
+        "concept_type": "regulatory_obligation",
+        "label_template": "{label}",
+        "shape": "document"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "financial_services",
+        "label": "Financial Services",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "regulated_by": {
+        "group": "validation",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "regulated_by",
+        "weight": 0.8
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "financial_products_need_regime"
+    ]
+  },
+  "metadata_fields": {
+    "regulatory_regime": {
+      "description": "Primary supervisory regime or framework",
+      "field_type": "string",
+      "id": "regulatory_regime",
+      "label": "Regulatory Regime"
+    }
+  },
+  "migration_notes": [
+    "Adds domain-specific concept, relationship aliases, metadata, validation, and seed fixtures."
+  ],
+  "name": "Financial Services",
+  "pack_id": "financial-services",
+  "relationship_types": {
+    "regulated_by": {
+      "allowed_source_types": [
+        "financial_product",
+        "capability",
+        "feature",
+        "service"
+      ],
+      "allowed_target_types": [
+        "regulatory_obligation",
+        "evidence"
+      ],
+      "description": "Source is governed by a regulatory obligation",
+      "family": "validation",
+      "id": "regulated_by",
+      "is_directed": true,
+      "is_system": false,
+      "label": "Regulated by",
+      "style": "bold",
+      "weight": 0.8
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "financial_products_need_regime",
+      "label": "Financial products need regime",
+      "message": "Financial products should include regulatory_regime metadata.",
+      "params": {
+        "concept_type": "financial_product",
+        "field": "regulatory_regime"
+      },
+      "rule_type": "required_metadata",
+      "severity": "warning"
+    }
+  ],
+  "version": "1.0.0"
+}

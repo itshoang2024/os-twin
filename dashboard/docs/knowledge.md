@@ -93,6 +93,59 @@ curl -X POST http://localhost:9000/api/knowledge/namespaces/my-docs/query \
 | POST | `/api/knowledge/namespaces/{name}/query` | Query the namespace |
 | GET | `/api/knowledge/namespaces/{name}/graph` | Get graph visualization data |
 
+
+
+### Ontology Profile Endpoints
+
+Ontology profiles define the dynamic concept types, relationship types, aliases, and validation rules used by a namespace knowledge graph. All endpoints use the same authentication and error response conventions as the other `/api/knowledge/namespaces/*` routes.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/knowledge/namespaces/{name}/ontology/profile` | Return the active profile, or default suggestion metadata for a legacy namespace with no saved profile |
+| PUT | `/api/knowledge/namespaces/{name}/ontology/profile` | Validate and save a profile payload |
+| POST | `/api/knowledge/namespaces/{name}/ontology/validate` | Validate a profile, node, edge, or pack manifest without saving |
+| POST | `/api/knowledge/namespaces/{name}/ontology/reset-default` | Create or replace the active profile with deterministic default seed data |
+| GET | `/api/knowledge/namespaces/{name}/ontology/summary` | Return concept, relation, alias, candidate, and validation issue counts |
+
+Get the active profile or default suggestion:
+
+```bash
+curl http://localhost:9000/api/knowledge/namespaces/my-docs/ontology/profile \
+  -H "Authorization: Bearer $OSTWIN_API_KEY"
+# Legacy namespaces return: {"profile": null, "default_suggested": true, "default_profile": {...}}
+```
+
+Save a validated profile:
+
+```bash
+curl -X PUT http://localhost:9000/api/knowledge/namespaces/my-docs/ontology/profile \
+  -H "Authorization: Bearer $OSTWIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"profile":{"profile_id":"enterprise_feature_map","namespace":"my-docs","version":"1.0.0","concept_types":{},"relationship_types":{},"layers":{},"abstraction_levels":{},"metadata_fields":{},"aliases":{},"validation_rules":[]}}'
+```
+
+Validate without saving:
+
+```bash
+curl -X POST http://localhost:9000/api/knowledge/namespaces/my-docs/ontology/validate \
+  -H "Authorization: Bearer $OSTWIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"edge","edge":{"relation_type":"requires","source_type":"feature","target_type":"service"}}'
+# Returns: {"valid": true|false, "issues": [...]}
+```
+
+Reset to defaults and inspect summary:
+
+```bash
+curl -X POST http://localhost:9000/api/knowledge/namespaces/my-docs/ontology/reset-default \
+  -H "Authorization: Bearer $OSTWIN_API_KEY"
+
+curl http://localhost:9000/api/knowledge/namespaces/my-docs/ontology/summary \
+  -H "Authorization: Bearer $OSTWIN_API_KEY"
+# Returns counts for concept_type_count, relation_type_count, alias_count,
+# candidate_count, validation_issue_count, and validation_issues.
+```
+
 ### Backup & Restore
 
 | Method | Path | Description |
@@ -243,3 +296,40 @@ Policies:
 - [Architecture Guide](./knowledge-architecture.md) — Internal design and extension points
 - [MCP Integration](./knowledge-mcp-opencode.md) — Using with opencode agents
 - [Curator Guide](./knowledge-curator-guide.md) — Using the knowledge-curator agent role
+
+
+## Ontology Operations Release References
+
+EPIC-010 adds a dedicated operations guide, frontend extension guide, deterministic lifecycle fixture, and performance baseline for long-term ontology maintenance:
+
+- `docs/knowledge-ontology-operations.md` — backend operations, profile schema, relation taxonomy, pack authoring, candidate review, and QA checklist.
+- `docs/knowledge-frontend-ontology-extension.md` — frontend hooks, Enterprise Map extension points, and profile-driven UI rules.
+- `docs/knowledge-ontology-performance-baseline.md` — baseline targets for profile load, validation, candidate listing, explorer seed, and Enterprise Map render.
+- `scripts/bench_ontology_operations.py` — deterministic benchmark command for release gates.
+
+### Domain pack and candidate endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/knowledge/ontology/packs` | List built-in domain packs such as Financial Services |
+| GET | `/api/knowledge/namespaces/{name}/ontology/packs` | List installed pack state for a namespace |
+| POST | `/api/knowledge/namespaces/{name}/ontology/packs/validate` | Preview pack compatibility and conflicts |
+| POST | `/api/knowledge/namespaces/{name}/ontology/packs/install` | Install or upgrade a domain pack |
+| POST | `/api/knowledge/namespaces/{name}/ontology/packs/uninstall` | Disable a domain pack and remove safe pack-owned additions |
+| GET | `/api/knowledge/namespaces/{name}/ontology/candidates` | List ontology review candidates |
+| POST | `/api/knowledge/namespaces/{name}/ontology/candidates/{id}/approve` | Promote a candidate to canonical profile definition |
+| POST | `/api/knowledge/namespaces/{name}/ontology/candidates/{id}/map` | Map a candidate to an existing canonical ID |
+| POST | `/api/knowledge/namespaces/{name}/ontology/candidates/{id}/reject` | Reject and suppress a candidate for the same source |
+| POST | `/api/knowledge/namespaces/{name}/ontology/candidates/bulk` | Bulk candidate review update |
+
+### Nexus explorer endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/knowledge/namespaces/{name}/explorer/summary` | Lightweight topology counts |
+| GET | `/api/knowledge/namespaces/{name}/explorer/seed` | Profile-aware initial graph seed |
+| POST | `/api/knowledge/namespaces/{name}/explorer/expand` | Expand from selected node IDs |
+| POST | `/api/knowledge/namespaces/{name}/explorer/search` | Search graph nodes and context |
+| GET | `/api/knowledge/namespaces/{name}/explorer/path` | Shortest path between two nodes |
+| GET | `/api/knowledge/namespaces/{name}/explorer/nodes/{node_id}` | Detail drawer payload |
+| GET | `/api/knowledge/namespaces/{name}/explorer/communities` | Community assignments |

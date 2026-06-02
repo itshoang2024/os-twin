@@ -31,8 +31,8 @@ Test harness:
 
 from __future__ import annotations
 
-import os
 import statistics
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,6 +42,7 @@ from unittest import mock
 
 import pytest
 
+sys.path.append(str(Path(__file__).parent / "support"))
 from dashboard.knowledge.embeddings import KnowledgeEmbedder
 from dashboard.knowledge.llm import KnowledgeLLM
 from dashboard.knowledge.namespace import (
@@ -51,13 +52,15 @@ from dashboard.knowledge.namespace import (
 from dashboard.knowledge.query import (
     ChunkHit,
     Citation,
-    EntityHit,
-    KnowledgeQueryEngine,
     QueryResult,
 )
 from dashboard.knowledge.service import KnowledgeService
-from dashboard.knowledge.vector_store import NamespaceVectorStore, VectorHit
-
+from dashboard.knowledge.vector_store import NamespaceVectorStore
+from ontology_lifecycle_fakes import (
+    DeterministicOntologyIngestor,
+    FakeEmbedder,
+    FakeKnowledgeRegressionGraph,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "knowledge_sample"
 
@@ -75,8 +78,8 @@ def kb_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def real_embedder() -> KnowledgeEmbedder:
-    """Real KnowledgeEmbedder; the model load is cached at the class level."""
-    return KnowledgeEmbedder()
+    """Deterministic embedder for query regressions; avoids external Ollama/model backends."""
+    return FakeEmbedder()
 
 
 @pytest.fixture
@@ -113,6 +116,8 @@ def _await_job(service: KnowledgeService, job_id: str, timeout: float = 60.0) ->
 def populated_service(kb_dir: Path, real_embedder: KnowledgeEmbedder, no_llm: KnowledgeLLM):
     """A KnowledgeService with the sample fixture pre-ingested into ``query-test``."""
     svc = _make_service(kb_dir, real_embedder, no_llm)
+    svc._ingestor_override = DeterministicOntologyIngestor(svc)  # noqa: SLF001 - deterministic regression path
+    svc._kuzu_graphs["query-test"] = FakeKnowledgeRegressionGraph()  # noqa: SLF001
     job_id = svc.import_folder("query-test", str(FIXTURES))
     status = _await_job(svc, job_id)
     assert status.state.value == "completed", f"setup ingestion failed: {status}"
@@ -490,7 +495,6 @@ class TestErrorPaths:
         The KG layer (KuzuDB) catches embedder failures internally, logs
         them, and returns an empty node list.  The query engine receives
         an empty result — no crash, just zero hits."""
-        engine = populated_service._get_query_engine("query-test")
         with mock.patch(
             "dashboard.knowledge.graph.index.kuzudb._get_embedder"
         ) as mock_get:

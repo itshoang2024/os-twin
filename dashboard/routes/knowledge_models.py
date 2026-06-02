@@ -11,7 +11,7 @@ All models are JSON-serializable (Pydantic v2) and include OpenAPI examples.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -146,6 +146,382 @@ class RetentionPolicyResponse(BaseModel):
     auto_delete_when_empty: bool = False
 
 
+
+
+# ---------------------------------------------------------------------------
+# Ontology Profile Models (EPIC-003)
+# ---------------------------------------------------------------------------
+
+
+class OntologyProfileRequest(BaseModel):
+    """Request body for PUT /api/knowledge/namespaces/{namespace}/ontology/profile."""
+
+    profile: dict[str, Any] = Field(
+        ...,
+        description="OntologyProfile JSON payload to validate and persist. The namespace must match the path.",
+        examples=[{"profile_id": "enterprise_feature_map", "namespace": "docs", "version": "1.0.0"}],
+    )
+    reason: str = Field(default="Profile saved through API", description="Human reason recorded in profile history")
+    validation_override: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Required metadata when migration safety detects a dangerous ontology change.",
+    )
+
+
+class OntologyValidationIssueResponse(BaseModel):
+    """Structured ontology validation issue."""
+
+    severity: str = Field(..., description="Issue severity: info, warning, or error")
+    code: str = Field(..., description="Machine-readable validation issue code")
+    path: str = Field(..., description="Path within the submitted subject that triggered the issue")
+    message: str = Field(..., description="Human-readable validation message")
+    suggested_fix: str = Field(default="", description="Suggested remediation")
+    subject: str = Field(default="edge", description="Validated subject: profile, node, edge, or pack")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional issue metadata")
+
+
+class OntologyProfileResponse(BaseModel):
+    """Response for ontology profile lookup and writes."""
+
+    namespace: str = Field(..., description="Namespace for the ontology profile")
+    profile: Optional[dict[str, Any]] = Field(default=None, description="Active ontology profile JSON, if one exists")
+    profile_exists: bool = Field(..., description="True when an active profile is persisted")
+    default_suggested: bool = Field(
+        default=False,
+        description="True when no active profile exists and default_profile contains seed metadata",
+    )
+    default_profile: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Deterministic default profile suggestion for legacy namespaces without a saved profile",
+    )
+    validation_issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
+
+
+
+
+class OntologyProfileDiffRequest(BaseModel):
+    """Request body for side-effect-free ontology profile diff previews."""
+
+    base_profile: Optional[dict[str, Any]] = None
+    target_profile: Optional[dict[str, Any]] = None
+    base_version: Optional[str] = None
+    target_version: Optional[str] = None
+
+
+class OntologyProfileDiffResponse(BaseModel):
+    namespace: str
+    base_version: Optional[str] = None
+    target_version: Optional[str] = None
+    history_id: Optional[str] = None
+    diff: dict[str, Any]
+    migration_issues: list[dict[str, Any]] = Field(default_factory=list)
+    would_mutate: bool = False
+
+
+class OntologyProfileHistoryRecordResponse(BaseModel):
+    id: str
+    namespace: str
+    actor: str
+    timestamp: datetime
+    reason: str
+    previous_version: Optional[str] = None
+    new_version: str
+    changed_paths: list[str] = Field(default_factory=list)
+    diff: dict[str, Any] = Field(default_factory=dict)
+    migration_issues: list[dict[str, Any]] = Field(default_factory=list)
+    validation_override: Optional[dict[str, Any]] = None
+    migration_entries: list[dict[str, Any]] = Field(default_factory=list)
+    profile: Optional[dict[str, Any]] = None
+
+
+class OntologyProfileHistoryListResponse(BaseModel):
+    namespace: str
+    history: list[OntologyProfileHistoryRecordResponse] = Field(default_factory=list)
+
+
+class OntologyValidateRequest(BaseModel):
+    """Request body for POST /api/knowledge/namespaces/{namespace}/ontology/validate."""
+
+    subject: Literal["profile", "node", "edge", "pack"] = Field(
+        ...,
+        description="Type of object to validate without saving",
+        examples=["profile", "edge"],
+    )
+    profile: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Optional profile payload to validate or to use as validation context",
+    )
+    node: Optional[dict[str, Any]] = Field(default=None, description="Node payload with a type/concept_type field")
+    edge: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Edge payload with relation/source/target type fields",
+    )
+    nodes: list[dict[str, Any]] = Field(default_factory=list, description="Node pack payloads")
+    edges: list[dict[str, Any]] = Field(default_factory=list, description="Edge pack payloads")
+
+
+class OntologyValidateResponse(BaseModel):
+    """Response for side-effect-free ontology validation."""
+
+    namespace: str
+    subject: str
+    valid: bool = Field(..., description="False when any validation issue has severity=error")
+    issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
+
+
+class OntologyResetDefaultResponse(BaseModel):
+    """Response for POST /api/knowledge/namespaces/{namespace}/ontology/reset-default."""
+
+    namespace: str
+    profile: dict[str, Any]
+    replaced_existing: bool = Field(..., description="True when an existing profile was replaced")
+
+
+class OntologySummaryResponse(BaseModel):
+    """Summary counters for a namespace ontology profile."""
+
+    namespace: str
+    profile_exists: bool
+    profile_id: Optional[str] = None
+    version: Optional[str] = None
+    concept_type_count: int = 0
+    relation_type_count: int = 0
+    alias_count: int = 0
+    candidate_count: int = 0
+    validation_issue_count: int = 0
+    validation_issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Enterprise Map Projection Models (EPIC-009)
+# ---------------------------------------------------------------------------
+
+
+class EnterpriseMapOntologyPathResponse(BaseModel):
+    """Ontology coordinates attached to an enterprise map node."""
+
+    layer: Optional[str] = None
+    abstraction_level: Optional[str] = None
+    concept_type: Optional[str] = None
+    pack_id: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+
+
+class EnterpriseMapNodeResponse(BaseModel):
+    """Ontology-aware node returned by /ontology/enterprise-map."""
+
+    id: str
+    label: Optional[str] = None
+    name: Optional[str] = None
+    score: float = 1.0
+    properties: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    concept_type: Optional[str] = None
+    concept_label: Optional[str] = None
+    concept_color: Optional[str] = None
+    concept_shape: Optional[str] = None
+    abstraction_level: Optional[str] = None
+    abstraction_label: Optional[str] = None
+    layer_id: Optional[str] = None
+    layer_label: Optional[str] = None
+    layer_order: Optional[int] = None
+    pack_id: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    owner: Optional[str] = None
+    description: Optional[str] = None
+    map_group: Optional[str] = None
+    data_store: Optional[str] = None
+    sync_mode: Optional[str] = None
+    ontology_path: EnterpriseMapOntologyPathResponse = Field(default_factory=EnterpriseMapOntologyPathResponse)
+    validation_issues: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EnterpriseMapEdgeResponse(BaseModel):
+    """Ontology-aware relationship returned by /ontology/enterprise-map."""
+
+    source: str
+    target: str
+    label: Optional[str] = None
+    weight: float = 1.0
+    properties: dict[str, Any] = Field(default_factory=dict)
+    relationship_type: Optional[str] = None
+    family: Optional[str] = None
+    display_label: Optional[str] = None
+    inverse_label: Optional[str] = None
+    style: Optional[str] = None
+    color: Optional[str] = None
+    dash: Optional[str] = None
+    map_source: Optional[str] = None
+    map_target: Optional[str] = None
+    map_direction: Optional[str] = None
+    is_candidate: bool = False
+    validation_issues: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EnterpriseMapLayerResponse(BaseModel):
+    """Layer lane returned by the enterprise map projection."""
+
+    id: str
+    label: str
+    order: int = 999
+    description: str = ""
+    lifecycle_state: str = "active"
+    count: int = 0
+
+
+class EnterpriseMapAbstractionLevelResponse(BaseModel):
+    """Abstraction level metadata returned by the enterprise map projection."""
+
+    id: str
+    label: str
+    order: Optional[int] = None
+    description: str = ""
+
+
+class EnterpriseMapStatsResponse(BaseModel):
+    """Projection counters and large-graph safety metadata."""
+
+    node_count: int = 0
+    edge_count: int = 0
+    layer_count: int = 0
+    concept_type_count: int = 0
+    relationship_type_count: int = 0
+    candidate_edge_count: int = 0
+    validation_issue_count: int = 0
+    source_node_count: Optional[int] = None
+    source_edge_count: Optional[int] = None
+    ontology_candidate_count: Optional[int] = None
+    limit: Optional[int] = None
+    filtered: bool = False
+
+
+class EnterpriseMapMetaResponse(BaseModel):
+    """Namespace/profile metadata for the enterprise map projection."""
+
+    ontology_profile: Optional[dict[str, Any]] = None
+    profile_exists: bool = False
+    ontology_candidate_count: int = 0
+    graph_instruction: dict[str, Any] = Field(default_factory=dict)
+
+
+class EnterpriseMapProjectionResponse(BaseModel):
+    """Typed response model for /api/knowledge/namespaces/{namespace}/ontology/enterprise-map."""
+
+    nodes: list[EnterpriseMapNodeResponse] = Field(default_factory=list)
+    edges: list[EnterpriseMapEdgeResponse] = Field(default_factory=list)
+    layers: list[EnterpriseMapLayerResponse] = Field(default_factory=list)
+    abstraction_levels: list[EnterpriseMapAbstractionLevelResponse] = Field(default_factory=list)
+    concept_type_counts: dict[str, int] = Field(default_factory=dict)
+    relationship_type_counts: dict[str, int] = Field(default_factory=dict)
+    relationship_family_counts: dict[str, int] = Field(default_factory=dict)
+    stats: EnterpriseMapStatsResponse = Field(default_factory=EnterpriseMapStatsResponse)
+    meta: EnterpriseMapMetaResponse = Field(default_factory=EnterpriseMapMetaResponse)
+
+
+# ---------------------------------------------------------------------------
+# Domain Pack Models (EPIC-005)
+# ---------------------------------------------------------------------------
+
+
+class DomainPackRequest(BaseModel):
+    """Request body for domain pack operations."""
+
+    pack_id: str = Field(..., description="Domain pack identifier", examples=["financial-services"])
+
+
+class DomainPackManifestResponse(BaseModel):
+    """Installable domain pack manifest."""
+
+    pack_id: str
+    name: str
+    version: str
+    compatible_profile_versions: list[str] = Field(default_factory=list)
+    concept_types: dict[str, Any] = Field(default_factory=dict)
+    relationship_types: dict[str, Any] = Field(default_factory=dict)
+    layers: dict[str, Any] = Field(default_factory=dict)
+    abstraction_levels: dict[str, Any] = Field(default_factory=dict)
+    aliases: dict[str, str] = Field(default_factory=dict)
+    metadata_fields: dict[str, Any] = Field(default_factory=dict)
+    validation_rules: list[dict[str, Any]] = Field(default_factory=list)
+    graph_instruction: dict[str, Any] = Field(default_factory=dict)
+    fixtures: list[dict[str, Any]] = Field(default_factory=list)
+    migration_notes: list[str] = Field(default_factory=list)
+
+
+class DomainPackListResponse(BaseModel):
+    """Response for available domain packs."""
+
+    packs: list[DomainPackManifestResponse] = Field(default_factory=list)
+
+
+class DomainPackInstalledResponse(BaseModel):
+    """Response for installed domain pack namespace state."""
+
+    namespace: str
+    schema_version: int = 1
+    installed_packs: dict[str, Any] = Field(default_factory=dict)
+
+
+class DomainPackValidateResponse(BaseModel):
+    """Side-effect-free pack validation response."""
+
+    namespace: str
+    pack_id: str
+    valid: bool
+    issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
+    profile: Optional[dict[str, Any]] = None
+    manifest: Optional[DomainPackManifestResponse] = None
+
+
+class DomainPackOperationResponse(BaseModel):
+    """Pack install/uninstall operation response."""
+
+    namespace: str
+    pack_id: str
+    action: str
+    installed: bool
+    profile: dict[str, Any]
+    state: DomainPackInstalledResponse
+    issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
+
+
+class OntologyCandidateActionRequest(BaseModel):
+    """Review action for an ontology candidate."""
+
+    canonical_id: Optional[str] = Field(default=None, description="Canonical enum id for approve/map actions")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Optional enum metadata for approval")
+    reason: str = Field(default="", description="Optional rejection reason")
+
+
+class OntologyCandidateBulkRequest(BaseModel):
+    """Bulk candidate review actions."""
+
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OntologyCandidateResponse(BaseModel):
+    id: str
+    namespace: str
+    candidate_type: str
+    source: str
+    original_label: str
+    normalized_label: str = ""
+    suggested_canonical: Optional[str] = None
+    confidence: float
+    sample_text: str
+    status: str
+    source_hash: str = ""
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyCandidateListResponse(BaseModel):
+    namespace: str
+    candidates: list[OntologyCandidateResponse] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Response Models (wrappers around canonical types)
 # ---------------------------------------------------------------------------
@@ -236,6 +612,11 @@ class ImportTextResponse(BaseModel):
         ...,
         description="Time taken for ingestion in seconds",
         examples=[0.42],
+    )
+    candidate_count: int = Field(
+        default=0,
+        description="Number of ontology review candidates emitted during ingestion",
+        examples=[1],
     )
 
 
@@ -337,6 +718,10 @@ class NamespaceMetaResponse(BaseModel):
     retention: RetentionPolicyResponse = Field(
         default_factory=RetentionPolicyResponse,
         description="Retention policy for automatic cleanup (EPIC-004)",
+    )
+    ontology_profile_version: Optional[str] = Field(
+        default=None,
+        description="Active ontology profile version for this namespace, or null for legacy namespaces",
     )
 
 
@@ -628,6 +1013,8 @@ __all__ = [
     "QueryRequest",
     "RestoreNamespaceRequest",
     "RetentionPolicyRequest",  # EPIC-004
+    "OntologyProfileRequest",
+    "OntologyValidateRequest",
     "ResearchRequest",
     "ResearchSearchRequest",
     "ResearchIngestItem",
@@ -649,6 +1036,19 @@ __all__ = [
     "QueryResultResponse",
     "RefreshNamespaceResponse",
     "RetentionPolicyResponse",  # EPIC-004
+    "OntologyValidationIssueResponse",
+    "OntologyProfileResponse",
+    "OntologyValidateResponse",
+    "OntologyResetDefaultResponse",
+    "OntologySummaryResponse",
+    "EnterpriseMapOntologyPathResponse",
+    "EnterpriseMapNodeResponse",
+    "EnterpriseMapEdgeResponse",
+    "EnterpriseMapLayerResponse",
+    "EnterpriseMapAbstractionLevelResponse",
+    "EnterpriseMapStatsResponse",
+    "EnterpriseMapMetaResponse",
+    "EnterpriseMapProjectionResponse",
     "ResearchResponse",
     "ResearchSourceResponse",
     "ResearchSearchResponse",

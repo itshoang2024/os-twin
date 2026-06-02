@@ -1,0 +1,6 @@
+{
+  "namespace": "ontology-lifecycle",
+  "pack": "financial-services",
+  "expected_candidates": ["powers"],
+  "nodes": ["loan_product", "kyc_obligation", "customer_profile_data"]
+}

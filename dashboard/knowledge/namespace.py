@@ -6,6 +6,7 @@ Each namespace is a self-contained directory under ``KNOWLEDGE_DIR``::
         graph.db          # Kuzu single-file DB (created lazily by the indexer)
         chroma/           # ChromaDB persistent dir (created lazily by the indexer)
         manifest.json     # NamespaceMeta (this module owns it)
+        ontology/profile.json  # Optional active OntologyProfile
         jobs/             # JobManager event logs (created in EPIC-003)
 
 Manifest writes are atomic: a temp file is written then ``os.replace``'d into
@@ -148,9 +149,10 @@ class NamespaceMeta(BaseModel):
     Schema versions:
     - v1: Original schema (EPIC-002)
     - v2: Added retention field (EPIC-004)
+    - v3: Added optional ontology_profile_version (EPIC-001 ontology profiles)
     """
 
-    schema_version: int = 2  # Bumped from 1 to 2 in EPIC-004
+    schema_version: int = 3  # Bumped from 2 to 3 for ontology profile metadata
     name: str
     created_at: datetime
     updated_at: datetime
@@ -164,6 +166,8 @@ class NamespaceMeta(BaseModel):
     imports: list[ImportRecord] = Field(default_factory=list)
     # EPIC-004: Retention policy for automatic cleanup
     retention: RetentionPolicy = Field(default_factory=RetentionPolicy)
+    # EPIC-001 ontology profiles: null means the namespace has no active profile.
+    ontology_profile_version: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -526,9 +530,11 @@ class NamespaceManager:
         or the JSON is unreadable / invalid. Logs a warning on parse failure
         so corruption isn't silently masked as "namespace doesn't exist".
 
-        Schema migration (EPIC-004):
+        Schema migration:
         - v1 manifests (schema_version=1 or missing) are auto-migrated to v2
           by adding the default retention field.
+        - v2 manifests are auto-migrated to v3 by adding a null
+          ontology_profile_version for legacy namespaces.
         - Migration is persisted in-place so subsequent loads are fast.
         """
         path = self._manifest_path_for(namespace)
@@ -541,16 +547,19 @@ class NamespaceManager:
             logger.warning("Failed to read manifest for %r at %s: %s", namespace, path, exc)
             return None
 
-        # Schema migration: v1 → v2 (EPIC-004)
-        # v1 manifests have schema_version=1 or no schema_version field
-        # v2 adds the 'retention' field
+        # Schema migration: v1 → v2 → v3
+        schema_version = raw.get("schema_version", 1)
         migrated = False
-        if raw.get("schema_version", 1) < 2:
-            logger.info("Migrating manifest for %r from v%d to v2", namespace, raw.get("schema_version", 1))
-            # Add default retention field
+        if schema_version < 2:
+            logger.info("Migrating manifest for %r from v%d to v2", namespace, schema_version)
             if "retention" not in raw:
                 raw["retention"] = RetentionPolicy().model_dump(mode="json")
             raw["schema_version"] = 2
+            migrated = True
+        if raw.get("schema_version", 1) < 3:
+            logger.info("Migrating manifest for %r from v%d to v3", namespace, raw.get("schema_version", 1))
+            raw.setdefault("ontology_profile_version", None)
+            raw["schema_version"] = 3
             migrated = True
 
         try:

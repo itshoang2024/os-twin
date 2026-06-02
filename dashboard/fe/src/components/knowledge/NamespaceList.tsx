@@ -13,6 +13,7 @@ const SUPPORTED_LANGUAGES = [
 
 interface NamespaceListProps {
   namespaces: NamespaceMetaResponse[];
+  visibleNamespaces?: NamespaceMetaResponse[];
   selectedNamespace: string | null;
   onSelect: (namespace: string) => void;
   onCreate: (name: string, description?: string, language?: string) => Promise<void>;
@@ -242,6 +243,7 @@ function NamespaceCard({
 
 export default function NamespaceList({
   namespaces,
+  visibleNamespaces,
   selectedNamespace,
   onSelect,
   onCreate,
@@ -301,13 +303,15 @@ export default function NamespaceList({
     }
   }, [onDelete]);
 
+  const displayNamespaces = visibleNamespaces ?? namespaces;
+
   // Filter namespaces by search
   const filteredNamespaces = searchTerm
-    ? namespaces.filter(ns => 
+    ? displayNamespaces.filter(ns =>
         ns.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ns.description?.toLowerCase().includes(searchTerm.toLowerCase())
       )
-    : namespaces;
+    : displayNamespaces;
 
   // Sort: selected first, then by updated_at desc
   const sortedNamespaces = [...filteredNamespaces].sort((a, b) => {
@@ -325,7 +329,10 @@ export default function NamespaceList({
             Knowledge Namespaces
           </h3>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-            {namespaces.length} namespace{namespaces.length !== 1 ? 's' : ''} available
+            {visibleNamespaces && visibleNamespaces.length !== namespaces.length
+              ? `${visibleNamespaces.length} of ${namespaces.length}`
+              : namespaces.length}{' '}
+            namespace{namespaces.length !== 1 ? 's' : ''} available
           </p>
         </div>
         <button
@@ -339,7 +346,7 @@ export default function NamespaceList({
       </div>
 
       {/* Search */}
-      {namespaces.length > 6 && (
+      {displayNamespaces.length > 6 && (
         <div className="mb-4">
           <div 
             className="flex items-center gap-2 px-3 py-2 rounded-lg border"
@@ -405,6 +412,20 @@ export default function NamespaceList({
           </span>
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
             No namespaces matching &quot;{searchTerm}&quot;
+          </p>
+        </div>
+      )}
+
+      {!searchTerm && namespaces.length > 0 && sortedNamespaces.length === 0 && (
+        <div className="text-center py-8">
+          <span
+            className="material-symbols-outlined text-[32px] mb-2"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            filter_alt_off
+          </span>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            No namespaces match the active filters.
           </p>
         </div>
       )}

@@ -1,0 +1,430 @@
+{
+  "aliases": {
+    "delivered_by": "ships_with",
+    "stock_checks": "reserves",
+    "customer_update_sync": "notifies"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "carrier": {
+      "abstraction_level": "implementation",
+      "color": "#0369a1",
+      "default_layer": "fulfillment",
+      "description": "Carrier or delivery partner",
+      "id": "carrier",
+      "label": "Carrier",
+      "metadata_schema": {},
+      "shape": "hexagon"
+    },
+    "crm_touchpoint": {
+      "abstraction_level": "feature",
+      "color": "#db2777",
+      "default_layer": "commerce",
+      "description": "Customer notification, support, or marketing touchpoint",
+      "id": "crm_touchpoint",
+      "label": "CRM Touchpoint",
+      "metadata_schema": {},
+      "shape": "document"
+    },
+    "integration": {
+      "abstraction_level": "implementation",
+      "color": "#1d4ed8",
+      "default_layer": "fulfillment",
+      "description": "External commerce, warehouse, or carrier integration",
+      "id": "integration",
+      "label": "Integration",
+      "metadata_schema": {},
+      "shape": "cylinder"
+    },
+    "inventory": {
+      "abstraction_level": "implementation",
+      "color": "#047857",
+      "default_layer": "fulfillment",
+      "description": "Stock position or inventory pool",
+      "id": "inventory",
+      "label": "Inventory",
+      "metadata_schema": {},
+      "shape": "diamond"
+    },
+    "order": {
+      "abstraction_level": "feature",
+      "color": "#7c3aed",
+      "default_layer": "commerce",
+      "description": "Customer purchase or fulfillment request",
+      "id": "order",
+      "label": "Order",
+      "metadata_schema": {},
+      "shape": "rounded_rectangle"
+    },
+    "shipment": {
+      "abstraction_level": "implementation",
+      "color": "#0f766e",
+      "default_layer": "fulfillment",
+      "description": "Physical shipment associated with an order",
+      "id": "shipment",
+      "label": "Shipment",
+      "metadata_schema": {},
+      "shape": "cylinder"
+    },
+    "sla": {
+      "abstraction_level": "capability",
+      "color": "#9333ea",
+      "default_layer": "commerce",
+      "description": "Service level commitment",
+      "id": "sla",
+      "label": "SLA",
+      "metadata_schema": {},
+      "shape": "document"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "fulfills",
+          "source": "shipment_1001",
+          "source_type": "shipment",
+          "target": "order_1001",
+          "target_type": "order"
+        },
+        {
+          "relation_type": "ships_with",
+          "source": "shipment_1001",
+          "source_type": "shipment",
+          "target": "carrier_api",
+          "target_type": "carrier"
+        },
+        {
+          "relation_type": "reserves",
+          "source": "order_1001",
+          "source_type": "order",
+          "target": "warehouse_stock",
+          "target_type": "inventory"
+        },
+        {
+          "relation_type": "notifies",
+          "source": "customer_email",
+          "source_type": "crm_touchpoint",
+          "target": "order_1001",
+          "target_type": "order"
+        },
+        {
+          "relation_type": "governed_by_sla",
+          "source": "shipment_1001",
+          "source_type": "shipment",
+          "target": "premium_sla",
+          "target_type": "sla"
+        }
+      ],
+      "id": "ecommerce_logistics_fixture",
+      "nodes": [
+        {
+          "id": "order_1001",
+          "type": "order"
+        },
+        {
+          "id": "shipment_1001",
+          "type": "shipment"
+        },
+        {
+          "id": "carrier_api",
+          "type": "carrier"
+        },
+        {
+          "id": "warehouse_stock",
+          "type": "inventory"
+        },
+        {
+          "id": "customer_email",
+          "type": "crm_touchpoint"
+        },
+        {
+          "id": "premium_sla",
+          "type": "sla"
+        },
+        {
+          "id": "wms_integration",
+          "type": "integration"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "carrier": {
+        "color": "#0369a1",
+        "concept_type": "carrier",
+        "default_layer": "fulfillment",
+        "label_template": "{label}",
+        "shape": "hexagon"
+      },
+      "crm_touchpoint": {
+        "color": "#db2777",
+        "concept_type": "crm_touchpoint",
+        "default_layer": "commerce",
+        "label_template": "{label}",
+        "shape": "document"
+      },
+      "integration": {
+        "color": "#1d4ed8",
+        "concept_type": "integration",
+        "default_layer": "fulfillment",
+        "label_template": "{label}",
+        "shape": "cylinder"
+      },
+      "inventory": {
+        "color": "#047857",
+        "concept_type": "inventory",
+        "default_layer": "fulfillment",
+        "label_template": "{label}",
+        "shape": "diamond"
+      },
+      "order": {
+        "color": "#7c3aed",
+        "concept_type": "order",
+        "default_layer": "commerce",
+        "label_template": "{label}",
+        "shape": "rounded_rectangle"
+      },
+      "shipment": {
+        "color": "#0f766e",
+        "concept_type": "shipment",
+        "default_layer": "fulfillment",
+        "label_template": "{label}",
+        "shape": "cylinder"
+      },
+      "sla": {
+        "color": "#9333ea",
+        "concept_type": "sla",
+        "default_layer": "commerce",
+        "label_template": "{label}",
+        "shape": "document"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "domain_map",
+        "label": "Domain Map",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [
+      {
+        "description": "Order-to-shipment logistics spine",
+        "edges": [
+          {
+            "relation_type": "fulfills",
+            "source": "shipment_1001",
+            "target": "order_1001"
+          },
+          {
+            "relation_type": "reserves",
+            "source": "order_1001",
+            "target": "warehouse_stock"
+          }
+        ],
+        "id": "ecommerce_logistics_spine",
+        "nodes": [
+          {
+            "id": "order_1001",
+            "type": "order"
+          },
+          {
+            "id": "shipment_1001",
+            "type": "shipment"
+          },
+          {
+            "id": "carrier_api",
+            "type": "carrier"
+          },
+          {
+            "id": "warehouse_stock",
+            "type": "inventory"
+          },
+          {
+            "id": "customer_email",
+            "type": "crm_touchpoint"
+          },
+          {
+            "id": "premium_sla",
+            "type": "sla"
+          },
+          {
+            "id": "wms_integration",
+            "type": "integration"
+          }
+        ]
+      }
+    ],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "fulfills": {
+        "group": "flow",
+        "label_template": "Fulfills",
+        "map_direction": "forward",
+        "relationship_type": "fulfills",
+        "weight": 0.8
+      },
+      "governed_by_sla": {
+        "dash": "6 4",
+        "group": "validation",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "governed_by_sla",
+        "weight": 0.65
+      },
+      "notifies": {
+        "dash": "2 3",
+        "group": "flow",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "notifies",
+        "weight": 0.6
+      },
+      "reserves": {
+        "dash": "6 4",
+        "group": "dependency",
+        "label_template": "Reserves",
+        "map_direction": "reversed",
+        "relationship_type": "reserves",
+        "weight": 0.7
+      },
+      "ships_with": {
+        "group": "flow",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "ships_with",
+        "weight": 0.7
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "logistics_relationship_endpoints"
+    ]
+  },
+  "layers": {
+    "commerce": {
+      "description": "Order and customer touchpoints",
+      "id": "commerce",
+      "label": "Commerce",
+      "order": 10
+    },
+    "fulfillment": {
+      "description": "Inventory, shipment, carrier, and SLA operations",
+      "id": "fulfillment",
+      "label": "Fulfillment",
+      "order": 11
+    }
+  },
+  "metadata_fields": {},
+  "migration_notes": [
+    "Adds ecommerce logistics Graph Instruction defaults and fixtures for fulfillment maps."
+  ],
+  "name": "Ecommerce Logistics",
+  "pack_id": "ecommerce-logistics",
+  "relationship_types": {
+    "fulfills": {
+      "allowed_source_types": [
+        "shipment"
+      ],
+      "allowed_target_types": [
+        "order"
+      ],
+      "family": "flow",
+      "id": "fulfills",
+      "label": "Fulfills",
+      "map_direction": "forward",
+      "style": "solid",
+      "weight": 0.8
+    },
+    "governed_by_sla": {
+      "allowed_source_types": [
+        "order",
+        "shipment"
+      ],
+      "allowed_target_types": [
+        "sla"
+      ],
+      "family": "validation",
+      "id": "governed_by_sla",
+      "label": "Governed by SLA",
+      "map_direction": "forward",
+      "style": "dashed",
+      "weight": 0.65
+    },
+    "notifies": {
+      "allowed_source_types": [
+        "crm_touchpoint",
+        "integration"
+      ],
+      "allowed_target_types": [
+        "order",
+        "shipment"
+      ],
+      "family": "flow",
+      "id": "notifies",
+      "label": "Notifies",
+      "map_direction": "forward",
+      "style": "dotted",
+      "weight": 0.6
+    },
+    "reserves": {
+      "allowed_source_types": [
+        "order"
+      ],
+      "allowed_target_types": [
+        "inventory"
+      ],
+      "family": "dependency",
+      "id": "reserves",
+      "label": "Reserves",
+      "map_direction": "reversed",
+      "style": "dashed",
+      "weight": 0.7
+    },
+    "ships_with": {
+      "allowed_source_types": [
+        "shipment"
+      ],
+      "allowed_target_types": [
+        "carrier"
+      ],
+      "family": "flow",
+      "id": "ships_with",
+      "label": "Ships with",
+      "map_direction": "forward",
+      "style": "solid",
+      "weight": 0.7
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "logistics_relationship_endpoints",
+      "label": "Logistics relationship endpoints",
+      "message": "Logistics relationships should connect declared ecommerce concepts.",
+      "params": {},
+      "rule_type": "allowed_relationship",
+      "severity": "warning"
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -54,6 +54,51 @@ def _get_prompt(key: str, lang_code: str, **kwargs) -> str | None:
         return None
 
 
+def _format_ontology_profile_hint(ontology_profile_hint: Any | None) -> str:
+    """Render an ontology profile hint for extraction prompts."""
+
+    if not ontology_profile_hint:
+        return ""
+    profile = ontology_profile_hint
+    if hasattr(profile, "model_dump"):
+        profile = profile.model_dump(mode="json")
+    if not isinstance(profile, dict):
+        return str(profile)
+
+    concepts = profile.get("concept_types") or {}
+    relations = profile.get("relationship_types") or {}
+    aliases = profile.get("aliases") or {}
+    concept_aliases = profile.get("concept_aliases") or {}
+
+    concept_lines = []
+    for cid, item in concepts.items():
+        label = item.get("label", cid) if isinstance(item, dict) else cid
+        concept_lines.append(f"- {cid}: {label}")
+    relation_lines = []
+    for rid, item in relations.items():
+        if isinstance(item, dict):
+            label = item.get("label", rid)
+            src = ",".join(item.get("allowed_source_types") or []) or "any"
+            tgt = ",".join(item.get("allowed_target_types") or []) or "any"
+            relation_lines.append(f"- {rid}: {label} (source: {src}; target: {tgt})")
+        else:
+            relation_lines.append(f"- {rid}")
+
+    parts = [
+        "Ontology profile hint:",
+        "Use only these concept type ids when possible:",
+        "\n".join(concept_lines) or "- (none)",
+        "Use only these relationship type ids when possible:",
+        "\n".join(relation_lines) or "- (none)",
+    ]
+    if aliases:
+        parts.append("Relationship aliases: " + ", ".join(f"{k}->{v}" for k, v in aliases.items()))
+    if concept_aliases:
+        parts.append("Concept aliases: " + ", ".join(f"{k}->{v}" for k, v in concept_aliases.items()))
+    parts.append("If no allowed type fits, return your best label; it will be reviewed as a candidate.")
+    return "\n".join(parts)
+
+
 _EXTRACT_SYSTEM = """You are an expert knowledge-graph engineer. Given a chunk of text,
 extract the entities and relationships that appear in it. Respond with strict JSON only.
 
@@ -189,15 +234,23 @@ class KnowledgeLLM(BaseLLMWrapper):
         return result
 
     def extract_entities(
-        self, text: str, language: str = "English", domain: str = ""
+        self,
+        text: str,
+        language: str = "English",
+        domain: str = "",
+        ontology_profile_hint: Any | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """Extract entities and relationships from `text`.
 
         Returns ([entity_dict], [relationship_dict]). When unavailable: ([], []).
         """
+        ontology_hint = _format_ontology_profile_hint(ontology_profile_hint)
+        effective_domain = domain or "general"
+        if ontology_hint:
+            effective_domain = f"{effective_domain}\n\n{ontology_hint}"
         system = _get_prompt(
-            _KEY_EXTRACT_SYSTEM, language, language=language, domain=domain or "general",
-        ) or _EXTRACT_SYSTEM.format(language=language, domain=domain or "general")
+            _KEY_EXTRACT_SYSTEM, language, language=language, domain=effective_domain, ontology_hint=ontology_hint,
+        ) or _EXTRACT_SYSTEM.format(language=language, domain=effective_domain)
         user = _get_prompt(
             _KEY_EXTRACT_USER, language, text=text,
         ) or _EXTRACT_USER.format(text=text)

@@ -29,6 +29,7 @@ from dashboard.knowledge.graph.explorer import (
     _node_to_dict,
     _relation_to_dict,
 )
+from dashboard.knowledge.ontology.defaults import create_default_ontology_profile
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +74,11 @@ class FakeRelation:
 class FakeKuzuGraph:
     """Deterministic fake that supports all methods called by KnowledgeExplorer."""
 
-    def __init__(self, entities=None, relations=None, triplets=None):
+    def __init__(self, entities=None, relations=None, triplets=None, ontology_profile=None):
         self._entities = entities or []
         self._relations = relations or []
         self._triplets = triplets or []
+        self.ontology_profile = ontology_profile
 
     # -- Counts --
 
@@ -207,6 +209,26 @@ class TestNodeToDict:
         result = _node_to_dict(node, community_id=None)
         assert "community_id" not in result
 
+    def test_node_includes_ontology_metadata_when_profile_available(self):
+        profile = create_default_ontology_profile("test-ns")
+        node = FakeEntityNode(
+            id="feature-1",
+            label="feature",
+            properties={
+                "concept_type": "feature",
+                "layer": "product",
+                "pack_id": "core",
+                "metadata": {"owner": "platform"},
+            },
+        )
+        result = _node_to_dict(node, profile=profile)
+        assert result["concept_type"] == "feature"
+        assert result["abstraction_level"] == "feature"
+        assert result["layer"] == "product"
+        assert result["pack_id"] == "core"
+        assert result["metadata"] == {"owner": "platform"}
+        assert result["validation_issues"] == []
+
 
 class TestRelationToDict:
     """Tests for _relation_to_dict serialization."""
@@ -232,6 +254,26 @@ class TestRelationToDict:
         rel = FakeRelation(label="", properties={})
         result = _relation_to_dict(rel)
         assert result["label"] == "RELATES"
+
+    def test_relation_includes_ontology_metadata(self):
+        profile = create_default_ontology_profile("test-ns")
+        rel = FakeRelation(source_id="a", target_id="b", label="depends_on")
+        source = FakeEntityNode(id="a", label="feature", properties={"concept_type": "feature"})
+        target = FakeEntityNode(id="b", label="service", properties={"concept_type": "service"})
+        result = _relation_to_dict(rel, profile=profile, source_node=source, target_node=target)
+        assert result["relationship_type"] == "depends_on"
+        assert result["family"] == "dependency"
+        assert result["display_label"] == "Depends on"
+        assert result["style"] == "dashed"
+        assert result["is_candidate"] is False
+
+    def test_relation_without_profile_has_legacy_defaults(self):
+        rel = FakeRelation(source_id="a", target_id="b", label="RELATES")
+        result = _relation_to_dict(rel)
+        assert result["label"] == "RELATES"
+        assert result["relationship_type"] == "relates"
+        assert result["family"] is None
+        assert result["is_candidate"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +336,16 @@ class TestExplorerSeed:
         result = explorer.seed(top_k=10)
         assert result["stats"]["node_count"] >= 1
         assert result["stats"]["seed_count"] >= 1
+
+
+    def test_seed_includes_profile_summary_meta(self):
+        profile = create_default_ontology_profile("test-ns")
+        e1 = FakeEntityNode(id="feature-1", label="feature", properties={"concept_type": "feature"})
+        kg = FakeKuzuGraph(entities=[e1], ontology_profile=profile)
+        explorer = KnowledgeExplorer(kg)
+        result = explorer.seed(top_k=1)
+        assert result["meta"]["profile_exists"] is True
+        assert result["meta"]["ontology_profile"]["profile_id"] == profile.profile_id
 
     def test_seed_count_in_stats(self):
         """With community-aware seeding, seed_count reflects actual seeds selected.
@@ -386,6 +438,54 @@ class TestExplorerSearch:
         explorer = KnowledgeExplorer(kg)
         result = explorer.search(query="test")
         assert result["nodes"] == []
+
+    def test_search_filters_by_concept_type_and_relationship_family(self):
+        profile = create_default_ontology_profile("test-ns")
+        e1 = FakeEntityNode(id="feature-1", label="feature", properties={"concept_type": "feature"})
+        e2 = FakeEntityNode(id="service-1", label="service", properties={"concept_type": "service"})
+        e3 = FakeEntityNode(id="risk-1", label="risk", properties={"concept_type": "risk"})
+        rel1 = FakeRelation(source_id="feature-1", target_id="service-1", label="depends_on")
+        rel2 = FakeRelation(source_id="feature-1", target_id="risk-1", label="validates")
+        kg = FakeKuzuGraph(entities=[e1, e2, e3], triplets=[(e1, rel1, e2), (e1, rel2, e3)], ontology_profile=profile)
+        explorer = KnowledgeExplorer(kg)
+        result = explorer.search(
+            query="feature",
+            filters={"concept_type": ["feature", "service"], "relationship_family": ["dependency"]},
+        )
+        assert {node["concept_type"] for node in result["nodes"]} == {"feature", "service"}
+        assert len(result["edges"]) == 1
+        assert result["edges"][0]["family"] == "dependency"
+
+
+class TestExplorerEnterpriseMap:
+    """Tests for ontology-owned enterprise map projections."""
+
+    def test_enterprise_map_projects_profile_layers_and_map_direction(self):
+        profile = create_default_ontology_profile("test-ns")
+        feature = FakeEntityNode(
+            id="feature-1",
+            name="Feature 1",
+            label="feature",
+            properties={"concept_type": "feature", "metadata": {"owner": "Product"}},
+        )
+        service = FakeEntityNode(
+            id="service-1",
+            name="Service 1",
+            label="service",
+            properties={"concept_type": "service", "metadata": {"owner": "Platform"}},
+        )
+        rel = FakeRelation(source_id="feature-1", target_id="service-1", label="depends_on")
+        kg = FakeKuzuGraph(entities=[feature, service], triplets=[(feature, rel, service)], ontology_profile=profile)
+
+        result = KnowledgeExplorer(kg).enterprise_map(limit=20)
+
+        assert result["stats"]["node_count"] == 2
+        assert {layer["id"] for layer in result["layers"]} >= {"product", "delivery"}
+        assert result["nodes"][0]["ontology_path"]["concept_type"] == "feature"
+        assert result["edges"][0]["relationship_type"] == "depends_on"
+        assert result["edges"][0]["map_source"] == "service-1"
+        assert result["edges"][0]["map_target"] == "feature-1"
+        assert result["meta"]["profile_exists"] is True
 
 
 class TestExplorerPath:
@@ -491,6 +591,18 @@ class TestExplorerNodeDetail:
         explorer = KnowledgeExplorer(kg)
         result = explorer.node_detail("e1")
         assert result["edges"][0]["peer"]["name"] == "Bob"
+
+
+    def test_node_detail_groups_edges_by_canonical_type_and_direction(self):
+        profile = create_default_ontology_profile("test-ns")
+        e1 = FakeEntityNode(id="feature-1", label="feature", properties={"concept_type": "feature"})
+        e2 = FakeEntityNode(id="service-1", label="service", properties={"concept_type": "service"})
+        rel = FakeRelation(source_id="feature-1", target_id="service-1", label="depends_on")
+        kg = FakeKuzuGraph(entities=[e1, e2], triplets=[(e1, rel, e2)], ontology_profile=profile)
+        explorer = KnowledgeExplorer(kg)
+        result = explorer.node_detail("feature-1")
+        assert "depends_on" in result["edge_groups"]
+        assert len(result["edge_groups"]["depends_on"]["outgoing"]) == 1
 
     def test_node_fetch_failure_graceful(self):
         kg = FakeKuzuGraph()

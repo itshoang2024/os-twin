@@ -7,8 +7,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useKnowledgeExplorer, useKnowledgeExplorerSummary } from '../use-knowledge-explorer';
-import type { ExplorerGraphData, ExplorerPathData, ExplorerNodeDetail, ExplorerSummary } from '../use-knowledge-explorer';
+import { useEnterpriseMap, useKnowledgeExplorer, useKnowledgeExplorerSummary } from '../use-knowledge-explorer';
+import type {
+  EnterpriseMapProjectionData,
+  ExplorerGraphData,
+  ExplorerNodeDetail,
+  ExplorerPathData,
+} from '../use-knowledge-explorer';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -82,6 +87,54 @@ describe('useKnowledgeExplorerSummary', () => {
     // With SWR, the initial state may be loading or data depending on cache
     // At minimum, summary should be null before fetch resolves
     expect(result.current.summary).toBeNull();
+  });
+});
+
+describe('useEnterpriseMap', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fetches the ontology enterprise-map projection for a namespace', async () => {
+    const projection: EnterpriseMapProjectionData = {
+      nodes: [
+        {
+          ...makeNode('feature-1', 'feature', 'Feature 1'),
+          concept_type: 'feature',
+          concept_label: 'Feature',
+          layer_id: 'product',
+          layer_label: 'Product',
+          owner: 'Product',
+          properties: {},
+        },
+      ],
+      edges: [],
+      layers: [{ id: 'product', label: 'Product', order: 1, count: 1 }],
+      abstraction_levels: [{ id: 'feature', label: 'Feature', order: 2 }],
+      concept_type_counts: { feature: 1 },
+      relationship_type_counts: {},
+      relationship_family_counts: {},
+      stats: {
+        node_count: 1,
+        edge_count: 0,
+        layer_count: 1,
+        concept_type_count: 1,
+        relationship_type_count: 0,
+        candidate_edge_count: 0,
+        validation_issue_count: 0,
+        ontology_candidate_count: 2,
+      },
+    };
+    mockApiGet.mockResolvedValueOnce(projection);
+
+    const { result } = renderHook(() => useEnterpriseMap(NAMESPACE, 25));
+
+    await waitFor(() => expect(result.current.map?.nodes).toHaveLength(1));
+
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/knowledge/namespaces/test-ns/ontology/enterprise-map?limit=25'
+    );
+    expect(result.current.map?.stats.ontology_candidate_count).toBe(2);
   });
 });
 
@@ -338,6 +391,26 @@ describe('useKnowledgeExplorer', () => {
     expect(result.current.nodes).toHaveLength(2);
   });
 
+
+
+  it('search forwards ontology filters when provided', async () => {
+    const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
+    mockApiPost.mockResolvedValueOnce(makeGraphData([], [], { query: 'test' }));
+
+    await act(async () => {
+      await result.current.search('test', 10, { concept_type: ['feature'], relationship_family: ['dependency'] });
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      expect.stringContaining('/explorer/search'),
+      {
+        query: 'test',
+        limit: 10,
+        filters: { concept_type: ['feature'], relationship_family: ['dependency'] },
+      }
+    );
+  });
+
   it('search does nothing with empty query', async () => {
     const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
 
@@ -501,8 +574,8 @@ describe('useKnowledgeExplorer', () => {
     expect(mockApiGet).toHaveBeenCalledWith(
       expect.stringContaining('/explorer/node/n1')
     );
-    expect(detail?.node?.id).toBe('n1');
-    expect(detail?.stats?.degree).toBe(5);
+    expect((detail as unknown as ExplorerNodeDetail).node?.id).toBe('n1');
+    expect((detail as unknown as ExplorerNodeDetail).stats?.degree).toBe(5);
   });
 
   it('getNodeDetail returns null on error', async () => {
@@ -512,7 +585,7 @@ describe('useKnowledgeExplorer', () => {
 
     const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
 
-    let detail: ExplorerNodeDetail | null = 'not-null' as any;
+    let detail: ExplorerNodeDetail | null = { node: null, edges: [], stats: { error: 'not-run' } };
     await act(async () => {
       detail = await result.current.getNodeDetail('missing');
     });
@@ -523,13 +596,47 @@ describe('useKnowledgeExplorer', () => {
   it('getNodeDetail returns null when namespace is null', async () => {
     const { result } = renderHook(() => useKnowledgeExplorer(null));
 
-    let detail: ExplorerNodeDetail | null = 'not-null' as any;
+    let detail: ExplorerNodeDetail | null = { node: null, edges: [], stats: { error: 'not-run' } };
     await act(async () => {
       detail = await result.current.getNodeDetail('n1');
     });
 
     expect(detail).toBeNull();
     expect(mockApiGet).not.toHaveBeenCalled();
+  });
+
+
+
+  it('accepts ontology-enriched response shapes without dropping legacy fields', async () => {
+    const enterpriseNode: ExplorerGraphData['nodes'][0] = {
+      ...makeNode('feature-1', 'feature', 'Feature 1'),
+      concept_type: 'feature',
+      abstraction_level: 'feature',
+      layer: 'product',
+      pack_id: 'core',
+      lifecycle_state: 'active',
+      metadata: { owner: 'platform' },
+      validation_issues: [],
+    };
+    const enterpriseEdge: ExplorerGraphData['edges'][0] = {
+      ...makeEdge('feature-1', 'service-1', 'depends_on'),
+      relationship_type: 'depends_on',
+      family: 'dependency',
+      display_label: 'Depends on',
+      inverse_label: 'Enables',
+      style: 'dashed',
+      is_candidate: false,
+      validation_issues: [],
+    };
+    mockApiGet.mockResolvedValueOnce(makeGraphData([enterpriseNode], [enterpriseEdge], { seed_count: 1 }));
+
+    const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
+    await act(async () => {
+      await result.current.seed(1);
+    });
+
+    expect(result.current.nodes[0].concept_type).toBe('feature');
+    expect(result.current.edges[0].family).toBe('dependency');
   });
 
   // ---- Reset action ----

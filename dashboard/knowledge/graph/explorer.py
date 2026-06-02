@@ -23,6 +23,10 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from dashboard.knowledge.ontology.normalizer import normalize_concept_type, normalize_relation
+from dashboard.knowledge.ontology.projection import project_enterprise_map
+from dashboard.knowledge.ontology.validator import validate_node, validate_relationship
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,52 +35,123 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _node_to_dict(node: Any, community_id: Optional[int] = None) -> Dict[str, Any]:
+def _coerce_properties(value: Any) -> Dict[str, Any]:
+    """Return a defensive dict for node/edge property payloads."""
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
+def _profile_summary(profile: Any) -> Optional[Dict[str, Any]]:
+    """Small, stable profile payload for explorer response metadata."""
+    if profile is None:
+        return None
+    return {
+        "profile_id": getattr(profile, "profile_id", ""),
+        "namespace": getattr(profile, "namespace", ""),
+        "version": getattr(profile, "version", ""),
+        "status": getattr(profile, "status", "active"),
+        "concept_type_count": len(getattr(profile, "concept_types", {}) or {}),
+        "relationship_type_count": len(getattr(profile, "relationship_types", {}) or {}),
+        "layer_count": len(getattr(profile, "layers", {}) or {}),
+        "abstraction_level_count": len(getattr(profile, "abstraction_levels", {}) or {}),
+    }
+
+
+def _node_to_dict(node: Any, community_id: Optional[int] = None, profile: Any = None) -> Dict[str, Any]:
     """Serialize a LlamaIndex LabelledNode to a JSON-friendly dict.
 
-    Includes optional ``degree`` (number of incident relations),
-    ``centrality_score`` when available, and ``community_id`` when the
-    Louvain community mapping has been computed.
+    The legacy shape is preserved while ontology-aware fields are added when
+    profile/node metadata is available. Legacy graphs without profiles receive
+    safe defaults (``validation_issues=[]`` and metadata from properties only).
     """
-    props = getattr(node, "properties", None) or {}
-    if isinstance(props, str):
+    props = _coerce_properties(getattr(node, "properties", None))
+    node_label = getattr(node, "label", "") or ""
+    raw_type = props.get("concept_type") or props.get("type") or node_label
+    concept_type = normalize_concept_type(str(raw_type), profile) if raw_type else ""
+    concept = None
+    if profile is not None and concept_type:
+        concept = (getattr(profile, "concept_types", {}) or {}).get(concept_type)
+
+    metadata = props.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {
+            key: value
+            for key, value in props.items()
+            if key not in {
+                "weight", "concept_type", "type", "abstraction_level", "layer",
+                "pack_id", "lifecycle_state", "validation_issues", "metadata",
+            }
+        }
+
+    validation_issues: List[Dict[str, Any]] = []
+    if isinstance(props.get("validation_issues"), list):
+        validation_issues.extend(props["validation_issues"])
+    if profile is not None and concept_type:
         try:
-            props = json.loads(props)
-        except (json.JSONDecodeError, TypeError):
-            props = {}
+            validation_issues.extend(issue.model_dump() for issue in validate_node(concept_type, profile))
+        except Exception as exc:  # noqa: BLE001 - validation must not break explorer reads
+            logger.debug("Explorer node validation failed for %s: %s", concept_type, exc)
 
     result = {
         "id": getattr(node, "id", ""),
-        "label": getattr(node, "label", ""),
+        "label": node_label,
         "name": getattr(node, "name", "") or getattr(node, "id", ""),
         "score": float(props.get("weight", 1.0)),
         "properties": props,
+        "concept_type": concept_type or None,
+        "abstraction_level": props.get("abstraction_level") or getattr(concept, "abstraction_level", None),
+        "layer": props.get("layer"),
+        "pack_id": props.get("pack_id"),
+        "lifecycle_state": props.get("lifecycle_state") or getattr(concept, "lifecycle_state", None),
+        "metadata": metadata,
+        "validation_issues": validation_issues,
     }
     if community_id is not None:
         result["community_id"] = community_id
     return result
 
 
-def _relation_to_dict(rel: Any) -> Dict[str, Any]:
+def _relation_to_dict(rel: Any, profile: Any = None, source_node: Any = None, target_node: Any = None) -> Dict[str, Any]:
     """Serialize a LlamaIndex Relation to a JSON-friendly dict.
 
-    Preserves ``relation_label`` and ``relation_properties`` (currently
-    discarded by the flat ``get_graph`` — this is the enhanced version).
+    Adds canonical relation metadata used by enterprise concept maps while
+    preserving the existing ``label``/``weight``/``properties`` contract.
     """
-    rel_props = getattr(rel, "properties", None) or {}
-    if isinstance(rel_props, str):
-        try:
-            rel_props = json.loads(rel_props)
-        except (json.JSONDecodeError, TypeError):
-            rel_props = {}
-
-    # Try structured fields first, fall back to properties dict
+    rel_props = _coerce_properties(getattr(rel, "properties", None))
     rel_label = getattr(rel, "label", "") or rel_props.get("relation_label", "RELATES")
-    rel_weight = float(
-        rel_props.get("weight", 1.0)
-        if isinstance(rel_props, dict)
-        else 1.0
-    )
+    rel_weight = float(rel_props.get("weight", 1.0))
+    normalized = normalize_relation(str(rel_label), profile)
+    relationship = normalized.canonical
+    relationship_type = normalized.normalized
+
+    validation_issues: List[Dict[str, Any]] = []
+    if isinstance(rel_props.get("validation_issues"), list):
+        validation_issues.extend(rel_props["validation_issues"])
+    if profile is not None:
+        try:
+            source_props = _coerce_properties(getattr(source_node, "properties", None)) if source_node is not None else {}
+            target_props = _coerce_properties(getattr(target_node, "properties", None)) if target_node is not None else {}
+            source_type = source_props.get("concept_type") or source_props.get("type") or getattr(source_node, "label", "")
+            target_type = target_props.get("concept_type") or target_props.get("type") or getattr(target_node, "label", "")
+            if source_type and target_type:
+                validation_issues.extend(
+                    issue.model_dump()
+                    for issue in validate_relationship(str(rel_label), str(source_type), str(target_type), profile)
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Explorer relation validation failed for %s: %s", rel_label, exc)
+
+    inverse_label = None
+    if relationship is not None and relationship.inverse:
+        inverse = (getattr(profile, "relationship_types", {}) or {}).get(relationship.inverse) if profile else None
+        inverse_label = getattr(inverse, "label", None) or relationship.inverse
 
     return {
         "source": getattr(rel, "source_id", ""),
@@ -84,18 +159,21 @@ def _relation_to_dict(rel: Any) -> Dict[str, Any]:
         "label": rel_label,
         "weight": rel_weight,
         "properties": rel_props,
+        "relationship_type": relationship_type,
+        "family": getattr(relationship, "family", None),
+        "display_label": getattr(relationship, "label", None) or rel_label,
+        "inverse_label": inverse_label,
+        "style": getattr(relationship, "style", "solid"),
+        "is_candidate": normalized.classification == "candidate",
+        "validation_issues": validation_issues,
     }
 
 
-def _triplet_to_edge_dicts(source: Any, rel: Any, target: Any) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
-    """Convert a (source, relation, target) triplet into node/edge dicts.
-
-    Returns (source_dict, target_dict, edge_dict, [node_dicts]).
-    Handles deduplication upstream.
-    """
-    s_dict = _node_to_dict(source)
-    t_dict = _node_to_dict(target)
-    e_dict = _relation_to_dict(rel)
+def _triplet_to_edge_dicts(source: Any, rel: Any, target: Any, profile: Any = None) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
+    """Convert a (source, relation, target) triplet into node/edge dicts."""
+    s_dict = _node_to_dict(source, profile=profile)
+    t_dict = _node_to_dict(target, profile=profile)
+    e_dict = _relation_to_dict(rel, profile=profile, source_node=source, target_node=target)
     return s_dict, t_dict, e_dict, [s_dict, t_dict]
 
 
@@ -124,6 +202,7 @@ class KnowledgeExplorer:
 
     def __init__(self, graph: Any) -> None:
         self.graph = graph
+        self.profile = getattr(graph, "ontology_profile", None)
         # Cached community mapping: {entity_id: community_id}
         self._community_map: Dict[str, int] = {}
         # Cached NetworkX graph (shared between seed / communities)
@@ -213,10 +292,10 @@ class KnowledgeExplorer:
             G = self._get_nx_graph()
         except Exception as exc:
             logger.error("Explorer seed graph fetch failed: %s", exc)
-            return {"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}}
+            return self._with_meta({"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}})
 
         if G is None or len(G.nodes()) == 0:
-            return {"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}}
+            return self._with_meta({"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}})
 
         # Step 2: Run community detection (caches result)
         try:
@@ -233,7 +312,7 @@ class KnowledgeExplorer:
                 entity_ids.append(orig_id)
 
             if not entity_ids:
-                return {"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}}
+                return self._with_meta({"nodes": [], "edges": [], "stats": {"node_count": 0, "edge_count": 0, "seed_count": 0, "community_count": 0}})
 
             uniform_weight = 1.0 / len(entity_ids)
             personalize = {eid: uniform_weight for eid in entity_ids}
@@ -253,9 +332,9 @@ class KnowledgeExplorer:
             top_ids = entity_ids[:top_k]
 
         # Step 5: Expand 1-hop from top nodes
-        return self._expand_from_ids(top_ids, include_seed_info=True)
+        return self._with_meta(self._expand_from_ids(top_ids, include_seed_info=True))
 
-    def expand(self, node_ids: List[str], depth: int = 1) -> Dict[str, Any]:
+    def expand(self, node_ids: List[str], depth: int = 1, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Expand from a set of node IDs outward by N hops.
 
         Each hop fetches the neighborhood of the frontier nodes via
@@ -292,7 +371,7 @@ class KnowledgeExplorer:
                 r_key = (s_id, t_id, getattr(rel, "label", ""))
                 if r_key not in seen_edges:
                     seen_edges.add(r_key)
-                    all_edges.append(_relation_to_dict(rel))
+                    all_edges.append(_relation_to_dict(rel, profile=self.profile, source_node=source, target_node=target))
                 if s_id not in all_node_ids:
                     all_node_ids.add(s_id)
                     next_frontier.append(s_id)
@@ -310,13 +389,13 @@ class KnowledgeExplorer:
             if e["source"] in node_id_set and e["target"] in node_id_set
         ]
 
-        return {
+        return self._apply_filters({
             "nodes": nodes,
             "edges": filtered_edges,
             "stats": {"node_count": len(nodes), "edge_count": len(filtered_edges)},
-        }
+        }, filters)
 
-    def search(self, query: str, limit: int = 20) -> Dict[str, Any]:
+    def search(self, query: str, limit: int = 20, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Vector-similarity search over node embeddings + 1-hop context.
 
         Uses ``get_all_nodes(context=query)`` which leverages KuzuDB's
@@ -342,7 +421,67 @@ class KnowledgeExplorer:
 
         result = self._expand_from_ids(seed_ids)
         result["stats"]["query"] = query
-        return result
+        return self._apply_filters(result, filters)
+
+    def enterprise_map(self, limit: int = 200, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Return an ontology-owned projection suitable for enterprise map surfaces.
+
+        Unlike ``seed`` and ``expand`` this does not model an interaction state.
+        It returns a bounded, stable read model of graph nodes and relationships
+        enriched with ontology layer/concept metadata. The projection is built
+        in ``knowledge.ontology`` so builder surfaces and map surfaces share the
+        same interpretation of raw graph facts.
+        """
+        kg = self.graph
+        limit = max(1, min(500, int(limit or 200)))
+
+        try:
+            kg_nodes = kg.get_all_nodes(label_type="entity", limit=limit)
+        except Exception as exc:
+            logger.error("Explorer enterprise_map node fetch failed: %s", exc)
+            kg_nodes = []
+
+        kg_nodes = kg_nodes[:limit]
+        nodes = [_node_to_dict(node, profile=self.profile) for node in kg_nodes]
+        node_ids = [node["id"] for node in nodes if node.get("id")]
+        node_id_set = set(node_ids)
+        edges: List[Dict[str, Any]] = []
+        seen_edges: set = set()
+
+        if node_ids:
+            try:
+                triplets = kg.get_triplets(ids=node_ids)
+            except Exception as exc:
+                logger.error("Explorer enterprise_map triplet fetch failed: %s", exc)
+                triplets = []
+
+            for source, rel, target in triplets:
+                s_id = getattr(source, "id", "")
+                t_id = getattr(target, "id", "")
+                if s_id not in node_id_set or t_id not in node_id_set:
+                    continue
+                r_key = (s_id, t_id, getattr(rel, "label", ""))
+                if r_key in seen_edges:
+                    continue
+                seen_edges.add(r_key)
+                edges.append(_relation_to_dict(rel, profile=self.profile, source_node=source, target_node=target))
+
+        graph_result = self._apply_filters(
+            {
+                "nodes": nodes,
+                "edges": edges,
+                "stats": {
+                    "source_node_count": len(nodes),
+                    "source_edge_count": len(edges),
+                    "limit": limit,
+                    "filtered": bool(filters),
+                },
+            },
+            filters,
+        )
+        projection = project_enterprise_map(graph_result["nodes"], graph_result["edges"], self.profile)
+        projection["stats"].update(graph_result.get("stats") or {})
+        return self._with_meta(projection)
 
     def path(self, source_id: str, target_id: str) -> Dict[str, Any]:
         """Find the shortest weighted path between two nodes.
@@ -396,12 +535,13 @@ class KnowledgeExplorer:
             edge_data = G.edges[nx_s, nx_t] if G.has_edge(nx_s, nx_t) else {}
             rel_label = edge_data.get("relation_label", edge_data.get("label", "RELATES"))
             rel_weight = edge_data.get("weight", 1.0)
-            path_edges.append({
-                "source": orig_s,
-                "target": orig_t,
+            rel_obj = type("ExplorerPathRelation", (), {
+                "source_id": orig_s,
+                "target_id": orig_t,
                 "label": rel_label,
-                "weight": rel_weight,
-            })
+                "properties": {"weight": rel_weight},
+            })()
+            path_edges.append(_relation_to_dict(rel_obj, profile=self.profile))
 
         return {
             "path": original_ids,
@@ -429,14 +569,14 @@ class KnowledgeExplorer:
         if node is None:
             return {"node": None, "edges": [], "stats": {"error": "node_not_found"}}
 
-        node_dict = _node_to_dict(node)
+        node_dict = _node_to_dict(node, profile=self.profile)
 
         # Get incident edges
         incident_edges = []
         try:
             triplets = kg.get_triplets(ids=[node_id])
             for source, rel, target in triplets:
-                edge = _relation_to_dict(rel)
+                edge = _relation_to_dict(rel, profile=self.profile, source_node=source, target_node=target)
                 # Annotate with whether this is incoming or outgoing
                 s_id = getattr(source, "id", "")
                 if s_id == node_id:
@@ -445,7 +585,7 @@ class KnowledgeExplorer:
                     edge["direction"] = "incoming"
                 # Include peer node info
                 peer = target if s_id == node_id else source
-                edge["peer"] = _node_to_dict(peer)
+                edge["peer"] = _node_to_dict(peer, profile=self.profile)
                 incident_edges.append(edge)
         except Exception as exc:
             logger.error("Explorer node_detail edges failed: %s", exc)
@@ -458,9 +598,17 @@ class KnowledgeExplorer:
         node_dict["in_degree"] = in_degree
         node_dict["out_degree"] = out_degree
 
+        edge_groups: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for edge in incident_edges:
+            rel_type = edge.get("relationship_type") or edge.get("label") or "RELATES"
+            direction = edge.get("direction") or "outgoing"
+            group = edge_groups.setdefault(str(rel_type), {"incoming": [], "outgoing": []})
+            group.setdefault(str(direction), []).append(edge)
+
         return {
             "node": node_dict,
             "edges": incident_edges,
+            "edge_groups": edge_groups,
             "stats": {
                 "degree": in_degree + out_degree,
                 "in_degree": in_degree,
@@ -471,6 +619,73 @@ class KnowledgeExplorer:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _with_meta(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Attach ontology profile summary without changing graph data shape."""
+        meta = result.setdefault("meta", {})
+        summary = _profile_summary(self.profile)
+        meta["ontology_profile"] = summary
+        meta["profile_exists"] = summary is not None
+        graph_instruction = getattr(self.profile, "graph_instruction", None)
+        meta["graph_instruction"] = graph_instruction.model_dump(mode="json") if graph_instruction is not None else {}
+        meta["safe_defaults"] = summary is None
+        return result
+
+    def _apply_filters(self, result: Dict[str, Any], filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Apply ontology-driven filters to a graph response in memory."""
+        if not filters:
+            return result
+
+        filters = {k: v for k, v in filters.items() if v not in (None, [], {})}
+        if not filters:
+            return result
+
+        def match_values(value: Any, expected: Any) -> bool:
+            if expected is None:
+                return True
+            values = expected if isinstance(expected, list) else [expected]
+            return value in values
+
+        metadata_filters = filters.get("metadata") or {}
+        nodes = []
+        for node in result.get("nodes", []):
+            if not match_values(node.get("concept_type"), filters.get("concept_type")):
+                continue
+            if not match_values(node.get("abstraction_level"), filters.get("abstraction_level")):
+                continue
+            if not match_values(node.get("layer"), filters.get("layer")):
+                continue
+            if not match_values(node.get("pack_id"), filters.get("pack_id")):
+                continue
+            if not match_values(node.get("lifecycle_state"), filters.get("lifecycle_state")):
+                continue
+            props = node.get("properties") or {}
+            metadata = node.get("metadata") or {}
+            if filters.get("owner") is not None and not match_values(props.get("owner") or metadata.get("owner"), filters.get("owner")):
+                continue
+            if any(metadata.get(key) != value and props.get(key) != value for key, value in metadata_filters.items()):
+                continue
+            nodes.append(node)
+
+        node_ids = {node.get("id") for node in nodes}
+        edges = []
+        for edge in result.get("edges", []):
+            if edge.get("source") not in node_ids or edge.get("target") not in node_ids:
+                continue
+            if not match_values(edge.get("family"), filters.get("relationship_family")):
+                continue
+            if not match_values(edge.get("relationship_type"), filters.get("relationship_type")):
+                continue
+            edges.append(edge)
+
+        result = dict(result)
+        result["nodes"] = nodes
+        result["edges"] = edges
+        stats = dict(result.get("stats") or {})
+        stats["node_count"] = len(nodes)
+        stats["edge_count"] = len(edges)
+        result["stats"] = stats
+        return result
 
     def _get_nx_graph(self) -> Any:
         """Get-or-compute the cached NetworkX entity subgraph.
@@ -641,7 +856,7 @@ class KnowledgeExplorer:
             r_key = (s_id, t_id, getattr(rel, "label", ""))
             if r_key not in seen_edges:
                 seen_edges.add(r_key)
-                all_edges.append(_relation_to_dict(rel))
+                all_edges.append(_relation_to_dict(rel, profile=self.profile, source_node=source, target_node=target))
             all_node_ids.add(s_id)
             all_node_ids.add(t_id)
 
@@ -691,7 +906,7 @@ class KnowledgeExplorer:
             for n in kg_nodes:
                 eid = getattr(n, "id", "")
                 cid = self._community_map.get(eid) if self._community_map else None
-                nodes.append(_node_to_dict(n, community_id=cid))
+                nodes.append(_node_to_dict(n, community_id=cid, profile=self.profile))
             return nodes
         except Exception as exc:
             logger.warning("Batch node fetch failed, falling back: %s", exc)
@@ -703,7 +918,7 @@ class KnowledgeExplorer:
                 if n is not None:
                     eid = getattr(n, "id", "")
                     cid = self._community_map.get(eid) if self._community_map else None
-                    nodes.append(_node_to_dict(n, community_id=cid))
+                    nodes.append(_node_to_dict(n, community_id=cid, profile=self.profile))
             except Exception:
                 pass
         return nodes

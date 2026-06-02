@@ -52,6 +52,23 @@ from dashboard.knowledge.config import EMBEDDING_MODEL as _DEFAULT_EMBED  # noqa
 from dashboard.knowledge.config import EMBEDDING_PROVIDER as _DEFAULT_EMBED_PROV  # noqa: WPS433
 from dashboard.knowledge.embeddings import KnowledgeEmbedder  # noqa: WPS433
 from dashboard.knowledge.query import KnowledgeQueryEngine  # noqa: WPS433
+from dashboard.knowledge.ontology.defaults import create_default_ontology_profile
+from dashboard.knowledge.ontology.models import OntologyProfile
+from dashboard.knowledge.ontology.store import OntologyProfileStore
+from dashboard.knowledge.ontology.audit import (
+    OntologyAuditStore,
+    add_rename_aliases,
+    diff_profiles,
+    validate_migration_safety,
+)
+from dashboard.knowledge.ontology.candidates import OntologyCandidateStore, normalize_candidate_label
+from dashboard.knowledge.ontology.packs import DomainPackStore
+from dashboard.knowledge.ontology.validator import (
+    validate_node as validate_ontology_node,
+    validate_pack as validate_ontology_pack,
+    validate_profile as validate_ontology_profile,
+    validate_relationship as validate_ontology_relationship,
+)
 if TYPE_CHECKING:  # pragma: no cover
     from dashboard.knowledge.query import KnowledgeQueryEngine, QueryResult
     from dashboard.knowledge.vector_store import NamespaceVectorStore
@@ -201,6 +218,10 @@ class KnowledgeService:
         self._graph_rag_engines: dict[str, Any] = {}  # per-namespace GraphRAGQueryEngine cache
         # Background retention sweeper (EPIC-004)
         self._sweeper: Optional[RetentionSweeper] = None
+        self._ontology_store = OntologyProfileStore(self._nm)
+        self._ontology_audit_store = OntologyAuditStore(self._nm)
+        self._candidate_store = OntologyCandidateStore(self._nm)
+        self._domain_pack_store = DomainPackStore(self._nm, self._ontology_store)
 
     # ---- Shared embedder / LLM (lazy) -----------------------------------
 
@@ -339,6 +360,7 @@ class KnowledgeService:
             index=namespace,
             ws_id=namespace,
             database_path=db_path,
+            ontology_profile=self.get_ontology_profile(namespace),
         )
         self._kuzu_graphs[namespace] = kg
         return kg
@@ -372,15 +394,25 @@ class KnowledgeService:
         explorer = self._get_explorer(namespace)
         return explorer.seed(top_k=top_k)
 
-    def explorer_expand(self, namespace: str, node_ids: list[str], depth: int = 1) -> dict:
+    def explorer_expand(self, namespace: str, node_ids: list[str], depth: int = 1, filters: dict[str, Any] | None = None) -> dict:
         """Expand from a set of node IDs outward by N hops."""
         explorer = self._get_explorer(namespace)
-        return explorer.expand(node_ids=node_ids, depth=depth)
+        return explorer.expand(node_ids=node_ids, depth=depth, filters=filters)
 
-    def explorer_search(self, namespace: str, query: str, limit: int = 20) -> dict:
+    def explorer_search(self, namespace: str, query: str, limit: int = 20, filters: dict[str, Any] | None = None) -> dict:
         """Vector-similarity search over node embeddings + 1-hop context."""
         explorer = self._get_explorer(namespace)
-        return explorer.search(query=query, limit=limit)
+        return explorer.search(query=query, limit=limit, filters=filters)
+
+    def ontology_enterprise_map(self, namespace: str, limit: int = 200, filters: dict[str, Any] | None = None) -> dict:
+        """Return a graph-backed ontology projection for map and builder surfaces."""
+        self._require_namespace(namespace)
+        explorer = self._get_explorer(namespace)
+        result = explorer.enterprise_map(limit=limit, filters=filters)
+        candidate_count = self._candidate_store.pending_count(namespace)
+        result.setdefault("stats", {})["ontology_candidate_count"] = candidate_count
+        result.setdefault("meta", {})["ontology_candidate_count"] = candidate_count
+        return result
 
     def explorer_path(self, namespace: str, source_id: str, target_id: str) -> dict:
         """Find the shortest weighted path between two nodes."""
@@ -446,6 +478,9 @@ class KnowledgeService:
                 llm=llm,
                 embedder=self._get_embedder(),
                 language=ns_language,
+                ontology_profile=self.get_ontology_profile(namespace),
+                candidate_store=self._candidate_store,
+                namespace=namespace,
             )
 
             # kg_extractors=[extractor] prevents llama-index from
@@ -716,6 +751,9 @@ class KnowledgeService:
                 llm=llm,
                 embedder=self._get_embedder(),
                 language=ns_language,
+                ontology_profile=self.get_ontology_profile(namespace),
+                candidate_store=self._candidate_store,
+                namespace=namespace,
             )
 
             index = PropertyGraphIndex.from_existing(
@@ -840,6 +878,509 @@ class KnowledgeService:
                 result = type(exc).__name__
             _log_call(namespace, "create_namespace", result, latency_ms, {"actor": actor, "error": str(exc)})
             raise
+
+
+    def _require_namespace(self, namespace: str) -> NamespaceMeta:
+        """Return namespace metadata or raise the canonical not-found exception."""
+        meta = self._nm.get(namespace)
+        if meta is None:
+            raise NamespaceNotFoundError(namespace)
+        return meta
+
+    def get_ontology_profile(self, namespace: str) -> Optional[OntologyProfile]:
+        """Return the namespace's active ontology profile, or None for legacy namespaces."""
+        return self._ontology_store.get(namespace)
+
+    def get_ontology_profile_with_default(self, namespace: str) -> dict[str, Any]:
+        """Return active ontology profile metadata or a deterministic default suggestion."""
+        self._require_namespace(namespace)
+        profile = self.get_ontology_profile(namespace)
+        issues = validate_ontology_profile(profile) if profile is not None else []
+        return {
+            "namespace": namespace,
+            "profile": profile.model_dump(mode="json") if profile is not None else None,
+            "profile_exists": profile is not None,
+            "default_suggested": profile is None,
+            "default_profile": (
+                None
+                if profile is not None
+                else create_default_ontology_profile(namespace).model_dump(mode="json")
+            ),
+            "validation_issues": [issue.model_dump() for issue in issues],
+        }
+
+    def save_ontology_profile(
+        self,
+        profile: OntologyProfile,
+        *,
+        actor: str = "anonymous",
+        reason: str = "Profile saved",
+        validation_override: dict[str, Any] | None = None,
+        operation: str = "profile_save",
+    ) -> OntologyProfile:
+        """Persist an ontology profile, history record, migration warnings, and audit event."""
+        previous = self.get_ontology_profile(profile.namespace)
+        profile, migration_entries = add_rename_aliases(previous, profile)
+        issues = validate_ontology_profile(profile)
+        if any(issue.severity == "error" for issue in issues):
+            messages = "; ".join(issue.message for issue in issues)
+            raise ValueError(f"Ontology profile has validation errors: {messages}")
+        cached_graph = self._kuzu_graphs.get(profile.namespace)
+        migration_issues = validate_migration_safety(
+            profile.namespace,
+            previous,
+            profile,
+            graph=cached_graph,
+        )
+        dangerous = [issue for issue in migration_issues if issue.severity == "error"]
+        if dangerous and not validation_override:
+            messages = "; ".join(issue.message for issue in dangerous)
+            raise ValueError(f"Dangerous ontology migration requires validation_override metadata: {messages}")
+
+        diff = diff_profiles(previous, profile)
+        written = self._ontology_store.write(profile, set_active=True)
+        self._ontology_audit_store.append_profile_record(
+            profile.namespace,
+            actor=actor,
+            reason=reason,
+            previous=previous,
+            current=written,
+            diff=diff,
+            migration_issues=migration_issues,
+            validation_override=validation_override,
+            migration_entries=migration_entries,
+            op=operation,
+        )
+        if cached_graph is not None:
+            cached_graph.ontology_profile = written
+        return written
+
+    def save_ontology_profile_payload(
+        self,
+        namespace: str,
+        payload: dict[str, Any],
+        *,
+        actor: str = "anonymous",
+        reason: str = "Profile saved through API",
+        validation_override: dict[str, Any] | None = None,
+    ) -> OntologyProfile:
+        """Validate and persist an ontology profile payload for the path namespace."""
+        self._require_namespace(namespace)
+        payload_namespace = payload.get("namespace")
+        if payload_namespace is None:
+            payload = {**payload, "namespace": namespace}
+        elif payload_namespace != namespace:
+            raise ValueError("Ontology profile namespace must match path namespace")
+        return self.save_ontology_profile(
+            OntologyProfile.model_validate(payload),
+            actor=actor,
+            reason=reason,
+            validation_override=validation_override,
+        )
+
+    def create_default_ontology_profile(self, namespace: str) -> OntologyProfile:
+        """Create and persist the deterministic default ontology profile for a namespace."""
+        self._require_namespace(namespace)
+        profile = create_default_ontology_profile(namespace)
+        return self.save_ontology_profile(profile, actor="system", reason="Create default ontology profile", operation="profile_reset")
+
+    def reset_default_ontology_profile(self, namespace: str) -> tuple[OntologyProfile, bool]:
+        """Replace any active profile with the deterministic default profile."""
+        self._require_namespace(namespace)
+        replaced_existing = self.get_ontology_profile(namespace) is not None
+        return self.create_default_ontology_profile(namespace), replaced_existing
+
+    def validate_ontology_payload(self, namespace: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate ontology profile, node, edge, or pack data without saving it."""
+        self._require_namespace(namespace)
+        subject = payload.get("subject")
+        profile_payload = payload.get("profile")
+        profile = (
+            OntologyProfile.model_validate(
+                {**profile_payload, "namespace": profile_payload.get("namespace", namespace)}
+            )
+            if isinstance(profile_payload, dict)
+            else self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
+        )
+        issues: list[Any] = []
+        if subject == "profile":
+            issues.extend(validate_ontology_profile(profile))
+        elif subject == "node":
+            node = payload.get("node") or {}
+            concept_type = node.get("concept_type", node.get("type", ""))
+            issues.extend(validate_ontology_node(str(concept_type), profile))
+        elif subject == "edge":
+            edge = payload.get("edge") or {}
+            relation_type = edge.get("relation_type", edge.get("label", edge.get("type", "")))
+            source_type = edge.get(
+                "source_type",
+                edge.get("source_concept_type", edge.get("source", {}).get("type", "")),
+            )
+            target_type = edge.get(
+                "target_type",
+                edge.get("target_concept_type", edge.get("target", {}).get("type", "")),
+            )
+            issues.extend(
+                validate_ontology_relationship(str(relation_type), str(source_type), str(target_type), profile)
+            )
+        elif subject == "pack":
+            for idx, node in enumerate(payload.get("nodes") or []):
+                concept_type = node.get("concept_type", node.get("type", ""))
+                issues.extend(validate_ontology_node(str(concept_type), profile, path=f"nodes[{idx}].type"))
+            issues.extend(validate_ontology_pack(list(payload.get("edges") or []), profile))
+        else:
+            raise ValueError("Validation subject must be one of: profile, node, edge, pack")
+        return {
+            "namespace": namespace,
+            "subject": str(subject),
+            "valid": not any(issue.severity == "error" for issue in issues),
+            "issues": [issue.model_dump() for issue in issues],
+        }
+
+    def list_ontology_profile_history(self, namespace: str) -> list[dict[str, Any]]:
+        """List profile version history records newest-first."""
+        self._require_namespace(namespace)
+        return [record.model_dump(mode="json", exclude={"profile"}) for record in self._ontology_audit_store.list_history(namespace)]
+
+    def get_ontology_profile_history(self, namespace: str, version_or_id: str) -> dict[str, Any]:
+        """Read one profile history record including its immutable profile snapshot."""
+        self._require_namespace(namespace)
+        return self._ontology_audit_store.get_history(namespace, version_or_id).model_dump(mode="json")
+
+    def diff_ontology_profiles(
+        self,
+        namespace: str,
+        *,
+        base_profile: dict[str, Any] | None = None,
+        target_profile: dict[str, Any] | None = None,
+        base_version: str | None = None,
+        target_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a side-effect-free diff between two profile payloads or history versions."""
+        self._require_namespace(namespace)
+
+        def resolve(payload: dict[str, Any] | None, version: str | None, fallback_current: bool) -> OntologyProfile | None:
+            if payload is not None:
+                return OntologyProfile.model_validate({**payload, "namespace": payload.get("namespace", namespace)})
+            if version:
+                record = self._ontology_audit_store.get_history(namespace, version)
+                return OntologyProfile.model_validate(record.profile)
+            if fallback_current:
+                return self.get_ontology_profile(namespace)
+            return None
+
+        previous = resolve(base_profile, base_version, True)
+        current = resolve(target_profile, target_version, False)
+        if current is None:
+            raise ValueError("target_profile or target_version is required")
+        diff = diff_profiles(previous, current)
+        migration_issues = validate_migration_safety(
+            namespace, previous, current, graph=self._kuzu_graphs.get(namespace)
+        )
+        return {
+            "namespace": namespace,
+            "base_version": previous.version if previous else None,
+            "target_version": current.version,
+            "diff": diff.model_dump(mode="json"),
+            "migration_issues": [issue.model_dump(mode="json") for issue in migration_issues],
+            "would_mutate": False,
+        }
+
+    def preview_ontology_profile_rollback(self, namespace: str, version_or_id: str) -> dict[str, Any]:
+        """Preview rollback diff to a historical profile without mutating current storage."""
+        record = self._ontology_audit_store.get_history(namespace, version_or_id)
+        current = self.get_ontology_profile(namespace)
+        target = OntologyProfile.model_validate(record.profile)
+        diff = diff_profiles(current, target)
+        migration_issues = validate_migration_safety(namespace, current, target, graph=self._kuzu_graphs.get(namespace))
+        return {
+            "namespace": namespace,
+            "base_version": current.version if current else None,
+            "target_version": target.version,
+            "history_id": record.id,
+            "diff": diff.model_dump(mode="json"),
+            "migration_issues": [issue.model_dump(mode="json") for issue in migration_issues],
+            "would_mutate": False,
+        }
+
+    def get_ontology_summary(self, namespace: str) -> dict[str, Any]:
+        """Return summary counters for the active ontology profile or default suggestion."""
+        self._require_namespace(namespace)
+        profile = self.get_ontology_profile(namespace)
+        profile_exists = profile is not None
+        if profile is None:
+            profile = create_default_ontology_profile(namespace)
+        issues = validate_ontology_profile(profile)
+        candidate_count = self._candidate_store.pending_count(namespace)
+        return {
+            "namespace": namespace,
+            "profile_exists": profile_exists,
+            "profile_id": profile.profile_id,
+            "version": profile.version,
+            "concept_type_count": len(profile.concept_types),
+            "relation_type_count": len(profile.relationship_types),
+            "alias_count": len(profile.aliases),
+            "candidate_count": candidate_count,
+            "validation_issue_count": len(issues),
+            "validation_issues": [issue.model_dump() for issue in issues],
+        }
+
+
+    def list_available_domain_packs(self) -> list[dict[str, Any]]:
+        """Return built-in domain pack manifests available for installation."""
+
+        return [manifest.model_dump(mode="json") for manifest in self._domain_pack_store.list_available()]
+
+    def list_installed_domain_packs(self, namespace: str) -> dict[str, Any]:
+        """Return namespace-local domain pack lifecycle state."""
+
+        self._require_namespace(namespace)
+        return self._domain_pack_store.get_state(namespace).model_dump(mode="json")
+
+    def validate_domain_pack_install(self, namespace: str, pack_id: str) -> dict[str, Any]:
+        """Preview pack compatibility, conflicts, and merged profile without saving."""
+
+        self._require_namespace(namespace)
+        manifest = self._domain_pack_store.load_manifest(pack_id)
+        profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
+        result = self._domain_pack_store.validate(manifest, profile)
+        data = result.model_dump()
+        data.update({"namespace": namespace, "pack_id": pack_id, "manifest": manifest.model_dump(mode="json")})
+        return data
+
+    def install_domain_pack(self, namespace: str, pack_id: str, *, actor: str = "anonymous", reason: str = "Domain pack install") -> dict[str, Any]:
+        """Install or upgrade a domain pack into the namespace active ontology profile."""
+
+        self._require_namespace(namespace)
+        manifest = self._domain_pack_store.load_manifest(pack_id)
+        profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
+        result = self._domain_pack_store.install(namespace, manifest, profile)
+        cached_graph = self._kuzu_graphs.get(namespace)
+        if cached_graph is not None:
+            cached_graph.ontology_profile = result.profile
+        self._ontology_audit_store.audit_operation(
+            namespace,
+            actor=actor,
+            op="pack_install",
+            reason=reason,
+            metadata={"pack_id": pack_id, "profile_version": result.profile.version, "action": "install"},
+        )
+        return result.model_dump()
+
+    def uninstall_domain_pack(self, namespace: str, pack_id: str, *, actor: str = "anonymous", reason: str = "Domain pack uninstall") -> dict[str, Any]:
+        """Disable a domain pack and remove pack-owned profile additions when safe."""
+
+        self._require_namespace(namespace)
+        profile = self.get_ontology_profile(namespace)
+        if profile is None:
+            raise ValueError("Cannot uninstall a domain pack before an ontology profile exists")
+        result = self._domain_pack_store.uninstall(namespace, pack_id, profile)
+        cached_graph = self._kuzu_graphs.get(namespace)
+        if cached_graph is not None:
+            cached_graph.ontology_profile = result.profile
+        self._ontology_audit_store.audit_operation(
+            namespace,
+            actor=actor,
+            op="pack_uninstall",
+            reason=reason,
+            metadata={"pack_id": pack_id, "profile_version": result.profile.version, "action": "uninstall"},
+        )
+        return result.model_dump()
+
+
+    def list_ontology_candidates(
+        self,
+        namespace: str,
+        *,
+        status: str | None = None,
+        candidate_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List namespace ontology review candidates."""
+
+        self._require_namespace(namespace)
+        return [c.model_dump(mode="json") for c in self._candidate_store.list(namespace, status=status, candidate_type=candidate_type)]
+
+    def approve_ontology_candidate(
+        self,
+        namespace: str,
+        candidate_id: str,
+        *,
+        reviewed_by: str = "anonymous",
+        canonical_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Approve a candidate by creating a canonical concept or relationship enum."""
+
+        self._require_namespace(namespace)
+        payload = payload or {}
+        candidate = next((c for c in self._candidate_store.list(namespace) if c.id == candidate_id), None)
+        if candidate is None:
+            raise KeyError(f"Candidate not found: {candidate_id}")
+        canonical = normalize_candidate_label(canonical_id or candidate.suggested_canonical or candidate.original_label)
+        profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
+
+        if candidate.candidate_type == "concept_type":
+            from dashboard.knowledge.ontology.models import ConceptType  # noqa: WPS433
+            level = payload.get("abstraction_level") or (next(iter(profile.abstraction_levels), "implementation"))
+            profile.concept_types[canonical] = ConceptType(
+                id=canonical,
+                label=payload.get("label") or candidate.original_label.strip().title(),
+                abstraction_level=level,
+                description=payload.get("description") or f"Approved from extraction candidate {candidate.original_label!r}.",
+                color=payload.get("color", "#64748b"),
+                shape=payload.get("shape", "rounded_rectangle"),
+            )
+        elif candidate.candidate_type in {"relationship_type", "alias"}:
+            from dashboard.knowledge.ontology.models import RelationshipType  # noqa: WPS433
+            profile.relationship_types[canonical] = RelationshipType(
+                id=canonical,
+                label=payload.get("label") or candidate.original_label.strip().title(),
+                family=payload.get("family", "semantic"),
+                description=payload.get("description") or f"Approved from extraction candidate {candidate.original_label!r}.",
+                allowed_source_types=list(payload.get("allowed_source_types") or []),
+                allowed_target_types=list(payload.get("allowed_target_types") or []),
+                weight=float(payload.get("weight", 0.5)),
+                style=payload.get("style", "solid"),
+                is_directed=bool(payload.get("is_directed", True)),
+            )
+        else:
+            raise ValueError(f"Unsupported candidate type: {candidate.candidate_type}")
+
+        saved = self.save_ontology_profile(profile, actor=reviewed_by, reason=f"Approve ontology candidate {candidate_id}")
+        updated = self._candidate_store.update_status(
+            namespace,
+            candidate_id,
+            "approved",
+            reviewed_by=reviewed_by,
+            suggested_canonical=canonical,
+            metadata={"profile_version": saved.version},
+        )
+        self._ontology_audit_store.audit_operation(
+            namespace,
+            actor=reviewed_by,
+            op="candidate_approve",
+            reason="Ontology candidate approved",
+            metadata={"candidate_id": candidate_id, "canonical_id": canonical, "profile_version": saved.version},
+        )
+        return updated.model_dump(mode="json")
+
+    def map_ontology_candidate(
+        self,
+        namespace: str,
+        candidate_id: str,
+        canonical_id: str,
+        *,
+        reviewed_by: str = "anonymous",
+    ) -> dict[str, Any]:
+        """Map a candidate label as an alias to an existing canonical enum."""
+
+        self._require_namespace(namespace)
+        candidate = next((c for c in self._candidate_store.list(namespace) if c.id == candidate_id), None)
+        if candidate is None:
+            raise KeyError(f"Candidate not found: {candidate_id}")
+        canonical = normalize_candidate_label(canonical_id)
+        alias = normalize_candidate_label(candidate.original_label)
+        profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
+
+        if candidate.candidate_type == "concept_type":
+            if canonical not in profile.concept_types:
+                raise ValueError(f"Unknown concept type: {canonical}")
+            profile.concept_aliases[alias] = canonical
+        else:
+            if canonical not in profile.relationship_types:
+                raise ValueError(f"Unknown relationship type: {canonical}")
+            profile.aliases[alias] = canonical
+
+        saved = self.save_ontology_profile(profile, actor=reviewed_by, reason=f"Map ontology candidate {candidate_id}")
+        updated = self._candidate_store.update_status(
+            namespace,
+            candidate_id,
+            "mapped",
+            reviewed_by=reviewed_by,
+            suggested_canonical=canonical,
+            metadata={"profile_version": saved.version},
+        )
+        self._ontology_audit_store.audit_operation(
+            namespace,
+            actor=reviewed_by,
+            op="candidate_map",
+            reason="Ontology candidate mapped",
+            metadata={"candidate_id": candidate_id, "canonical_id": canonical, "profile_version": saved.version},
+        )
+        return updated.model_dump(mode="json")
+
+    def reject_ontology_candidate(
+        self,
+        namespace: str,
+        candidate_id: str,
+        *,
+        reviewed_by: str = "anonymous",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Reject a candidate; same source hash will not emit it again."""
+
+        self._require_namespace(namespace)
+        updated = self._candidate_store.update_status(
+            namespace,
+            candidate_id,
+            "rejected",
+            reviewed_by=reviewed_by,
+            metadata={"reason": reason} if reason else None,
+        )
+        self._ontology_audit_store.audit_operation(
+            namespace,
+            actor=reviewed_by,
+            op="candidate_reject",
+            reason=reason or "Ontology candidate rejected",
+            metadata={"candidate_id": candidate_id},
+        )
+        return updated.model_dump(mode="json")
+
+    def bulk_update_ontology_candidates(
+        self,
+        namespace: str,
+        actions: list[dict[str, Any]],
+        *,
+        reviewed_by: str = "anonymous",
+    ) -> list[dict[str, Any]]:
+        """Apply approve/map/reject actions to multiple candidates."""
+
+        results: list[dict[str, Any]] = []
+        for action in actions:
+            op = action.get("action")
+            cid = action.get("candidate_id") or action.get("id")
+            if not cid:
+                raise ValueError("candidate_id is required for bulk actions")
+            if op == "approve":
+                results.append(self.approve_ontology_candidate(namespace, cid, reviewed_by=reviewed_by, canonical_id=action.get("canonical_id"), payload=action.get("payload") or {}))
+            elif op == "map":
+                results.append(self.map_ontology_candidate(namespace, cid, action.get("canonical_id", ""), reviewed_by=reviewed_by))
+            elif op == "reject":
+                results.append(self.reject_ontology_candidate(namespace, cid, reviewed_by=reviewed_by, reason=action.get("reason", "")))
+            else:
+                raise ValueError(f"Unsupported candidate action: {op}")
+        return results
+
+    def normalize_relation(self, relation_type: str, namespace: str) -> Any:
+        """Normalize a relationship label for a namespace ontology profile."""
+        from dashboard.knowledge.ontology.normalizer import normalize_relation  # noqa: WPS433
+
+        return normalize_relation(relation_type, self.get_ontology_profile(namespace))
+
+    def validate_relationship(
+        self,
+        namespace: str,
+        relation_type: str,
+        source_concept_type: str,
+        target_concept_type: str,
+    ) -> list[Any]:
+        """Validate relationship semantics for a namespace ontology profile."""
+        from dashboard.knowledge.ontology.validator import validate_relationship  # noqa: WPS433
+
+        profile = self.get_ontology_profile(namespace)
+        if profile is None:
+            return []
+        return validate_relationship(relation_type, source_concept_type, target_concept_type, profile)
 
     def delete_namespace(self, namespace: str, actor: str = "anonymous") -> bool:
         """Delete a namespace; returns True if it existed, False otherwise.

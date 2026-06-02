@@ -8,6 +8,7 @@
  * - POST /api/knowledge/namespaces/{namespace}/explorer/search   -> ExplorerGraphData
  * - POST /api/knowledge/namespaces/{namespace}/explorer/path     -> ExplorerPathData
  * - GET  /api/knowledge/namespaces/{namespace}/explorer/node/{id} -> ExplorerNodeDetail
+ * - GET  /api/knowledge/namespaces/{namespace}/ontology/enterprise-map -> EnterpriseMapProjectionData
  *
  * The explorer hook maintains an **accumulated** graph state — each expand/search
  * merges new nodes/edges into the existing set so the visualisation grows
@@ -35,6 +36,14 @@ export interface ExplorerNode {
   out_degree?: number;
   /** Louvain community ID from the explorer seed/communities endpoint. */
   community_id?: number;
+  /** Ontology-aware concept metadata (present when a namespace profile exists, safe defaults otherwise). */
+  concept_type?: string | null;
+  abstraction_level?: string | null;
+  layer?: string | null;
+  pack_id?: string | null;
+  lifecycle_state?: string | null;
+  metadata?: Record<string, unknown>;
+  validation_issues?: Array<Record<string, unknown>>;
 }
 
 /** Enhanced edge with label, weight, and direction. */
@@ -49,6 +58,14 @@ export interface ExplorerEdge {
   properties?: Record<string, unknown>;
   /** Set during node_detail: 'incoming' | 'outgoing'. */
   direction?: 'incoming' | 'outgoing';
+  /** Ontology-aware relation metadata for enterprise concept maps. */
+  relationship_type?: string | null;
+  family?: string | null;
+  display_label?: string | null;
+  inverse_label?: string | null;
+  style?: 'solid' | 'dashed' | 'dotted' | 'bold' | string | null;
+  is_candidate?: boolean;
+  validation_issues?: Array<Record<string, unknown>>;
 }
 
 /** Common graph data shape returned by seed/expand/search endpoints. */
@@ -62,6 +79,86 @@ export interface ExplorerGraphData {
     query?: string;
     path_length?: number;
     error?: string;
+  };
+  meta?: {
+    ontology_profile?: Record<string, unknown> | null;
+    profile_exists?: boolean;
+    [key: string]: unknown;
+  };
+}
+
+export interface EnterpriseMapLayer {
+  id: string;
+  label: string;
+  order: number;
+  description?: string;
+  lifecycle_state?: string;
+  count: number;
+}
+
+export interface EnterpriseMapAbstractionLevel {
+  id: string;
+  label: string;
+  order?: number;
+  description?: string;
+}
+
+export interface EnterpriseMapNode extends ExplorerNode {
+  concept_label?: string | null;
+  concept_color?: string | null;
+  concept_shape?: string | null;
+  abstraction_label?: string | null;
+  layer_id?: string | null;
+  layer_label?: string | null;
+  layer_order?: number | null;
+  owner?: string | null;
+  description?: string | null;
+  map_group?: string | null;
+  data_store?: string | null;
+  sync_mode?: string | null;
+  ontology_path?: {
+    layer?: string | null;
+    abstraction_level?: string | null;
+    concept_type?: string | null;
+    pack_id?: string | null;
+    lifecycle_state?: string | null;
+  };
+}
+
+export interface EnterpriseMapEdge extends ExplorerEdge {
+  map_source?: string | null;
+  map_target?: string | null;
+  map_direction?: 'forward' | 'reversed' | string | null;
+}
+
+export interface EnterpriseMapProjectionData {
+  nodes: EnterpriseMapNode[];
+  edges: EnterpriseMapEdge[];
+  layers: EnterpriseMapLayer[];
+  abstraction_levels: EnterpriseMapAbstractionLevel[];
+  concept_type_counts: Record<string, number>;
+  relationship_type_counts: Record<string, number>;
+  relationship_family_counts: Record<string, number>;
+  stats: {
+    node_count: number;
+    edge_count: number;
+    layer_count: number;
+    concept_type_count: number;
+    relationship_type_count: number;
+    candidate_edge_count: number;
+    validation_issue_count: number;
+    source_node_count?: number;
+    source_edge_count?: number;
+    ontology_candidate_count?: number;
+    limit?: number;
+    filtered?: boolean;
+    [key: string]: unknown;
+  };
+  meta?: {
+    ontology_profile?: Record<string, unknown> | null;
+    profile_exists?: boolean;
+    ontology_candidate_count?: number;
+    [key: string]: unknown;
   };
 }
 
@@ -86,6 +183,7 @@ export interface ExplorerPathData extends ExplorerGraphData {
 export interface ExplorerNodeDetail {
   node: ExplorerNode | null;
   edges: ExplorerEdge[];
+  edge_groups?: Record<string, { incoming: ExplorerEdge[]; outgoing: ExplorerEdge[] }>;
   stats: {
     degree?: number;
     in_degree?: number;
@@ -94,16 +192,30 @@ export interface ExplorerNodeDetail {
   };
 }
 
+export interface ExplorerOntologyFilters {
+  layer?: string[];
+  abstraction_level?: string[];
+  concept_type?: string[];
+  relationship_family?: string[];
+  relationship_type?: string[];
+  pack_id?: string[];
+  lifecycle_state?: string[];
+  owner?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 /** Expand request body. */
 interface ExpandRequest {
   node_ids: string[];
   depth: number;
+  filters?: ExplorerOntologyFilters;
 }
 
 /** Search request body. */
 interface SearchRequest {
   query: string;
   limit: number;
+  filters?: ExplorerOntologyFilters;
 }
 
 /** Path request body. */
@@ -137,6 +249,24 @@ export function useKnowledgeExplorerSummary(namespace: string | null) {
   };
 }
 
+export function useEnterpriseMap(namespace: string | null, limit: number = 200) {
+  const key = namespace
+    ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/enterprise-map?limit=${limit}`
+    : null;
+  const { data, error, isLoading, mutate } = useSWR<EnterpriseMapProjectionData>(
+    key,
+    (url: string) => apiGet<EnterpriseMapProjectionData>(url),
+    { revalidateOnFocus: false },
+  );
+
+  return {
+    map: data ?? null,
+    isLoading,
+    error: error ? String(error) : null,
+    mutate,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Hook: useKnowledgeExplorer
 // ---------------------------------------------------------------------------
@@ -158,7 +288,7 @@ export function useKnowledgeExplorer(namespace: string | null) {
   // ---- Exploration state ----
   const [activeIgnitionPoints, setActiveIgnitionPoints] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<{ source: string; target: string; path: string[] } | null>(null);
-  const [activeLens, setActiveLens] = useState<LensMode>('community');
+  const [activeLens, setActiveLens] = useState<LensMode>('structural');
   const [expansionDepth, setExpansionDepth] = useState(1);
 
   // ---- Loading flags ----
@@ -288,13 +418,13 @@ export function useKnowledgeExplorer(namespace: string | null) {
   }, [namespace, expansionDepth, activeIgnitionPoints, mergeGraphData, computeBrightness]);
 
   // ---- Action: expand from multiple nodes ----
-  const expand = useCallback(async (nodeIds: string[], depth?: number) => {
+  const expand = useCallback(async (nodeIds: string[], depth?: number, filters?: ExplorerOntologyFilters) => {
     if (!namespace || nodeIds.length === 0) return;
     setIsExpanding(true);
     try {
       const data = await apiPost<ExplorerGraphData>(
         `${KNOWLEDGE_BASE}/namespaces/${namespace}/explorer/expand`,
-        { node_ids: nodeIds, depth: depth ?? expansionDepth } satisfies ExpandRequest
+        { node_ids: nodeIds, depth: depth ?? expansionDepth, ...(filters ? { filters } : {}) } satisfies ExpandRequest
       );
       mergeGraphData(data);
     } catch (err) {
@@ -305,13 +435,13 @@ export function useKnowledgeExplorer(namespace: string | null) {
   }, [namespace, expansionDepth, mergeGraphData]);
 
   // ---- Action: search and ignite results ----
-  const search = useCallback(async (query: string, limit?: number) => {
+  const search = useCallback(async (query: string, limit?: number, filters?: ExplorerOntologyFilters) => {
     if (!namespace || !query.trim()) return;
     setIsSearching(true);
     try {
       const data = await apiPost<ExplorerGraphData>(
         `${KNOWLEDGE_BASE}/namespaces/${namespace}/explorer/search`,
-        { query: query.trim(), limit: limit ?? 20 } satisfies SearchRequest
+        { query: query.trim(), limit: limit ?? 20, ...(filters ? { filters } : {}) } satisfies SearchRequest
       );
       mergeGraphData(data);
     } catch (err) {

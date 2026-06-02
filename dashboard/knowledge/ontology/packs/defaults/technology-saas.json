@@ -1,0 +1,156 @@
+{
+  "aliases": {
+    "calls_api": "integrates_with",
+    "multi_tenant_for": "contains",
+    "syncs_with": "integrates_with"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "integration": {
+      "abstraction_level": "implementation",
+      "color": "#1d4ed8",
+      "description": "External API, webhook, or platform integration",
+      "id": "integration",
+      "label": "Integration",
+      "metadata_schema": {},
+      "shape": "cylinder"
+    },
+    "tenant": {
+      "abstraction_level": "implementation",
+      "color": "#2563eb",
+      "description": "SaaS customer or workspace boundary",
+      "id": "tenant",
+      "label": "Tenant",
+      "metadata_schema": {},
+      "shape": "hexagon"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "integrates_with",
+          "source": "service",
+          "source_type": "service",
+          "target": "crm_sync",
+          "target_type": "integration"
+        }
+      ],
+      "id": "crm_sync_fixture",
+      "nodes": [
+        {
+          "id": "crm_sync",
+          "type": "integration"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "integration": {
+        "color": "#1d4ed8",
+        "concept_type": "integration",
+        "label_template": "{label}",
+        "shape": "cylinder"
+      },
+      "tenant": {
+        "color": "#2563eb",
+        "concept_type": "tenant",
+        "label_template": "{label}",
+        "shape": "hexagon"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "technology_saas",
+        "label": "Technology / SaaS",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "integrates_with": {
+        "group": "flow",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "integrates_with",
+        "weight": 0.7
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "saas_integration_source_known"
+    ]
+  },
+  "metadata_fields": {
+    "sla_tier": {
+      "allowed_values": [
+        "standard",
+        "premium",
+        "enterprise"
+      ],
+      "description": "Service level tier",
+      "field_type": "enum",
+      "id": "sla_tier",
+      "label": "SLA Tier"
+    }
+  },
+  "migration_notes": [
+    "Adds domain-specific concept, relationship aliases, metadata, validation, and seed fixtures."
+  ],
+  "name": "Technology / SaaS",
+  "pack_id": "technology-saas",
+  "relationship_types": {
+    "integrates_with": {
+      "allowed_source_types": [
+        "feature",
+        "service"
+      ],
+      "allowed_target_types": [
+        "integration",
+        "service"
+      ],
+      "description": "Service or feature exchanges data with an integration",
+      "family": "flow",
+      "id": "integrates_with",
+      "is_directed": true,
+      "is_system": false,
+      "label": "Integrates with",
+      "style": "solid",
+      "weight": 0.7
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "saas_integration_source_known",
+      "label": "SaaS integration source known",
+      "message": "Integrations should originate from a feature or service.",
+      "params": {
+        "relationship_type": "integrates_with"
+      },
+      "rule_type": "allowed_relationship",
+      "severity": "warning"
+    }
+  ],
+  "version": "1.0.0"
+}

@@ -16,13 +16,19 @@ Target runtime: < 3 minutes on CI hardware.
 
 from __future__ import annotations
 
-import os
+import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
+
+sys.path.append(str(Path(__file__).parent / "support"))
 from fastapi.testclient import TestClient
+from ontology_lifecycle_fakes import (
+    DeterministicOntologyIngestor,
+    FakeEmbedder,
+    FakeKnowledgeRegressionGraph,
+)
 
 # Fixture path for test documents
 FIXTURES = Path(__file__).parent / "fixtures" / "knowledge_sample"
@@ -38,20 +44,80 @@ def fresh_kb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def client_with_auth(fresh_kb: Path):
-    """TestClient with authentication bypassed."""
-    from dashboard.api import app
+    """TestClient with auth bypassed and a deterministic Knowledge service.
+
+    The broader REST regression must not depend on a developer machine running
+    Ollama or having a local embedding model installed.  Inject the same small
+    fake embedder used by the EPIC-010 lifecycle tests into the route singleton
+    before TestClient starts, so import/query/restore coverage still exercises
+    the real REST surface and storage path while vector operations remain
+    deterministic.
+    """
     from dashboard.auth import get_current_user
+    from dashboard.knowledge.jobs import JobManager
+    from dashboard.knowledge.llm import KnowledgeLLM
+    from dashboard.knowledge.namespace import NamespaceManager
+    from dashboard.knowledge.service import KnowledgeService
+    from dashboard.routes import knowledge as knowledge_routes
+    from fastapi import FastAPI
+
+    # Build a route-scoped app for this regression so TestClient does not start
+    # unrelated dashboard/MCP background services during the Knowledge REST gate.
+    app = FastAPI()
+    app.include_router(knowledge_routes.router)
 
     # Override auth to return a mock user
     async def mock_get_current_user():
         return {"sub": "test-user", "email": "test@example.com"}
 
     app.dependency_overrides[get_current_user] = mock_get_current_user
+    service = KnowledgeService(
+        namespace_manager=NamespaceManager(base_dir=fresh_kb),
+        job_manager=JobManager(base_dir=fresh_kb, max_workers=1),
+        embedder=FakeEmbedder(),
+        llm=KnowledgeLLM(api_key=None),
+    )
+    service._ingestor_override = DeterministicOntologyIngestor(service)  # noqa: SLF001
+
+    def _fake_graph(namespace: str):
+        graph = service._kuzu_graphs.get(namespace)  # noqa: SLF001
+        if graph is None:
+            graph = FakeKnowledgeRegressionGraph()
+            service._kuzu_graphs[namespace] = graph  # noqa: SLF001
+        return graph
+
+    service._get_kuzu_graph = _fake_graph  # noqa: SLF001 - deterministic REST regression graph
+
+    def _backup_namespace(namespace: str, dest_path: Path | None = None) -> Path:
+        archive = dest_path or (fresh_kb / f"{namespace}.tar.gz")
+        archive.write_bytes(f"deterministic backup for {namespace}".encode())
+        return archive
+
+    def _restore_namespace(archive_path: str, name: str | None = None, overwrite: bool = False):
+        namespace = name or Path(archive_path).stem
+        from dashboard.knowledge.namespace import NamespaceNotFoundError
+
+        try:
+            existing = service._nm.get(namespace)  # noqa: SLF001
+        except NamespaceNotFoundError:
+            existing = None
+        if overwrite and existing is not None:
+            service.delete_namespace(namespace)
+            existing = None
+        meta = existing or service.create_namespace(namespace, description="Restored deterministic E2E REST namespace")
+        service._kuzu_graphs[namespace] = FakeKnowledgeRegressionGraph()  # noqa: SLF001
+        return meta
+
+    service.backup_namespace = _backup_namespace  # type: ignore[method-assign]
+    service.restore_namespace = _restore_namespace  # type: ignore[method-assign]
+    knowledge_routes._service_instance = service  # noqa: SLF001 - test route singleton injection
 
     with TestClient(app) as client:
         yield client
 
     # Clean up
+    service.shutdown()
+    knowledge_routes._service_instance = None  # noqa: SLF001
     app.dependency_overrides.clear()
 
 
@@ -147,7 +213,10 @@ class TestKnowledgeE2ERestLifecycle:
             assert "chunks" in graph_result
             assert "entities" in graph_result
             assert graph_result["mode"] == "graph"
-            print(f"[{time.perf_counter() - start_time:.1f}s] Graph query returned {len(graph_result['chunks'])} chunks")
+            print(
+                f"[{time.perf_counter() - start_time:.1f}s] "
+                f"Graph query returned {len(graph_result['chunks'])} chunks"
+            )
 
         # ============================================================
         # STEP 6: Query (mode=summarized) - requires LLM
@@ -374,7 +443,9 @@ class TestKnowledgeE2ERestListOperations:
         resp = client_with_auth.get("/api/knowledge/namespaces/job-list-test/jobs")
         assert resp.status_code == 200
         data = resp.json()
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert data["jobs"] == []
+        assert data["graph_counts"] == {"entities": 0, "chunks": 0, "relations": 0}
 
 
 class TestKnowledgeE2ERestRetention:

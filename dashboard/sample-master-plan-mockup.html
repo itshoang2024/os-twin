@@ -1,0 +1,2650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Internal Audit Risk Platform - Multi-Industry Feature Map (CPO Plan v2)</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --line: #d9dee7;
+    --text: #16202a;
+    --muted: #647184;
+    --soft: #eef2f7;
+    --blue: #2563eb;
+    --teal: #0f766e;
+    --amber: #b7791f;
+    --violet: #7c3aed;
+    --rose: #be123c;
+    --green: #15803d;
+    --shadow: 0 10px 28px rgba(15, 23, 42, 0.09);
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  button, input, select { font: inherit; }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 22px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 720;
+    letter-spacing: 0;
+  }
+  header .meta {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .view-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #edf1f6;
+    border-radius: 8px;
+    padding: 4px;
+    flex-wrap: wrap;
+  }
+  .view-toggle button {
+    border: 0;
+    background: transparent;
+    color: #465466;
+    border-radius: 6px;
+    padding: 7px 11px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .view-toggle button.active {
+    color: #111827;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  }
+  .summary-bar {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(130px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .summary-card {
+    background: #fff;
+    padding: 10px 14px;
+    min-height: 64px;
+  }
+  .summary-card .label {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 760;
+  }
+  .summary-card .value {
+    margin-top: 3px;
+    font-size: 18px;
+    font-weight: 780;
+    line-height: 1.1;
+  }
+  .summary-card .hint {
+    margin-top: 3px;
+    color: #7a8697;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .concept-strip {
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+    padding: 10px 22px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+  }
+  .concept {
+    border-left: 3px solid var(--blue);
+    background: #f8fafc;
+    padding: 8px 10px;
+    min-height: 74px;
+  }
+  .concept:nth-child(2) { border-left-color: var(--teal); }
+  .concept:nth-child(3) { border-left-color: var(--amber); }
+  .concept:nth-child(4) { border-left-color: var(--violet); }
+  .concept:nth-child(5) { border-left-color: var(--green); }
+  .concept .k {
+    color: #334155;
+    font-size: 11px;
+    font-weight: 760;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .concept .v {
+    margin-top: 4px;
+    color: #374151;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 244px minmax(0, 1fr) 332px;
+  }
+  aside.filters, aside.detail {
+    background: #fff;
+    overflow-y: auto;
+    padding: 14px;
+    border-color: var(--line);
+  }
+  aside.filters { border-right: 1px solid var(--line); }
+  aside.detail { border-left: 1px solid var(--line); }
+  aside section { margin-bottom: 18px; }
+  aside h3 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 760;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  aside label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    color: #334155;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  aside input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--blue);
+    flex: 0 0 auto;
+  }
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.12);
+    flex: 0 0 auto;
+  }
+  .count {
+    margin-left: auto;
+    color: #8a95a6;
+    font-size: 11px;
+  }
+  main {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    background: #fff;
+  }
+  .main-view {
+    display: none;
+    height: 100%;
+    overflow: auto;
+    padding: 22px;
+  }
+  .main-view.active { display: block; }
+  #graph-view { padding: 0; }
+  #graph-host {
+    height: 100%;
+    overflow: auto;
+    background: #fff;
+  }
+  #graph-svg {
+    display: block;
+    background: #fff;
+    min-width: 860px;
+  }
+  .legend {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow);
+    font-size: 11px;
+    color: #3b4758;
+    max-width: 310px;
+  }
+  .legend .legend-title {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 760;
+    margin: 7px 0 4px;
+  }
+  .legend .legend-title:first-child { margin-top: 0; }
+  .legend .item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+  }
+  .focus-hint {
+    display: none;
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    border: 0;
+    background: #111827;
+    color: #fff;
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    z-index: 4;
+  }
+  .focus-hint.show { display: block; }
+  .node rect {
+    cursor: pointer;
+    transition: opacity 0.15s, filter 0.15s, stroke-width 0.15s;
+  }
+  .node:hover rect { filter: brightness(0.96); }
+  .node text { pointer-events: none; }
+  .node .id { font-size: 10px; font-weight: 780; }
+  .node .name { font-size: 11px; font-weight: 650; }
+  .node .meta { font-size: 9px; opacity: 0.68; }
+  .node.dimmed rect, .node.dimmed text { opacity: 0.18; }
+  .node.related rect { stroke-width: 2.6; }
+  .node.selected rect {
+    stroke-width: 3.4;
+    filter: drop-shadow(0 0 5px rgba(37, 99, 235, 0.38));
+  }
+  .edge {
+    fill: none;
+    stroke-width: 1.6;
+    opacity: 0.42;
+    transition: opacity 0.15s, stroke-width 0.15s;
+  }
+  .edge.dimmed { opacity: 0.04; }
+  .edge.focused { opacity: 1; stroke-width: 2.7; }
+  .lane-bg-sources { fill: #f7f9fc; }
+  .lane-bg-infra { fill: #f8fafc; }
+  .lane-bg-governance { fill: #fff7ed; }
+  .lane-bg-data { fill: #ecfeff; }
+  .lane-bg-ontology { fill: #fffde7; }
+  .lane-bg-packs { fill: #eef2ff; }
+  .lane-bg-grc { fill: #f5f3ff; }
+  .lane-bg-experience { fill: #f0fdf4; }
+  .lane-divider { stroke: #dbe2eb; stroke-width: 1; stroke-dasharray: 4 5; }
+  .lane-label {
+    font-size: 11px;
+    font-weight: 780;
+    fill: #5b6677;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .lane-label-bg { fill: rgba(255,255,255,0.9); }
+  .panel-title {
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 760;
+  }
+  .panel-subtitle {
+    margin: 0 0 16px;
+    max-width: 950px;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .group-card, .phase-card, .flow-card, .plan-section, .risk-row, .workstream-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .group-card {
+    cursor: pointer;
+    padding: 12px 14px;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+  .group-card:hover {
+    border-color: #94a3b8;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+  }
+  .group-card .name {
+    font-size: 13px;
+    font-weight: 760;
+    line-height: 1.3;
+  }
+  .pill-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: #eef2f7;
+    color: #405064;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .pill.must { background: #fee2e2; color: #991b1b; }
+  .pill.v1 { background: #dbeafe; color: #1d4ed8; }
+  .pill.v2 { background: #f5d0fe; color: #86198f; }
+  .pill.done { background: #dcfce7; color: #166534; }
+  .group-card .deps {
+    margin-top: 8px;
+    color: #66758a;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .roadmap {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+  .phase-card {
+    padding: 14px 15px;
+    border-top: 4px solid var(--blue);
+  }
+  .phase-card.p0 { border-top-color: #64748b; }
+  .phase-card.p1 { border-top-color: var(--teal); }
+  .phase-card.p2 { border-top-color: var(--blue); }
+  .phase-card.p3 { border-top-color: var(--amber); }
+  .phase-card.p4 { border-top-color: var(--violet); }
+  .phase-card.p5 { border-top-color: var(--rose); }
+  .phase-card h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 780;
+  }
+  .phase-card .duration {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 3px;
+  }
+  .phase-card ul, .plan-section ul {
+    margin: 10px 0 0;
+    padding-left: 18px;
+    color: #38475a;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .phase-card li { margin: 4px 0; }
+  .gate {
+    margin-top: 10px;
+    background: #f8fafc;
+    border-left: 3px solid #64748b;
+    padding: 8px 10px;
+    color: #334155;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .workflow-list {
+    display: grid;
+    gap: 14px;
+  }
+  .flow-card {
+    padding: 14px 15px;
+  }
+  .flow-card h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 760;
+  }
+  .flow-card .purpose {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .flow-steps {
+    display: flex;
+    align-items: stretch;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .flow-step {
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 7px;
+    background: #fff;
+    padding: 8px 9px;
+    width: 155px;
+    min-height: 60px;
+    cursor: pointer;
+  }
+  .flow-step:hover { border-color: #94a3b8; }
+  .flow-step .sid {
+    color: var(--blue);
+    font-size: 10px;
+    font-weight: 800;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .flow-step .slabel {
+    margin-top: 2px;
+    color: #1f2937;
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    color: #9aa5b5;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .plan-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(310px, 0.8fr);
+    gap: 14px;
+  }
+  .plan-section {
+    padding: 14px 15px;
+    margin-bottom: 14px;
+  }
+  .plan-section h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 780;
+  }
+  .plan-section p {
+    margin: 0 0 8px;
+    color: #38475a;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .workstream-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .workstream-card {
+    padding: 11px 12px;
+  }
+  .workstream-card .name {
+    font-size: 12.5px;
+    font-weight: 760;
+  }
+  .workstream-card .body {
+    margin-top: 5px;
+    color: #4b5b70;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    text-align: left;
+    background: #f4f7fb;
+    color: #66758a;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 780;
+    padding: 8px 9px;
+    border-bottom: 1px solid var(--line);
+  }
+  td {
+    padding: 9px;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: top;
+    color: #334155;
+  }
+  code {
+    background: #edf2f8;
+    color: #1e3a8a;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+  }
+  .risk-row {
+    display: grid;
+    grid-template-columns: 62px 1fr 95px;
+    gap: 10px;
+    align-items: start;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .risk-row.high { border-left: 4px solid var(--rose); background: #fff7f7; }
+  .risk-row.med { border-left: 4px solid var(--amber); background: #fffbeb; }
+  .risk-row.low { border-left: 4px solid var(--teal); background: #f0fdfa; }
+  .risk-row .severity {
+    font-size: 10px;
+    font-weight: 820;
+    text-transform: uppercase;
+  }
+  .risk-row .risk-body {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .risk-row .owner {
+    color: var(--muted);
+    font-size: 11px;
+    text-align: right;
+  }
+  .node-card h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.3;
+  }
+  .badge-row {
+    margin: 9px 0 12px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: #fff;
+    color: #44546a;
+    font-size: 10px;
+    font-weight: 760;
+  }
+  .field {
+    margin: 12px 0;
+    font-size: 12px;
+  }
+  .field-label {
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 780;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+  .field-value {
+    color: #243244;
+    line-height: 1.5;
+  }
+  .relations a {
+    display: inline-block;
+    margin: 2px 4px 2px 0;
+    padding: 3px 7px;
+    background: #edf2f8;
+    border-radius: 5px;
+    color: #26364b;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .relations a:hover { background: #dce7f4; }
+  .empty {
+    color: #8a95a6;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  @media (max-width: 1180px) {
+    .summary-bar { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+    .concept-strip { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+    .layout { grid-template-columns: 220px minmax(0, 1fr); }
+    aside.detail { display: none; }
+    .plan-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    header { align-items: flex-start; }
+    .summary-bar { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+    .concept-strip { grid-template-columns: 1fr; padding: 10px 14px; }
+    .layout { grid-template-columns: 1fr; }
+    aside.filters { display: none; }
+    .main-view { padding: 16px; }
+    .legend { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Internal Audit Risk Platform - Multi-Industry Feature Map (CPO Plan v2)</h1>
+    <div class="meta">CPO re-architecture of the junior plan: an industry-neutral platform spine plus pluggable vertical packs (Financial Services flagship; Technology &amp; SaaS, Retail, Public Sector). Synthesized with the internal audit platform architecture slide: four-tier delivery, operational lifecycle, domain analytics, 8+8 agents, and ontology-first development. See the <strong>Strategy</strong> tab. Prepared 2026-06-01.</div>
+  </div>
+  <nav class="view-toggle" aria-label="Views">
+    <button id="btn-graph" class="active" type="button">Map</button>
+    <button id="btn-strategy" type="button">Strategy</button>
+    <button id="btn-groups" type="button">Groups</button>
+    <button id="btn-roadmap" type="button">Roadmap</button>
+    <button id="btn-flows" type="button">Workflows</button>
+    <button id="btn-plan" type="button">Engineering Plan</button>
+  </nav>
+</header>
+
+<section class="summary-bar" id="summary-bar"></section>
+<section class="concept-strip">
+  <div class="concept">
+    <div class="k">Product thesis</div>
+    <div class="v">One industry-neutral risk operating system. The spine is horizontal; industry knowledge ships as pluggable packs, never hardcoded.</div>
+  </div>
+  <div class="concept">
+    <div class="k">Platform spine</div>
+    <div class="v">Sources, infrastructure, governance, Smart Table, ontology, workflow, and experience are shared by every industry.</div>
+  </div>
+  <div class="concept">
+    <div class="k">Pack platform (the moat)</div>
+    <div class="v">A Pack SDK, registry, Configuration Studio, and curated regulatory content turn a new vertical into configuration, not a rebuild.</div>
+  </div>
+  <div class="concept">
+    <div class="k">Flagship then proof</div>
+    <div class="v">Prove the engine on Financial Services in P1, then ship Technology and SaaS via the SDK in P3 to prove verticalization.</div>
+  </div>
+  <div class="concept">
+    <div class="k">Ontology development</div>
+    <div class="v">Ontology is a living product: authored, reviewed, versioned, migrated, observed, and improved from audit feedback.</div>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="filters">
+    <section><h3>Industry</h3><div id="filter-industry"></div></section>
+    <section><h3>Layer</h3><div id="filter-layer"></div></section>
+    <section><h3>Phase</h3><div id="filter-phase"></div></section>
+    <section><h3>Group</h3><div id="filter-group"></div></section>
+    <section><h3>Track</h3><div id="filter-track"></div></section>
+    <section><h3>Type</h3><div id="filter-type"></div></section>
+    <section><h3>Priority</h3><div id="filter-priority"></div></section>
+    <section><h3>Owner</h3><div id="filter-owner"></div></section>
+  </aside>
+
+  <main>
+    <section id="graph-view" class="main-view active">
+      <div id="graph-host">
+        <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Internal audit eGRC feature dependency map"></svg>
+      </div>
+      <button class="focus-hint" id="focus-hint" type="button">Clear focus</button>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section id="strategy-view" class="main-view"></section>
+    <section id="groups-view" class="main-view"></section>
+    <section id="roadmap-view" class="main-view"></section>
+    <section id="flows-view" class="main-view"></section>
+    <section id="plan-view" class="main-view"></section>
+  </main>
+
+  <aside class="detail">
+    <div id="detail-panel">
+      <p class="empty">Click a node to inspect scope, dependencies, engineering notes, and acceptance criteria.</p>
+    </div>
+  </aside>
+</div>
+
+<script>
+const DATA = {
+  "meta": {
+    "name": "Simple Enterprise Feature Map Demo",
+    "prepared_on": "2026-06-02",
+    "category": "Small schema-compatible demo for feature-map concepts",
+    "sources": [
+      "sample-feature-map-v2.html"
+    ]
+  },
+  "layers": [
+    "Enterprise Sources",
+    "Infrastructure and Deployment",
+    "Governance and Trust",
+    "Smart Table Data Plane",
+    "Ontology and Context Graph",
+    "Extensibility and Packs",
+    "eGRC Control Plane",
+    "Experience and Reporting"
+  ],
+  "phases": [
+    {
+      "id": "P0",
+      "name": "Define the Map",
+      "duration": "1 to 2 weeks",
+      "className": "p0",
+      "deliverables": [
+        "Pick one workflow",
+        "Agree on the node schema",
+        "Mark build dependencies"
+      ],
+      "gate": "Everyone can read one node and understand owner, dependency, data store, and done criteria."
+    },
+    {
+      "id": "P1",
+      "name": "Build the Core Spine",
+      "duration": "6 to 8 weeks",
+      "className": "p1",
+      "deliverables": [
+        "Evidence intake",
+        "Governance",
+        "Smart Table",
+        "Ontology context",
+        "Audit workflow",
+        "Workbench"
+      ],
+      "gate": "A source artifact becomes a reviewed finding with visible lineage."
+    },
+    {
+      "id": "P2",
+      "name": "Make It Configurable",
+      "duration": "3 to 5 weeks",
+      "className": "p2",
+      "deliverables": [
+        "Pack SDK",
+        "Configuration pattern",
+        "Operational release checks"
+      ],
+      "gate": "A vertical feature can be added as configuration and content."
+    },
+    {
+      "id": "P3",
+      "name": "Add a Second Vertical",
+      "duration": "3 to 5 weeks",
+      "className": "p3",
+      "deliverables": [
+        "Technology and SaaS pack",
+        "Leadership reporting"
+      ],
+      "gate": "The second vertical uses the same spine without changing the page structure."
+    },
+    {
+      "id": "P4",
+      "name": "Expand and Monitor",
+      "duration": "Later",
+      "className": "p4",
+      "deliverables": [
+        "Monitoring",
+        "Retail pack",
+        "Public sector pack"
+      ],
+      "gate": "The same data model explains monitoring and regulated-industry needs."
+    },
+    {
+      "id": "P5",
+      "name": "Scale the Ecosystem",
+      "duration": "Later",
+      "className": "p5",
+      "deliverables": [
+        "ESG pack",
+        "Marketplace direction"
+      ],
+      "gate": "Partners can add certified packs without breaking the core spine."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "DISC01",
+      "name": "Feature-map contract",
+      "layer": "Governance and Trust",
+      "type": "Feature",
+      "phase": "P0",
+      "track": "Platform",
+      "priority": "Must",
+      "owner": "Product",
+      "industry": "Horizontal",
+      "data_store": "feature_map_schema",
+      "sync_mode": "sync",
+      "group": "Map definition",
+      "prerequisites": [],
+      "effort": {
+        "dev": 1,
+        "design": 1,
+        "qa": 0.5
+      },
+      "description": "Defines how engineers read the map: each feature is a node with owner, layer, phase, dependencies, data store, and acceptance criteria.",
+      "sub_features": [
+        "Node schema",
+        "Layer vocabulary",
+        "Dependency rule",
+        "Acceptance rule"
+      ],
+      "acceptance": [
+        "Every node follows the same shape.",
+        "Dependencies can be read as build order.",
+        "The map can drive graph, groups, roadmap, flows, and plan views."
+      ]
+    },
+    {
+      "id": "SRC01",
+      "name": "Evidence intake",
+      "layer": "Enterprise Sources",
+      "type": "Integration",
+      "phase": "P1",
+      "track": "Integration",
+      "priority": "Must",
+      "owner": "Data",
+      "industry": "Horizontal",
+      "data_store": "raw_source_layer",
+      "sync_mode": "async",
+      "group": "Core spine",
+      "prerequisites": [
+        "DISC01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 1,
+        "qa": 1
+      },
+      "description": "Accepts uploads and source exports, preserves source references, and creates immutable evidence artifacts.",
+      "sub_features": [
+        "Upload",
+        "Source metadata",
+        "Checksum",
+        "Immutable artifact"
+      ],
+      "acceptance": [
+        "Original evidence is preserved.",
+        "Every artifact has a stable source reference.",
+        "Failed intake jobs are visible and retryable."
+      ]
+    },
+    {
+      "id": "GOV01",
+      "name": "Identity and audit log",
+      "layer": "Governance and Trust",
+      "type": "Service",
+      "phase": "P1",
+      "track": "Governance",
+      "priority": "Must",
+      "owner": "Security",
+      "industry": "Horizontal",
+      "data_store": "identity_store",
+      "sync_mode": "sync",
+      "group": "Core spine",
+      "prerequisites": [
+        "DISC01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 1,
+        "qa": 1
+      },
+      "description": "Controls who can view evidence, approve facts, change workflow states, and inspect audit history.",
+      "sub_features": [
+        "Roles",
+        "Permission checks",
+        "Audit events",
+        "Review states"
+      ],
+      "acceptance": [
+        "Permission decisions are testable.",
+        "Critical changes create audit events.",
+        "Review approvals cannot be silently overwritten."
+      ]
+    },
+    {
+      "id": "ST01",
+      "name": "Smart Table engine",
+      "layer": "Smart Table Data Plane",
+      "type": "Service",
+      "phase": "P1",
+      "track": "Platform",
+      "priority": "Must",
+      "owner": "Platform",
+      "industry": "Horizontal",
+      "data_store": "smart_table_layer",
+      "sync_mode": "sync",
+      "group": "Core spine",
+      "prerequisites": [
+        "SRC01",
+        "GOV01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 1,
+        "qa": 1
+      },
+      "description": "Turns evidence into typed rows, governed columns, schema versions, reviewer status, and reproducible snapshots.",
+      "sub_features": [
+        "Rows",
+        "Columns",
+        "Schema versions",
+        "Reviewer fields",
+        "Snapshots"
+      ],
+      "acceptance": [
+        "Rows trace back to evidence.",
+        "Schema changes are versioned.",
+        "Snapshots can be reproduced."
+      ]
+    },
+    {
+      "id": "ONT01",
+      "name": "Ontology and context graph",
+      "layer": "Ontology and Context Graph",
+      "type": "Service",
+      "phase": "P1",
+      "track": "Platform",
+      "priority": "Must",
+      "owner": "Platform",
+      "industry": "Horizontal",
+      "data_store": "ontology_graph",
+      "sync_mode": "sync",
+      "group": "Core spine",
+      "prerequisites": [
+        "ST01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 2,
+        "qa": 1
+      },
+      "description": "Links rows and evidence to risks, controls, obligations, owners, workflows, and report conclusions.",
+      "sub_features": [
+        "Risk links",
+        "Control links",
+        "Obligation links",
+        "Context package",
+        "Relationship approval"
+      ],
+      "acceptance": [
+        "Rows can link to business objects.",
+        "Approved relationships are logged.",
+        "Context can be reused by workflow and agents."
+      ]
+    },
+    {
+      "id": "AI01",
+      "name": "Governed agent runtime",
+      "layer": "Smart Table Data Plane",
+      "type": "Service",
+      "phase": "P1",
+      "track": "Data/AI",
+      "priority": "Must",
+      "owner": "Data",
+      "industry": "Horizontal",
+      "data_store": "agent_outputs",
+      "sync_mode": "async",
+      "group": "Core spine",
+      "prerequisites": [
+        "ST01",
+        "ONT01",
+        "GOV01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 1,
+        "qa": 1.5
+      },
+      "description": "Runs AI-assisted extraction, mapping, and testing against approved table rows and ontology context.",
+      "sub_features": [
+        "Run queue",
+        "Context package input",
+        "Citations",
+        "Confidence",
+        "Human review"
+      ],
+      "acceptance": [
+        "Agent outputs include citations.",
+        "High-impact outputs require review.",
+        "Runs can be reproduced from recorded inputs."
+      ]
+    },
+    {
+      "id": "GRC01",
+      "name": "Audit workflow",
+      "layer": "eGRC Control Plane",
+      "type": "Module",
+      "phase": "P1",
+      "track": "Audit Domain",
+      "priority": "Must",
+      "owner": "Audit Domain",
+      "industry": "Horizontal",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Core spine",
+      "prerequisites": [
+        "AI01",
+        "ONT01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 2,
+        "qa": 1.5
+      },
+      "description": "Promotes reviewed evidence into tests, findings, issues, remediation actions, and closure decisions.",
+      "sub_features": [
+        "Test result",
+        "Exception",
+        "Finding",
+        "Issue owner",
+        "Closure validation"
+      ],
+      "acceptance": [
+        "Findings link to source evidence.",
+        "Issues have owners and due dates.",
+        "Closure requires validation evidence."
+      ]
+    },
+    {
+      "id": "EXP01",
+      "name": "Auditor workbench",
+      "layer": "Experience and Reporting",
+      "type": "Experience",
+      "phase": "P1",
+      "track": "Experience",
+      "priority": "Must",
+      "owner": "Product",
+      "industry": "Horizontal",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Core spine",
+      "prerequisites": [
+        "GRC01",
+        "ST01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 3,
+        "qa": 1
+      },
+      "description": "Gives auditors one place to inspect evidence rows, agent outputs, findings, review status, and source lineage.",
+      "sub_features": [
+        "Evidence grid",
+        "Review panel",
+        "Finding detail",
+        "Lineage view"
+      ],
+      "acceptance": [
+        "Auditor can trace a conclusion to evidence.",
+        "Review status is visible.",
+        "Unsupported agent output is clearly labelled."
+      ]
+    },
+    {
+      "id": "INF01",
+      "name": "Operations and deployment baseline",
+      "layer": "Infrastructure and Deployment",
+      "type": "Service",
+      "phase": "P2",
+      "track": "Platform",
+      "priority": "Must",
+      "owner": "Platform",
+      "industry": "Horizontal",
+      "data_store": "operations_store",
+      "sync_mode": "async",
+      "group": "Platform operations",
+      "prerequisites": [
+        "GOV01",
+        "ST01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 1,
+        "qa": 1.5
+      },
+      "description": "Adds service health, job visibility, event replay, release evidence, and basic deployment controls.",
+      "sub_features": [
+        "Service health",
+        "Job queue",
+        "Event replay",
+        "Release gate",
+        "Deployment mode"
+      ],
+      "acceptance": [
+        "Failed background work can be inspected.",
+        "Important events can be replayed safely.",
+        "Release gates produce evidence."
+      ]
+    },
+    {
+      "id": "PAK01",
+      "name": "Pack SDK and configuration",
+      "layer": "Extensibility and Packs",
+      "type": "Service",
+      "phase": "P2",
+      "track": "Pack Platform",
+      "priority": "Must",
+      "owner": "Platform",
+      "industry": "Horizontal",
+      "data_store": "pack_registry",
+      "sync_mode": "sync",
+      "group": "Pack platform",
+      "prerequisites": [
+        "ONT01",
+        "INF01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 2,
+        "qa": 1.5
+      },
+      "description": "Defines how industry-specific controls, taxonomies, templates, workflows, and reports ship as packs.",
+      "sub_features": [
+        "Pack manifest",
+        "Taxonomy config",
+        "Template config",
+        "Workflow config",
+        "Versioning"
+      ],
+      "acceptance": [
+        "A pack can declare content and dependencies.",
+        "Invalid packs are blocked.",
+        "Packs cannot bypass governance and lineage rules."
+      ]
+    },
+    {
+      "id": "FS01",
+      "name": "Financial Services pack",
+      "layer": "eGRC Control Plane",
+      "type": "Domain Pack",
+      "phase": "P1",
+      "track": "Domain Pack",
+      "priority": "Should",
+      "owner": "Audit Domain",
+      "industry": "Financial Services",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Industry packs",
+      "prerequisites": [
+        "GRC01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 2,
+        "qa": 1
+      },
+      "description": "Flagship SOX and ICFR content to prove strict audit evidence, controls, testing, and deficiency workflows.",
+      "sub_features": [
+        "SOX controls",
+        "ICFR tests",
+        "Deficiency workflow",
+        "External auditor export"
+      ],
+      "acceptance": [
+        "Controls can be scoped and tested.",
+        "Deficiencies link to evidence.",
+        "Auditor package preserves lineage."
+      ]
+    },
+    {
+      "id": "TEC01",
+      "name": "Technology and SaaS pack",
+      "layer": "eGRC Control Plane",
+      "type": "Domain Pack",
+      "phase": "P3",
+      "track": "Domain Pack",
+      "priority": "Should",
+      "owner": "Security",
+      "industry": "Technology & SaaS",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Industry packs",
+      "prerequisites": [
+        "PAK01",
+        "GRC01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 2,
+        "qa": 1
+      },
+      "description": "Second-vertical pack for SOC 2, ISO 27001, IAM, change, incident, and cloud evidence workflows.",
+      "sub_features": [
+        "SOC 2 controls",
+        "ISO controls",
+        "IAM evidence",
+        "Change testing"
+      ],
+      "acceptance": [
+        "Pack installs without changing core services.",
+        "Cloud and identity evidence maps to controls.",
+        "Workflow reuses the core spine."
+      ]
+    },
+    {
+      "id": "MON01",
+      "name": "Continuous monitoring",
+      "layer": "eGRC Control Plane",
+      "type": "Module",
+      "phase": "P4",
+      "track": "Data/AI",
+      "priority": "Should",
+      "owner": "Data",
+      "industry": "Horizontal",
+      "data_store": "monitoring_layer",
+      "sync_mode": "async",
+      "group": "Monitoring",
+      "prerequisites": [
+        "SRC01",
+        "AI01",
+        "GRC01"
+      ],
+      "effort": {
+        "dev": 3,
+        "design": 1,
+        "qa": 1.5
+      },
+      "description": "Runs recurring rule and agent checks, creates exception queues, and routes confirmed issues into workflow.",
+      "sub_features": [
+        "Scheduled refresh",
+        "Rule checks",
+        "Agent checks",
+        "Exception queue",
+        "Issue routing"
+      ],
+      "acceptance": [
+        "Monitoring results link to controls and evidence.",
+        "Exceptions can become issues.",
+        "Trends can inform risk planning."
+      ]
+    },
+    {
+      "id": "RET01",
+      "name": "Retail and consumer pack",
+      "layer": "eGRC Control Plane",
+      "type": "Domain Pack",
+      "phase": "P4",
+      "track": "Domain Pack",
+      "priority": "Can defer",
+      "owner": "Compliance",
+      "industry": "Retail & Consumer",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Industry packs",
+      "prerequisites": [
+        "PAK01",
+        "MON01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 1.5,
+        "qa": 1
+      },
+      "description": "Retail pack for PCI, store operations, payment evidence, vendor risk, and consumer privacy controls.",
+      "sub_features": [
+        "PCI controls",
+        "Payment evidence",
+        "Store tests",
+        "Consumer privacy"
+      ],
+      "acceptance": [
+        "PCI controls can be mapped to evidence.",
+        "Store findings become issues.",
+        "Privacy obligations reuse the pack model."
+      ]
+    },
+    {
+      "id": "PUB01",
+      "name": "Public Sector pack",
+      "layer": "eGRC Control Plane",
+      "type": "Domain Pack",
+      "phase": "P4",
+      "track": "Domain Pack",
+      "priority": "Can defer",
+      "owner": "Audit Domain",
+      "industry": "Public Sector",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Industry packs",
+      "prerequisites": [
+        "PAK01",
+        "INF01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 2,
+        "qa": 1
+      },
+      "description": "Public-sector pack for NIST 800-53, FedRAMP evidence, GAGAS workflow, and regulated deployment expectations.",
+      "sub_features": [
+        "NIST controls",
+        "FedRAMP evidence",
+        "GAGAS workflow",
+        "Regulated export"
+      ],
+      "acceptance": [
+        "Public controls can be tested.",
+        "Authorization evidence preserves lineage.",
+        "Deployment constraints are visible."
+      ]
+    },
+    {
+      "id": "ESG01",
+      "name": "ESG assurance pack",
+      "layer": "eGRC Control Plane",
+      "type": "Domain Pack",
+      "phase": "P5",
+      "track": "Domain Pack",
+      "priority": "Can defer",
+      "owner": "ESG",
+      "industry": "Cross-industry",
+      "data_store": "workpaper_layer",
+      "sync_mode": "sync",
+      "group": "Industry packs",
+      "prerequisites": [
+        "PAK01",
+        "MON01"
+      ],
+      "effort": {
+        "dev": 2,
+        "design": 2,
+        "qa": 1
+      },
+      "description": "Cross-industry pack for ESG metric controls, disclosure evidence, supplier data, and assurance reporting.",
+      "sub_features": [
+        "ESG metrics",
+        "Disclosure mapping",
+        "Supplier evidence",
+        "Assurance export"
+      ],
+      "acceptance": [
+        "ESG claims link to source evidence.",
+        "Metrics can be reviewed.",
+        "Assurance package preserves lineage."
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "name": "Core evidence-to-finding flow",
+      "purpose": "The smallest workflow that explains the feature map.",
+      "steps": [
+        [
+          "SRC01",
+          "Intake evidence"
+        ],
+        [
+          "ST01",
+          "Create rows"
+        ],
+        [
+          "ONT01",
+          "Bind context"
+        ],
+        [
+          "AI01",
+          "Review insight"
+        ],
+        [
+          "GRC01",
+          "Open finding"
+        ],
+        [
+          "EXP01",
+          "Auditor reviews"
+        ]
+      ]
+    },
+    {
+      "name": "Add a vertical pack",
+      "purpose": "Shows how industry content extends the platform spine.",
+      "steps": [
+        [
+          "PAK01",
+          "Define pack"
+        ],
+        [
+          "TEC01",
+          "Install SaaS pack"
+        ],
+        [
+          "GRC01",
+          "Reuse workflow"
+        ],
+        [
+          "EXP01",
+          "Use same workbench"
+        ]
+      ]
+    },
+    {
+      "name": "Monitor and expand",
+      "purpose": "Shows the later monitoring and cross-industry expansion path.",
+      "steps": [
+        [
+          "MON01",
+          "Run monitoring"
+        ],
+        [
+          "RET01",
+          "Apply retail pack"
+        ],
+        [
+          "PUB01",
+          "Apply public pack"
+        ],
+        [
+          "ESG01",
+          "Apply ESG pack"
+        ]
+      ]
+    }
+  ],
+  "engineeringPlan": {
+    "principles": [
+      "Keep the original HTML and renderer unchanged; teach the concept through DATA.",
+      "A node is the smallest planning unit: owner, layer, dependency, data store, scope, and done criteria.",
+      "The core spine is source -> Smart Table -> ontology -> agent -> workflow -> experience.",
+      "Industry depth arrives through packs, not hardcoded core changes.",
+      "Every final conclusion should trace back to evidence and review state."
+    ],
+    "workstreams": [
+      [
+        "Core spine",
+        "Evidence intake, identity, Smart Table, ontology, agent runtime, audit workflow, and workbench."
+      ],
+      [
+        "Pack platform",
+        "Pack SDK, configuration, validation, and versioning."
+      ],
+      [
+        "Industry packs",
+        "Financial Services, Technology and SaaS, Retail, Public Sector, and ESG examples."
+      ],
+      [
+        "Operations",
+        "Release gates, event replay, deployment mode, and monitoring readiness."
+      ]
+    ],
+    "architectureServices": [
+      [
+        "source-service",
+        "Evidence intake and source references"
+      ],
+      [
+        "identity-service",
+        "Roles, permissions, audit events, review states"
+      ],
+      [
+        "smart-table-service",
+        "Rows, columns, schema versions, snapshots"
+      ],
+      [
+        "ontology-service",
+        "Risk, control, obligation, and evidence relationships"
+      ],
+      [
+        "agent-runtime-service",
+        "AI runs, citations, confidence, review state"
+      ],
+      [
+        "workflow-service",
+        "Tests, findings, issues, remediation, closure"
+      ],
+      [
+        "pack-service",
+        "Pack manifest, config, validation, versioning"
+      ],
+      [
+        "experience-service",
+        "Auditor workbench and reporting surfaces"
+      ]
+    ],
+    "dataLayers": [
+      [
+        "Raw source layer",
+        "Original evidence and source metadata."
+      ],
+      [
+        "Smart Table layer",
+        "Rows, columns, reviewer fields, snapshots."
+      ],
+      [
+        "Ontology graph layer",
+        "Risks, controls, obligations, evidence, workflow, and pack relationships."
+      ],
+      [
+        "Agent output layer",
+        "Cited and reviewable AI outputs."
+      ],
+      [
+        "Workpaper layer",
+        "Findings, issues, remediation, closure, and sign-off."
+      ],
+      [
+        "Pack configuration layer",
+        "Industry templates, controls, and workflow configuration."
+      ]
+    ],
+    "gates": [
+      [
+        "Schema gate",
+        "Every node renders in graph, groups, roadmap, workflows, plan, and detail views."
+      ],
+      [
+        "Lineage gate",
+        "The core flow can trace a finding back to evidence."
+      ],
+      [
+        "AI gate",
+        "Agent output is cited and human-reviewed before it supports a conclusion."
+      ],
+      [
+        "Pack gate",
+        "A new vertical extends the spine through pack configuration."
+      ]
+    ],
+    "risks": [
+      [
+        "high",
+        "Map becomes too complex to learn",
+        "Use a small node set and expand only after the schema is understood.",
+        "Product"
+      ],
+      [
+        "high",
+        "AI is treated as evidence too early",
+        "Require citations and review state before promotion.",
+        "Data"
+      ],
+      [
+        "med",
+        "Industry logic leaks into the core",
+        "Keep vertical controls and templates in packs.",
+        "Platform"
+      ],
+      [
+        "med",
+        "Teams miss build order",
+        "Use prerequisites as implementation dependencies.",
+        "Engineering"
+      ]
+    ],
+    "ontologyFamilies": [
+      [
+        "Enterprise context",
+        "Entity, process, system, owner"
+      ],
+      [
+        "Risk context",
+        "Risk, control, obligation, test"
+      ],
+      [
+        "Evidence context",
+        "Source artifact, row, reviewed fact"
+      ],
+      [
+        "Workflow context",
+        "Finding, issue, remediation, closure"
+      ],
+      [
+        "Pack context",
+        "Pack, configuration, version, template"
+      ]
+    ],
+    "agentOutputStates": [
+      [
+        "Draft",
+        "Generated and not reviewed.",
+        "No"
+      ],
+      [
+        "Assistive",
+        "Helpful but not evidential alone.",
+        "No"
+      ],
+      [
+        "Reviewed",
+        "Accepted by a human reviewer.",
+        "Yes, as support"
+      ],
+      [
+        "Approved fact",
+        "Locked, cited, versioned, and reusable.",
+        "Yes"
+      ]
+    ],
+    "eventCatalog": [
+      "EvidenceReceived",
+      "SmartTableCreated",
+      "OntologyLinkApproved",
+      "AgentInsightGenerated",
+      "AgentInsightReviewed",
+      "FindingCreated",
+      "IssueAssigned",
+      "PackInstalled",
+      "MonitoringExceptionRaised"
+    ],
+    "aiMaturity": [
+      [
+        "Level 1",
+        "Extraction",
+        "Extract facts from evidence."
+      ],
+      [
+        "Level 2",
+        "Mapping",
+        "Map evidence to controls and obligations."
+      ],
+      [
+        "Level 3",
+        "Testing",
+        "Assess gaps, exceptions, and closure readiness."
+      ]
+    ],
+    "stateMachines": [
+      [
+        "Evidence to finding",
+        "Evidence received -> row created -> context linked -> insight reviewed -> finding created"
+      ],
+      [
+        "Issue closure",
+        "Issue assigned -> remediation submitted -> evidence reviewed -> closed or reopened"
+      ],
+      [
+        "Pack lifecycle",
+        "Pack drafted -> validated -> installed -> configured -> upgraded"
+      ]
+    ]
+  },
+  "strategy": {
+    "headline": "A small feature map that explains how enterprise software grows from a core spine into industry packs.",
+    "reviewStrengths": [
+      "The original v2 HTML remains unchanged and all views still render from DATA.",
+      "The graph is small enough to read but still covers layers, groups, industries, workflows, and the engineering plan.",
+      "Every node has prerequisites, owner, data store, sub-features, and acceptance criteria."
+    ],
+    "reviewGaps": [
+      [
+        "Full product scope is intentionally absent",
+        "This file is a teaching fixture, not a complete roadmap."
+      ],
+      [
+        "Effort values are illustrative",
+        "Use them to explain the schema, then replace them with team estimates."
+      ]
+    ],
+    "decisions": [
+      [
+        "Keep one core spine",
+        "The simplest useful map is source, governance, table, ontology, AI, workflow, and workbench."
+      ],
+      [
+        "Show packs with only a few examples",
+        "Financial Services, Technology and SaaS, Retail, Public Sector, and ESG are enough to demonstrate industry filtering."
+      ],
+      [
+        "Use workflows as node references",
+        "Workflows stay aligned with the graph because steps point to node IDs."
+      ],
+      [
+        "Keep engineering plan short",
+        "The plan explains how to build from the graph without overwhelming the demo."
+      ]
+    ],
+    "architectureShift": [
+      [
+        "Large feature catalog",
+        "Small readable concept map"
+      ],
+      [
+        "Static diagram",
+        "Data-driven graph and detail views"
+      ],
+      [
+        "Industry-specific build",
+        "Horizontal spine plus packs"
+      ]
+    ],
+    "verticalSequence": [
+      [
+        "Financial Services",
+        "P1",
+        "Flagship audit scenario."
+      ],
+      [
+        "Technology and SaaS",
+        "P3",
+        "Second vertical through pack configuration."
+      ],
+      [
+        "Retail and Consumer",
+        "P4",
+        "Payment and store controls."
+      ],
+      [
+        "Public Sector",
+        "P4",
+        "Regulated controls and deployment expectations."
+      ],
+      [
+        "ESG",
+        "P5",
+        "Cross-industry assurance pack."
+      ]
+    ],
+    "editions": [
+      [
+        "Core platform",
+        "Core spine and auditor workbench",
+        "Base product"
+      ],
+      [
+        "Industry pack",
+        "Vertical controls, templates, workflows",
+        "Expansion add-on"
+      ],
+      [
+        "Regulated deployment",
+        "Operational and deployment controls",
+        "Premium tier"
+      ]
+    ],
+    "proofPoints": [
+      "All eight original layers are represented.",
+      "Every node can be clicked and inspected.",
+      "Industry filters show horizontal and vertical-pack examples.",
+      "Workflow cards navigate back to graph nodes.",
+      "The engineering plan is generated from the same DATA object."
+    ],
+    "nonGoals": [
+      "Not a full enterprise roadmap.",
+      "Not a final delivery estimate.",
+      "Not a change to the v2 HTML structure."
+    ],
+    "benchmarkAdopted": [
+      "Lifecycle thinking from evidence intake to workbench, findings, monitoring, and packs.",
+      "Operational concepts such as release gates and monitoring remain visible."
+    ],
+    "benchmarkRetained": [
+      "Ontology-first lineage.",
+      "Governed AI outputs.",
+      "Pack-based industry extension."
+    ],
+    "agentCommon": [
+      "Evidence extraction",
+      "Control mapping",
+      "Finding draft"
+    ],
+    "agentDomain": [
+      "SOX",
+      "SOC 2",
+      "PCI",
+      "Public Sector",
+      "ESG"
+    ],
+    "analyticsDomains": [
+      [
+        "Evidence quality",
+        "Completeness and source traceability"
+      ],
+      [
+        "Monitoring",
+        "Recurring exceptions and trends"
+      ],
+      [
+        "Risk planning",
+        "Findings and control coverage"
+      ]
+    ],
+    "deliveryTiers": [
+      [
+        "Presentation",
+        "Experience and Reporting",
+        "Auditor workbench"
+      ],
+      [
+        "Application",
+        "eGRC Control Plane and Packs",
+        "Workflow and industry content"
+      ],
+      [
+        "Data",
+        "Enterprise Sources and Smart Table",
+        "Evidence rows and reviewed outputs"
+      ],
+      [
+        "Semantic",
+        "Ontology and Context Graph",
+        "Risk, control, obligation, and evidence links"
+      ],
+      [
+        "Infrastructure",
+        "Governance plus Deployment",
+        "Identity, audit log, operations"
+      ]
+    ],
+    "deploymentModes": [
+      [
+        "Cloud",
+        "Default SaaS"
+      ],
+      [
+        "Private",
+        "Regulated tenant option"
+      ],
+      [
+        "On-prem",
+        "Restricted environment option"
+      ]
+    ],
+    "architectureCoverage": [
+      [
+        "Enterprise Sources",
+        "Evidence entry point",
+        "SRC01",
+        "P1"
+      ],
+      [
+        "Infrastructure and Deployment",
+        "Operations baseline",
+        "INF01",
+        "P2"
+      ],
+      [
+        "Governance and Trust",
+        "Feature contract and identity",
+        "DISC01, GOV01",
+        "P0-P1"
+      ],
+      [
+        "Smart Table Data Plane",
+        "Rows and agent outputs",
+        "ST01, AI01",
+        "P1"
+      ],
+      [
+        "Ontology and Context Graph",
+        "Context links",
+        "ONT01",
+        "P1"
+      ],
+      [
+        "Extensibility and Packs",
+        "Pack configuration",
+        "PAK01",
+        "P2"
+      ],
+      [
+        "eGRC Control Plane",
+        "Workflow, monitoring, and packs",
+        "GRC01, MON01, FS01, TEC01, RET01, PUB01, ESG01",
+        "P1-P5"
+      ],
+      [
+        "Experience and Reporting",
+        "Workbench",
+        "EXP01",
+        "P1"
+      ]
+    ],
+    "ontologySpirit": [
+      [
+        "Shared language",
+        "The map uses consistent risk, control, evidence, workflow, and pack concepts.",
+        "DISC01 and ONT01 define the common language."
+      ],
+      [
+        "Context before AI",
+        "AI runs after evidence is structured and context is linked.",
+        "AI01 depends on ST01, ONT01, and GOV01."
+      ],
+      [
+        "Packs extend the graph",
+        "Industry content is added as pack nodes.",
+        "PAK01 enables TEC01, RET01, PUB01, and ESG01."
+      ]
+    ]
+  }
+};
+
+const LAYERS = DATA.layers;
+const LAYER_KEY = {
+  "Enterprise Sources": "sources",
+  "Infrastructure and Deployment": "infra",
+  "Governance and Trust": "governance",
+  "Smart Table Data Plane": "data",
+  "Ontology and Context Graph": "ontology",
+  "Extensibility and Packs": "packs",
+  "eGRC Control Plane": "grc",
+  "Experience and Reporting": "experience"
+};
+const LAYER_COLOR = {
+  "Enterprise Sources": "#64748b",
+  "Infrastructure and Deployment": "#475569",
+  "Governance and Trust": "#b7791f",
+  "Smart Table Data Plane": "#0f766e",
+  "Ontology and Context Graph": "#a16207",
+  "Extensibility and Packs": "#4338ca",
+  "eGRC Control Plane": "#7c3aed",
+  "Experience and Reporting": "#15803d"
+};
+const TRACK_COLOR = {
+  "Platform": { bg: "#dbeafe", border: "#2563eb", text: "#1e3a8a" },
+  "Data/AI": { bg: "#ccfbf1", border: "#0f766e", text: "#134e4a" },
+  "Audit Domain": { bg: "#ede9fe", border: "#7c3aed", text: "#4c1d95" },
+  "Governance": { bg: "#fef3c7", border: "#b7791f", text: "#78350f" },
+  "Experience": { bg: "#dcfce7", border: "#15803d", text: "#14532d" },
+  "Integration": { bg: "#e2e8f0", border: "#64748b", text: "#334155" },
+  "Compliance": { bg: "#ffe4e6", border: "#be123c", text: "#881337" },
+  "Domain Pack": { bg: "#f5d0fe", border: "#a21caf", text: "#701a75" },
+  "Pack Platform": { bg: "#e0e7ff", border: "#4338ca", text: "#312e81" }
+};
+const INDUSTRY_COLOR = {
+  "Horizontal": { bg: "#e2e8f0", border: "#475569", text: "#1e293b" },
+  "Cross-industry": { bg: "#cffafe", border: "#0e7490", text: "#155e75" },
+  "Financial Services": { bg: "#dbeafe", border: "#1d4ed8", text: "#1e3a8a" },
+  "Technology & SaaS": { bg: "#ccfbf1", border: "#0f766e", text: "#134e4a" },
+  "Retail & Consumer": { bg: "#fae8ff", border: "#a21caf", text: "#701a75" },
+  "Public Sector": { bg: "#fde68a", border: "#b45309", text: "#78350f" }
+};
+const TYPE_STYLE = {
+  "Integration": { rx: 0, dashed: false },
+  "Service": { rx: 6, dashed: false },
+  "Feature": { rx: 18, dashed: false },
+  "Module": { rx: 6, dashed: false },
+  "Domain Pack": { rx: 6, dashed: true },
+  "Experience": { rx: 18, dashed: false }
+};
+const PHASE_LABEL = Object.fromEntries(DATA.phases.map(p => [p.id, `${p.id} ${p.name}`]));
+const NODE_W = 174;
+const NODE_H = 66;
+const H_GAP = 15;
+const V_GAP = 12;
+const LANE_PAD_TOP = 34;
+const LANE_PAD_BOTTOM = 16;
+const SVG_PAD_X = 24;
+const DELIVERY_FTE = 12;
+const activeFilters = {
+  industry: new Set(),
+  layer: new Set(),
+  phase: new Set(),
+  group: new Set(),
+  track: new Set(),
+  type: new Set(),
+  priority: new Set(),
+  owner: new Set()
+};
+let selectedId = null;
+
+function effortTotal(node) {
+  return node.effort.dev + node.effort.design + node.effort.qa;
+}
+function nodeById(id) {
+  return DATA.nodes.find(n => n.id === id);
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+function truncate(value, limit) {
+  const s = String(value);
+  return s.length > limit ? s.slice(0, limit - 1) + "..." : s;
+}
+function dependencyEdges() {
+  return DATA.nodes.reduce((sum, n) => sum + n.prerequisites.length, 0);
+}
+function phaseNodeCount(phaseId) {
+  return DATA.nodes.filter(n => n.phase === phaseId).length;
+}
+function phaseEffort(phaseId) {
+  return DATA.nodes.filter(n => n.phase === phaseId).reduce((sum, n) => sum + effortTotal(n), 0);
+}
+function downstreamCount(id) {
+  return DATA.nodes.filter(n => n.prerequisites.includes(id)).length;
+}
+function nodeVisible(n) {
+  return activeFilters.industry.has(n.industry)
+    && activeFilters.layer.has(n.layer)
+    && activeFilters.phase.has(n.phase)
+    && activeFilters.group.has(n.group)
+    && activeFilters.track.has(n.track)
+    && activeFilters.type.has(n.type)
+    && activeFilters.priority.has(n.priority)
+    && activeFilters.owner.has(n.owner);
+}
+function filterValues(key) {
+  const values = DATA.nodes.map(n => n[key]);
+  if (key === "layer") return LAYERS.filter(v => values.includes(v));
+  if (key === "phase") return DATA.phases.map(p => p.id).filter(v => values.includes(v));
+  return Array.from(new Set(values)).sort();
+}
+function buildFilter(containerId, key, colorFn) {
+  const container = document.getElementById(containerId);
+  const counts = {};
+  DATA.nodes.forEach(n => counts[n[key]] = (counts[n[key]] || 0) + 1);
+  filterValues(key).forEach(value => {
+    activeFilters[key].add(value);
+    const label = document.createElement("label");
+    const color = colorFn ? colorFn(value) : null;
+    const display = key === "phase" ? PHASE_LABEL[value] : value;
+    const swatch = color ? `<span class="swatch" style="background:${color.bg || color};border-color:${color.border || color}"></span>` : "";
+    label.innerHTML = `<input type="checkbox" checked data-key="${key}" data-value="${escapeHtml(value)}" />${swatch}<span>${escapeHtml(display)}</span><span class="count">${counts[value]}</span>`;
+    container.appendChild(label);
+  });
+  container.addEventListener("change", event => {
+    if (event.target.tagName !== "INPUT") return;
+    const key = event.target.dataset.key;
+    const value = event.target.dataset.value;
+    if (event.target.checked) activeFilters[key].add(value);
+    else activeFilters[key].delete(value);
+    selectedId = null;
+    renderGraph();
+    showDetail(null);
+  });
+}
+
+function renderSummary() {
+  const totalEffort = DATA.nodes.reduce((sum, n) => sum + effortTotal(n), 0);
+  const mvpEffort = DATA.nodes.filter(n => n.phase === "P1").reduce((sum, n) => sum + effortTotal(n), 0);
+  const mustCount = DATA.nodes.filter(n => n.priority === "Must").length;
+  const fullMonths = Math.round((totalEffort / DELIVERY_FTE / 4.3) * 10) / 10;
+  const mvpMonths = Math.round((mvpEffort / DELIVERY_FTE / 4.3) * 10) / 10;
+  const packCount = DATA.nodes.filter(n => n.layer === "Extensibility and Packs").length;
+  const ontologyCount = DATA.nodes.filter(n => n.layer === "Ontology and Context Graph").length;
+  const verticalCount = DATA.nodes.filter(n => ["Financial Services","Technology & SaaS","Retail & Consumer","Public Sector"].includes(n.industry)).length;
+  const cards = [
+    ["Architecture nodes", DATA.nodes.length, `${dependencyEdges()} dependency edges across ${DATA.layers.length} layers`],
+    ["Flagship MVP", `${mustCount} must`, `${mvpEffort} mw in P1 - Financial Services`],
+    ["Ontology lifecycle", ontologyCount, "Model, graph, studio, migrations, quality, feedback"],
+    ["Pack platform", packCount, "SDK, registry, config studio, content, crosswalk"],
+    ["Industry packs", verticalCount, "FS flagship + Tech/SaaS, Retail, Public Sector"],
+    ["Full platform effort", `${totalEffort} mw`, `~${fullMonths} mo at ${DELIVERY_FTE} FTE`]
+  ];
+  document.getElementById("summary-bar").innerHTML = cards.map(([label, value, hint]) => `
+    <div class="summary-card">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value">${escapeHtml(value)}</div>
+      <div class="hint">${escapeHtml(hint)}</div>
+    </div>`).join("");
+}
+
+buildFilter("filter-industry", "industry", value => INDUSTRY_COLOR[value]);
+buildFilter("filter-layer", "layer", value => ({ bg: `${LAYER_COLOR[value]}22`, border: LAYER_COLOR[value] }));
+buildFilter("filter-phase", "phase", value => {
+  const colors = { P0: "#64748b", P1: "#0f766e", P2: "#2563eb", P3: "#b7791f", P4: "#7c3aed", P5: "#be123c" };
+  return { bg: `${colors[value]}22`, border: colors[value] };
+});
+buildFilter("filter-group", "group", null);
+buildFilter("filter-track", "track", value => TRACK_COLOR[value]);
+buildFilter("filter-type", "type", null);
+buildFilter("filter-priority", "priority", value => {
+  const colors = { Must: "#be123c", Should: "#2563eb", "Can defer": "#64748b" };
+  return { bg: `${colors[value]}22`, border: colors[value] };
+});
+buildFilter("filter-owner", "owner", null);
+renderSummary();
+
+const svg = document.getElementById("graph-svg");
+const graphHost = document.getElementById("graph-host");
+
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+  return el;
+}
+function pathBetween(x1, y1, x2, y2) {
+  const dy = Math.abs(y2 - y1);
+  const c = Math.max(38, dy * 0.35);
+  return `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`;
+}
+function connectedSet(id) {
+  const out = new Set([id]);
+  const node = nodeById(id);
+  if (!node) return out;
+  node.prerequisites.forEach(p => out.add(p));
+  DATA.nodes.forEach(n => {
+    if (n.prerequisites.includes(id)) out.add(n.id);
+  });
+  return out;
+}
+function computeLayout(nodes, hostWidth) {
+  const byLayer = Object.fromEntries(LAYERS.map(l => [l, []]));
+  nodes.forEach(n => byLayer[n.layer].push(n));
+  const usableWidth = Math.max(hostWidth - SVG_PAD_X * 2, NODE_W);
+  const cols = Math.max(1, Math.floor((usableWidth + H_GAP) / (NODE_W + H_GAP)));
+  const positions = {};
+  const lanes = [];
+  let y = 0;
+  LAYERS.forEach(layer => {
+    const layerNodes = byLayer[layer].sort((a, b) => {
+      const phaseCompare = a.phase.localeCompare(b.phase);
+      if (phaseCompare) return phaseCompare;
+      return a.id.localeCompare(b.id);
+    });
+    const rows = Math.max(1, Math.ceil(layerNodes.length / cols));
+    const laneHeight = Math.max(96, LANE_PAD_TOP + rows * NODE_H + (rows - 1) * V_GAP + LANE_PAD_BOTTOM);
+    lanes.push({ layer, y0: y, y1: y + laneHeight, count: layerNodes.length });
+    layerNodes.forEach((node, index) => {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      const rowCount = Math.min(cols, layerNodes.length - row * cols);
+      const rowWidth = rowCount * NODE_W + (rowCount - 1) * H_GAP;
+      const startX = SVG_PAD_X + Math.max(0, (usableWidth - rowWidth) / 2);
+      positions[node.id] = {
+        x: startX + col * (NODE_W + H_GAP),
+        y: y + LANE_PAD_TOP + row * (NODE_H + V_GAP)
+      };
+    });
+    y += laneHeight;
+  });
+  return { positions, lanes, height: y, width: Math.max(hostWidth, 900) };
+}
+function renderGraph() {
+  const visibleNodes = DATA.nodes.filter(nodeVisible);
+  const visibleIds = new Set(visibleNodes.map(n => n.id));
+  const hostWidth = graphHost.clientWidth || 980;
+  const layout = computeLayout(visibleNodes, hostWidth);
+  const { positions, lanes, width, height } = layout;
+  const focusMode = selectedId && visibleIds.has(selectedId);
+  const connected = focusMode ? connectedSet(selectedId) : new Set();
+  document.getElementById("focus-hint").classList.toggle("show", !!focusMode);
+  svg.replaceChildren();
+
+  const defs = svgEl("defs");
+  LAYERS.forEach(layer => {
+    const color = LAYER_COLOR[layer];
+    const key = LAYER_KEY[layer];
+    const marker = svgEl("marker", {
+      id: `arrow-${key}`,
+      viewBox: "0 0 10 10",
+      refX: "9",
+      refY: "5",
+      markerWidth: "7",
+      markerHeight: "7",
+      orient: "auto-start-reverse"
+    });
+    marker.appendChild(svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+    defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", height);
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const bg = svgEl("rect", { x: 0, y: 0, width, height, fill: "transparent", style: "cursor:default" });
+  bg.addEventListener("click", () => {
+    selectedId = null;
+    renderGraph();
+    showDetail(null);
+  });
+  svg.appendChild(bg);
+
+  lanes.forEach(lane => {
+    const key = LAYER_KEY[lane.layer];
+    svg.appendChild(svgEl("rect", { x: 0, y: lane.y0, width, height: lane.y1 - lane.y0, class: `lane-bg-${key}`, style: "pointer-events:none" }));
+    if (lane.y1 < height) svg.appendChild(svgEl("line", { x1: 0, y1: lane.y1, x2: width, y2: lane.y1, class: "lane-divider", style: "pointer-events:none" }));
+    const label = `${lane.layer} - ${lane.count}`;
+    const labelWidth = label.length * 6.7 + 16;
+    svg.appendChild(svgEl("rect", { x: 12, y: lane.y0 + 8, width: labelWidth, height: 20, rx: 5, class: "lane-label-bg", style: "pointer-events:none" }));
+    const text = svgEl("text", { x: 20, y: lane.y0 + 22, class: "lane-label", style: "pointer-events:none" });
+    text.textContent = label;
+    svg.appendChild(text);
+  });
+
+  DATA.nodes.forEach(node => {
+    if (!visibleIds.has(node.id)) return;
+    node.prerequisites.forEach(pid => {
+      if (!visibleIds.has(pid)) return;
+      const from = positions[pid];
+      const to = positions[node.id];
+      if (!from || !to) return;
+      const sourceNode = nodeById(pid);
+      const key = LAYER_KEY[sourceNode.layer];
+      let cls = "edge";
+      if (focusMode) cls += (pid === selectedId || node.id === selectedId) ? " focused" : " dimmed";
+      const path = svgEl("path", {
+        d: pathBetween(from.x + NODE_W / 2, from.y + NODE_H, to.x + NODE_W / 2, to.y),
+        class: cls,
+        stroke: LAYER_COLOR[sourceNode.layer],
+        "marker-end": `url(#arrow-${key})`,
+        "data-from": pid,
+        "data-to": node.id
+      });
+      svg.appendChild(path);
+    });
+  });
+
+  visibleNodes.forEach(node => {
+    const pos = positions[node.id];
+    if (!pos) return;
+    const color = TRACK_COLOR[node.track] || TRACK_COLOR.Platform;
+    const style = TYPE_STYLE[node.type] || TYPE_STYLE.Feature;
+    let cls = "node";
+    if (focusMode) {
+      if (node.id === selectedId) cls += " selected";
+      else if (connected.has(node.id)) cls += " related";
+      else cls += " dimmed";
+    }
+    const g = svgEl("g", { class: cls, "data-id": node.id });
+    const rect = svgEl("rect", {
+      x: pos.x,
+      y: pos.y,
+      width: NODE_W,
+      height: NODE_H,
+      rx: style.rx,
+      ry: style.rx,
+      fill: color.bg,
+      stroke: color.border,
+      "stroke-width": 1.6
+    });
+    if (style.dashed) rect.setAttribute("stroke-dasharray", "5 4");
+    g.appendChild(rect);
+    const idText = svgEl("text", { x: pos.x + 9, y: pos.y + 17, class: "id", fill: color.text });
+    idText.textContent = node.id;
+    g.appendChild(idText);
+    const nameText = svgEl("text", { x: pos.x + 9, y: pos.y + 34, class: "name", fill: color.text });
+    nameText.textContent = truncate(node.name, 24);
+    g.appendChild(nameText);
+    const metaText = svgEl("text", { x: pos.x + 9, y: pos.y + 53, class: "meta", fill: color.text });
+    metaText.textContent = `${node.phase} - ${node.priority} - ${effortTotal(node)}mw`;
+    g.appendChild(metaText);
+    const typeText = svgEl("text", { x: pos.x + NODE_W - 9, y: pos.y + 17, class: "meta", fill: color.text, "text-anchor": "end" });
+    typeText.textContent = truncate(node.type, 12);
+    g.appendChild(typeText);
+    g.addEventListener("click", event => {
+      event.stopPropagation();
+      selectedId = node.id;
+      renderGraph();
+      showDetail(node.id);
+    });
+    svg.appendChild(g);
+  });
+
+  if (!visibleNodes.length) {
+    const text = svgEl("text", { x: width / 2, y: 120, "text-anchor": "middle", fill: "#8a95a6" });
+    text.textContent = "No nodes match the current filters.";
+    svg.appendChild(text);
+  }
+}
+
+function renderLegend() {
+  document.getElementById("legend").innerHTML = `
+    <div class="legend-title">Node fill = workstream</div>
+    ${Object.entries(TRACK_COLOR).map(([name, color]) => `<div class="item"><span class="swatch" style="background:${color.bg};border-color:${color.border}"></span>${escapeHtml(name)}</div>`).join("")}
+    <div class="legend-title">Edge color = source layer</div>
+    ${LAYERS.map(layer => `<div class="item"><span class="swatch" style="background:${LAYER_COLOR[layer]}"></span>${escapeHtml(layer)}</div>`).join("")}
+    <div class="legend-title">Node shape</div>
+    <div class="item">Square = integration, rounded = service/module, pill = feature/experience, dashed = domain pack</div>
+  `;
+}
+function linkChip(id) {
+  const n = nodeById(id);
+  return `<a data-jump="${escapeHtml(id)}">${escapeHtml(id)} - ${escapeHtml(n ? n.name : "missing")}</a>`;
+}
+function showDetail(id) {
+  const panel = document.getElementById("detail-panel");
+  if (!id) {
+    panel.innerHTML = '<p class="empty">Click a node to inspect scope, dependencies, engineering notes, and acceptance criteria.</p>';
+    return;
+  }
+  const node = nodeById(id);
+  if (!node) return;
+  const color = TRACK_COLOR[node.track] || TRACK_COLOR.Platform;
+  const enables = DATA.nodes.filter(n => n.prerequisites.includes(node.id)).map(n => n.id);
+  panel.innerHTML = `
+    <div class="node-card">
+      <h2>${escapeHtml(node.id)} - ${escapeHtml(node.name)}</h2>
+      <div class="badge-row">
+        <span class="badge" style="border-color:${LAYER_COLOR[node.layer]};background:${LAYER_COLOR[node.layer]}16">${escapeHtml(node.layer)}</span>
+        <span class="badge" style="border-color:${color.border};background:${color.bg};color:${color.text}">${escapeHtml(node.track)}</span>
+        <span class="badge">${escapeHtml(node.type)}</span>
+        <span class="badge">${escapeHtml(PHASE_LABEL[node.phase])}</span>
+        <span class="badge">${escapeHtml(node.priority)}</span>
+        <span class="badge">${effortTotal(node)}mw</span>
+      </div>
+      <div class="field"><div class="field-label">Purpose</div><div class="field-value">${escapeHtml(node.description)}</div></div>
+      <div class="field"><div class="field-label">Sub-features</div><div class="field-value"><ul>${node.sub_features.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div></div>
+      <div class="field"><div class="field-label">Acceptance criteria</div><div class="field-value"><ul>${node.acceptance.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div></div>
+      <div class="field"><div class="field-label">Engineering ownership</div><div class="field-value">Owner: <strong>${escapeHtml(node.owner)}</strong><br>Data store: <code>${escapeHtml(node.data_store)}</code><br>Execution: <code>${escapeHtml(node.sync_mode)}</code><br>Effort: dev ${node.effort.dev}mw, design ${node.effort.design}mw, QA ${node.effort.qa}mw</div></div>
+      <div class="field"><div class="field-label">Prerequisites</div><div class="field-value relations">${node.prerequisites.length ? node.prerequisites.map(linkChip).join(" ") : "None"}</div></div>
+      <div class="field"><div class="field-label">Enables</div><div class="field-value relations">${enables.length ? enables.map(linkChip).join(" ") : "None"}</div></div>
+    </div>
+  `;
+  panel.querySelectorAll("[data-jump]").forEach(link => {
+    link.addEventListener("click", () => {
+      selectedId = link.dataset.jump;
+      switchView("graph");
+      renderGraph();
+      showDetail(selectedId);
+    });
+  });
+}
+
+function renderGroups() {
+  const byGroup = {};
+  DATA.nodes.forEach(node => {
+    if (!byGroup[node.group]) byGroup[node.group] = [];
+    byGroup[node.group].push(node);
+  });
+  const groups = Object.entries(byGroup).map(([name, nodes]) => {
+    const incoming = {};
+    const outgoing = {};
+    nodes.forEach(node => {
+      node.prerequisites.forEach(pid => {
+        const p = nodeById(pid);
+        if (p && p.group !== name) incoming[p.group] = (incoming[p.group] || 0) + 1;
+      });
+      DATA.nodes.forEach(other => {
+        if (other.prerequisites.includes(node.id) && other.group !== name) outgoing[other.group] = (outgoing[other.group] || 0) + 1;
+      });
+    });
+    return { name, nodes, incoming, outgoing, effort: nodes.reduce((sum, n) => sum + effortTotal(n), 0) };
+  }).sort((a, b) => b.effort - a.effort);
+  document.getElementById("groups-view").innerHTML = `
+    <h2 class="panel-title">Feature Groups</h2>
+    <p class="panel-subtitle">Groups map the product concept into engineering ownership boundaries. Click a group to filter the architecture map to that slice.</p>
+    <div class="group-grid">
+      ${groups.map(group => {
+        const topLayer = Object.entries(group.nodes.reduce((acc, n) => { acc[n.layer] = (acc[n.layer] || 0) + 1; return acc; }, {})).sort((a,b) => b[1] - a[1])[0][0];
+        const outgoing = Object.entries(group.outgoing).sort((a,b) => b[1] - a[1]).slice(0, 3).map(([g,c]) => `${g} (${c})`).join(", ");
+        const incoming = Object.entries(group.incoming).sort((a,b) => b[1] - a[1]).slice(0, 3).map(([g,c]) => `${g} (${c})`).join(", ");
+        return `
+          <div class="group-card" data-group="${escapeHtml(group.name)}" style="border-left:4px solid ${LAYER_COLOR[topLayer]}">
+            <div class="name">${escapeHtml(group.name)}</div>
+            <div class="pill-row">
+              <span class="pill">${group.nodes.length} nodes</span>
+              <span class="pill">${group.effort}mw</span>
+              <span class="pill must">${group.nodes.filter(n => n.priority === "Must").length} must</span>
+              <span class="pill v1">${group.nodes.filter(n => n.phase === "P1" || n.phase === "P2").length} P1-P2</span>
+            </div>
+            ${incoming ? `<div class="deps"><strong>Depends on:</strong> ${escapeHtml(incoming)}</div>` : ""}
+            ${outgoing ? `<div class="deps"><strong>Enables:</strong> ${escapeHtml(outgoing)}</div>` : ""}
+          </div>`;
+      }).join("")}
+    </div>
+  `;
+  document.querySelectorAll(".group-card[data-group]").forEach(card => {
+    card.addEventListener("click", () => {
+      const group = card.dataset.group;
+      const groupNodes = DATA.nodes.filter(n => n.group === group);
+      ["industry", "layer", "phase", "track", "type", "priority", "owner"].forEach(key => {
+        activeFilters[key].clear();
+        filterValues(key).forEach(value => activeFilters[key].add(value));
+        syncFilterCheckboxes(key);
+      });
+      activeFilters.group.clear();
+      activeFilters.group.add(group);
+      syncFilterCheckboxes("group");
+      selectedId = groupNodes[0] ? groupNodes[0].id : null;
+      switchView("graph");
+      renderGraph();
+      showDetail(selectedId);
+    });
+  });
+}
+function syncFilterCheckboxes(key) {
+  document.querySelectorAll(`input[data-key="${key}"]`).forEach(cb => {
+    cb.checked = activeFilters[key].has(cb.dataset.value);
+  });
+}
+function renderRoadmap() {
+  document.getElementById("roadmap-view").innerHTML = `
+    <h2 class="panel-title">Delivery Roadmap</h2>
+    <p class="panel-subtitle">The roadmap is sequenced around the dependency graph: governance, infrastructure, Smart Table, and ontology foundations first; audit workbench MVP second; ontology/pack platformization third; planning, compliance, monitoring, deployment, and domain packs after the core is stable.</p>
+    <div class="roadmap">
+      ${DATA.phases.map(phase => `
+        <article class="phase-card ${phase.className}">
+          <h3>${escapeHtml(phase.id)} - ${escapeHtml(phase.name)}</h3>
+          <div class="duration">${escapeHtml(phase.duration)} - ${phaseNodeCount(phase.id)} nodes - ${phaseEffort(phase.id)} man-week</div>
+          <ul>${phase.deliverables.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+          <div class="gate"><strong>Exit gate:</strong> ${escapeHtml(phase.gate)}</div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+function renderFlows() {
+  document.getElementById("flows-view").innerHTML = `
+    <h2 class="panel-title">Workflow Blueprints</h2>
+    <p class="panel-subtitle">These flows translate the context maps into engineering slices. Each step is clickable and maps back to the dependency graph.</p>
+    <div class="workflow-list">
+      ${DATA.flows.map(flow => `
+        <article class="flow-card">
+          <h3>${escapeHtml(flow.name)}</h3>
+          <div class="purpose">${escapeHtml(flow.purpose)}</div>
+          <div class="flow-steps">
+            ${flow.steps.map(([id, label], index) => {
+              const node = nodeById(id);
+              const color = node ? LAYER_COLOR[node.layer] : "#64748b";
+              return `${index ? '<div class="flow-arrow">to</div>' : ""}
+                <div class="flow-step" data-id="${escapeHtml(id)}" style="border-left-color:${color}">
+                  <div class="sid">${escapeHtml(id)}</div>
+                  <div class="slabel">${escapeHtml(label)}</div>
+                </div>`;
+            }).join("")}
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+  document.querySelectorAll(".flow-step[data-id]").forEach(step => {
+    step.addEventListener("click", () => {
+      selectedId = step.dataset.id;
+      switchView("graph");
+      renderGraph();
+      showDetail(selectedId);
+    });
+  });
+}
+function renderPlan() {
+  const totalEffort = DATA.nodes.reduce((sum, n) => sum + effortTotal(n), 0);
+  const mvpEffort = DATA.nodes.filter(n => n.phase === "P1").reduce((sum, n) => sum + effortTotal(n), 0);
+  document.getElementById("plan-view").innerHTML = `
+    <h2 class="panel-title">Engineering Plan</h2>
+    <p class="panel-subtitle">This is the build plan implied by the internal audit platform architecture: start with evidence-grade Smart Table, ontology, governance, and infrastructure foundations, prove one complete engagement, then expand into risk planning, compliance mapping, monitoring, assurance, domain packs, and deployment modes.</p>
+    <div class="plan-grid">
+      <div>
+        <section class="plan-section">
+          <h3>Build Principles</h3>
+          <ul>${DATA.engineeringPlan.principles.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </section>
+        <section class="plan-section">
+          <h3>Workstreams</h3>
+          <div class="workstream-grid">
+            ${DATA.engineeringPlan.workstreams.map(([name, body]) => `<div class="workstream-card"><div class="name">${escapeHtml(name)}</div><div class="body">${escapeHtml(body)}</div></div>`).join("")}
+          </div>
+        </section>
+        <section class="plan-section">
+          <h3>Service Architecture</h3>
+          <table><thead><tr><th>Service</th><th>Owns</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.architectureServices.map(([service, owns]) => `<tr><td><code>${escapeHtml(service)}</code></td><td>${escapeHtml(owns)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Data Architecture</h3>
+          <table><thead><tr><th>Layer</th><th>Purpose</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.dataLayers.map(([layer, purpose]) => `<tr><td><strong>${escapeHtml(layer)}</strong></td><td>${escapeHtml(purpose)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Ontology Object Families</h3>
+          <table><thead><tr><th>Family</th><th>Objects</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.ontologyFamilies.map(([family, objects]) => `<tr><td><strong>${escapeHtml(family)}</strong></td><td>${escapeHtml(objects)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Ontology Development Lifecycle</h3>
+          <table><thead><tr><th>Principle</th><th>Meaning</th><th>Implementation</th></tr></thead><tbody>
+            ${DATA.strategy.ontologySpirit.map(([principle, meaning, implementation]) => `<tr><td><strong>${escapeHtml(principle)}</strong></td><td>${escapeHtml(meaning)}</td><td>${escapeHtml(implementation)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Agent Output States</h3>
+          <table><thead><tr><th>State</th><th>Meaning</th><th>Supports conclusion?</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.agentOutputStates.map(([state, meaning, supports]) => `<tr><td><strong>${escapeHtml(state)}</strong></td><td>${escapeHtml(meaning)}</td><td>${escapeHtml(supports)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+      </div>
+      <div>
+        <section class="plan-section">
+          <h3>Effort Model</h3>
+          <p><strong>${totalEffort} man-week</strong> for the mapped full platform. The P1 MVP core is <strong>${mvpEffort} man-week</strong>. This plan assumes parallel platform, data/AI, ontology, audit-domain, security, experience, and QA workstreams totaling about <strong>${DELIVERY_FTE} FTE</strong>. At that staffing level, P1 is approximately <strong>${Math.round((mvpEffort / DELIVERY_FTE / 4.3) * 10) / 10} months</strong> after discovery and the mapped scope is approximately <strong>${Math.round((totalEffort / DELIVERY_FTE / 4.3) * 10) / 10} months</strong>. A smaller team needs explicit scope cuts.</p>
+          <table><thead><tr><th>Phase</th><th>Nodes</th><th>Effort</th></tr></thead><tbody>
+            ${DATA.phases.map(phase => `<tr><td>${escapeHtml(phase.id)} - ${escapeHtml(phase.name)}</td><td>${phaseNodeCount(phase.id)}</td><td>${phaseEffort(phase.id)}mw</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Release Gates</h3>
+          <ul>${DATA.engineeringPlan.gates.map(([gate, body]) => `<li><strong>${escapeHtml(gate)}:</strong> ${escapeHtml(body)}</li>`).join("")}</ul>
+        </section>
+        <section class="plan-section">
+          <h3>Workflow State Machines</h3>
+          <table><thead><tr><th>Workflow</th><th>State path</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.stateMachines.map(([name, path]) => `<tr><td><strong>${escapeHtml(name)}</strong></td><td>${escapeHtml(path)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Event Catalog</h3>
+          <p>These events keep Smart Table, ontology graph, audit log, workflow queues, monitoring, and AI evaluation data synchronized.</p>
+          <div class="pill-row">${DATA.engineeringPlan.eventCatalog.map(eventName => `<span class="pill">${escapeHtml(eventName)}</span>`).join("")}</div>
+        </section>
+        <section class="plan-section">
+          <h3>AI Maturity Sequence</h3>
+          <table><thead><tr><th>Level</th><th>Capability</th><th>Use</th></tr></thead><tbody>
+            ${DATA.engineeringPlan.aiMaturity.map(([level, capability, use]) => `<tr><td><strong>${escapeHtml(level)}</strong></td><td>${escapeHtml(capability)}</td><td>${escapeHtml(use)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Risk Register</h3>
+          ${DATA.engineeringPlan.risks.map(([severity, title, mitigation, owner]) => `
+            <div class="risk-row ${severity}">
+              <div class="severity">${escapeHtml(severity)}</div>
+              <div class="risk-body"><strong>${escapeHtml(title)}</strong><br>${escapeHtml(mitigation)}</div>
+              <div class="owner">${escapeHtml(owner)}</div>
+            </div>
+          `).join("")}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function renderStrategy() {
+  const s = DATA.strategy;
+  document.getElementById("strategy-view").innerHTML = `
+    <h2 class="panel-title">CPO Strategy: Horizontal Platform, Pluggable Industry Packs</h2>
+    <p class="panel-subtitle">${escapeHtml(s.headline)}</p>
+    <div class="plan-grid">
+      <div>
+        <section class="plan-section">
+          <h3>What the first plan got right</h3>
+          <ul>${s.reviewStrengths.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        </section>
+        <section class="plan-section">
+          <h3>Gaps for a multi-industry platform</h3>
+          <table><thead><tr><th>Gap</th><th>Why it matters</th></tr></thead><tbody>
+            ${s.reviewGaps.map(([t, d]) => `<tr><td><strong>${escapeHtml(t)}</strong></td><td>${escapeHtml(d)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Architecture shift</h3>
+          <table><thead><tr><th>From (first plan)</th><th>To (CPO plan)</th></tr></thead><tbody>
+            ${s.architectureShift.map(([a, b]) => `<tr><td>${escapeHtml(a)}</td><td><strong>${escapeHtml(b)}</strong></td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Packaging and editions</h3>
+          <table><thead><tr><th>Edition</th><th>Includes</th><th>Buyer / motion</th></tr></thead><tbody>
+            ${s.editions.map(([a, b, c]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td><td>${escapeHtml(c)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+      </div>
+      <div>
+        <section class="plan-section">
+          <h3>Key product decisions</h3>
+          <table><thead><tr><th>Decision</th><th>Rationale</th></tr></thead><tbody>
+            ${s.decisions.map(([a, b]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Vertical sequencing</h3>
+          <table><thead><tr><th>Vertical</th><th>When</th><th>Why</th></tr></thead><tbody>
+            ${s.verticalSequence.map(([a, b, c]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td><td>${escapeHtml(c)}</td></tr>`).join("")}
+          </tbody></table>
+        </section>
+        <section class="plan-section">
+          <h3>Proof points that validate the thesis</h3>
+          <ul>${s.proofPoints.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        </section>
+        <section class="plan-section">
+          <h3>Non-goals</h3>
+          <ul>${s.nonGoals.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        </section>
+      </div>
+    </div>
+    <h2 class="panel-title" style="margin-top:20px;">Synthesis with a World-Class Benchmark</h2>
+    <p class="panel-subtitle">The best version fuses the operational depth of a mature enterprise audit suite with the platform, ontology, and governance rigor of this plan.</p>
+    <div class="group-grid">
+      <section class="plan-section"><h3>Adopted from the benchmark</h3><ul>${s.benchmarkAdopted.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></section>
+      <section class="plan-section"><h3>Retained beyond the benchmark</h3><ul>${s.benchmarkRetained.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul></section>
+    </div>
+    <div class="group-grid">
+      <section class="plan-section"><h3>Common intelligent agents (8)</h3><div class="pill-row">${s.agentCommon.map(x => `<span class="pill v1">${escapeHtml(x)}</span>`).join("")}</div></section>
+      <section class="plan-section"><h3>Domain intelligent agents (8)</h3><div class="pill-row">${s.agentDomain.map(x => `<span class="pill v2">${escapeHtml(x)}</span>`).join("")}</div></section>
+    </div>
+    <section class="plan-section"><h3>Domain analytics model library</h3><table><thead><tr><th>Domain</th><th>Prebuilt models</th></tr></thead><tbody>${s.analyticsDomains.map(([a, b]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td></tr>`).join("")}</tbody></table></section>
+    <section class="plan-section"><h3>Four-tier delivery architecture</h3><table><thead><tr><th>Tier</th><th>Maps to</th><th>Elements</th></tr></thead><tbody>${s.deliveryTiers.map(([a, b, c]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td><td>${escapeHtml(c)}</td></tr>`).join("")}</tbody></table></section>
+    <section class="plan-section"><h3>Architecture coverage map</h3><table><thead><tr><th>Layer from architecture slide</th><th>Feature-map interpretation</th><th>Nodes</th><th>Phase</th></tr></thead><tbody>${s.architectureCoverage.map(([a, b, c, d]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td><td><code>${escapeHtml(c)}</code></td><td>${escapeHtml(d)}</td></tr>`).join("")}</tbody></table></section>
+    <section class="plan-section"><h3>Ontology development spirit</h3><table><thead><tr><th>Principle</th><th>Meaning</th><th>How it shows up in the build</th></tr></thead><tbody>${s.ontologySpirit.map(([a, b, c]) => `<tr><td><strong>${escapeHtml(a)}</strong></td><td>${escapeHtml(b)}</td><td>${escapeHtml(c)}</td></tr>`).join("")}</tbody></table></section>
+    <section class="plan-section"><h3>Deployment modes</h3><div class="pill-row">${s.deploymentModes.map(([a, b]) => `<span class="pill">${escapeHtml(a)} - ${escapeHtml(b)}</span>`).join("")}</div></section>
+  `;
+}
+
+const views = {
+  strategy: document.getElementById("strategy-view"),
+  graph: document.getElementById("graph-view"),
+  groups: document.getElementById("groups-view"),
+  roadmap: document.getElementById("roadmap-view"),
+  flows: document.getElementById("flows-view"),
+  plan: document.getElementById("plan-view")
+};
+const buttons = {
+  strategy: document.getElementById("btn-strategy"),
+  graph: document.getElementById("btn-graph"),
+  groups: document.getElementById("btn-groups"),
+  roadmap: document.getElementById("btn-roadmap"),
+  flows: document.getElementById("btn-flows"),
+  plan: document.getElementById("btn-plan")
+};
+function switchView(name) {
+  Object.values(views).forEach(v => v.classList.remove("active"));
+  Object.values(buttons).forEach(b => b.classList.remove("active"));
+  views[name].classList.add("active");
+  buttons[name].classList.add("active");
+  if (name === "strategy") renderStrategy();
+  if (name === "groups") renderGroups();
+  if (name === "roadmap") renderRoadmap();
+  if (name === "flows") renderFlows();
+  if (name === "plan") renderPlan();
+  if (name === "graph") {
+    setTimeout(renderGraph, 0);
+  }
+}
+Object.entries(buttons).forEach(([name, button]) => {
+  button.addEventListener("click", () => switchView(name));
+});
+document.getElementById("focus-hint").addEventListener("click", () => {
+  selectedId = null;
+  renderGraph();
+  showDetail(null);
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && selectedId) {
+    selectedId = null;
+    renderGraph();
+    showDetail(null);
+  }
+});
+
+renderLegend();
+renderGraph();
+window.addEventListener("resize", () => {
+  clearTimeout(window.__graphTimer);
+  window.__graphTimer = setTimeout(renderGraph, 120);
+});
+</script>
+</body>
+</html>
+

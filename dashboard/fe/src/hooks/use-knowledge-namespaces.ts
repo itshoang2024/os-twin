@@ -51,6 +51,7 @@ export interface NamespaceMetaResponse {
   stats: NamespaceStatsResponse;
   imports: ImportRecordResponse[];
   retention?: RetentionPolicyResponse;
+  ontology_profile_version?: string | null;
 }
 
 export interface CreateNamespaceRequest {
@@ -104,6 +105,7 @@ export function useKnowledgeNamespaces() {
         bytes_on_disk: 0,
       },
       imports: [],
+      ontology_profile_version: null,
     };
 
     mutate((namespaces) => namespaces ? [...namespaces, tempNamespace] : [tempNamespace], false);

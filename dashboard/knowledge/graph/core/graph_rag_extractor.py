@@ -67,6 +67,7 @@ class ExtractionMetrics:
     failed_extractions: int = 0
     total_entities: int = 0
     total_relationships: int = 0
+    candidate_count: int = 0
     average_processing_time: float = 0.0
     errors: List[str] = field(default_factory=list)
 
@@ -87,6 +88,9 @@ class GraphRAGExtractor(TransformComponent):
     language: str = "English"
     max_paths_per_chunk: int = 10
     num_workers: int = 1
+    ontology_profile: Optional[Any] = None
+    candidate_store: Optional[Any] = None
+    namespace: str = ""
 
     def __init__(
         self,
@@ -97,6 +101,9 @@ class GraphRAGExtractor(TransformComponent):
         num_workers: int = 1,
         config: Optional[ExtractionConfig] = None,
         embedder: Optional[KnowledgeEmbedder] = None,
+        ontology_profile: Optional[Any] = None,
+        candidate_store: Optional[Any] = None,
+        namespace: str = "",
         # Legacy kwargs accepted for back-compat; ignored.
         extract_prompt: Any = None,
         sys_prompt: Any = None,
@@ -112,6 +119,9 @@ class GraphRAGExtractor(TransformComponent):
         self.language = language or "English"
         self.max_paths_per_chunk = max_paths_per_chunk
         self.num_workers = num_workers
+        self.ontology_profile = ontology_profile
+        self.candidate_store = candidate_store
+        self.namespace = namespace or getattr(ontology_profile, "namespace", "") or ""
 
     # -- Sync entrypoint ------------------------------------------------
 
@@ -187,12 +197,14 @@ class GraphRAGExtractor(TransformComponent):
                     text,
                     self.language,
                     self.domain_prompt,
+                    ontology_profile_hint=self.ontology_profile,
                 )
                 t_llm = _time.monotonic() - t_llm_start
                 logger.info(
                     "[TRACE] extractor/llm_call: %.3fs, attempt=%d, node=%s, %d entities, %d relations",
                     t_llm, attempt + 1, node.id_, len(entities), len(relations),
                 )
+                entities, relations = self._normalize_extraction_payload(node, text, entities, relations)
                 return self._create_extraction_result(node, entities, relations)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
@@ -244,6 +256,107 @@ class GraphRAGExtractor(TransformComponent):
         except Exception as exc:
             logger.error("acall batch extraction failed: %s", exc)
             return [self._create_empty_extraction_result(node, str(exc)) for node in nodes]
+
+    def _normalize_extraction_payload(
+        self,
+        node: BaseNode,
+        text: str,
+        entities: list,
+        relations: list,
+    ) -> tuple[list, list]:
+        """Normalize extracted labels and persist ontology review candidates."""
+
+        profile = self.ontology_profile
+        if profile is None:
+            # Legacy namespaces must behave exactly as before.
+            return entities, relations
+
+        from dashboard.knowledge.ontology.normalizer import normalize_concept, normalize_relation
+
+        source_hash = str(node.metadata.get("file_hash") or node.metadata.get("chunk_hash") or "")
+        source = str(node.metadata.get("file_path") or node.metadata.get("filename") or node.id_)
+        sample_text = text[:500]
+        candidate_count = 0
+
+        normalized_entities: list = []
+        entity_type_by_name: dict[str, str] = {}
+        for entity in entities:
+            if isinstance(entity, dict):
+                item = dict(entity)
+                raw_type = str(item.get("type", ""))
+                normalized = normalize_concept(raw_type, profile)
+                item["type"] = normalized.normalized
+                if normalized.classification != "canonical":
+                    item.setdefault("metadata", {})
+                    item["original_type"] = normalized.original
+                    item["ontology_normalization"] = normalized.classification
+                if normalized.classification == "candidate":
+                    candidate = self._record_candidate(
+                        candidate_type="concept_type",
+                        original_label=normalized.original,
+                        source=source,
+                        source_hash=source_hash,
+                        sample_text=sample_text,
+                        suggested_canonical=normalized.normalized,
+                        confidence=float(item.get("confidence") or 0.5),
+                        metadata={"node_id": str(node.id_), "entity_name": item.get("name", "")},
+                    )
+                    if candidate is not None and candidate.status == "pending":
+                        candidate_count += 1
+                    item["ontology_candidate_id"] = getattr(candidate, "id", None)
+                entity_type_by_name[str(item.get("name", ""))] = str(item.get("type", ""))
+                normalized_entities.append(item)
+            else:
+                normalized_entities.append(entity)
+
+        normalized_relations: list = []
+        for rel in relations:
+            if isinstance(rel, dict):
+                item = dict(rel)
+                raw_label = str(item.get("relation", ""))
+                normalized = normalize_relation(raw_label, profile)
+                item["original_relation"] = raw_label
+                item["relation"] = normalized.normalized if normalized.classification != "candidate" else raw_label
+                item["ontology_normalization"] = normalized.classification
+                if normalized.classification == "candidate":
+                    candidate = self._record_candidate(
+                        candidate_type="relationship_type",
+                        original_label=normalized.original,
+                        source=source,
+                        source_hash=source_hash,
+                        sample_text=sample_text,
+                        suggested_canonical=normalized.normalized,
+                        confidence=float(item.get("confidence") or 0.5),
+                        metadata={
+                            "node_id": str(node.id_),
+                            "source_entity": item.get("source", ""),
+                            "target_entity": item.get("target", ""),
+                            "source_type": entity_type_by_name.get(str(item.get("source", "")), ""),
+                            "target_type": entity_type_by_name.get(str(item.get("target", "")), ""),
+                        },
+                    )
+                    if candidate is not None and candidate.status == "pending":
+                        candidate_count += 1
+                    item["ontology_candidate_id"] = getattr(candidate, "id", None)
+                normalized_relations.append(item)
+            else:
+                normalized_relations.append(rel)
+
+        if candidate_count and self.metrics is not None:
+            self.metrics.candidate_count += candidate_count
+        node.metadata["ontology_candidate_count"] = candidate_count
+        return normalized_entities, normalized_relations
+
+    def _record_candidate(self, **kwargs: Any) -> Any | None:
+        """Persist a candidate if candidate storage is configured."""
+
+        if self.candidate_store is None or not self.namespace:
+            return None
+        try:
+            return self.candidate_store.upsert_pending(self.namespace, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to persist ontology candidate: %s", exc)
+            return None
 
     # -- Result builders ------------------------------------------------
 
@@ -305,6 +418,10 @@ class GraphRAGExtractor(TransformComponent):
                 subj, obj, rlabel, desc = rel
             relation_metadata["relationship_description"] = desc
             relation_metadata["node_id"] = str(node.id_)
+            if isinstance(rel, dict):
+                for key in ("original_relation", "ontology_normalization", "ontology_candidate_id"):
+                    if rel.get(key) is not None:
+                        relation_metadata[key] = rel.get(key)
             existing_relations.append(
                 Relation(
                     label=rlabel,

@@ -59,6 +59,19 @@ from dashboard.knowledge.ingestion import (
     IngestOptions,
     Ingestor,
 )
+from dashboard.knowledge.ontology import (
+    AbstractionLevel,
+    ConceptType,
+    Layer,
+    MetadataField,
+    OntologyProfile,
+    OntologyProfileStatus,
+    OntologyProfileStore,
+    RelationshipFamily,
+    RelationshipType,
+    ValidationRule,
+    create_default_ontology_profile,
+)
 from dashboard.knowledge.jobs import (
     JobEvent,
     JobManager,
@@ -111,6 +124,17 @@ __all__ = [
     "NamespaceExistsError",
     "InvalidNamespaceIdError",
     "RetentionPolicy",  # EPIC-004
+    "AbstractionLevel",
+    "ConceptType",
+    "Layer",
+    "MetadataField",
+    "OntologyProfile",
+    "OntologyProfileStatus",
+    "OntologyProfileStore",
+    "RelationshipFamily",
+    "RelationshipType",
+    "ValidationRule",
+    "create_default_ontology_profile",
     # Ingestion + jobs (EPIC-003)
     "Ingestor",
     "IngestOptions",
