@@ -256,14 +256,13 @@ if ((Test-Path $McpExtensionScript) -and (Get-Command bash -ErrorAction Silently
     }
 }
 
-# ─── Sync MCP to Ostwin-managed opencode.json ────────────────────────────────
+# ─── Sync MCP to global ~/.config/opencode/opencode.json ─────────────────────
 # Runs the same logic as `ostwin mcp sync`:
 #   resolve_opencode.py sync → resolves servers + generates agent permissions
-#   from role.json mcp_refs → writes to ~/.ostwin/.opencode/opencode.json.
+#   from role.json mcp_refs → writes to ~/.config/opencode/opencode.json.
 
 $ResolveScript = Join-Path $ScriptDir "mcp" "resolve_opencode.py"
-$OstwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $HOME ".ostwin" }
-$ManagedOpencodeDir = Join-Path $OstwinHome ".opencode"
+$GlobalOpencodeDir = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME "opencode" } else { Join-Path $HOME ".config" "opencode" }
 
 if (Test-Path $ResolveScript) {
     Write-Step "Syncing MCP config (ostwin mcp sync)..."
@@ -293,7 +292,7 @@ if (Test-Path $ResolveScript) {
     try {
         & $pythonCmd @syncArgs
     } catch {
-        Write-Warn "Failed to sync managed opencode.json (non-critical): $_"
+        Write-Warn "Failed to sync global config-oc.json (non-critical): $_"
     }
 }
 
@@ -313,14 +312,14 @@ if (Test-Path $SyncAgentsScript) {
     }
 }
 
-# ─── Clone managed opencode.json to project .opencode/ ───────────────────────
+# ─── Clone global opencode.json to project .opencode/ ────────────────────────
 # Ensures agents running in the project context (via Invoke-Agent.ps1) have the
 # full config: MCP servers, agent permissions, tools blocks, provider definitions.
 #
 # MERGE LOGIC (not simple copy):
-#   - If project .opencode/opencode.json doesn't exist → copy from managed
+#   - If project .opencode/opencode.json doesn't exist → copy from global
 #   - If it DOES exist (created by mcp-extension.sh compile with project MCP
-#     servers) → merge managed keys (agent permissions, tools, provider, model)
+#     servers) → merge global keys (agent permissions, tools, provider, model)
 #     while preserving the project's MCP server block.
 #   - This prevents the global sync from overwriting project-level extensions
 #     that were just compiled by the previous step.
@@ -330,18 +329,18 @@ if (-not (Test-Path $ProjectOpencodeDir)) {
     New-Item -ItemType Directory -Path $ProjectOpencodeDir -Force | Out-Null
 }
 
-$GlobalOpencodeFile = Join-Path $ManagedOpencodeDir "opencode.json"
+$GlobalOpencodeFile = Join-Path $GlobalOpencodeDir "opencode.json"
 $ProjectOpencodeFile = Join-Path $ProjectOpencodeDir "opencode.json"
 
 if (Test-Path $GlobalOpencodeFile) {
     if (-not (Test-Path $ProjectOpencodeFile)) {
         # No project file yet — simple copy from global
         Copy-Item -Path $GlobalOpencodeFile -Destination $ProjectOpencodeFile -Force
-        Write-Ok "Created .opencode/opencode.json from managed config"
+        Write-Ok "Created .opencode/opencode.json from global config"
     }
     else {
         # Project file exists (likely from mcp-extension.sh compile).
-        # Merge: keep project MCP servers, add managed agent/tools/permission blocks.
+        # Merge: keep project MCP servers, add global agent/tools/permission blocks.
         try {
             $globalJson = Get-Content $GlobalOpencodeFile -Raw | ConvertFrom-Json -AsHashtable
             $projectJson = Get-Content $ProjectOpencodeFile -Raw | ConvertFrom-Json -AsHashtable
@@ -361,7 +360,7 @@ if (Test-Path $GlobalOpencodeFile) {
 
             # Write merged result
             $projectJson | ConvertTo-Json -Depth 10 | Set-Content -Path $ProjectOpencodeFile -Encoding UTF8
-            Write-Ok "Merged managed agent/tools/permissions into project .opencode/opencode.json"
+            Write-Ok "Merged global agent/tools/permissions into project .opencode/opencode.json"
         }
         catch {
             # Fallback: if merge fails, overwrite with global (better than nothing)
@@ -372,7 +371,7 @@ if (Test-Path $GlobalOpencodeFile) {
 }
 elseif (-not (Test-Path $ProjectOpencodeFile)) {
     # Neither global nor project file exists — leave empty (compile may have failed)
-    Write-Warn "No managed or project opencode.json found"
+    Write-Warn "No global or project opencode.json found"
 }
 
 Remove-OstwinManagedLegacyOpencodeMcp -HomeDir $HomeDir

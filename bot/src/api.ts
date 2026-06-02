@@ -520,14 +520,12 @@ export interface ToolAction {
   type: string;
   plan_id?: string;
   room_id?: string;
-  url?: string;
 }
 
 export interface ChatResponse {
   text: string;
   conversation_id: string;
   actions?: ToolAction[];
-  redirect_url?: string;
   attachments?: Array<{ name: string; data?: string; type?: string }>;
 }
 

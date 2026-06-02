@@ -16,7 +16,7 @@ _SETUP_OPENCODE_SH_LOADED=1
 _OPENCODE_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/scripts" 2>/dev/null && pwd || echo "")"
 
 setup_opencode_permissions() {
-  local oc_dir="$INSTALL_DIR/.opencode"
+  local oc_dir="$HOME/.config/opencode"
   local oc_config="$oc_dir/opencode.json"
 
   if ! command -v python3 &>/dev/null && ! [[ -x "$VENV_DIR/bin/python" ]]; then
@@ -27,7 +27,7 @@ setup_opencode_permissions() {
   local py_cmd="python3"
   [[ -x "$VENV_DIR/bin/python" ]] && py_cmd="$VENV_DIR/bin/python"
 
-  step "Patching Ostwin OpenCode permissions (allow file reads + external directories)..."
+  step "Patching OpenCode permissions (allow file reads + external directories)..."
   mkdir -p "$oc_dir"
 
   if "$py_cmd" "${_OPENCODE_SCRIPTS_DIR}/patch_opencode_permissions.py" "$oc_config"; then

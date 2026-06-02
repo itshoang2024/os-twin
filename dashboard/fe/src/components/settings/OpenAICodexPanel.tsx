@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import type { ProviderSettings } from '@/types/settings';
-import { ProviderIcon } from './ProviderIcon';
 
 type CodexOAuthStart = {
   authorization_url: string;
@@ -29,13 +28,9 @@ function getErrorMessage(err: unknown, fallback: string) {
 
 export function OpenAICodexPanel({
   provider,
-  onVaultClick,
-  vaultSet,
   onSettingsChange,
 }: {
   provider: ProviderSettings;
-  onVaultClick: () => void;
-  vaultSet: boolean;
   onSettingsChange: (updates: Partial<ProviderSettings>) => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -127,51 +122,18 @@ export function OpenAICodexPanel({
   };
 
   return (
-    <div
-      aria-label="OpenAI provider credentials"
-      className="relative rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
-      role="region"
-    >
-      <div className="absolute left-0 top-6 h-8 w-1 bg-green-600" />
-
-      <div className="mb-4 flex items-center gap-3">
-        <ProviderIcon provider="openai" size={20} />
-        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-900">openai</h3>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-slate-500">
-            API Access Key
-          </label>
-          <button
-            type="button"
-            onClick={onVaultClick}
-            className="flex w-full items-center justify-between rounded border border-slate-200 bg-slate-50 p-2.5 text-left font-mono text-xs transition-colors hover:bg-slate-100"
-          >
-            <span className="text-slate-400">
-              {vaultSet ? '••••••••••••••••••••••••' : 'Click to configure'}
-            </span>
-            <span className={`material-symbols-outlined text-sm ${vaultSet ? 'text-green-600' : 'text-slate-400'}`}>
-              {vaultSet ? 'check_circle' : 'vpn_key'}
-            </span>
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={login}
-            disabled={busy}
-            className="w-full rounded bg-slate-900 px-4 py-3 text-xs font-bold uppercase text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
-          >
-            {busy ? 'Opening OpenAI' : 'Login with Codex'}
-          </button>
-          <div className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-slate-300'}`} />
-            {connected ? 'Codex connected' : 'Codex not connected'}
-          </div>
-        </div>
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={login}
+        disabled={busy}
+        className="w-full rounded bg-slate-900 px-4 py-3 text-xs font-bold uppercase text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
+      >
+        {busy ? 'Opening OpenAI' : 'Login with Codex'}
+      </button>
+      <div className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+        <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-slate-300'}`} />
+        {connected ? 'Connected' : 'Not connected'}
       </div>
     </div>
   );

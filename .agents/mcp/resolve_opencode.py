@@ -148,15 +148,6 @@ def load_global_opencode_config():
     return {}
 
 
-def managed_opencode_config_path():
-    """Return the Ostwin-owned OpenCode config path."""
-    home = os.environ.get('OSTWIN_HOME')
-    if not home:
-        user_home = os.environ.get('HOME') or os.path.expanduser('~')
-        home = os.path.join(user_home, '.ostwin')
-    return os.path.join(home, '.opencode', 'opencode.json')
-
-
 # ─── Role scanning ───────────────────────────────────────────────────────────
 
 def scan_roles(roles_dir):
@@ -513,7 +504,7 @@ def _main_sync(argv):
     home = os.environ.get('HOME') or os.path.expanduser('~')
     default_config = os.path.join(home, '.ostwin', '.agents', 'mcp',
                                   'mcp-builtin.json')
-    default_output = managed_opencode_config_path()
+    default_output = os.path.join(home, '.config', 'opencode', 'opencode.json')
     default_roles = os.path.join(home, '.ostwin', '.agents', 'roles')
 
     parser.add_argument(

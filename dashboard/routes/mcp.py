@@ -7,7 +7,6 @@ Delegates to mcp-extension.sh for actual operations.
 
 import json
 import asyncio
-import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -19,7 +18,6 @@ from mcp.client.sse import sse_client
 
 from dashboard.api_utils import AGENTS_DIR
 from dashboard.auth import get_current_user
-from dashboard.lib.opencode_paths import get_managed_opencode_config_path, get_ostwin_home
 
 # Try to import vault and config_resolver from .agents/mcp
 import sys
@@ -36,50 +34,19 @@ except ImportError:
     get_vault = None
     ConfigResolver = None
 
-try:
-    from resolve_opencode import sync as sync_opencode_mcp_config
-except ImportError:
-    sync_opencode_mcp_config = None
-
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
-OSTWIN_HOME = get_ostwin_home()
 MCP_DIR = AGENTS_DIR / "mcp"
 EXTENSIONS_FILE = MCP_DIR / "extensions.json"
 CATALOG_FILE = MCP_DIR / "mcp-catalog.json"
 BUILTIN_CONFIG_FILE = MCP_DIR / "mcp-builtin.json"
-HOME_CONFIG_FILE = OSTWIN_HOME / ".agents" / "mcp" / "config.json"
+HOME_CONFIG_FILE = Path.home() / ".ostwin" / ".agents" / "mcp" / "config.json"
 if not HOME_CONFIG_FILE.exists():
-    _legacy = OSTWIN_HOME / ".agents" / "mcp" / "mcp-config.json"
+    _legacy = Path.home() / ".ostwin" / ".agents" / "mcp" / "mcp-config.json"
     if _legacy.exists():
         HOME_CONFIG_FILE = _legacy
-DEPLOY_CONFIG_FILE = OSTWIN_HOME / ".agents" / "mcp" / "mcp-config.json"
+DEPLOY_CONFIG_FILE = Path.home() / ".ostwin" / ".agents" / "mcp" / "mcp-config.json"
 SCRIPT = MCP_DIR / "mcp-extension.sh"
-SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z\d+\-.]*://")
-
-
-def _is_local_mcp_host(value: str) -> bool:
-    authority = re.split(r"[/?#]", value, maxsplit=1)[0].lower()
-    if authority.startswith("[") and "]" in authority:
-        host = authority[1:authority.index("]")]
-    else:
-        host = authority.split(":", 1)[0]
-    return host in {"localhost", "::1", "0.0.0.0", "127.0.0.1"} or host.startswith("127.")
-
-
-def _normalize_mcp_http_url(value: Optional[str]) -> Optional[str]:
-    """Accept bare MCP hosts from the dashboard and store an explicit URL."""
-    if not value:
-        return value
-    trimmed = value.strip()
-    if not trimmed:
-        return trimmed
-    if SCHEME_RE.match(trimmed):
-        return trimmed
-    scheme = "http" if _is_local_mcp_host(trimmed.removeprefix("//")) else "https"
-    if trimmed.startswith("//"):
-        return f"{scheme}:{trimmed}"
-    return f"{scheme}://{trimmed}"
 
 
 class InstallRequest(BaseModel):
@@ -122,8 +89,6 @@ class McpServerConfig(BaseModel):
         if self.httpUrl and not self.url:
             self.url = self.httpUrl
             self.httpUrl = None
-        if self.type == "remote" and self.url:
-            self.url = _normalize_mcp_http_url(self.url)
         # Normalize env: env → environment
         if self.env and not self.environment:
             self.environment = self.env
@@ -145,25 +110,6 @@ def _read_json(path: Path) -> dict:
 def _get_servers(data: dict) -> dict:
     """Extract MCP servers dict, supporting both OpenCode 'mcp' and legacy 'mcpServers' keys."""
     return data.get("mcp", data.get("mcpServers", {}))
-
-
-def _sync_managed_opencode_config() -> Path:
-    """Sync dashboard MCP config into Ostwin-managed opencode.json."""
-    output_path = get_managed_opencode_config_path(OSTWIN_HOME)
-    if sync_opencode_mcp_config is None:
-        data = _read_json(output_path)
-        data["$schema"] = "https://opencode.ai/config.json"
-        data["mcp"] = _get_servers(_read_json(HOME_CONFIG_FILE))
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(data, indent=2) + "\n")
-        return output_path
-
-    sync_opencode_mcp_config(
-        config_path=str(HOME_CONFIG_FILE),
-        output_path=str(output_path),
-        roles_dir=str(OSTWIN_HOME / ".agents" / "roles"),
-    )
-    return output_path
 
 
 async def _run_script(args: list[str], timeout: int = 120) -> dict:
@@ -301,9 +247,8 @@ async def add_mcp_server(server: McpServerConfig, user: dict = Depends(get_curre
     # Ensure directory exists
     HOME_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     HOME_CONFIG_FILE.write_text(json.dumps(data, indent=2))
-    opencode_path = _sync_managed_opencode_config()
 
-    return {"status": "success", "name": server.name, "opencode_path": str(opencode_path)}
+    return {"status": "success", "name": server.name}
 
 
 @router.delete("/servers/{name}")
@@ -313,8 +258,7 @@ async def remove_mcp_server(name: str, user: dict = Depends(get_current_user)):
     if "mcp" in data and name in data["mcp"]:
         del data["mcp"][name]
         HOME_CONFIG_FILE.write_text(json.dumps(data, indent=2))
-        opencode_path = _sync_managed_opencode_config()
-        return {"status": "success", "opencode_path": str(opencode_path)}
+        return {"status": "success"}
 
     raise HTTPException(status_code=404, detail=f"Server {name} not found in home config")
 

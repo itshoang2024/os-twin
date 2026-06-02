@@ -90,17 +90,12 @@ patch_mcp_config() {
       "$mcp_config" "$env_file"
   fi
 
-  # 3. Normalize + validate + merge MCP servers into the Ostwin-managed
-  #    OpenCode config. Do not mutate the user's global ~/.config/opencode file.
-  if [[ "${SKIP_OPENCODE_CONFIG:-false}" == "true" ]]; then
-    info "Skipping OpenCode MCP config (--no-opencode-config)"
-  else
-    local opencode_home="$INSTALL_DIR/.opencode"
-    mkdir -p "$opencode_home"
-    OSTWIN_VENV_DIR="$VENV_DIR" OSTWIN_INSTALL_DIR="$INSTALL_DIR" \
-      "$VENV_DIR/bin/python" "${_PATCH_SCRIPTS_DIR}/merge_mcp_to_opencode.py" \
-      "$mcp_config" "$opencode_home/opencode.json" "$INSTALL_DIR/.agents/mcp"
-  fi
+  # 3. Normalize + validate + merge MCP servers into ~/.config/opencode/opencode.json
+  local opencode_home="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  mkdir -p "$opencode_home"
+  OSTWIN_VENV_DIR="$VENV_DIR" OSTWIN_INSTALL_DIR="$INSTALL_DIR" \
+    "$VENV_DIR/bin/python" "${_PATCH_SCRIPTS_DIR}/merge_mcp_to_opencode.py" \
+    "$mcp_config" "$opencode_home/opencode.json" "$INSTALL_DIR/.agents/mcp"
 
   ok "MCP config synced"
 }

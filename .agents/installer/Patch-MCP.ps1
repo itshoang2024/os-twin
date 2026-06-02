@@ -80,9 +80,17 @@ function Patch-McpConfig {
         }
     }
 
-    # 3. Normalize + validate + merge MCP servers into the Ostwin-managed
-    #    OpenCode config. Do not mutate the user's global opencode config.
-    $opencodeHome = Join-Path $script:InstallDir ".opencode"
+    # 3. Normalize + validate + merge MCP servers into opencode config
+    # On Windows, XDG_CONFIG_HOME may not exist — use LOCALAPPDATA or USERPROFILE
+    $opencodeHome = if ($env:XDG_CONFIG_HOME) {
+        Join-Path $env:XDG_CONFIG_HOME "opencode"
+    }
+    elseif ($env:USERPROFILE) {
+        Join-Path $env:USERPROFILE ".config\opencode"
+    }
+    else {
+        Join-Path $HOME ".config\opencode"
+    }
 
     if (-not (Test-Path $opencodeHome)) {
         New-Item -ItemType Directory -Path $opencodeHome -Force | Out-Null

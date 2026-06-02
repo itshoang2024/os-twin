@@ -30,24 +30,7 @@ export interface AgentContext {
 
 export interface AgentResponse {
   text: string;
-  planId?: string;
-  destinationUrl?: string;
   attachments?: Array<{ buffer: Buffer; name: string }>;
-}
-
-function planCreatedDestination(actions?: Array<{ type: string; plan_id?: string; url?: string }>): {
-  planId: string;
-  destinationUrl: string;
-} | null {
-  for (const action of actions || []) {
-    if (action.type === 'plan_created' && action.plan_id) {
-      return {
-        planId: action.plan_id,
-        destinationUrl: action.url || `/plans/${action.plan_id}`,
-      };
-    }
-  }
-  return null;
 }
 
 // ── Trivial message fast-path ───────────────────────────────────────────
@@ -112,16 +95,13 @@ export async function askAgent(
         return { text: `⚠️ OpenCode command error: ${(result as any)._error}` };
       }
 
-      const destination = planCreatedDestination(result.actions);
-      if (destination) {
-        setPlan(agentCtx.userId, agentCtx.platform, destination.planId);
+      for (const action of result.actions || []) {
+        if (action.type === 'plan_created' && action.plan_id) {
+          setPlan(agentCtx.userId, agentCtx.platform, action.plan_id);
+        }
       }
 
-      return {
-        text: result.text || 'No response.',
-        planId: destination?.planId,
-        destinationUrl: destination?.destinationUrl,
-      };
+      return { text: result.text || 'No response.' };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[BRIDGE] OpenCode draft command error:', message);
@@ -176,17 +156,14 @@ export async function askAgent(
 
     const text = result.text || 'No response.';
 
-    // Use structured actions for reliable session state updates.
-    const destination = planCreatedDestination(result.actions);
-    if (destination) {
-      setPlan(agentCtx.userId, agentCtx.platform, destination.planId);
+    // Use structured actions for reliable session state updates
+    for (const action of result.actions || []) {
+      if (action.type === 'plan_created' && action.plan_id) {
+        setPlan(agentCtx.userId, agentCtx.platform, action.plan_id);
+      }
     }
 
-    return {
-      text,
-      planId: destination?.planId,
-      destinationUrl: destination?.destinationUrl,
-    };
+    return { text };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[BRIDGE] OpenCode chat error:', message);

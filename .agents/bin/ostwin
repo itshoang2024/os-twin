@@ -1699,7 +1699,7 @@ switch ($Command) {
         if ($mcpSub -eq "sync") {
             # ── ostwin mcp sync ──
             # Canonical sync: resolve MCP servers + generate agent permissions
-            # from role.json mcp_refs. Writes to ~/.ostwin/.opencode/opencode.json.
+            # from role.json mcp_refs. Writes to ~/.config/opencode/opencode.json.
             $resolveScript = Join-Path $OstwinHome ".agents" "mcp" "resolve_opencode.py"
             if (-not (Test-Path $resolveScript)) {
                 $resolveScript = Join-Path $AgentsDir "mcp" "resolve_opencode.py"
@@ -1719,7 +1719,6 @@ switch ($Command) {
             }
 
             Write-Host "Syncing MCP permissions from role definitions..."
-            $env:OSTWIN_HOME = $OstwinHome
             & $PythonCmd @syncArgs
         }
         else {

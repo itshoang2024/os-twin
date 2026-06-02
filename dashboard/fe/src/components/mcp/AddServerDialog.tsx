@@ -6,32 +6,6 @@ interface AddServerDialogProps {
   onClose: () => void;
 }
 
-const SCHEME_RE = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
-
-function isLocalMcpHost(value: string): boolean {
-  const authority = value.split(/[/?#]/, 1)[0].toLowerCase();
-  const host = authority.startsWith('[')
-    ? authority.slice(1, authority.indexOf(']'))
-    : authority.split(':')[0];
-
-  return (
-    host === 'localhost' ||
-    host === '::1' ||
-    host === '0.0.0.0' ||
-    host === '127.0.0.1' ||
-    host.startsWith('127.')
-  );
-}
-
-export function normalizeMcpHttpUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return trimmed;
-  if (SCHEME_RE.test(trimmed)) return trimmed;
-  const scheme = isLocalMcpHost(trimmed.replace(/^\/\//, '')) ? 'http' : 'https';
-  if (trimmed.startsWith('//')) return `${scheme}:${trimmed}`;
-  return `${scheme}://${trimmed}`;
-}
-
 export const AddServerDialog: React.FC<AddServerDialogProps> = ({ isOpen, onClose }) => {
   const { addServer, refresh } = useMcpServers();
   const [type, setType] = useState<'stdio' | 'http'>('stdio');
@@ -71,7 +45,7 @@ export const AddServerDialog: React.FC<AddServerDialogProps> = ({ isOpen, onClos
         if (args) server.args = args.split(' ').filter(a => a);
         if (env) server.env = parseKV(env);
       } else {
-        server.httpUrl = normalizeMcpHttpUrl(httpUrl);
+        server.httpUrl = httpUrl;
         if (headers) server.headers = parseKV(headers);
       }
       await addServer(server);
@@ -140,9 +114,8 @@ export const AddServerDialog: React.FC<AddServerDialogProps> = ({ isOpen, onClos
 
               <div className="space-y-4 animate-in slide-in-from-bottom-2 duration-300">
                 <div>
-                  <label htmlFor="mcp-server-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Server Name</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Server Name</label>
                   <input
-                    id="mcp-server-name"
                     type="text"
                     required
                     placeholder="e.g. google-search"
@@ -189,13 +162,9 @@ export const AddServerDialog: React.FC<AddServerDialogProps> = ({ isOpen, onClos
                 ) : (
                   <>
                     <div>
-                      <label htmlFor="mcp-http-url" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">HTTP URL</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">HTTP URL</label>
                       <input
-                        id="mcp-http-url"
-                        type="text"
-                        inputMode="url"
-                        autoCapitalize="none"
-                        spellCheck={false}
+                        type="url"
                         required
                         placeholder="https://mcp.example.com/api"
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono"

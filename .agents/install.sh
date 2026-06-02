@@ -12,7 +12,7 @@
 #   ./install.sh --search-engine  # Also install & start SearXNG search
 #   ./install.sh --search-engine-mode local|docker
 #   ./install.sh --dashboard-only  # Install dashboard API + frontend only
-#   ./install.sh --no-opencode-config  # Skip patching the managed OpenCode config
+#   ./install.sh --no-opencode-config  # Skip writing to ~/.config/opencode/opencode.json
 #   ./install.sh --no-start       # Install only; do not start OpenCode/dashboard services
 #   ./install.sh --help        # Show this help
 #

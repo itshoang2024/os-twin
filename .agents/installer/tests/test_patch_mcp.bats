@@ -44,61 +44,6 @@ setup() {
   rm -rf "$TEST_DIR"
 }
 
-@test "patch_mcp_config writes opencode config under install dir" {
-  TEST_DIR=$(mktemp -d)
-  INSTALL_DIR="$TEST_DIR"
-  VENV_DIR="$TEST_DIR/.venv"
-  MCP_DIR="$TEST_DIR/.agents/mcp"
-
-  mkdir -p "$MCP_DIR" "$VENV_DIR/bin"
-  echo '{"mcp":{}}' > "$MCP_DIR/config.json"
-
-  cat > "$VENV_DIR/bin/python" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >> "$TEST_DIR/python-args.txt"
-if [[ "\$1" == *merge_mcp_to_opencode.py ]]; then
-  mkdir -p "\$(dirname "\$3")"
-  printf '{}\n' > "\$3"
-fi
-exit 0
-EOF
-  chmod +x "$VENV_DIR/bin/python"
-
-  run patch_mcp_config
-
-  [[ -f "$TEST_DIR/.opencode/opencode.json" ]]
-  grep -Fq "$TEST_DIR/.opencode/opencode.json" "$TEST_DIR/python-args.txt"
-  ! grep -Fq "$HOME/.config/opencode/opencode.json" "$TEST_DIR/python-args.txt"
-
-  rm -rf "$TEST_DIR"
-}
-
-@test "patch_mcp_config respects SKIP_OPENCODE_CONFIG" {
-  TEST_DIR=$(mktemp -d)
-  INSTALL_DIR="$TEST_DIR"
-  VENV_DIR="$TEST_DIR/.venv"
-  MCP_DIR="$TEST_DIR/.agents/mcp"
-  SKIP_OPENCODE_CONFIG=true
-
-  mkdir -p "$MCP_DIR" "$VENV_DIR/bin"
-  echo '{"mcp":{}}' > "$MCP_DIR/config.json"
-
-  cat > "$VENV_DIR/bin/python" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >> "$TEST_DIR/python-args.txt"
-exit 0
-EOF
-  chmod +x "$VENV_DIR/bin/python"
-
-  run patch_mcp_config
-
-  [[ ! -f "$TEST_DIR/.opencode/opencode.json" ]]
-  ! grep -Fq "merge_mcp_to_opencode.py" "$TEST_DIR/python-args.txt"
-
-  unset SKIP_OPENCODE_CONFIG
-  rm -rf "$TEST_DIR"
-}
-
 @test "patch_mcp_config replaces existing AGENT_DIR and PATH in .env" {
   TEST_DIR=$(mktemp -d)
   INSTALL_DIR="$TEST_DIR"

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -117,14 +116,12 @@ class ToolAction(BaseModel):
     type: str
     plan_id: str | None = None
     room_id: str | None = None
-    url: str | None = None
 
 
 class ChatResponse(BaseModel):
     text: str
     conversation_id: str
     actions: list[ToolAction] | None = None
-    redirect_url: str | None = None
 
 
 # ── Tool-call → action mapping ────────────────────────────────────────────
@@ -154,27 +151,8 @@ def _extract_actions_from_tool_parts(tool_parts: list[dict]) -> list[ToolAction]
         output = part.get("output", "")
         plan_id = _extract_plan_id(tool_name, output)
         if plan_id:
-            url = _extract_plan_url(output) or f"/plans/{plan_id}"
-            actions.append(ToolAction(type=action_type, plan_id=plan_id, url=url))
+            actions.append(ToolAction(type=action_type, plan_id=plan_id))
     return actions
-
-
-def _extract_json_string_field(output: str, field: str) -> str | None:
-    try:
-        data = json.loads(output)
-        value = data.get(field)
-        if value:
-            return str(value)
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    match = re.search(
-        rf'\{{[^{{}}]*"{re.escape(field)}"\s*:\s*"([^"]+)"[^{{}}]*\}}',
-        output,
-    )
-    if match:
-        return match.group(1)
-    return None
 
 
 def _extract_plan_id(tool_name: str, output: str) -> str | None:
@@ -184,49 +162,20 @@ def _extract_plan_id(tool_name: str, output: str) -> str | None:
     """
     if not output:
         return None
-    return _extract_json_string_field(output, "plan_id")
-
-
-def _extract_plan_url(output: str) -> str | None:
-    if not output:
-        return None
-    return _extract_json_string_field(output, "url")
-
-
-def _redirect_url_from_actions(actions: list[ToolAction]) -> str | None:
-    for action in actions:
-        if action.type == "plan_created" and action.plan_id:
-            return action.url or f"/plans/{action.plan_id}"
+    # Try direct JSON parse
+    try:
+        data = json.loads(output)
+        pid = data.get("plan_id")
+        if pid:
+            return str(pid)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Try finding JSON blob in text
+    import re
+    match = re.search(r'\{[^{}]*"plan_id"\s*:\s*"([^"]+)"[^{}]*\}', output)
+    if match:
+        return match.group(1)
     return None
-
-
-async def _broadcast_plan_created_navigation(
-    actions: list[ToolAction],
-    *,
-    conversation_id: str,
-    user_id: str,
-    platform: str,
-) -> None:
-    """Tell connected dashboard tabs to leave the master-agent surface."""
-    for action in actions:
-        if action.type != "plan_created" or not action.plan_id:
-            continue
-        try:
-            from dashboard.global_state import broadcaster
-
-            await broadcaster.broadcast(
-                "agent_plan_created",
-                {
-                    "plan_id": action.plan_id,
-                    "url": action.url or f"/plans/{action.plan_id}",
-                    "conversation_id": conversation_id,
-                    "user_id": user_id,
-                    "platform": platform,
-                    "source": "master_agent",
-                },
-            )
-        except Exception as e:
-            logger.warning("[CHAT] Failed to broadcast plan-created navigation: %s", e)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
@@ -292,18 +241,10 @@ async def chat_endpoint(request: ChatRequest, user: dict = Depends(get_current_u
     except Exception as e:
         logger.warning("[CHAT] Failed to read tool parts for actions: %s", e)
 
-    await _broadcast_plan_created_navigation(
-        actions,
-        conversation_id=conv_id,
-        user_id=request.user_id,
-        platform=request.platform,
-    )
-
     return ChatResponse(
         text=raw_text or "No response from AI.",
         conversation_id=conv_id,
         actions=actions or None,
-        redirect_url=_redirect_url_from_actions(actions),
     )
 
 
@@ -345,18 +286,10 @@ async def chat_command_endpoint(request: CommandRequest, user: dict = Depends(ge
     except Exception as e:
         logger.warning("[CHAT] Failed to read tool parts for actions: %s", e)
 
-    await _broadcast_plan_created_navigation(
-        actions,
-        conversation_id=conv_id,
-        user_id=request.user_id,
-        platform=request.platform,
-    )
-
     return ChatResponse(
         text=raw_text or "No response from AI.",
         conversation_id=conv_id,
         actions=actions or None,
-        redirect_url=_redirect_url_from_actions(actions),
     )
 
 

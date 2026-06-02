@@ -3,11 +3,10 @@ OpenCode config sync.
 
 Keeps two files aligned with the dashboard vault:
 
-1. ``~/.ostwin/.opencode/opencode.json`` -- ``provider`` block for
+1. ``~/.config/opencode/opencode.json``  -- ``provider`` block for
    OpenAI-compatible providers (gemini, byteplus).
 2. ``~/.local/share/opencode/auth.json`` -- ``{"type":"api","key":"…"}``
-   entries for native providers (anthropic, openai, azure, xai, …), while
-   preserving native OpenCode OAuth sessions such as OpenAI subscription auth.
+   entries for native providers (anthropic, openai, azure, xai, …).
 
 Some providers (e.g. Azure) use **both** auth.json *and* ENV vars.
 ENV-only providers (AWS Bedrock) are not synced here -- the user
@@ -31,8 +30,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from dashboard.lib.opencode_paths import get_managed_opencode_config_path
-
 from .models_registry import (
     AUTH_JSON_PROVIDERS,
     OPENCODE_PROVIDERS,
@@ -42,7 +39,7 @@ from .models_registry import (
 
 logger = logging.getLogger(__name__)
 
-OPENCODE_CONFIG_PATH = get_managed_opencode_config_path()
+OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
 AUTH_JSON_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 OPENCODE_SCHEMA = "https://opencode.ai/config.json"
 
@@ -232,17 +229,11 @@ def _sync_auth_json(vault, settings, target: Path) -> TargetResult:
             skipped.append(name)
             continue
 
-        auth_json_key = adef.auth_json_key
-        existing_entry = existing.get(auth_json_key)
-        if _is_oauth_entry(existing_entry):
-            skipped.append(name)
-            continue
-
         if not api_key:
             if (
-                auth_json_key in existing
-                and isinstance(existing.get(auth_json_key), dict)
-                and existing[auth_json_key].get("type") == "api"
+                adef.auth_json_key in existing
+                and isinstance(existing.get(adef.auth_json_key), dict)
+                and existing[adef.auth_json_key].get("type") == "api"
             ):
                 del existing[adef.auth_json_key]
                 removed.append(name)
@@ -250,7 +241,7 @@ def _sync_auth_json(vault, settings, target: Path) -> TargetResult:
                 skipped.append(name)
             continue
 
-        existing[auth_json_key] = {
+        existing[adef.auth_json_key] = {
             "type": "api",
             "key": api_key,
         }
@@ -281,11 +272,6 @@ def _sync_auth_json(vault, settings, target: Path) -> TargetResult:
             api_key = vault.get("providers", vault_key)
         except Exception as exc:
             logger.warning("Vault read failed for providers/%s: %s", vault_key, exc)
-            skipped.append(vault_key)
-            continue
-
-        existing_entry = existing.get(vault_key)
-        if _is_oauth_entry(existing_entry):
             skipped.append(vault_key)
             continue
 
@@ -435,11 +421,6 @@ def _load_json(path: Path, *, skeleton: Dict[str, Any]) -> Dict[str, Any]:
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to read %s, starting fresh", path)
     return dict(skeleton)
-
-
-def _is_oauth_entry(entry: Any) -> bool:
-    """Return whether an auth.json entry is managed by OpenCode OAuth."""
-    return isinstance(entry, dict) and entry.get("type") == "oauth"
 
 
 def _write_json(path: Path, data: Dict[str, Any]) -> None:
