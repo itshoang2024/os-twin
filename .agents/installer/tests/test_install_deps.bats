@@ -64,13 +64,16 @@ setup() {
   [[ "$body" == *"AGENT_BROWSER_VERSION"* ]]
 }
 
-@test "install_agent_browser prefers bun and never uses pnpm" {
+@test "install_agent_browser prefers bun with pnpm and npm fallbacks" {
   local selector helper
   selector=$(declare -f _select_global_js_pm)
   helper=$(declare -f _install_global_js_package)
   [[ "$selector" == *"command -v bun"* ]]
+  [[ "$selector" == *"command -v pnpm"* ]]
+  [[ "$selector" == *"command -v npm"* ]]
   [[ "$helper" == *'bun add -g "$package_spec"'* ]]
-  [[ "$selector$helper" != *"pnpm"* ]]
+  [[ "$helper" == *'pnpm add -g "$package_spec"'* ]]
+  [[ "$helper" == *'npm install -g "$package_spec"'* ]]
 }
 
 @test "install_chrome_devtools does not enable stealth by default" {
