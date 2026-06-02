@@ -16,16 +16,9 @@ function Setup-OpenCodePermissions {
     [CmdletBinding()]
     param()
 
-    # OpenCode config location on Windows
-    $ocDir = if ($env:XDG_CONFIG_HOME) {
-        Join-Path $env:XDG_CONFIG_HOME "opencode"
-    }
-    elseif ($env:USERPROFILE) {
-        Join-Path $env:USERPROFILE ".config\opencode"
-    }
-    else {
-        Join-Path $HOME ".config\opencode"
-    }
+    # Ostwin-managed OpenCode config location. Avoid mutating the user's
+    # global OpenCode config under ~/.config/opencode.
+    $ocDir = Join-Path $script:InstallDir ".opencode"
     $ocConfig = Join-Path $ocDir "opencode.json"
 
     # Find Python

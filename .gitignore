@@ -22,6 +22,7 @@ gold-mining/
 .agents/mcp/mcp-manifest.json
 .agents/conversations/plans/index.json
 .agents/config.json
+.agents/models_dev_raw.json
 # ── Build output ──────────────────────────────────────────────────────────────
 dist/
 # ── Dependencies ──────────────────────────────────────────────────────────────

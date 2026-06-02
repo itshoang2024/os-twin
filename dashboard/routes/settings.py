@@ -773,7 +773,7 @@ async def migrate_secrets_to_vault(
 async def sync_opencode(
     user: dict = Depends(get_current_user),
 ):
-    """Sync provider keys + models to ~/.config/opencode/opencode.json.
+    """Sync provider keys + models to the Ostwin-managed opencode.json.
 
     Only gemini (non-vertex) and byteplus are synced -- other providers
     are handled natively by OpenCode via env vars.
