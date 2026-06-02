@@ -26,7 +26,7 @@ install_files() {
   # with whatever happens to be in the source repo's plans/ directory.
   # PLAN.template.md is seeded separately below if missing.
   # NEVER sync: docs/, node_modules/
-  # Skip if already exists (don't override): config.json, models_dev_raw.json, roles/config.json
+  # Skip if already exists (don't override): config.json, roles/config.json
   local _rsync_excludes=(
     --exclude='.venv/' --exclude='*.pid' --exclude='dashboard.pid'
     --exclude='logs/' --exclude='__pycache__/' --exclude='*.pyc'
@@ -40,10 +40,6 @@ install_files() {
   if [[ -f "$INSTALL_DIR/.agents/config.json" ]]; then
     _rsync_excludes+=(--exclude='/config.json')
     _find_excludes+=(-not -name 'config.json')
-  fi
-  if [[ -f "$INSTALL_DIR/.agents/models_dev_raw.json" ]]; then
-    _rsync_excludes+=(--exclude='/models_dev_raw.json')
-    _find_excludes+=(-not -name 'models_dev_raw.json')
   fi
   if [[ -f "$INSTALL_DIR/.agents/roles/config.json" ]]; then
     _rsync_excludes+=(--exclude='/roles/config.json')

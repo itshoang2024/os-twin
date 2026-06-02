@@ -42,27 +42,9 @@ CONFIGURED_MODELS_PATH = (
     Path.home() / ".ostwin" / ".agents" / "configured_models.json"
 )
 
-# Home-directory raw catalog cache (primary fallback)
+# Home-directory raw catalog cache.
 _HOME_RAW_PATH = CONFIGURED_MODELS_PATH.parent / "models_dev_raw.json"
 
-
-def _project_raw_path() -> Optional[Path]:
-    """Return the project-level .agents/models_dev_raw.json path, or None.
-
-    The project-level file ships with os-twin and acts as the install-time
-    seed so a fresh deployment can bootstrap even before the first network
-    fetch succeeds.  We resolve it via the dashboard package location.
-    """
-    try:
-        from dashboard.api_utils import AGENTS_DIR
-
-        candidate = AGENTS_DIR / "models_dev_raw.json"
-        # Only return a path whose parent actually exists
-        if candidate.parent.exists():
-            return candidate
-    except Exception:
-        pass
-    return None
 
 # In-memory cache
 _cached_models: Optional[Dict[str, Any]] = None
@@ -512,29 +494,9 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-            # ── 1) Write to the home-directory cache (primary fallback) ──
+            # ── Write to the home-directory cache ────────────────────────
             _write_json(_HOME_RAW_PATH, data)
             logger.info("Fetched models.dev catalog: %d providers", len(data))
-
-            # ── 2) Mirror to project-level .agents/models_dev_raw.json ───
-            # This keeps the install-time seed file up-to-date so that a
-            # fresh deployment or `ostwin install` can bootstrap the catalog
-            # without a network round-trip.
-            proj_path = _project_raw_path()
-            if proj_path is not None:
-                try:
-                    _write_json(proj_path, data)
-                    logger.info(
-                        "[MODELS] Mirrored raw catalog to project path: %s",
-                        proj_path,
-                    )
-                except Exception as mirror_exc:
-                    logger.warning(
-                        "[MODELS] Could not mirror raw catalog to %s: %s",
-                        proj_path,
-                        mirror_exc,
-                    )
-
             return data
     except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to fetch models.dev/api.json: %s", exc)
@@ -544,38 +506,14 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
 def _read_cached_raw() -> Optional[Dict[str, Any]]:
     """Read the raw models.dev cache from disk.
 
-    Resolution order:
-    1. ``~/.ostwin/.agents/models_dev_raw.json``  (primary, updated on every fetch)
-    2. Project-level ``.agents/models_dev_raw.json`` (install-time seed / bootstrap)
-
-    When the home cache is missing or empty and the project-level file has
-    real data, the project file is copied to the home location so subsequent
-    lookups are fast.
+    The cache lives under ``~/.ostwin/.agents/models_dev_raw.json`` and is
+    updated on successful network fetches. The repository no longer ships or
+    mutates a project-level raw catalog.
     """
-    # 1. Home-directory cache
     if _HOME_RAW_PATH.exists():
         try:
             data = json.loads(_HOME_RAW_PATH.read_text())
             if data:  # non-empty dict is valid
-                return data
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    # 2. Project-level seed (bootstrap for fresh installs)
-    proj_path = _project_raw_path()
-    if proj_path is not None and proj_path.exists():
-        try:
-            data = json.loads(proj_path.read_text())
-            if data:
-                logger.info(
-                    "[MODELS] Bootstrapping home raw cache from project seed: %s",
-                    proj_path,
-                )
-                # Promote to home cache so future boots skip this step
-                try:
-                    _write_json(_HOME_RAW_PATH, data)
-                except Exception:
-                    pass
                 return data
         except (json.JSONDecodeError, OSError):
             pass
