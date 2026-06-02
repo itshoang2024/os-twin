@@ -376,6 +376,10 @@ _select_global_js_pm() {
     echo "bun"
     return 0
   fi
+  if command -v pnpm &>/dev/null; then
+    echo "pnpm"
+    return 0
+  fi
   if command -v npm &>/dev/null; then
     echo "npm"
     return 0
@@ -400,6 +404,22 @@ _add_js_global_bin_to_path() {
         export PATH="$npm_prefix/bin:$PATH"
       fi
       ;;
+    pnpm)
+      local pnpm_bin_dir=""
+      pnpm_bin_dir=$(pnpm config get global-bin-dir 2>/dev/null || true)
+      if [[ -z "$pnpm_bin_dir" || "$pnpm_bin_dir" == "undefined" || "$pnpm_bin_dir" == "null" ]]; then
+        pnpm_bin_dir="${PNPM_HOME:-$HOME/.local/bin}"
+        mkdir -p "$pnpm_bin_dir"
+        export PNPM_HOME="$pnpm_bin_dir"
+        pnpm config set global-bin-dir "$pnpm_bin_dir" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "${PNPM_HOME:-}" && -d "$PNPM_HOME" && ":$PATH:" != *":$PNPM_HOME:"* ]]; then
+        export PATH="$PNPM_HOME:$PATH"
+      fi
+      if [[ -n "$pnpm_bin_dir" && "$pnpm_bin_dir" != "undefined" && -d "$pnpm_bin_dir" && ":$PATH:" != *":$pnpm_bin_dir:"* ]]; then
+        export PATH="$pnpm_bin_dir:$PATH"
+      fi
+      ;;
   esac
 }
 
@@ -415,6 +435,10 @@ _install_global_js_package() {
     npm)
       npm install -g "$package_spec" 2>/dev/null || sudo npm install -g "$package_spec" 2>/dev/null
       _add_js_global_bin_to_path npm
+      ;;
+    pnpm)
+      _add_js_global_bin_to_path pnpm
+      pnpm add -g "$package_spec" 2>/dev/null
       ;;
     *)
       return 1
@@ -433,14 +457,30 @@ install_agent_browser() {
   local js_pm=""
   js_pm="$(_select_global_js_pm || true)"
   if [[ -z "$js_pm" ]]; then
-    warn "Skipping agent-browser — neither bun nor npm was found"
+    warn "Skipping agent-browser — no supported JavaScript package manager found"
     return 0
   fi
 
   step "Installing agent-browser CLI with $js_pm..."
   if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
-    if [[ "$js_pm" == "bun" && -n "$(command -v npm 2>/dev/null || true)" ]]; then
-      warn "agent-browser bun install failed; retrying with npm"
+    if [[ "$js_pm" == "bun" && -n "$(command -v pnpm 2>/dev/null || true)" ]]; then
+      warn "agent-browser bun install failed; retrying with pnpm"
+      js_pm="pnpm"
+      if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
+        if [[ -n "$(command -v npm 2>/dev/null || true)" ]]; then
+          warn "agent-browser pnpm install failed; retrying with npm"
+          js_pm="npm"
+          if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
+            warn "agent-browser npm install failed; browser automation CLI will require manual install"
+            return 0
+          fi
+        else
+          warn "agent-browser pnpm install failed; browser automation CLI will require manual install"
+          return 0
+        fi
+      fi
+    elif [[ "$js_pm" != "npm" && -n "$(command -v npm 2>/dev/null || true)" ]]; then
+      warn "agent-browser $js_pm install failed; retrying with npm"
       js_pm="npm"
       if ! _install_global_js_package "$js_pm" "agent-browser@$AGENT_BROWSER_VERSION"; then
         warn "agent-browser npm install failed; browser automation CLI will require manual install"
