@@ -114,10 +114,13 @@ start_dashboard() {
   # Source .env so the dashboard process inherits API keys
   local env_file="$INSTALL_DIR/.env"
   if [[ -f "$env_file" ]]; then
+    local path_before_env="$PATH"
     set -a
     # shellcheck source=/dev/null
     source "$env_file"
     set +a
+    export PATH="$path_before_env"
+    hash -r 2>/dev/null || true
   fi
 
   mkdir -p "$INSTALL_DIR/logs"

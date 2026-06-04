@@ -53,7 +53,22 @@ _install_channel_deps() {
   esac
 }
 
+_source_channel_env() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+
+  local path_before_env="$PATH"
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+  export PATH="$path_before_env"
+  hash -r 2>/dev/null || true
+}
+
 install_channels() {
+  ensure_brew_paths
+
   # Install in ~/.ostwin/bot/ (primary) and source repo (for development)
   local bot_dirs=()
 
@@ -122,6 +137,8 @@ install_channels() {
 # Starts channel connectors in the background.
 
 start_channels() {
+  ensure_brew_paths
+
   if [[ -z "${CHAN_DIR:-}" ]]; then
     return
   fi
@@ -134,10 +151,8 @@ start_channels() {
   local env_file="$INSTALL_DIR/.env"
   local project_root_env
   project_root_env="$(cd "$CHAN_DIR/.." && pwd)/.env"
-  # shellcheck disable=SC1090
-  [[ -f "$env_file" ]] && { set -a; source "$env_file"; set +a; }
-  # shellcheck disable=SC1090
-  [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
+  _source_channel_env "$env_file"
+  _source_channel_env "$project_root_env"
 
   local chan_pid_file="$INSTALL_DIR/.agents/channel.pid"
   if [[ -f "$chan_pid_file" ]]; then
@@ -160,8 +175,7 @@ start_channels() {
   step "Starting channels from $CHAN_DIR..."
   (
     cd "$CHAN_DIR" || exit
-    # shellcheck disable=SC1090
-    [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
+    _source_channel_env "$project_root_env"
     nohup bun run start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
     echo $! > "$chan_pid_file"
     echo "$!"
