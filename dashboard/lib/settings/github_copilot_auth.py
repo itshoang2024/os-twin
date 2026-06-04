@@ -31,7 +31,7 @@ LEGACY_COPILOT_PROVIDER_ID = "copilot"
 
 # Public GitHub OAuth app client id for the OSTwin local dashboard.
 _CLIENT_ID = os.environ.get("OSTWIN_GITHUB_CLIENT_ID", "Ov23liQTivczXRzkXA1E")
-_CLIENT_SECRET = os.environ.get("OSTWIN_GITHUB_CLIENT_SECRET", "")
+_CLIENT_SECRET = os.environ.get("OSTWIN_GITHUB_CLIENT_SECRET", "b4c27d0498fcbea441414dc2bfacb74bfa6d8239")
 _REDIRECT_URI = os.environ.get(
     "OSTWIN_GITHUB_REDIRECT_URI",
     "http://localhost:3366/api/settings/github/oauth/callback",
