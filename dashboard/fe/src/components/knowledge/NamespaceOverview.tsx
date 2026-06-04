@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { NamespaceMetaResponse } from '@/hooks/use-knowledge-namespaces';
 import { QueryResultResponse } from '@/hooks/use-knowledge-query';
-import { GraphCountsResponse } from '@/hooks/use-knowledge-import';
+import { GraphCountsResponse, JobStatusResponse } from '@/hooks/use-knowledge-import';
 import BacklinkBadge from './BacklinkBadge';
 import AnswerMarkdown from './AnswerMarkdown';
 import { getNodeColor } from './constants';
@@ -51,7 +51,9 @@ function getLanguageDisplay(lang: string): { flag: string; label: string } {
 interface NamespaceOverviewProps {
   namespace: NamespaceMetaResponse;
   graphCounts?: GraphCountsResponse;
+  activeJob?: JobStatusResponse;
   onNavigateImport: () => void;
+  onNavigateResearch: () => void;
   onNavigateQuery: () => void;
   onDelete: () => void;
   onRefresh: () => void;
@@ -178,7 +180,9 @@ function HistoryItem({ entry, isActive, onClick }: {
 export default function NamespaceOverview({
   namespace: ns,
   graphCounts,
+  activeJob,
   onNavigateImport,
+  onNavigateResearch,
   onNavigateQuery,
   onDelete,
   onRefresh,
@@ -199,10 +203,13 @@ export default function NamespaceOverview({
   const [activeHistoryIdx, setActiveHistoryIdx] = useState<number>(-1);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Live counts from KuzuDB (fallback to manifest stats)
-  const entityCount = graphCounts?.entities ?? stats.entities;
-  const chunkCount = graphCounts?.chunks ?? stats.chunks;
-  const relationCount = graphCounts?.relations ?? stats.relations;
+  // Live counts — use the higher of KuzuDB live counts vs manifest stats.
+  // KuzuDB may report 0 when chunks exist only in the vector store (e.g.
+  // embedding failures prevent graph persistence but chunks are still tracked
+  // in the manifest).
+  const entityCount = Math.max(graphCounts?.entities ?? 0, stats.entities);
+  const chunkCount = Math.max(graphCounts?.chunks ?? 0, stats.chunks);
+  const relationCount = Math.max(graphCounts?.relations ?? 0, stats.relations);
 
   // Reset local state when namespace changes
   const [prevNamespace, setPrevNamespace] = useState(ns.name);
@@ -297,6 +304,13 @@ export default function NamespaceOverview({
               <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--color-text-muted)' }}>upload</span>
             </button>
             <button
+              onClick={onNavigateResearch}
+              className="p-2 rounded-lg hover:bg-white/50 transition-colors shrink-0"
+              aria-label="Web research" title="Web Research"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18, color: 'var(--color-text-muted)' }}>travel_explore</span>
+            </button>
+            <button
               onClick={onRefresh}
               className="p-2 rounded-lg hover:bg-white/50 transition-colors shrink-0"
               aria-label="Refresh namespace" title="Refresh"
@@ -320,6 +334,38 @@ export default function NamespaceOverview({
           <StatPill icon="hub" label="Entities" value={entityCount} color="#EC4899" />
           <StatPill icon="link" label="Relations" value={relationCount} color="#F59E0B" />
         </div>
+
+        {/* Active job banner */}
+        {activeJob && (
+          <div className="flex items-center gap-3 px-4 py-3 mb-5 rounded-xl border" style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+            <span className="material-symbols-outlined animate-spin" style={{ fontSize: 18, color: 'var(--color-primary)' }}>progress_activity</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: 'var(--color-text)' }}>
+                  {activeJob.operation === 'research_ingest' ? 'Web research' : 'Importing'} in progress…
+                </span>
+                {activeJob.progress_total > 0 && (
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>
+                    {activeJob.progress_current}/{activeJob.progress_total}
+                  </span>
+                )}
+              </div>
+              <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-border)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: activeJob.progress_total > 0 ? `${Math.round((activeJob.progress_current / activeJob.progress_total) * 100)}%` : '30%',
+                    background: 'var(--color-primary)',
+                    ...(activeJob.progress_total === 0 ? { animation: 'pulse 1.5s ease-in-out infinite' } : {}),
+                  }}
+                />
+              </div>
+              {activeJob.message && (
+                <p className="text-xs mt-1 truncate" style={{ color: 'var(--color-text-muted)' }}>{activeJob.message}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── Hero Search ──────────────────────────────────────── */}
         {hasContent && onExecuteQuery ? (

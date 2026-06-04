@@ -318,6 +318,7 @@ $($script:SkyFighterEpicDesc)
             $briefContent | Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
 
             $taskDesc = Get-Content (Join-Path $script:roomDir "brief.md") -Raw
+            $workingDir = ''
             if ($taskDesc -match '## Working Directory\s*\n(.+)') {
                 $workingDir = $Matches[1].Trim()
             }

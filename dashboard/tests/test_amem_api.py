@@ -2,7 +2,7 @@
 
 Tests the /api/amem/{plan_id}/... endpoints that serve memory graph data,
 note listings, individual notes, and statistics from the centralized
-~/.ostwin/memory/memory-{plan_id}/ directory.
+~/.ostwin/memory/{plan_id}/ directory.
 """
 
 import json
@@ -76,7 +76,7 @@ Just a simple note with no metadata.
 
 def _make_memory_dir(memory_base: Path, plan_id: str) -> Path:
     """Create the centralized memory directory for a plan_id."""
-    mem_dir = memory_base / f"memory-{plan_id}"
+    mem_dir = memory_base / plan_id
     return mem_dir
 
 
@@ -93,27 +93,19 @@ def memory_workspace(tmp_path, monkeypatch):
 
     # architecture/database/
     (notes_dir / "architecture" / "database").mkdir(parents=True)
-    (notes_dir / "architecture" / "database" / "database-schemas.md").write_text(
-        SAMPLE_NOTE_SCHEMA, encoding="utf-8"
-    )
+    (notes_dir / "architecture" / "database" / "database-schemas.md").write_text(SAMPLE_NOTE_SCHEMA, encoding="utf-8")
 
     # architecture/api/
     (notes_dir / "architecture" / "api").mkdir(parents=True)
-    (notes_dir / "architecture" / "api" / "api-contracts.md").write_text(
-        SAMPLE_NOTE_API, encoding="utf-8"
-    )
+    (notes_dir / "architecture" / "api" / "api-contracts.md").write_text(SAMPLE_NOTE_API, encoding="utf-8")
 
     # architecture/decisions/
     (notes_dir / "architecture" / "decisions").mkdir(parents=True)
-    (notes_dir / "architecture" / "decisions" / "cdn-strategy.md").write_text(
-        SAMPLE_NOTE_DECISION, encoding="utf-8"
-    )
+    (notes_dir / "architecture" / "decisions" / "cdn-strategy.md").write_text(SAMPLE_NOTE_DECISION, encoding="utf-8")
 
     # misc/
     (notes_dir / "misc").mkdir(parents=True)
-    (notes_dir / "misc" / "minimal-note.md").write_text(
-        SAMPLE_NOTE_MINIMAL, encoding="utf-8"
-    )
+    (notes_dir / "misc" / "minimal-note.md").write_text(SAMPLE_NOTE_MINIMAL, encoding="utf-8")
 
     # Create vectordb (empty, just to prove it exists)
     (mem_dir / "vectordb" / "memories").mkdir(parents=True)
@@ -164,9 +156,7 @@ class TestMemoryGraph:
     """Tests for GET /api/amem/{plan_id}/graph"""
 
     def test_graph_returns_nodes_and_links(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph")
@@ -179,18 +169,14 @@ class TestMemoryGraph:
         assert "stats" in data
 
     def test_graph_has_correct_node_count(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph").json()
         assert data["stats"]["total_memories"] == 4
 
     def test_graph_nodes_have_required_fields(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph").json()
@@ -211,9 +197,7 @@ class TestMemoryGraph:
                 assert field in node, f"Node missing field: {field}"
 
     def test_graph_groups_from_directory_structure(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph").json()
@@ -222,18 +206,14 @@ class TestMemoryGraph:
         assert "misc" in group_ids
 
     def test_graph_links_between_notes(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph").json()
         assert isinstance(data["links"], list)
 
     def test_graph_groups_have_colors(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/graph").json()
@@ -242,9 +222,7 @@ class TestMemoryGraph:
             assert group["color"].startswith("#")
 
     def test_graph_empty_memory(self, empty_memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{empty_memory_workspace['plan_id']}/graph").json()
@@ -254,18 +232,14 @@ class TestMemoryGraph:
         assert data["groups"] == []
 
     def test_graph_no_memory_dir_returns_404(self, no_memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", no_memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", no_memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get(f"/api/amem/{no_memory_workspace['plan_id']}/graph")
         assert resp.status_code == 404
 
     def test_graph_nonexistent_plan_returns_404(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get("/api/amem/nonexistent-plan/graph")
@@ -279,18 +253,14 @@ class TestMemoryNotesList:
     """Tests for GET /api/amem/{plan_id}/notes"""
 
     def test_list_notes_returns_all(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes").json()
         assert len(data) == 4
 
     def test_list_notes_excludes_content(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes").json()
@@ -298,9 +268,7 @@ class TestMemoryNotesList:
             assert "content" not in note
 
     def test_list_notes_has_metadata(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes").json()
@@ -311,9 +279,7 @@ class TestMemoryNotesList:
             assert "tags" in note
 
     def test_list_notes_parses_tags(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes").json()
@@ -323,9 +289,7 @@ class TestMemoryNotesList:
         assert "schema" in schema_note["tags"]
 
     def test_list_notes_parses_keywords(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes").json()
@@ -334,9 +298,7 @@ class TestMemoryNotesList:
         assert "users" in schema_note["keywords"]
 
     def test_list_notes_empty(self, empty_memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{empty_memory_workspace['plan_id']}/notes").json()
@@ -350,14 +312,10 @@ class TestMemoryNoteDetail:
     """Tests for GET /api/amem/{plan_id}/notes/{note_id}"""
 
     def test_get_note_by_id(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
-        resp = client.get(
-            f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas"
-        )
+        resp = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas")
         assert resp.status_code == 200
 
         data = resp.json()
@@ -366,48 +324,32 @@ class TestMemoryNoteDetail:
         assert "CREATE TABLE" in data["content"]
 
     def test_get_note_has_title_from_h1(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
-        data = client.get(
-            f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas"
-        ).json()
+        data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas").json()
         assert data["title"] == "Video Platform: Database Schemas"
 
     def test_get_note_has_links(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
-        data = client.get(
-            f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas"
-        ).json()
+        data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes/database-schemas").json()
         assert "api-contracts" in data["links"]
         assert "system-architecture" in data["links"]
 
     def test_get_note_nonexistent_returns_404(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
-        resp = client.get(
-            f"/api/amem/{memory_workspace['plan_id']}/notes/does-not-exist"
-        )
+        resp = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes/does-not-exist")
         assert resp.status_code == 404
 
     def test_get_note_minimal_has_defaults(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
-        data = client.get(
-            f"/api/amem/{memory_workspace['plan_id']}/notes/minimal-note"
-        ).json()
+        data = client.get(f"/api/amem/{memory_workspace['plan_id']}/notes/minimal-note").json()
         assert data["title"] == "Minimal Note"
         assert data["tags"] == []
         assert data["keywords"] == []
@@ -421,9 +363,7 @@ class TestMemoryStats:
     """Tests for GET /api/amem/{plan_id}/stats"""
 
     def test_stats_returns_counts(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats").json()
@@ -432,9 +372,7 @@ class TestMemoryStats:
         assert data["total_keywords"] > 0
 
     def test_stats_includes_all_tags(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats").json()
@@ -443,28 +381,22 @@ class TestMemoryStats:
         assert "architecture" in data["tags"]
 
     def test_stats_includes_paths(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats").json()
         assert len(data["paths"]) > 0
 
     def test_stats_includes_memory_dir(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats").json()
         assert "memory_dir" in data
-        assert f"memory-{memory_workspace['plan_id']}" in data["memory_dir"]
+        assert memory_workspace["plan_id"] in data["memory_dir"]
 
     def test_stats_empty_memory(self, empty_memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", empty_memory_workspace["memory_base"])
         client = TestClient(app)
 
         data = client.get(f"/api/amem/{empty_memory_workspace['plan_id']}/stats").json()
@@ -473,9 +405,7 @@ class TestMemoryStats:
         assert data["tags"] == []
 
     def test_stats_no_memory_returns_404(self, no_memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", no_memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", no_memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get(f"/api/amem/{no_memory_workspace['plan_id']}/stats")
@@ -489,18 +419,14 @@ class TestPlanResolution:
     """Tests for _resolve_memory_dir — resolving centralized memory from plan_id."""
 
     def test_resolves_from_centralized_dir(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get(f"/api/amem/{memory_workspace['plan_id']}/stats")
         assert resp.status_code == 200
 
     def test_nonexistent_plan_returns_404(self, memory_workspace, monkeypatch):
-        monkeypatch.setattr(
-            "dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"]
-        )
+        monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_workspace["memory_base"])
         client = TestClient(app)
 
         resp = client.get("/api/amem/this-plan-does-not-exist/graph")
@@ -568,12 +494,10 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
-        (notes_dir / "no-heading.md").write_text(
-            "Just content, no heading.", encoding="utf-8"
-        )
+        (notes_dir / "no-heading.md").write_text("Just content, no heading.", encoding="utf-8")
 
         client = TestClient(app)
 
@@ -588,12 +512,10 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
-        (notes_dir / "empty-tags.md").write_text(
-            "# Test\n\n**Tags**: \n\nContent here.", encoding="utf-8"
-        )
+        (notes_dir / "empty-tags.md").write_text("# Test\n\n**Tags**: \n\nContent here.", encoding="utf-8")
 
         client = TestClient(app)
 
@@ -608,7 +530,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        mem_dir = memory_base / f"memory-{plan_id}"
+        mem_dir = memory_base / plan_id
         notes_dir = mem_dir / "notes"
         notes_dir.mkdir(parents=True)
         (notes_dir / "note.md").write_text("# Real Note\nContent.", encoding="utf-8")
@@ -628,7 +550,7 @@ class TestNoteParsing:
         monkeypatch.setattr("dashboard.routes.amem.MEMORY_BASE_DIR", memory_base)
 
         plan_id = "test.plan"
-        deep_dir = memory_base / f"memory-{plan_id}" / "notes" / "a" / "b" / "c"
+        deep_dir = memory_base / plan_id / "notes" / "a" / "b" / "c"
         deep_dir.mkdir(parents=True)
         (deep_dir / "deep-note.md").write_text("# Deep\nContent.", encoding="utf-8")
 
@@ -637,3 +559,138 @@ class TestNoteParsing:
         data = client.get(f"/api/amem/{plan_id}/notes").json()
         assert len(data) == 1
         assert data[0]["path"] == "a/b/c"
+
+
+# ── Merkle tree endpoint ─────────────────────────────────────────────
+
+
+class TestMerkleEndpoint:
+    """Tests for ``GET /api/amem/{plan_id}/merkle``."""
+
+    def test_merkle_returns_404_when_no_manifest(self, memory_workspace):
+        """Should return 404 when no merkle_manifest.json exists."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+        resp = client.get(f"/api/amem/{plan_id}/merkle")
+        assert resp.status_code == 404
+        assert "No Merkle manifest" in resp.json()["detail"]
+
+    def test_merkle_returns_correct_shape(self, memory_workspace):
+        """Should return a properly transformed d3-hierarchy shape."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "aaaa1111bbbb2222",
+            "generated_at": "20260518150000",
+            "note_count": 2,
+            "vectordb_root_hash": "cccc3333dddd4444",
+            "tree": {
+                "_hash": "aaaa1111bbbb2222",
+                "devops": {
+                    "_hash": "eeee5555ffff6666",
+                    "pod-basics.md": "1111aaaa2222bbbb",
+                },
+                "unfiled-note.md": "9999xxxx0000yyyy",
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        resp = client.get(f"/api/amem/{plan_id}/merkle")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["root_hash"] == "aaaa1111bbbb2222"
+        assert data["note_count"] == 2
+        assert data["generated_at"] == "20260518150000"
+        assert data["vectordb_root_hash"] == "cccc3333dddd4444"
+
+        tree = data["tree"]
+        assert tree["name"] == "(root)"
+        assert tree["type"] == "dir"
+        assert tree["hash"] == "aaaa1111bbbb2222"
+
+    def test_merkle_tree_has_correct_children(self, memory_workspace):
+        """Should correctly transform directories and leaves."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "root_hash_value!",
+            "generated_at": "20260518160000",
+            "note_count": 3,
+            "vectordb_root_hash": "",
+            "tree": {
+                "_hash": "root_hash_value!",
+                "alpha": {
+                    "_hash": "alpha_hash_val!!",
+                    "note-a.md": "leaf_hash_a_val!",
+                    "note-b.md": "leaf_hash_b_val!",
+                },
+                "standalone.md": "standalone_hash!",
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        data = client.get(f"/api/amem/{plan_id}/merkle").json()
+        tree = data["tree"]
+
+        # Root should have 2 children: "alpha" dir and "standalone.md" leaf
+        children = tree["children"]
+        assert len(children) == 2
+
+        # Children are sorted by name
+        assert children[0]["name"] == "alpha"
+        assert children[0]["type"] == "dir"
+        assert children[0]["hash"] == "alpha_hash_val!!"
+        assert len(children[0]["children"]) == 2
+
+        assert children[1]["name"] == "standalone.md"
+        assert children[1]["type"] == "leaf"
+        assert children[1]["hash"] == "standalone_hash!"
+        assert len(children[1]["children"]) == 0
+
+    def test_merkle_leaves_have_correct_type(self, memory_workspace):
+        """All .md keys should become type=leaf, dict keys should become type=dir."""
+        client = TestClient(app)
+        plan_id = memory_workspace["plan_id"]
+
+        manifest = {
+            "version": 1,
+            "root_hash": "r",
+            "generated_at": "20260518170000",
+            "note_count": 1,
+            "tree": {
+                "_hash": "r",
+                "deep": {
+                    "_hash": "d1",
+                    "nested": {
+                        "_hash": "d2",
+                        "leaf.md": "lh",
+                    },
+                },
+            },
+        }
+        manifest_path = memory_workspace["memory_dir"] / "merkle_manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        data = client.get(f"/api/amem/{plan_id}/merkle").json()
+        # Navigate: root -> deep -> nested -> leaf.md
+        deep = data["tree"]["children"][0]
+        assert deep["type"] == "dir"
+        nested = deep["children"][0]
+        assert nested["type"] == "dir"
+        leaf = nested["children"][0]
+        assert leaf["type"] == "leaf"
+        assert leaf["name"] == "leaf.md"
+        assert leaf["hash"] == "lh"
+
+    def test_merkle_nonexistent_plan_returns_404(self, memory_workspace):
+        """A plan_id with no memory dir should return 404."""
+        client = TestClient(app)
+        resp = client.get("/api/amem/nonexistent-plan/merkle")
+        assert resp.status_code == 404

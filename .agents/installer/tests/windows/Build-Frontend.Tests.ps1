@@ -34,7 +34,7 @@ Describe "Build-Frontend" {
 
         # Mock: no package managers available
         Mock Get-Command { $null } -ParameterFilter {
-            $Name -in @("bun", "pnpm", "npm", "yarn")
+            $Name -in @("bun", "npm")
         }
 
         { Build-Frontend -SubDir "dashboard\fe" -Label "Test FE" } | Should -Not -Throw
@@ -46,7 +46,7 @@ Describe "Build-Frontend" {
         Set-Content -Path (Join-Path $feDir "package.json") -Value '{"name": "test"}'
 
         Mock Get-Command { $null } -ParameterFilter {
-            $Name -in @("bun", "pnpm", "npm", "yarn")
+            $Name -in @("bun", "npm")
         }
 
         { Build-Frontend -SubDir "dashboard\fe" -Label "Test FE" -Required } | Should -Throw

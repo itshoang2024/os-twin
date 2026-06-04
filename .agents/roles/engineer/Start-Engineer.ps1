@@ -47,7 +47,6 @@ $configPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
 $config = $null
 $maxPromptBytes = 102400
 $InstanceId = ""
-$instanceWorkingDir = ""
 if (Test-Path $configPath) {
     $config = Get-Content $configPath -Raw | ConvertFrom-Json
     if ($TimeoutSeconds -eq 0) {
@@ -81,6 +80,7 @@ if ($engineerConfigs) {
 }
 
 # --- Resolve instance-specific working directory ---
+$instanceWorkingDir = ''
 if ($InstanceId -and $config -and $config.engineer.instances.$InstanceId) {
     $instanceConfig = $config.engineer.instances.$InstanceId
     if ($instanceConfig.working_dir) {
@@ -89,6 +89,10 @@ if ($InstanceId -and $config -and $config.engineer.instances.$InstanceId) {
     if ($instanceConfig.timeout_seconds -and $TimeoutSeconds -eq $config.engineer.timeout_seconds) {
         $TimeoutSeconds = $instanceConfig.timeout_seconds
     }
+}
+# Fallback: read working_dir from room config.json if not resolved from instance config
+if (-not $instanceWorkingDir -and $roomConfig -and $roomConfig.working_dir) {
+    $instanceWorkingDir = $roomConfig.working_dir
 }
 
 # --- Write per-role context.md ---
@@ -143,14 +147,18 @@ $taskDesc = if (Test-Path (Join-Path $RoomDir "brief.md")) {
     Get-Content (Join-Path $RoomDir "brief.md") -Raw
 } else { "No task description found." }
 
-# --- Parse working directory from brief.md ---
-$workingDir = Get-Location
+# --- Parse working directories from brief.md ---
+$workingDirs = @()
 $briefContent = $taskDesc
-if ($briefContent -match 'working_dir:\s*(.+)') {
-    $workingDir = $Matches[1].Trim()
+if ($briefContent -match '(?s)## Working Directories\s*\n(.*?)(?=\n## |\z)') {
+    $workingDirs = @(($Matches[1].Trim() -split '\n') |
+        ForEach-Object { ($_ -replace '^-\s*', '').Trim() } | Where-Object { $_ })
+}
+elseif ($briefContent -match 'working_dir:\s*(.+)') {
+    $workingDirs = @($Matches[1].Trim())
 }
 elseif ($briefContent -match '## Working Directory\s*\n(.+)') {
-    $workingDir = $Matches[1].Trim()
+    $workingDirs = @($Matches[1].Trim())
 }
 
 # Note: ROLE.md is loaded by Build-SystemPrompt.ps1 via Get-RoleDefinition.

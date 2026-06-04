@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useKnowledgeNamespaces } from '@/hooks/use-knowledge-namespaces';
 import { useKnowledgeImportMonitor } from '@/hooks/use-knowledge-import';
@@ -10,10 +10,11 @@ import NamespaceSidebar from '@/components/knowledge/NamespaceSidebar';
 import NamespaceOverview from '@/components/knowledge/NamespaceOverview';
 import NamespaceList from '@/components/knowledge/NamespaceList';
 import ImportPanel from '@/components/knowledge/ImportPanel';
+import ResearchPanel from '@/components/knowledge/ResearchPanel';
 import NexusExplorer from '@/components/knowledge/NexusExplorer';
 import MetricsStrip from '@/components/knowledge/MetricsStrip';
 
-type DetailView = 'overview' | 'import' | 'nexus';
+type DetailView = 'overview' | 'import' | 'research' | 'nexus';
 
 /**
  * Props interface for the KnowledgeTabCore component.
@@ -38,7 +39,7 @@ export interface KnowledgeTabCoreProps {
   /** If set, filter namespaces to only show this specific namespace */
   filterNamespace?: string;
   /** Default tab to open in the detail view (used by deep-link routes) */
-  defaultTab?: 'import' | 'nexus';
+  defaultTab?: 'import' | 'research' | 'nexus';
 }
 
 /**
@@ -67,6 +68,7 @@ export default function KnowledgeTabCore({
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(
     defaultNamespace ?? filterNamespace ?? null
   );
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showMetricsPanel, setShowMetricsPanel] = useState(false);
@@ -81,14 +83,65 @@ export default function KnowledgeTabCore({
     refresh: refreshNamespaces,
   } = useKnowledgeNamespaces();
 
+  // Sync selectedNamespace when defaultNamespace prop changes (handles static export hydration)
+  useEffect(() => {
+    if (defaultNamespace && defaultNamespace !== '_') {
+      // Update if current selection is stale (null, '_', or differs from the intended default)
+      if (!selectedNamespace || selectedNamespace === '_' || selectedNamespace !== defaultNamespace) {
+        setSelectedNamespace(defaultNamespace);
+        if (defaultTab) {
+          setActiveDetailView(defaultTab);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultNamespace, namespacesLoading]);
+
   const {
     jobs,
     graphCounts,
     activeJob,
+    latestJob,
     isLoading: jobsLoading,
     startImport,
     refreshJobs,
   } = useKnowledgeImportMonitor(selectedNamespace);
+
+  // Track previous active job to detect completion transitions
+  const prevActiveJobRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const prevJobId = prevActiveJobRef.current;
+    const currentActiveId = activeJob?.job_id ?? null;
+
+    // Detect transition: was active → now no active job (i.e. job finished)
+    if (prevJobId && !currentActiveId) {
+      // Find the completed job in the jobs list
+      const finishedJob = jobs?.find(j => j.job_id === prevJobId);
+      if (finishedJob) {
+        if (finishedJob.state === 'completed') {
+          addToast({
+            type: 'success',
+            title: 'Ingestion Complete',
+            message: finishedJob.message || `Job finished successfully.`,
+            autoDismiss: true,
+          });
+        } else if (finishedJob.state === 'failed') {
+          addToast({
+            type: 'error',
+            title: 'Ingestion Failed',
+            message: finishedJob.errors?.[0] || finishedJob.message || 'Job failed.',
+            autoDismiss: false,
+          });
+        }
+      }
+      // Refresh namespace metadata + graph counts to update stats
+      refreshNamespaces();
+      refreshJobs();
+    }
+
+    prevActiveJobRef.current = currentActiveId;
+  }, [activeJob, jobs, addToast, refreshNamespaces, refreshJobs]);
 
   const {
     result: queryResult,
@@ -100,15 +153,18 @@ export default function KnowledgeTabCore({
 
   // Handlers
   const handleSelectNamespace = useCallback((ns: string) => {
+    const isSameNamespace = ns === selectedNamespace;
     setSelectedNamespace(ns);
-    setActiveDetailView('overview');
-    // Clear previous namespace's query results
-    clearResult();
+    // Only reset to overview when switching to a different namespace
+    if (!isSameNamespace) {
+      setActiveDetailView('overview');
+      clearResult();
+    }
     // Sync URL if in global context (not plan context)
     if (!isPlanContext) {
       router.replace(`/knowledge/${encodeURIComponent(ns)}`, { scroll: false });
     }
-  }, [isPlanContext, router, clearResult]);
+  }, [isPlanContext, router, clearResult, selectedNamespace]);
 
   const handleCreateNamespace = useCallback(async (name: string, description?: string, language?: string) => {
     try {
@@ -221,6 +277,7 @@ export default function KnowledgeTabCore({
   const detailTabs: { id: DetailView; label: string; icon: string }[] = [
     { id: 'overview', label: 'Overview', icon: 'dashboard' },
     { id: 'import', label: 'Import', icon: 'upload' },
+    { id: 'research', label: 'Research', icon: 'travel_explore' },
     { id: 'nexus', label: 'Nexus', icon: 'hub' },
   ];
 
@@ -349,6 +406,9 @@ export default function KnowledgeTabCore({
                 onRefresh={refreshJobs}
               />
             )}
+            {activeDetailView === 'research' && (
+              <ResearchPanel selectedNamespace={selectedNamespace} onJobStart={refreshJobs} />
+            )}
             {activeDetailView === 'nexus' && (
               <NexusExplorer
                 namespaces={displayNamespaces ?? []}
@@ -455,11 +515,29 @@ export default function KnowledgeTabCore({
               onSelectNamespace={handleSelectNamespace}
               onNoteClick={handleNoteClick}
             />
+          ) : activeDetailView === 'research' ? (
+            <div className="h-full flex flex-col">
+              <div className="flex items-center gap-2 px-5 py-2.5 border-b shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  onClick={() => setActiveDetailView('overview')}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium text-text-muted hover:bg-surface-hover transition-all"
+                >
+                  <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                  Back
+                </button>
+                <span className="text-xs font-semibold" style={{ color: 'var(--color-text-main)' }}>Web Research</span>
+              </div>
+              <div className="flex-1 overflow-auto">
+                <ResearchPanel selectedNamespace={selectedNamespace} onJobStart={refreshJobs} />
+              </div>
+            </div>
           ) : selectedNsMeta ? (
             <NamespaceOverview
               namespace={selectedNsMeta}
               graphCounts={graphCounts}
+              activeJob={activeJob}
               onNavigateImport={() => setActiveDetailView('import')}
+              onNavigateResearch={() => setActiveDetailView('research')}
               onNavigateQuery={() => setActiveDetailView('nexus')}
               onDelete={() => setShowDeleteConfirm(selectedNamespace)}
               onRefresh={refreshNamespaces}

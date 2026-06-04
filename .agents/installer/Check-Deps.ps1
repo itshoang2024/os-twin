@@ -1,8 +1,8 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Check-Deps.ps1 — Dependency presence checks (pure — no installs)
 #
-# Provides: Check-Python, Check-Pwsh, Check-Node, Check-UV, Check-OpenCode,
-#           Check-ChromeDevTools
+# Provides: Check-Python, Check-Pwsh, Check-Node, Check-Bun, Check-UV,
+#           Check-OpenCode, Check-ChromeDevTools
 #
 # Requires: Lib.ps1 (Compare-VersionGte), Versions.ps1 (MinPythonVersion, MinPwshVersion)
 #
@@ -94,6 +94,15 @@ function Check-Node {
     param()
 
     $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+}
+
+# ─── Bun (JavaScript runtime/package manager) ────────────────────────────────
+
+function Check-Bun {
+    [CmdletBinding()]
+    param()
+
+    $null -ne (Get-Command bun -ErrorAction SilentlyContinue)
 }
 
 # ─── uv (Python package manager) ────────────────────────────────────────────

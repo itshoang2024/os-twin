@@ -66,7 +66,7 @@ migrate_one() {
         echo "  WARN: No plan registry entry for $project_dir, using name '$plan_id'"
     fi
 
-    local central_dir="$MEMORY_BASE/$plan_id"
+    local central_dir="$MEMORY_BASE/memory-$plan_id"
 
     if $DRY_RUN; then
         echo "  DRY-RUN: $project_memory → $central_dir"

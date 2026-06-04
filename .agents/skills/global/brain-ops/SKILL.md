@@ -15,6 +15,43 @@ Both layers are accessed via MCP tools or the `npx mcporter call` CLI.
 
 ---
 
+## Deepsearch Evidence Bridge
+
+Use the `deepsearch` skill when the team needs to discover external sources,
+download reports/data/files, grep local evidence, or prepare artifacts before
+promoting them into the brain.
+
+Recommended flow:
+
+1. Run Deepsearch into a stable artifact directory with `--fetch --out <dir>`.
+2. Inspect `manifest.json` for source URLs and `grep-results.json` for evidence matches.
+3. Import durable source files into Knowledge with `knowledge.import_folder`.
+4. Save the operational summary, caveats, and next actions to Memory with `memory.save`.
+
+```bash
+python3 .agents/skills/global/deepsearch/scripts/deepsearch.py \
+  'architecture decision records filetype:pdf OR filetype:md' \
+  --fetch \
+  --out ./research/architecture-evidence \
+  --grep 'decision|trade-off|constraint' \
+  --output json
+
+npx mcporter call knowledge.import_folder \
+  namespace:'external-evidence' \
+  folder_path:'/absolute/path/to/research/architecture-evidence'
+
+npx mcporter call memory.save \
+  content:'Deepsearch gathered architecture evidence for <topic>. Artifacts are in <absolute path>. Manifest lists original source URLs. Key finding: <finding>. Caveat: <uncertainty or missing source>.' \
+  name:'Deepsearch evidence - <topic>' \
+  path:'research/evidence' \
+  tags:'deepsearch,research,evidence'
+```
+
+Deepsearch is an evidence intake layer. Knowledge stores durable source files;
+Memory stores the agent-team interpretation and coordination context.
+
+---
+
 ## The Two Layers
 
 ### Knowledge — The Source of Truth

@@ -33,11 +33,46 @@ from dashboard.lib.settings.google_oauth import (
     get_adc_path,
     OAuthSession,
 )
+from dashboard.lib.settings.openai_codex_auth import (
+    CodexOAuthStartResponse,
+    CodexSessionStatus,
+    get_codex_session_status,
+    start_codex_oauth,
+)
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+_SECRET_KEY_HINTS = ("key", "secret", "token", "password")
+
+
+def _mask_secret(field: str, val: Any) -> Any:
+    """Redact values for fields whose name looks secret-bearing."""
+    name = field.lower()
+    if val not in (None, "") and any(hint in name for hint in _SECRET_KEY_HINTS):
+        return "***"
+    return val
+
+
+def _log_namespace_change(namespace: str, old: Dict[str, Any], new: Dict[str, Any], user: dict) -> None:
+    """Log which fields changed in a namespace patch (old -> new, secrets masked)."""
+    changes = {
+        field: (old.get(field), val)
+        for field, val in new.items()
+        if old.get(field) != val
+    }
+    who = user.get("username", "?")
+    if not changes:
+        logger.info("[SETTINGS] %s patched by %s (no field changes)", namespace, who)
+        return
+    rendered = ", ".join(
+        f"{field}: {_mask_secret(field, before)!r} -> {_mask_secret(field, after)!r}"
+        for field, (before, after) in changes.items()
+    )
+    logger.info("[SETTINGS] %s changed by %s: %s", namespace, who, rendered)
 
 
 # ── Request / Response Models ──────────────────────────────────────────
@@ -245,7 +280,10 @@ async def put_knowledge_settings(
     dashboard restart.
     """
     resolver = get_settings_resolver()
-    data = payload.model_dump(mode="json")
+    # Only persist fields explicitly provided by the caller — Pydantic fills
+    # unset fields with defaults (empty strings) which would overwrite
+    # previously persisted values.
+    data = payload.model_dump(mode="json", exclude_unset=True)
     # knowledge_embedding_dimension is read-only (fixed from OSTWIN_EMBEDDING_DIM).
     # Strip it from the payload so users cannot persist a conflicting value.
     data.pop("knowledge_embedding_dimension", None)
@@ -445,10 +483,13 @@ async def patch_global_namespace(
             value["master_agent_model"] = format_master_model(value["master_agent_model"])
 
     resolver = get_settings_resolver()
+    old_namespace = dict(resolver.load_config().get(namespace, {}))
     try:
         resolver.patch_namespace(namespace, value)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    _log_namespace_change(namespace, old_namespace, value, user)
 
     if namespace == "runtime" and "master_agent_model" in value:
         from dashboard.master_agent import set_master_model
@@ -464,6 +505,36 @@ async def patch_global_namespace(
     # Sync Vertex AI env vars to ~/.ostwin/.env when provider config changes.
     if namespace == "providers":
         _sync_vertex_env(value)
+        # Invalidate cached embedding clients so the new deployment_mode
+        # (gemini vs vertex) takes effect without a restart.
+        try:
+            from dashboard.routes.knowledge import _get_service  # noqa: WPS433
+
+            svc = _get_service()
+            if hasattr(svc, "invalidate_model_cache"):
+                svc.invalidate_model_cache()
+
+            import dashboard.ai as _ai_mod
+
+            _ai_mod._embedder = None
+            if hasattr(_ai_mod, "_embedder_cache"):
+                _ai_mod._embedder_cache.clear()
+
+            try:
+                from dashboard.knowledge.graph.index import kuzudb
+
+                kuzudb._embedder_singleton = None
+            except Exception:
+                pass
+
+            try:
+                from dashboard.llm_client import _embedding_cache
+
+                _embedding_cache.clear()
+            except Exception:
+                pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Embedding cache invalidation after provider change skipped: %s", exc)
 
     # Flag config reload for the MCP memory server when memory settings change.
     if namespace == "memory":
@@ -702,7 +773,7 @@ async def migrate_secrets_to_vault(
 async def sync_opencode(
     user: dict = Depends(get_current_user),
 ):
-    """Sync provider keys + models to ~/.config/opencode/opencode.json.
+    """Sync provider keys + models to the Ostwin-managed opencode.json.
 
     Only gemini (non-vertex) and byteplus are synced -- other providers
     are handled natively by OpenCode via env vars.
@@ -767,6 +838,33 @@ async def restart_opencode(
         healthy=healthy,
         message="restarted" if healthy else "started but health check timed out",
     )
+
+
+# ── OpenAI Codex / OpenCode OAuth Flow ────────────────────────────────
+
+
+@router.get("/openai/codex/session", response_model=CodexSessionStatus)
+async def openai_codex_session(
+    user: dict = Depends(get_current_user),
+):
+    """Return whether the local OpenCode OpenAI OAuth credential exists."""
+    return get_codex_session_status()
+
+
+@router.post("/openai/codex/oauth/start", response_model=CodexOAuthStartResponse)
+async def openai_codex_oauth_start(
+    user: dict = Depends(get_current_user),
+):
+    """Start the dashboard-owned browser OAuth flow for OpenAI Codex.
+
+    OpenAI's Codex CLI OAuth client redirects to localhost:1455, so the
+    dashboard starts a local one-shot callback listener and saves the resulting
+    OpenCode credential after state validation.
+    """
+    try:
+        return start_codex_oauth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────

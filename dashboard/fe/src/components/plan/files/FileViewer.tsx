@@ -6,6 +6,7 @@ import MarkdownViewer from './viewers/MarkdownViewer';
 import PdfViewer from './viewers/PdfViewer';
 import DocxViewer from './viewers/DocxViewer';
 import ExcelViewer from './viewers/ExcelViewer';
+import { getFileIconMeta } from './file-icons';
 
 interface FileViewerProps {
   planId: string;
@@ -65,17 +66,6 @@ function getFileType(path: string, mimeType: string, encoding: string): FileType
   return 'code';
 }
 
-function getFileIcon(fileType: FileType): string {
-  switch (fileType) {
-    case 'image': return 'image';
-    case 'markdown': return 'article';
-    case 'pdf': return 'picture_as_pdf';
-    case 'docx': return 'description';
-    case 'excel': return 'table';
-    case 'code': return 'code';
-    case 'binary': return 'binary';
-  }
-}
 
 function getFileLabel(fileType: FileType): string {
   switch (fileType) {
@@ -122,12 +112,17 @@ export default function FileViewer({ planId, path }: FileViewerProps) {
 
   if (content.truncated && content.content === null) {
     const fileType = getFileType(path, content.mime_type, content.encoding || 'utf-8');
+    const iconMeta = getFileIconMeta(path, { fileType });
     return (
       <div className="flex-1 flex flex-col overflow-hidden bg-surface/30">
         <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface shrink-0">
           <div className="flex items-center gap-2 overflow-hidden">
-            <span className="material-symbols-outlined text-[18px] text-text-muted shrink-0">
-              {getFileIcon(fileType)}
+            <span
+              className={`material-symbols-outlined text-[18px] ${iconMeta.colorClass} shrink-0`}
+              title={iconMeta.label}
+              aria-hidden="true"
+            >
+              {iconMeta.icon}
             </span>
             <span className="text-xs font-bold text-text-main truncate" title={path}>
               {path.split('/').pop()}
@@ -163,13 +158,18 @@ export default function FileViewer({ planId, path }: FileViewerProps) {
   }
 
   const fileType = getFileType(path, content.mime_type, content.encoding || 'utf-8');
+  const iconMeta = getFileIconMeta(path, { fileType });
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-surface/30">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface shrink-0">
         <div className="flex items-center gap-2 overflow-hidden">
-          <span className="material-symbols-outlined text-[18px] text-text-muted shrink-0">
-            {getFileIcon(fileType)}
+          <span
+            className={`material-symbols-outlined text-[18px] ${iconMeta.colorClass} shrink-0`}
+            title={iconMeta.label}
+            aria-hidden="true"
+          >
+            {iconMeta.icon}
           </span>
           <span className="text-xs font-bold text-text-main truncate" title={path}>
             {path.split('/').pop()}
@@ -210,14 +210,14 @@ export default function FileViewer({ planId, path }: FileViewerProps) {
             extension={path.split('.').pop()?.toLowerCase() || ''}
           />
         ) : (
-          <BinaryFallback mimeType={content.mime_type} path={path} downloadUrl={content.download_url} />
+          <BinaryFallback downloadUrl={content.download_url} />
         )}
       </div>
     </div>
   );
 }
 
-function BinaryFallback({ mimeType, path, downloadUrl }: { mimeType: string; path: string; downloadUrl: string }) {
+function BinaryFallback({ downloadUrl }: { downloadUrl: string }) {
   // Validate download_url is a same-origin relative path to prevent open redirect
   const safeUrl = downloadUrl.startsWith('/api/') ? downloadUrl : '#';
   return (

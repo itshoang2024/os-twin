@@ -5,8 +5,8 @@ On every server startup this module:
 
 1. Fetches the full model catalog from ``https://models.dev/api.json``.
 2. Reads ``~/.local/share/opencode/auth.json`` to discover which providers
-   the user has API keys for.
-3. Reads ``~/.config/opencode/opencode.json`` for any custom providers.
+   the user has API keys or OAuth sessions for.
+3. Reads the Ostwin-managed opencode.json for any custom providers.
 4. Filters the catalog to only include models from configured providers.
 5. Writes the result to ``~/.ostwin/.agents/configured_models.json``
    so it can be served without re-fetching.
@@ -20,13 +20,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import time
 import urllib.request
 import urllib.error
 import ollama
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+from dashboard.lib.opencode_paths import get_managed_opencode_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -34,32 +37,14 @@ MODELS_DEV_URL = "https://models.dev/api.json"
 MODELS_DEV_LOGO_URL = "https://models.dev/logos/{provider}.svg"
 
 AUTH_JSON_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
-OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
+OPENCODE_CONFIG_PATH = get_managed_opencode_config_path()
 CONFIGURED_MODELS_PATH = (
     Path.home() / ".ostwin" / ".agents" / "configured_models.json"
 )
 
-# Home-directory raw catalog cache (primary fallback)
+# Home-directory raw catalog cache.
 _HOME_RAW_PATH = CONFIGURED_MODELS_PATH.parent / "models_dev_raw.json"
 
-
-def _project_raw_path() -> Optional[Path]:
-    """Return the project-level .agents/models_dev_raw.json path, or None.
-
-    The project-level file ships with os-twin and acts as the install-time
-    seed so a fresh deployment can bootstrap even before the first network
-    fetch succeeds.  We resolve it via the dashboard package location.
-    """
-    try:
-        from dashboard.api_utils import AGENTS_DIR
-
-        candidate = AGENTS_DIR / "models_dev_raw.json"
-        # Only return a path whose parent actually exists
-        if candidate.parent.exists():
-            return candidate
-    except Exception:
-        pass
-    return None
 
 # In-memory cache
 _cached_models: Optional[Dict[str, Any]] = None
@@ -98,6 +83,35 @@ def load_models_on_startup() -> Dict[str, Any]:
     _cached_timestamp = time.time()
     logger.info(
         "Models catalog loaded: %d providers, %d total models",
+        len(configured.get("providers", {})),
+        sum(len(p.get("models", {})) for p in configured.get("providers", {}).values()),
+    )
+    return configured
+
+
+def rebuild_configured_models_from_cache() -> Dict[str, Any]:
+    """Rebuild configured_models.json from the cached raw catalog.
+
+    This is used after local auth changes, such as Codex OAuth login, where
+    provider discovery changed but the full models.dev catalog does not need a
+    network refetch.
+    """
+    global _cached_models, _cached_timestamp
+
+    raw_catalog = _read_cached_raw()
+    if raw_catalog is None:
+        logger.warning("[MODELS] Cannot rebuild configured models: no raw catalog cache")
+        _cached_models = {"providers": {}, "loaded_at": _iso_now()}
+        _cached_timestamp = time.time()
+        return _cached_models
+
+    configured_providers = _read_configured_providers()
+    configured = _build_configured_models(raw_catalog, configured_providers)
+    _write_json(CONFIGURED_MODELS_PATH, configured)
+    _cached_models = configured
+    _cached_timestamp = time.time()
+    logger.info(
+        "Models catalog rebuilt from cache: %d providers, %d total models",
         len(configured.get("providers", {})),
         sum(len(p.get("models", {})) for p in configured.get("providers", {}).values()),
     )
@@ -459,6 +473,7 @@ def invalidate_cache() -> None:
     get_context_limit.cache_clear()
     list_ollama_models.cache_clear()
     show_ollama_model.cache_clear()
+    _list_opencode_models.cache_clear()
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
@@ -479,29 +494,9 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-            # ── 1) Write to the home-directory cache (primary fallback) ──
+            # ── Write to the home-directory cache ────────────────────────
             _write_json(_HOME_RAW_PATH, data)
             logger.info("Fetched models.dev catalog: %d providers", len(data))
-
-            # ── 2) Mirror to project-level .agents/models_dev_raw.json ───
-            # This keeps the install-time seed file up-to-date so that a
-            # fresh deployment or `ostwin install` can bootstrap the catalog
-            # without a network round-trip.
-            proj_path = _project_raw_path()
-            if proj_path is not None:
-                try:
-                    _write_json(proj_path, data)
-                    logger.info(
-                        "[MODELS] Mirrored raw catalog to project path: %s",
-                        proj_path,
-                    )
-                except Exception as mirror_exc:
-                    logger.warning(
-                        "[MODELS] Could not mirror raw catalog to %s: %s",
-                        proj_path,
-                        mirror_exc,
-                    )
-
             return data
     except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to fetch models.dev/api.json: %s", exc)
@@ -511,38 +506,14 @@ def _fetch_models_dev() -> Optional[Dict[str, Any]]:
 def _read_cached_raw() -> Optional[Dict[str, Any]]:
     """Read the raw models.dev cache from disk.
 
-    Resolution order:
-    1. ``~/.ostwin/.agents/models_dev_raw.json``  (primary, updated on every fetch)
-    2. Project-level ``.agents/models_dev_raw.json`` (install-time seed / bootstrap)
-
-    When the home cache is missing or empty and the project-level file has
-    real data, the project file is copied to the home location so subsequent
-    lookups are fast.
+    The cache lives under ``~/.ostwin/.agents/models_dev_raw.json`` and is
+    updated on successful network fetches. The repository no longer ships or
+    mutates a project-level raw catalog.
     """
-    # 1. Home-directory cache
     if _HOME_RAW_PATH.exists():
         try:
             data = json.loads(_HOME_RAW_PATH.read_text())
             if data:  # non-empty dict is valid
-                return data
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    # 2. Project-level seed (bootstrap for fresh installs)
-    proj_path = _project_raw_path()
-    if proj_path is not None and proj_path.exists():
-        try:
-            data = json.loads(proj_path.read_text())
-            if data:
-                logger.info(
-                    "[MODELS] Bootstrapping home raw cache from project seed: %s",
-                    proj_path,
-                )
-                # Promote to home cache so future boots skip this step
-                try:
-                    _write_json(_HOME_RAW_PATH, data)
-                except Exception:
-                    pass
                 return data
         except (json.JSONDecodeError, OSError):
             pass
@@ -679,16 +650,25 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
     """
     providers: Dict[str, Dict[str, Any]] = {}
 
-    # 1. auth.json -- native providers
+    # 1. auth.json -- native providers. OpenCode stores ChatGPT/Codex login as
+    #    ``type: oauth`` for the normal ``openai`` provider, not as a separate
+    #    ``codex`` provider.
     if AUTH_JSON_PATH.exists():
         try:
             auth_data = json.loads(AUTH_JSON_PATH.read_text())
             for provider_id, entry in auth_data.items():
-                if isinstance(entry, dict) and entry.get("type") == "api":
+                if not isinstance(entry, dict):
+                    continue
+                auth_type = entry.get("type")
+                if auth_type in {"api", "oauth"}:
+                    if auth_type == "oauth":
+                        has_key = bool(entry.get("access") or entry.get("refresh"))
+                    else:
+                        has_key = bool(entry.get("key"))
                     providers[provider_id] = {
-                        "type": "api",
+                        "type": auth_type,
                         "source": "auth.json",
-                        "has_key": bool(entry.get("key")),
+                        "has_key": has_key,
                     }
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read auth.json: %s", exc)
@@ -808,6 +788,67 @@ _COMPANION_PROVIDERS: Dict[str, Dict[str, List[str]]] = {
         "gemini": [],  # base catalog only
     },
 }
+
+
+@lru_cache(maxsize=16)
+def _list_opencode_models(provider_id: str) -> Set[str]:
+    """Return model ids OpenCode actually exposes for a provider.
+
+    models.dev can list API-key models that are not available through a user's
+    OpenCode OAuth credential.  OpenAI Codex login is one such case.
+    """
+    env = os.environ.copy()
+    env.pop("OPENCODE_CONFIG", None)
+    try:
+        result = subprocess.run(
+            ["opencode", "models", provider_id],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("Could not list OpenCode models for %s: %s", provider_id, exc)
+        return set()
+
+    if result.returncode != 0:
+        logger.debug(
+            "OpenCode model listing failed for %s: %s",
+            provider_id,
+            (result.stderr or result.stdout or "").strip(),
+        )
+        return set()
+
+    models = {
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.lstrip().startswith(("┌", "│", "└", "●"))
+    }
+    short = {
+        model.split("/", 1)[1]
+        for model in models
+        if model.startswith(f"{provider_id}/") and "/" in model
+    }
+    return models | short
+
+
+def _filter_oauth_provider_models(
+    provider_id: str,
+    provider_cfg: Dict[str, Any],
+    provider_entry: Dict[str, Any],
+) -> None:
+    if provider_id != "openai" or provider_cfg.get("type") != "oauth":
+        return
+
+    allowed = _list_opencode_models(provider_id)
+    if not allowed:
+        return
+
+    provider_entry["models"] = {
+        model_id: model_data
+        for model_id, model_data in provider_entry["models"].items()
+        if model_id in allowed or f"{provider_id}/{model_id}" in allowed
+    }
 
 
 def _build_configured_models(
@@ -1000,6 +1041,8 @@ def _build_configured_models(
                         "parameter_size": lm.get("parameter_size"),
                         "quantization_level": lm.get("quantization_level"),
                     }
+
+        _filter_oauth_provider_models(provider_id, provider_cfg, provider_entry)
 
         if provider_entry["models"]:
             result["providers"][provider_id] = provider_entry

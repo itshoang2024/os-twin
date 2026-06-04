@@ -4,7 +4,7 @@
 #
 # Provides: install_channels, start_channels
 #
-# Requires: lib.sh, check-deps.sh (check_node),
+# Requires: lib.sh, check-deps.sh (check_node, check_bun),
 #           globals: INSTALL_DIR, SOURCE_DIR, SCRIPT_DIR
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -13,66 +13,55 @@
 _START_CHANNELS_SH_LOADED=1
 
 # ─── install_channels ────────────────────────────────────────────────────────
-# Installs channel connector Node.js dependencies.
+# Installs channel connector dependencies with Bun.
 
-_ensure_channel_pnpm_build_approvals() {
-  local chan_dir="$1"
-  local workspace="$chan_dir/pnpm-workspace.yaml"
-
-  if [[ ! -f "$workspace" ]]; then
-    cat > "$workspace" <<'YAML'
-allowBuilds:
-  '@discordjs/opus': true
-  esbuild: true
-YAML
-    return
-  fi
-
-  if ! grep -qE '^[[:space:]]*allowBuilds:' "$workspace"; then
-    cat >> "$workspace" <<'YAML'
-
-allowBuilds:
-  '@discordjs/opus': true
-  esbuild: true
-YAML
-    return
-  fi
-
-  _set_pnpm_allow_build "$workspace" "^[[:space:]]*'?@discordjs/opus'?[[:space:]]*:" "  '@discordjs/opus': true"
-  _set_pnpm_allow_build "$workspace" "^[[:space:]]*esbuild[[:space:]]*:" "  esbuild: true"
+_channel_ci_mode() {
+  [[ "${CI:-}" == "1" || "${CI:-}" == "true" || "${CI:-}" == "TRUE" ]]
 }
 
-_set_pnpm_allow_build() {
-  local workspace="$1"
-  local key_regex="$2"
-  local line="$3"
-  local tmp="${workspace}.tmp.$$"
+_select_channel_pm() {
+  command -v bun &>/dev/null && { echo "bun"; return 0; }
+  return 1
+}
 
-  if grep -qE "$key_regex" "$workspace"; then
-    awk -v key_regex="$key_regex" -v line="$line" '
-      $0 ~ key_regex { print line; next }
-      { print }
-    ' "$workspace" > "$tmp" && mv "$tmp" "$workspace"
-  else
-    awk -v line="$line" '
-      { print }
-      !inserted && $0 ~ /^[[:space:]]*allowBuilds:/ {
-        print line
-        inserted = 1
-      }
-    ' "$workspace" > "$tmp" && mv "$tmp" "$workspace"
-  fi
+_install_channel_deps() {
+  local pm="$1"
+  local output=""
+
+  case "$pm" in
+    bun)
+      if [[ -f bun.lockb || -f bun.lock ]]; then
+        if output="$(bun install --frozen-lockfile 2>&1)"; then
+          [[ -n "$output" ]] && printf '%s\n' "$output"
+          return 0
+        fi
+        if ! _channel_ci_mode; then
+          warn "bun lockfile is out of date; retrying without --frozen-lockfile"
+          [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+          bun install
+          return $?
+        fi
+        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+        return 1
+      fi
+      bun install
+      ;;
+    *)
+      warn "Unsupported JavaScript package manager for channels: $pm"
+      return 1
+      ;;
+  esac
 }
 
 install_channels() {
   # Install in ~/.ostwin/bot/ (primary) and source repo (for development)
   local bot_dirs=()
-  
+
   # Primary: installed bot directory
   if [[ -f "$INSTALL_DIR/bot/package.json" ]]; then
     bot_dirs+=("$INSTALL_DIR/bot")
   fi
-  
+
   # Secondary: source repo for development
   for candidate in \
     "${SOURCE_DIR}/bot" \
@@ -94,25 +83,32 @@ install_channels() {
     warn "Node.js not found — cannot install channel connectors"
     info "Install Node.js and re-run"
     return
-  elif ! command -v pnpm &>/dev/null; then
-    warn "pnpm not found — cannot install channel connectors"
-    info "Install pnpm and re-run"
+  elif ! check_bun; then
+    warn "Bun not found — cannot install channel connectors"
+    info "Install Bun and re-run"
     return
   fi
 
   for CHAN_DIR in "${bot_dirs[@]}"; do
+    local channel_pm=""
+    channel_pm="$(_select_channel_pm || true)"
+    if [[ -z "$channel_pm" ]]; then
+      warn "No Bun runtime found — cannot install channel connectors in $CHAN_DIR"
+      info "Install Bun and re-run"
+      continue
+    fi
+
     local start_time
     start_time=$(get_now)
-    step "Installing channel dependencies in $CHAN_DIR with pnpm..."
-    _ensure_channel_pnpm_build_approvals "$CHAN_DIR"
+    step "Installing channel dependencies in $CHAN_DIR with Bun..."
     # shellcheck disable=SC2015
-    (cd "$CHAN_DIR" && pnpm install) \
+    (cd "$CHAN_DIR" && _install_channel_deps "$channel_pm") \
       && ok_time "Channel dependencies installed" "$(print_duration "$start_time")" \
       || warn "Channel dependency install failed"
 
     # tsx should come from bot/package.json devDependencies after install.
     if [[ ! -f "$CHAN_DIR/node_modules/.bin/tsx" ]]; then
-      warn "tsx not found after pnpm install"
+      warn "tsx not found after Bun install"
     else
       ok "tsx available in $CHAN_DIR"
     fi
@@ -127,6 +123,11 @@ install_channels() {
 
 start_channels() {
   if [[ -z "${CHAN_DIR:-}" ]]; then
+    return
+  fi
+
+  if ! command -v bun &>/dev/null; then
+    warn "Bun not found — cannot start channels"
     return
   fi
 
@@ -151,7 +152,7 @@ start_channels() {
   if [[ -n "${DISCORD_TOKEN:-}" ]] && [[ -n "${DISCORD_CLIENT_ID:-}" ]]; then
     step "Registering Discord slash commands..."
     # shellcheck disable=SC2015
-    (cd "$CHAN_DIR" && npx tsx src/deploy-commands.ts 2>/dev/null) \
+    (cd "$CHAN_DIR" && bun run deploy 2>/dev/null) \
       && ok "Discord commands registered" || warn "Discord command registration failed (non-critical)"
   fi
 
@@ -161,7 +162,7 @@ start_channels() {
     cd "$CHAN_DIR" || exit
     # shellcheck disable=SC1090
     [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
-    nohup npm start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
+    nohup bun run start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
     echo $! > "$chan_pid_file"
     echo "$!"
   ) | { read -r chan_pid; ok "Channels started (PID $chan_pid) — log: $INSTALL_DIR/logs/channel.log"; }

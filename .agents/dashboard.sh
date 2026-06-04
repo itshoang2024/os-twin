@@ -70,19 +70,72 @@ fi
 # Resolve project dir to absolute path
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 
+select_dashboard_pm() {
+  local fe_dir="$1"
+  if [[ ( -f "$fe_dir/bun.lockb" || -f "$fe_dir/bun.lock" ) ]] && command -v bun >/dev/null 2>&1; then
+    printf '%s\n' "bun"
+    return 0
+  fi
+  if [[ ( -f "$fe_dir/package-lock.json" || -f "$fe_dir/npm-shrinkwrap.json" ) ]] && command -v npm >/dev/null 2>&1; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    printf '%s\n' "npm"
+    return 0
+  fi
+  if command -v bun >/dev/null 2>&1; then
+    printf '%s\n' "bun"
+    return 0
+  fi
+  return 1
+}
+
+install_dashboard_deps() {
+  local pm="$1"
+  case "$pm" in
+    bun)
+      if [[ -f bun.lockb || -f bun.lock ]]; then
+        bun install --frozen-lockfile 2>/dev/null || bun install
+      else
+        bun install
+      fi
+      ;;
+    npm)
+      if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+        npm ci 2>/dev/null || npm install
+      else
+        npm install
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Build frontend if source is newer than output (unless skipped)
 FE_DIR="$DASHBOARD_DIR/fe"
 FE_OUT="$FE_DIR/out"
 if [[ "$SKIP_BUILD" == "false" && -d "$FE_DIR" && -f "$FE_DIR/package.json" ]]; then
   if [[ ! -d "$FE_OUT" ]] || [[ -n "$(find "$FE_DIR/src" -newer "$FE_OUT" -print -quit 2>/dev/null)" ]]; then
-    echo "[DASHBOARD] Building frontend..."
-    (cd "$FE_DIR" && pnpm install --silent 2>/dev/null && pnpm run build 2>&1) || {
-      echo "[WARN] Frontend build failed — serving with stale assets" >&2
-    }
+    DASHBOARD_PM="$(select_dashboard_pm "$FE_DIR" || true)"
+    if [[ -z "$DASHBOARD_PM" ]]; then
+      echo "[WARN] No JavaScript package manager found (expected bun or npm) — serving with stale assets" >&2
+    else
+      echo "[DASHBOARD] Building frontend with $DASHBOARD_PM..."
+      (cd "$FE_DIR" && install_dashboard_deps "$DASHBOARD_PM" && "$DASHBOARD_PM" run build 2>&1) || {
+        echo "[WARN] Frontend build failed — serving with stale assets" >&2
+      }
+    fi
   fi
 fi
 
 PID_FILE="$AGENTS_DIR/dashboard.pid"
+
+# Log verbosity for the dashboard's file log (~/.ostwin/dashboard/debug.log).
+# Defaults to DEBUG; override by exporting OSTWIN_LOG_LEVEL (e.g. in .env).
+export OSTWIN_LOG_LEVEL="${OSTWIN_LOG_LEVEL:-DEBUG}"
 
 # Raise open-file limit — the polling loop + background zvec sync can easily
 # exhaust macOS's default 256-fd limit, causing "Too many open files" errors.

@@ -464,17 +464,13 @@ async def get_available_providers(user: dict = Depends(get_current_user)):
 async def reload_models(user: dict = Depends(get_current_user)):
     """Force re-fetch models from models.dev and rebuild configured_models.json.
 
-    After a successful fetch the raw catalog is written to two locations:
-    1. ``~/.ostwin/.agents/models_dev_raw.json``  -- the home-directory cache.
-    2. ``.agents/models_dev_raw.json``            -- project-level install seed.
-
-    Both paths are reported in the response so callers can confirm the sync.
+    After a successful fetch the raw catalog is written to
+    ``~/.ostwin/.agents/models_dev_raw.json`` as runtime cache.
     """
     from dashboard.lib.settings.models_dev_loader import (
         invalidate_cache,
         load_models_on_startup,
         _HOME_RAW_PATH,
-        _project_raw_path,
     )
     invalidate_cache()
     result = load_models_on_startup()
@@ -484,13 +480,10 @@ async def reload_models(user: dict = Depends(get_current_user)):
         for p in result.get("providers", {}).values()
     )
 
-    # Report which disk paths were populated
-    proj_path = _project_raw_path()
+    # Report which runtime disk cache was populated.
     raw_paths = {
         "home": str(_HOME_RAW_PATH),
         "home_exists": _HOME_RAW_PATH.exists(),
-        "project": str(proj_path) if proj_path else None,
-        "project_exists": proj_path.exists() if proj_path else False,
     }
 
     return {
@@ -826,7 +819,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             capture_output=True,
             text=True,
             timeout=60,
-            env={**__import__("os").environ},
+            env={**__import__("os").environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"},
         )
         return (
             result.returncode,

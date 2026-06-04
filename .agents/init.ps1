@@ -256,13 +256,14 @@ if ((Test-Path $McpExtensionScript) -and (Get-Command bash -ErrorAction Silently
     }
 }
 
-# ─── Sync MCP to global ~/.config/opencode/opencode.json ─────────────────────
+# ─── Sync MCP to Ostwin-managed opencode.json ────────────────────────────────
 # Runs the same logic as `ostwin mcp sync`:
 #   resolve_opencode.py sync → resolves servers + generates agent permissions
-#   from role.json mcp_refs → writes to ~/.config/opencode/opencode.json.
+#   from role.json mcp_refs → writes to ~/.ostwin/.opencode/opencode.json.
 
 $ResolveScript = Join-Path $ScriptDir "mcp" "resolve_opencode.py"
-$GlobalOpencodeDir = if ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME "opencode" } else { Join-Path $HOME ".config" "opencode" }
+$OstwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $HOME ".ostwin" }
+$ManagedOpencodeDir = Join-Path $OstwinHome ".opencode"
 
 if (Test-Path $ResolveScript) {
     Write-Step "Syncing MCP config (ostwin mcp sync)..."
@@ -292,18 +293,34 @@ if (Test-Path $ResolveScript) {
     try {
         & $pythonCmd @syncArgs
     } catch {
-        Write-Warn "Failed to sync global config-oc.json (non-critical): $_"
+        Write-Warn "Failed to sync managed opencode.json (non-critical): $_"
     }
 }
 
-# ─── Clone global opencode.json to project .opencode/ ────────────────────────
+# ─── Sync project role definitions to OpenCode agents directory ──────────────
+# Ensures that roles defined in .agents/roles/ and contributes/roles/ are
+# available as named agents for `opencode run --agent <role>`.
+# This runs on every init so contributed roles (e.g. security-specialist) are
+# always present even on a clean machine that hasn't run the full installer.
+
+$SyncAgentsScript = Join-Path $ScriptDir "plan" "Sync-ContributedAgents.ps1"
+if (Test-Path $SyncAgentsScript) {
+    Write-Step "Syncing role definitions to OpenCode agents..."
+    try {
+        & $SyncAgentsScript -ProjectDir $TargetDir
+    } catch {
+        Write-Warn "Agent sync returned non-zero (non-critical): $_"
+    }
+}
+
+# ─── Clone managed opencode.json to project .opencode/ ───────────────────────
 # Ensures agents running in the project context (via Invoke-Agent.ps1) have the
 # full config: MCP servers, agent permissions, tools blocks, provider definitions.
 #
 # MERGE LOGIC (not simple copy):
-#   - If project .opencode/opencode.json doesn't exist → copy from global
+#   - If project .opencode/opencode.json doesn't exist → copy from managed
 #   - If it DOES exist (created by mcp-extension.sh compile with project MCP
-#     servers) → merge global keys (agent permissions, tools, provider, model)
+#     servers) → merge managed keys (agent permissions, tools, provider, model)
 #     while preserving the project's MCP server block.
 #   - This prevents the global sync from overwriting project-level extensions
 #     that were just compiled by the previous step.
@@ -313,18 +330,18 @@ if (-not (Test-Path $ProjectOpencodeDir)) {
     New-Item -ItemType Directory -Path $ProjectOpencodeDir -Force | Out-Null
 }
 
-$GlobalOpencodeFile = Join-Path $GlobalOpencodeDir "opencode.json"
+$GlobalOpencodeFile = Join-Path $ManagedOpencodeDir "opencode.json"
 $ProjectOpencodeFile = Join-Path $ProjectOpencodeDir "opencode.json"
 
 if (Test-Path $GlobalOpencodeFile) {
     if (-not (Test-Path $ProjectOpencodeFile)) {
         # No project file yet — simple copy from global
         Copy-Item -Path $GlobalOpencodeFile -Destination $ProjectOpencodeFile -Force
-        Write-Ok "Created .opencode/opencode.json from global config"
+        Write-Ok "Created .opencode/opencode.json from managed config"
     }
     else {
         # Project file exists (likely from mcp-extension.sh compile).
-        # Merge: keep project MCP servers, add global agent/tools/permission blocks.
+        # Merge: keep project MCP servers, add managed agent/tools/permission blocks.
         try {
             $globalJson = Get-Content $GlobalOpencodeFile -Raw | ConvertFrom-Json -AsHashtable
             $projectJson = Get-Content $ProjectOpencodeFile -Raw | ConvertFrom-Json -AsHashtable
@@ -344,7 +361,7 @@ if (Test-Path $GlobalOpencodeFile) {
 
             # Write merged result
             $projectJson | ConvertTo-Json -Depth 10 | Set-Content -Path $ProjectOpencodeFile -Encoding UTF8
-            Write-Ok "Merged global agent/tools/permissions into project .opencode/opencode.json"
+            Write-Ok "Merged managed agent/tools/permissions into project .opencode/opencode.json"
         }
         catch {
             # Fallback: if merge fails, overwrite with global (better than nothing)
@@ -355,7 +372,7 @@ if (Test-Path $GlobalOpencodeFile) {
 }
 elseif (-not (Test-Path $ProjectOpencodeFile)) {
     # Neither global nor project file exists — leave empty (compile may have failed)
-    Write-Warn "No global or project opencode.json found"
+    Write-Warn "No managed or project opencode.json found"
 }
 
 Remove-OstwinManagedLegacyOpencodeMcp -HomeDir $HomeDir
@@ -377,18 +394,18 @@ if ($PlanId -and (Test-Path $ProjectOpencodeFile)) {
     Write-Ok "Bound plan_id=$PlanId to memory MCP URL"
 
     # Create centralized memory directory + symlink from project/.memory
-    # Use "memory-$PlanId" naming to match global-memory-server.py convention
-    # (it discovers directories with the "memory-" prefix).
+    # Use bare plan_id as directory name to match memory_mcp.py pool
+    # (the HTTP MCP endpoint resolves plan_id → ~/.ostwin/memory/<plan_id>/).
     $memoryBase = Join-Path $env:HOME ".ostwin" "memory"
-    $centralDir = Join-Path $memoryBase "memory-$PlanId"
+    $centralDir = Join-Path $memoryBase $PlanId
     $symlinkPath = Join-Path $TargetDir ".memory"
 
     if (-not (Test-Path $centralDir)) {
         New-Item -ItemType Directory -Path $centralDir -Force | Out-Null
     }
 
-    # ── Step 1: Migrate from old bare-name directory (without "memory-" prefix) ──
-    $legacyDir = Join-Path $memoryBase $PlanId
+    # ── Step 1: Migrate from old "memory-" prefixed directory to bare plan_id ──
+    $legacyDir = Join-Path $memoryBase "memory-$PlanId"
     if ((Test-Path $legacyDir) -and ($legacyDir -ne $centralDir)) {
         if (Get-Command rsync -ErrorAction SilentlyContinue) {
             & rsync -a "$legacyDir/" "$centralDir/" 2>$null
@@ -471,7 +488,6 @@ $OstwinBlock = @"
 .opencode/opencode.json
 .war-rooms/
 .agents/*
-!.agents/memory/
 .memory
 "@
 
@@ -485,7 +501,6 @@ if (Test-Path $Gitignore) {
             $_ -ne '.opencode/opencode.json' -and
             $_ -ne '.war-rooms/' -and
             $_ -ne '.agents/*' -and
-            $_ -ne '!.agents/memory/' -and
             $_ -ne '.agents/' -and
             $_ -ne '.memory'
         }

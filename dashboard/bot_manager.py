@@ -1,12 +1,12 @@
 """
-bot_manager.py — Manages the Node.js bot process lifecycle.
+bot_manager.py — Manages the Bun-powered bot process lifecycle.
 
 The dashboard spawns the bot as a child process so it can:
   1. Auto-start the bot when the dashboard starts.
   2. Restart the bot when channel configs change (channels.json).
   3. Expose status / restart endpoints without manual intervention.
 
-The bot entry point is  bot/src/index.ts  (run via tsx).
+The bot is launched through bot/package.json using Bun (`bun run start`).
 """
 
 import asyncio
@@ -40,52 +40,74 @@ _MAX_LOG_LINES = 500
 _RESTART_DEBOUNCE_SECS = 2.0
 
 
-def ensure_bot_dependencies() -> bool:
-    """Install bot dependencies if node_modules missing.
-    
+def _is_ci() -> bool:
+    return os.environ.get("CI", "").lower() in {"1", "true"}
+
+
+def ensure_bot_dependencies(bot_dir: Optional[Path] = None) -> bool:
+    """Install bot dependencies with Bun if node_modules is missing.
+
     Returns True if dependencies are available (already installed or just installed).
-    Returns False if installation failed.
+    Returns False if installation failed or Bun/package.json is unavailable.
     """
-    node_modules = BOT_DIR / "node_modules"
-    
+    target_dir = bot_dir or BOT_DIR
+    node_modules = target_dir / "node_modules"
+
     if node_modules.exists():
         logger.debug("[BOT] node_modules already exists")
         return True
-    
-    if not (BOT_DIR / "package.json").exists():
-        logger.warning("[BOT] package.json not found in %s", BOT_DIR)
+
+    if not (target_dir / "package.json").exists():
+        logger.warning("[BOT] package.json not found in %s", target_dir)
         return False
-    
-    # Find package manager
+
     import subprocess
-    
-    pkg_manager = None
-    for pm in ["pnpm", "npm"]:
-        if shutil.which(pm):
-            pkg_manager = pm
-            break
-    
-    if not pkg_manager:
-        logger.error("[BOT] No package manager found (pnpm or npm required)")
+
+    bun = shutil.which("bun")
+    if not bun:
+        logger.error("[BOT] Bun not found; install Bun before starting the bot")
         return False
-    
-    logger.info("[BOT] Installing dependencies with %s in %s", pkg_manager, BOT_DIR)
-    
+
+    has_bun_lock = (target_dir / "bun.lock").exists() or (target_dir / "bun.lockb").exists()
+    cmd = [bun, "install"]
+    if has_bun_lock:
+        cmd.append("--frozen-lockfile")
+
+    logger.info("[BOT] Installing dependencies with Bun in %s", target_dir)
+
     try:
         result = subprocess.run(
-            [pkg_manager, "install"],
-            cwd=str(BOT_DIR),
+            cmd,
+            cwd=str(target_dir),
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=300,  # 5 minute timeout
         )
-        
+
         if result.returncode == 0:
             logger.info("[BOT] Dependencies installed successfully")
             return True
-        else:
-            logger.error("[BOT] Dependency install failed: %s", result.stderr)
+
+        if has_bun_lock and not _is_ci():
+            logger.warning(
+                "[BOT] Bun frozen lockfile install failed; retrying without --frozen-lockfile: %s",
+                result.stderr,
+            )
+            retry = subprocess.run(
+                [bun, "install"],
+                cwd=str(target_dir),
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if retry.returncode == 0:
+                logger.info("[BOT] Dependencies installed successfully")
+                return True
+            logger.error("[BOT] Dependency install failed: %s", retry.stderr)
             return False
+
+        logger.error("[BOT] Dependency install failed: %s", result.stderr)
+        return False
     except subprocess.TimeoutExpired:
         logger.error("[BOT] Dependency install timed out")
         return False
@@ -126,28 +148,27 @@ class BotProcessManager:
             logger.info("[BOT] Already running (pid %s)", self._process.pid)
             return False
 
-        # Ensure dependencies are installed
+        # Ensure dependencies are installed in this manager's bot directory.
         loop = asyncio.get_running_loop()
-        deps_ok = await loop.run_in_executor(None, ensure_bot_dependencies)
+        deps_ok = await loop.run_in_executor(None, lambda: ensure_bot_dependencies(self.bot_dir))
         if not deps_ok:
             logger.error("[BOT] Failed to install dependencies")
             return False
 
-        tsx_result = self._find_tsx()
-        if tsx_result is None:
-            logger.error("[BOT] Cannot find tsx binary — is bot/node_modules installed?")
+        bun_exe = self._find_bun()
+        if bun_exe is None:
+            logger.error("[BOT] Cannot find Bun — install Bun before starting the bot")
             return False
 
-        tsx_exe, tsx_args = tsx_result
-
-        if not BOT_ENTRY.exists():
-            logger.error("[BOT] Entry point not found: %s", BOT_ENTRY)
+        entry = self.bot_dir / "src" / "index.ts"
+        if not entry.exists():
+            logger.error("[BOT] Entry point not found: %s", entry)
             return False
 
         env = {**os.environ}  # inherit current env (includes .env vars)
 
-        # Build command: tsx_exe [tsx_args] BOT_ENTRY
-        cmd = [tsx_exe, *tsx_args, str(BOT_ENTRY)]
+        # Build command: bun run start (bot/package.json start script)
+        cmd = [bun_exe, "run", "start"]
         logger.info("[BOT] Starting bot process: %s", " ".join(cmd))
         self._log_lines.clear()
         self._stopping = False
@@ -273,18 +294,6 @@ class BotProcessManager:
         if len(self._log_lines) > _MAX_LOG_LINES:
             self._log_lines = self._log_lines[-_MAX_LOG_LINES:]
 
-    def _find_tsx(self) -> Optional[tuple[str, list[str]]]:
-        """Locate the tsx binary in the bot's node_modules.
-        
-        Returns tuple of (executable, args) or None if not found.
-        - Local tsx: (tsx_path, [])
-        - Fallback npx: ('npx', ['tsx'])
-        """
-        local_tsx = self.bot_dir / "node_modules" / ".bin" / "tsx"
-        if local_tsx.exists():
-            return (str(local_tsx), [])
-        # Fallback: use npx tsx
-        npx = shutil.which("npx")
-        if npx:
-            return (npx, ["tsx"])
-        return None
+    def _find_bun(self) -> Optional[str]:
+        """Locate the Bun executable used to run bot scripts."""
+        return shutil.which("bun")

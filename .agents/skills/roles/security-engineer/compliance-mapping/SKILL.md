@@ -1,6 +1,6 @@
 ---
 name: compliance-mapping
-description: Map implementation details to compliance framework requirements (SOC2, GDPR, HIPAA, PCI-DSS, ISO 27001). Identifies gaps between current implementation and framework requirements, produces evidence documentation, and tracks remediation.
+description: Use when mapping implementation details, security controls, OWASP findings, privacy/data-protection behavior, access control, encryption, logging, vulnerability management, or configuration evidence to SOC2, GDPR, HIPAA, PCI-DSS, ISO 27001, or similar compliance frameworks.
 ---
 
 # compliance-mapping
@@ -73,6 +73,17 @@ Compliance frameworks define what security controls must exist. This skill conne
 5. **Evidence** — collect and organize compliance evidence
 6. **Track** — monitor remediation progress
 7. **Review** — reassess quarterly or when significant changes occur
+
+## Security Evidence to Capture
+
+For security-engineer reviews, collect evidence that maps naturally to compliance controls:
+
+- Access control: server-side authorization, RBAC/ABAC policy, default-deny endpoint behavior, IDOR prevention.
+- Authentication/session: password hashing, session entropy, cookie flags, session regeneration, timeout/invalidation.
+- Data protection: TLS/HSTS, encryption at rest, key management, password salting, sensitive-data logging rules.
+- Configuration: disabled debug mode, safe error handling, request filtering, encrypted/externalized secrets.
+- Vulnerability management: dependency inventory/SBOM, CVE scan output, remediation/acceptance records, unused component removal.
+- Application security testing: manual secure code review findings, SAST/DAST outputs, threat model, risk acceptance.
 
 ## Anti-Patterns
 

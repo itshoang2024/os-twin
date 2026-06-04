@@ -103,7 +103,7 @@ if ($detectedCapabilities.Count -gt 0) {
 
 # --- Suggest primary role based on dominant capability ---
 $roleMapping = @{
-    'security'       = 'security-auditor'
+    'security'       = 'security-engineer'
     'database'       = 'database-architect'
     'infrastructure' = 'devops-engineer'
     'architecture'   = 'architect'
@@ -111,6 +111,14 @@ $roleMapping = @{
     'frontend'       = 'engineer:fe'
     'backend'        = 'engineer:be'
     'testing'        = 'test-engineer'
+}
+
+$reviewRoleMapping = @{
+    'security'       = 'security-specialist'
+    'database'       = 'database-architect'
+    'infrastructure' = 'devops-engineer'
+    'architecture'   = 'architect'
+    'accessibility'  = 'accessibility-specialist'
 }
 
 if ($detectedCapabilities.Count -gt 0) {
@@ -124,8 +132,8 @@ if ($detectedCapabilities.Count -gt 0) {
 # --- Suggest pipeline ---
 $pipelineStages = @($result.SuggestedRole)
 foreach ($cap in $detectedCapabilities) {
-    if ($cap -in @('security', 'database', 'architecture', 'infrastructure', 'accessibility')) {
-        $reviewRole = $roleMapping[$cap]
+    if ($reviewRoleMapping.ContainsKey($cap)) {
+        $reviewRole = $reviewRoleMapping[$cap]
         if ($reviewRole -ne $result.SuggestedRole) {
             $pipelineStages += $reviewRole
         }

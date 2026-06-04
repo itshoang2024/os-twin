@@ -18,6 +18,11 @@ setup_env() {
     ok ".env already exists at $env_file"
     _ensure_vault_key "$env_file"
     _create_env_sh_hook
+    # Sync the install shell with .env so OSTWIN_API_KEY (and friends) match
+    # the file even if the parent shell exported a stale value from a prior
+    # install. Without this, the completion banner can print one key while
+    # the dashboard accepts another.
+    _export_env_from_file "$env_file"
     return
   fi
 
@@ -93,9 +98,27 @@ ENVEOF
       ok "Saved NGROK_AUTHTOKEN — tunnel will auto-start with dashboard"
     fi
   fi
+
+  # Mirror the freshly-written file into the install shell so the rest of
+  # the script (banner, dashboard launch, etc.) sees the same values that
+  # were just persisted.
+  _export_env_from_file "$env_file"
 }
 
 # ─── Internal helpers ────────────────────────────────────────────────────────
+
+# Source $1 into the current shell with auto-export so every assignment in
+# the file becomes an exported variable, overwriting any stale value the
+# parent shell may have had. Used to keep ``.env`` the single source of
+# truth for OSTWIN_API_KEY and friends during the install.
+_export_env_from_file() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file" || true
+  set +a
+}
 
 _ensure_vault_key() {
   local env_file="$1"
@@ -120,23 +143,49 @@ _configure_memory_provider() {
 
   local provider="none"
   local llm_model=""
+  local llm_backend=""
   local embed_model=""
   local embed_backend=""
 
-  # Priority 1: Gemini API key
+  # Priority 1: Vertex AI (gcloud ADC)
+  local adc_file="$HOME/.config/gcloud/application_default_credentials.json"
+  if [[ -f "$adc_file" ]]; then
+    local project=""
+    project=$("$VENV_DIR/bin/python" -c "
+import json
+with open('$adc_file') as f:
+    d = json.load(f)
+print(d.get('quota_project_id', ''))
+" 2>/dev/null || true)
+    if [[ -n "$project" ]]; then
+      provider="google-vertex"
+      llm_model="google-vertex/gemini-3-flash-preview"
+      llm_backend="gemini"
+      embed_model="google-vertex/gemini-embedding-001"
+      embed_backend="gemini"
+      grep -q "^GOOGLE_CLOUD_PROJECT=" "$env_file" 2>/dev/null || \
+        echo "GOOGLE_CLOUD_PROJECT=$project" >> "$env_file"
+      grep -q "^VERTEX_LOCATION=" "$env_file" 2>/dev/null || \
+        echo "VERTEX_LOCATION=global" >> "$env_file"
+      info "Detected Vertex AI (ADC) — project: $project"
+    fi
+  fi
+
+  # Priority 2: Gemini API key
   if [[ "$provider" == "none" ]]; then
     local api_key=""
     api_key=$(grep -E "^GOOGLE_API_KEY=" "$env_file" 2>/dev/null | cut -d= -f2- || true)
     if [[ -n "$api_key" ]]; then
       provider="google"
       llm_model="google/gemini-3-flash-preview"
+      llm_backend="gemini"
       embed_model="google/gemini-embedding-001"
       embed_backend="gemini"
       info "Detected Gemini API key — using google/ provider"
     fi
   fi
 
-  # Priority 2: Nothing
+  # Priority 3: Nothing
   if [[ "$provider" == "none" ]]; then
     warn "No Google AI credentials detected — memory analysis will be limited"
     info "Set GOOGLE_API_KEY in ~/.ostwin/.env, or configure Vertex in Settings with browser OAuth or a service-account JSON file."
@@ -155,9 +204,10 @@ else:
     config = {}
 
 config.setdefault('memory', {})
+config['memory']['llm_backend'] = '$llm_backend'
 config['memory']['llm_model'] = '$llm_model'
-config['memory']['embedding_model'] = '$embed_model'
 config['memory']['embedding_backend'] = '$embed_backend'
+config['memory']['embedding_model'] = '$embed_model'
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)

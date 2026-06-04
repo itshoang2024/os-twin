@@ -230,6 +230,8 @@ class ProviderSettings(BaseModel):
     org_id: Optional[str] = None
     enabled: bool = True
     default_model: Optional[str] = None
+    auth_mode: Optional[str] = None  # 'api_key' | 'codex_oauth' (OpenAI only)
+    model_variant: Optional[str] = None  # OpenCode --variant for Codex-compatible models
     deployment_mode: Optional[str] = None  # 'gemini' | 'vertex' (Google only)
     project_id: Optional[str] = None  # Vertex AI project ID (Google only)
     vertex_location: Optional[str] = None  # Vertex AI region (Google only, default: global)

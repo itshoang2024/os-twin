@@ -239,7 +239,11 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 # Parse global working_dir from PLAN.md
 if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
-    if ($globalWorkingDir -and (Test-Path $globalWorkingDir)) {
+    if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
+        if (-not (Test-Path $globalWorkingDir)) {
+            Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $globalWorkingDir -Force | Out-Null
+        }
         $ProjectDir = (Resolve-Path $globalWorkingDir).Path
         Write-Host "  Project: $ProjectDir" -ForegroundColor DarkGray
         # Re-resolve war-rooms dir to follow the plan's working_dir (unless explicitly set via env)
@@ -248,8 +252,6 @@ if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
             $env:WARROOMS_DIR = $warRoomsDir
             $room000Dir = Join-Path $warRoomsDir "room-000"
         }
-    } elseif ($globalWorkingDir -and $globalWorkingDir -ne '...') {
-        Write-Warning "working_dir '$globalWorkingDir' not found. Falling back to ProjectDir: $ProjectDir"
     }
 }
 
@@ -714,10 +716,19 @@ function New-PlanWarRooms {
         }
 
         $resolvedWorkingDir = $ProjectDir
-        if ($entry.EpicWorkingDir) {
-            $candidate = Join-Path $ProjectDir $entry.EpicWorkingDir
-            if (Test-Path $candidate) { $resolvedWorkingDir = $candidate }
-            else { $resolvedWorkingDir = $entry.EpicWorkingDir }
+        if ($entry.EpicWorkingDir -and $entry.EpicWorkingDir -ne '') {
+            $wd = $entry.EpicWorkingDir
+            if ($wd -eq '.') {
+                $resolvedWorkingDir = $ProjectDir
+            } elseif ([System.IO.Path]::IsPathRooted($wd)) {
+                $resolvedWorkingDir = $wd
+            } else {
+                $resolvedWorkingDir = (Join-Path $ProjectDir $wd)
+            }
+        }
+        if (-not (Test-Path $resolvedWorkingDir)) {
+            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }
@@ -766,8 +777,12 @@ function New-PlanWarRooms {
         if ($entry.Pipeline) {
             $roomArgs['Pipeline'] = $entry.Pipeline
         }
-        if ($entry.RequiredCapabilities -and $entry.RequiredCapabilities.Count -gt 0) {
-            $roomArgs['RequiredCapabilities'] = $entry.RequiredCapabilities
+        # PlanParser exposes parsed directives as .Capabilities; forward them to
+        # New-WarRoom as RequiredCapabilities so Resolve-Pipeline can drive the
+        # correct lifecycle (e.g. security → security-engineer worker +
+        # security-specialist evaluator).
+        if ($entry.Capabilities -and $entry.Capabilities.Count -gt 0) {
+            $roomArgs['RequiredCapabilities'] = $entry.Capabilities
         }
         if ($entry.Lifecycle) {
             $roomArgs['Lifecycle'] = $entry.Lifecycle
@@ -802,7 +817,7 @@ if (-not $Resume -and -not $DryRun -and (Test-Path $reviewDeps)) {
         WarRoomsDir = $warRoomsDir
         PlanFile    = $PlanFile
     }
-    if ($config.manager -and $config.manager.auto_approve_deps -eq $true) {
+    if ($NonInteractive -or ($config.manager -and $config.manager.auto_approve_deps -eq $true)) {
         $depReviewArgs['AutoApprove'] = $true
     }
     & $reviewDeps @depReviewArgs

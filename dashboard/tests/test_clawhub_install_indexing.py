@@ -115,7 +115,7 @@ class TestClawhubInstallIndexing:
         """After a successful clawhub install, the skill must be indexed into zvec."""
         skills_dir = mock_globals["skills_dir"]
 
-        # Simulate what `npx clawhub install --workdir --dir skills` produces:
+        # Simulate what `bun x clawhub install --workdir --dir skills` produces:
         # the skill lands directly in _GLOBAL_SKILLS_DIR/<slug>/SKILL.md
         _make_skill_on_disk(skills_dir, "test-clawhub-skill", description="From ClawHub")
 
@@ -124,14 +124,16 @@ class TestClawhubInstallIndexing:
         fake_proc, mock_request = self._make_mocks()
 
         with patch("dashboard.routes.skills._verify_clawhub_skill_exists", new_callable=AsyncMock, return_value=True), \
-             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc), \
+             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc) as create_proc, \
              patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(b"installed ok", b"")), \
+             patch("dashboard.routes.skills.shutil.which", return_value=None), \
              patch("dashboard.global_state.store", store):
 
             req = skills_routes.ClawhubInstallRequest(skill_name="test-clawhub-skill")
             result = await skills_routes.clawhub_install(req, mock_request, {"username": "testuser"})
 
         assert result["status"] == "installed"
+        assert create_proc.call_args.args[:3] == ("bun", "x", "clawhub")
 
         # Skill should exist at _GLOBAL_SKILLS_DIR/<slug>
         dest = skills_dir / "test-clawhub-skill"
@@ -155,6 +157,7 @@ class TestClawhubInstallIndexing:
         with patch("dashboard.routes.skills._verify_clawhub_skill_exists", new_callable=AsyncMock, return_value=True), \
              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc), \
              patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(b"ok", b"")), \
+             patch("dashboard.routes.skills.shutil.which", return_value=None), \
              patch("dashboard.global_state.store", None):
 
             req = skills_routes.ClawhubInstallRequest(skill_name="no-store-skill")
@@ -176,6 +179,7 @@ class TestClawhubInstallIndexing:
         with patch("dashboard.routes.skills._verify_clawhub_skill_exists", new_callable=AsyncMock, return_value=True), \
              patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc), \
              patch("asyncio.wait_for", new_callable=AsyncMock, return_value=(b"ok", b"")), \
+             patch("dashboard.routes.skills.shutil.which", return_value=None), \
              patch("dashboard.global_state.store", store):
 
             req = skills_routes.ClawhubInstallRequest(skill_name="broken-skill")

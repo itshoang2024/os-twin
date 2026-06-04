@@ -8,7 +8,7 @@ by which providers are actually enabled in the current settings.
 The catalog is populated dynamically from ``models.dev/api.json``
 (fetched at server startup) and filtered by which providers the user
 has configured in ``~/.local/share/opencode/auth.json`` and
-``~/.config/opencode/opencode.json``.
+the Ostwin-managed opencode.json.
 
 A static fallback catalog is kept for the four legacy providers
 (Anthropic, OpenAI, Google/Gemini, BytePlus) so the system works
@@ -17,7 +17,7 @@ even if models.dev is unreachable and no cache exists.
 Provider mapping for OpenCode sync
 -----------------------------------
 Only providers that require a custom ``provider`` block in
-``~/.config/opencode/opencode.json`` are listed here.  Providers
+the Ostwin-managed opencode.json are listed here.  Providers
 natively supported by OpenCode (Anthropic, OpenAI) are excluded.
 """
 
@@ -43,7 +43,7 @@ class ProviderAuthType(str, enum.Enum):
 
     AUTH_JSON = "auth_json"  # ~/.local/share/opencode/auth.json
     OPENAI_COMPATIBLE = (
-        "openai_compatible"  # ~/.config/opencode/opencode.json provider block
+        "openai_compatible"  # Ostwin-managed opencode.json provider block
     )
     ENV = "env"  # environment variables only
 

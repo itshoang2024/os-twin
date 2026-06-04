@@ -1,19 +1,21 @@
 {
   "name": "security-engineer",
-  "description": "Security Engineer — shift-left security specialist owning threat modeling, secure code review, dependency vulnerability management, security architecture review, and compliance mapping",
-  "instance_type": "evaluator",
+  "description": "Security Engineer — shift-left security specialist owning threat modeling, risk-based secure code review, OWASP Top 10 validation, dependency vulnerability management, security architecture review, and compliance mapping",
+  "instance_type": "worker",
   "capabilities": [
+    "security",
     "threat-modeling",
     "secure-code-review",
-    "vulnerability-management",
+    "dependency-vulnerability",
     "security-architecture",
-    "compliance-mapping",
-    "penetration-testing",
-    "security-automation"
+    "compliance-mapping"
   ],
   "prompt_file": "ROLE.md",
   "quality_gates": [
     "threat-model-complete",
+    "owasp-a1-a10-reviewed",
+    "source-to-sink-traced",
+    "security-metrics-considered",
     "vulnerabilities-triaged",
     "compliance-mapped",
     "no-critical-findings"

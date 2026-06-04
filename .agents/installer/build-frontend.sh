@@ -27,29 +27,25 @@ _frontend_ci_mode() {
 _select_frontend_pm() {
   local fe_dir="$1"
 
-  if [[ -f "$fe_dir/pnpm-lock.yaml" ]] && command -v pnpm &>/dev/null; then
-    echo "pnpm"
-    return 0
-  fi
-  if [[ -f "$fe_dir/package-lock.json" || -f "$fe_dir/npm-shrinkwrap.json" ]] && command -v npm &>/dev/null; then
-    echo "npm"
-    return 0
-  fi
-  if [[ -f "$fe_dir/yarn.lock" ]] && command -v yarn &>/dev/null; then
-    echo "yarn"
-    return 0
-  fi
-  if [[ -f "$fe_dir/bun.lockb" || -f "$fe_dir/bun.lock" ]] && command -v bun &>/dev/null; then
+  # Installer builds intentionally support only bun and npm. Prefer the
+  # package manager with a committed lockfile, then fall back to npm because
+  # Node.js includes it by default and no extra bootstrap step is needed.
+  if [[ ( -f "$fe_dir/bun.lockb" || -f "$fe_dir/bun.lock" ) ]] && command -v bun &>/dev/null; then
     echo "bun"
     return 0
   fi
-
-  for tool in pnpm npm yarn bun; do
-    if command -v "$tool" &>/dev/null; then
-      echo "$tool"
-      return 0
-    fi
-  done
+  if [[ ( -f "$fe_dir/package-lock.json" || -f "$fe_dir/npm-shrinkwrap.json" ) ]] && command -v npm &>/dev/null; then
+    echo "npm"
+    return 0
+  fi
+  if command -v npm &>/dev/null; then
+    echo "npm"
+    return 0
+  fi
+  if command -v bun &>/dev/null; then
+    echo "bun"
+    return 0
+  fi
 
   return 1
 }
@@ -59,36 +55,49 @@ _install_frontend_deps() {
   local output=""
 
   case "$pm" in
-    pnpm)
-      if output="$(pnpm install --frozen-lockfile 2>&1)"; then
-        [[ -n "$output" ]] && printf '%s\n' "$output"
-        return 0
+    bun)
+      if [[ -f bun.lockb || -f bun.lock ]]; then
+        if output="$(bun install --frozen-lockfile 2>&1)"; then
+          [[ -n "$output" ]] && printf '%s\n' "$output"
+          return 0
+        fi
+
+        if ! _frontend_ci_mode; then
+          warn "bun lockfile is out of date; retrying without --frozen-lockfile"
+          [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+          bun install
+          return $?
+        fi
+
+        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+        return 1
       fi
 
-      if [[ ( "$output" == *"ERR_PNPM_OUTDATED_LOCKFILE"* || "$output" == *"ERR_PNPM_LOCKFILE_CONFIG_MISMATCH"* ) ]] && ! _frontend_ci_mode; then
-        warn "pnpm lockfile/config is out of date; retrying with --no-frozen-lockfile"
-        pnpm install --no-frozen-lockfile
-        return $?
-      fi
-
-      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
-      return 1
+      bun install
       ;;
     npm)
       if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
-        npm ci
-      else
-        npm install
+        if output="$(npm ci 2>&1)"; then
+          [[ -n "$output" ]] && printf '%s\n' "$output"
+          return 0
+        fi
+
+        if ! _frontend_ci_mode; then
+          warn "npm lockfile install failed; retrying with npm install"
+          [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+          npm install
+          return $?
+        fi
+
+        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+        return 1
       fi
-      ;;
-    yarn)
-      yarn install --frozen-lockfile
-      ;;
-    bun)
-      bun install --frozen-lockfile
+
+      npm install
       ;;
     *)
-      "$pm" install
+      warn "Unsupported JavaScript package manager: $pm"
+      return 1
       ;;
   esac
 }
@@ -122,8 +131,8 @@ build_frontend() {
   pm="$(_select_frontend_pm "$fe_dir" || true)"
 
   if [[ -z "$pm" ]]; then
-    warn "No package manager (bun/pnpm/npm/yarn) found — skipping $label build"
-    info "Install Node.js and a package manager to enable $label"
+    warn "No package manager (bun/npm) found — skipping $label build"
+    info "Install bun or npm to enable $label"
     [[ "$required" == "true" || "$required" == "required" || "$required" == "--required" ]] && return 1
     return
   fi
@@ -155,7 +164,7 @@ build_frontend() {
   (
     set -e
     cd "$fe_dir" || exit
-    step "Installing npm dependencies..."
+    step "Installing JavaScript dependencies with $pm..."
     _install_frontend_deps "$pm"
     "$pm" run build
   ) || status=$?

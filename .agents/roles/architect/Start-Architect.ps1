@@ -151,22 +151,8 @@ Analyze the provided plan details.
 If the plan is well-specified, well-scoped, and ready for engineering implementation, approve it.
 If it lacks critical details, provide architectural guidance on what must be improved.
 
-IMPORTANT: Your response MUST conclude with exactly one of these lines:
-  VERDICT: PASS
-  VERDICT: REJECT
-
-## Engineer's Submission
-
-$engineerReport
-
-## Manager's Request
-
-$managerRequest
-
-## Instructions
-
-Analyze the QA failure, the engineer's submission, and the manager's request.
-Provide detailed technical guidance and architectural advice on how the engineering team should proceed to resolve the issue.
+If approving, call `memory_save` with the plan-review decision before posting `plan-approve`.
+Do NOT use `signoff` for plan review approval.
 
 IMPORTANT: Your response MUST conclude with exactly one of these lines:
   VERDICT: PASS

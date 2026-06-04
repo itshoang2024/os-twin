@@ -266,12 +266,46 @@ cmd_install() {
         rm -rf "$ext_path"
         exit 1
       fi
-      step "Building (pnpm install && pnpm run build)..."
-      (
+      local js_pm=""
+      if [[ ( -f "$ext_path/bun.lockb" || -f "$ext_path/bun.lock" ) ]] && command -v bun &>/dev/null; then
+        js_pm="bun"
+      elif command -v npm &>/dev/null; then
+        js_pm="npm"
+      elif command -v bun &>/dev/null; then
+        js_pm="bun"
+      else
+        fail "bun or npm is required but neither is installed."
+        rm -rf "$ext_path"
+        exit 1
+      fi
+
+      step "Building ($js_pm install && $js_pm run build)..."
+      if (
         cd "$ext_path"
-        pnpm install --silent 2>/dev/null || pnpm install
-        grep -q '"build"' package.json 2>/dev/null && { pnpm run build 2>/dev/null || pnpm run build; }
-      ) && ok "Build complete" || { fail "Build failed"; rm -rf "$ext_path"; exit 1; }
+        case "$js_pm" in
+          bun)
+            if [[ -f bun.lockb || -f bun.lock ]]; then
+              bun install --frozen-lockfile 2>/dev/null || bun install
+            else
+              bun install
+            fi
+            ;;
+          npm)
+            if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+              npm ci 2>/dev/null || npm install
+            else
+              npm install
+            fi
+            ;;
+        esac
+        grep -q '"build"' package.json 2>/dev/null && { "$js_pm" run build 2>/dev/null || "$js_pm" run build; }
+      ); then
+        ok "Build complete"
+      else
+        fail "Build failed"
+        rm -rf "$ext_path"
+        exit 1
+      fi
       ;;
     python)
       step "Installing Python dependencies..."
@@ -647,7 +681,8 @@ with open('$CONFIG_FILE', 'w') as f:
   # Resolve {env:AGENT_DIR} and {env:PROJECT_DIR} → absolute paths
   local abs_project_dir
   abs_project_dir="$(cd "$PROJECT_DIR" 2>/dev/null && pwd || echo "$PROJECT_DIR")"
-  local env_mcp_file="$(dirname "$CONFIG_FILE")/.env.mcp"
+  local env_mcp_file
+  env_mcp_file="$(dirname "$CONFIG_FILE")/.env.mcp"
 
   export AGENT_DIR="$INSTALL_DIR"
   export PROJECT_DIR="$abs_project_dir"

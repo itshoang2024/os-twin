@@ -118,6 +118,34 @@ You MUST follow these rules when exploring the filesystem:
    and similar project files.
 "@)
 
+# Section 4c: Scoped Working Directories
+if ($RoomDir -and (Test-Path $RoomDir)) {
+    $roomConfigFile = Join-Path $RoomDir "config.json"
+    if (Test-Path $roomConfigFile) {
+        try {
+            $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
+            $scopedDir = ''
+            if ($roomCfg.PSObject.Properties['working_dir'] -and $roomCfg.working_dir) {
+                $scopedDir = $roomCfg.working_dir
+            }
+            if ($scopedDir) {
+                $sections.Add(@"
+
+## Scoped Working Directory
+
+Your work is scoped to the following directory. Focus all file exploration,
+code changes, and testing within this path:
+
+- ``$scopedDir``
+
+Do NOT modify files outside this directory unless explicitly required by
+a dependency (e.g. a shared config file referenced from your scoped directory).
+"@)
+            }
+        } catch { }
+    }
+}
+
 # Section 5: War-room context
 if ($RoomDir -and (Test-Path $RoomDir)) {
     # Task brief

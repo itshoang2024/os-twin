@@ -100,8 +100,8 @@ Save a detailed `quality-audit.md` artifact with per-namespace probe results, he
 
 ## Verification
 
-1. `memory_search` called before probing to discover pain points.
+1. `search` called before probing to discover pain points.
 2. All namespaces probed with multiple queries across all three modes via `npx mcporter`.
 3. Each namespace has a health score assigned.
-4. `memory_save` called with the final audit verdict.
+4. `save` called with the final audit verdict.
 5. `quality-audit.md` artifact produced.

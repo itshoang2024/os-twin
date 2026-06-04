@@ -76,8 +76,11 @@ Write a plan, run it, watch agents collaborate:
 
 ```bash
 # 1. Install OSTwin
+curl -fsSL https://twin.igot-ai/install.sh | bash
+
+# Or from a local checkout:
 git clone https://github.com/igot-ai/os-twin.git
-cd os-twin && pwsh Install.ps1
+cd os-twin && .agents/install.sh
 
 # 2. Set your API key
 export ANTHROPIC_API_KEY="sk-ant-..."

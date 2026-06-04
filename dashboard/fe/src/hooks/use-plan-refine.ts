@@ -14,6 +14,14 @@ export function usePlanRefine() {
   const [streamedResponse, setStreamedResponse] = useState('');
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const seededRef = useRef(false);
+
+  /** Seed chat history once (idempotent). Skips if history already has messages. */
+  const seedHistory = useCallback((messages: ChatMessage[]) => {
+    if (seededRef.current) return;
+    seededRef.current = true;
+    setChatHistory((prev) => (prev.length === 0 ? messages : prev));
+  }, []);
 
   const refine = useCallback(
     async (message: string, planContent: string = '', planId: string = '') => {
@@ -139,10 +147,6 @@ export function usePlanRefine() {
     setChatHistory([]);
     setStreamedResponse('');
     setError(null);
-  }, []);
-
-  const seedHistory = useCallback((messages: ChatMessage[]) => {
-    setChatHistory(messages);
   }, []);
 
   return {

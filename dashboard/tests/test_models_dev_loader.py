@@ -27,6 +27,7 @@ from dashboard.lib.settings.models_dev_loader import (
     get_model_registry_from_configured,
     get_provider_logo_url,
     invalidate_cache,
+    rebuild_configured_models_from_cache,
     _format_context_window,
     _classify_tier,
     get_context_limit,
@@ -172,6 +173,37 @@ def test_reads_auth_json_providers(fake_auth_json):
     assert providers["openai"]["has_key"] is True
 
 
+def test_reads_auth_json_oauth_provider_over_vault(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    auth_path.write_text(json.dumps({
+        "openai": {
+            "type": "oauth",
+            "access": "access-token",
+            "refresh": "refresh-token",
+            "expires": 9999999999,
+            "accountId": "acct-test",
+        }
+    }))
+
+    class FakeVault:
+        def list_keys(self, scope):
+            return {"openai": {"is_set": True}}
+
+    env = {
+        "OSTWIN_CONFIG_PATH": str(tmp_path / "missing-config.json"),
+        "OSTWIN_VAULT_BACKEND": "env",
+    }
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", auth_path):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch("dashboard.lib.settings.vault.get_vault", return_value=FakeVault()):
+                with patch.dict(os.environ, env, clear=True):
+                    providers = _read_configured_providers()
+
+    assert providers["openai"]["type"] == "oauth"
+    assert providers["openai"]["source"] == "auth.json"
+    assert providers["openai"]["has_key"] is True
+
+
 def test_reads_opencode_json_custom_providers(fake_opencode_json):
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", fake_opencode_json):
@@ -221,14 +253,19 @@ def test_google_detected_from_api_key(tmp_path):
 
 
 def test_google_not_detected_without_env():
+    class EmptyVault:
+        def list_keys(self, scope):
+            return {}
+
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", Path("/nonexistent")):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
-            with patch.dict(
-                os.environ,
-                {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json"},
-                clear=True,
-            ):
-                providers = _read_configured_providers()
+            with patch("dashboard.lib.settings.vault.get_vault", return_value=EmptyVault()):
+                with patch.dict(
+                    os.environ,
+                    {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json"},
+                    clear=True,
+                ):
+                    providers = _read_configured_providers()
 
     assert "google" not in providers
 
@@ -338,9 +375,32 @@ def test_build_filters_to_configured_providers(fake_raw_catalog):
 
 def test_build_tags_models_dev_source(fake_raw_catalog):
     providers = {"openai": {"type": "api", "source": "auth.json", "has_key": True}}
-    result = _build_configured_models(fake_raw_catalog, providers)
+    with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+        result = _build_configured_models(fake_raw_catalog, providers)
     for mid, mdata in result["providers"]["openai"]["models"].items():
         assert mdata["source"] == "models.dev"
+
+
+def test_openai_oauth_filters_to_opencode_models(fake_raw_catalog):
+    fake_raw_catalog["openai"]["models"]["gpt-5.3-codex"] = {
+        "name": "GPT-5.3 Codex",
+        "family": "gpt-5",
+        "reasoning": True,
+        "tool_call": True,
+        "cost": {"input": 1},
+        "limit": {"context": 272000},
+    }
+    providers = {"openai": {"type": "oauth", "source": "auth.json", "has_key": True}}
+
+    with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+        with patch(
+            "dashboard.lib.settings.models_dev_loader._list_opencode_models",
+            return_value={"openai/gpt-5.3-codex", "gpt-5.3-codex"},
+        ):
+            result = _build_configured_models(fake_raw_catalog, providers)
+
+    models = result["providers"]["openai"]["models"]
+    assert set(models) == {"gpt-5.3-codex"}
 
 
 def test_build_includes_custom_models_from_opencode(fake_raw_catalog, fake_opencode_json):
@@ -477,6 +537,38 @@ def test_invalidate_cache_clears_memory():
     invalidate_cache()
     assert loader._cached_models is None
     assert loader._cached_timestamp == 0.0
+
+
+def test_rebuild_configured_models_from_cache_picks_up_oauth_openai(tmp_path, fake_raw_catalog):
+    auth_path = tmp_path / "auth.json"
+    raw_path = tmp_path / "models_dev_raw.json"
+    configured_path = tmp_path / "configured_models.json"
+    raw_path.write_text(json.dumps(fake_raw_catalog))
+    auth_path.write_text(json.dumps({"openai": {"type": "oauth", "access": "token"}}))
+
+    class EmptyVault:
+        def list_keys(self, scope):
+            return {}
+
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", auth_path):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch("dashboard.lib.settings.models_dev_loader._HOME_RAW_PATH", raw_path):
+                with patch("dashboard.lib.settings.models_dev_loader.CONFIGURED_MODELS_PATH", configured_path):
+                    with patch("dashboard.lib.settings.vault.get_vault", return_value=EmptyVault()):
+                        with patch(
+                            "dashboard.lib.settings.models_dev_loader._list_opencode_models",
+                            return_value={"openai/gpt-4.1", "gpt-4.1"},
+                        ):
+                            with patch.dict(
+                                os.environ,
+                                {"OSTWIN_CONFIG_PATH": "/nonexistent/config.json", "OSTWIN_VAULT_BACKEND": "env"},
+                                clear=True,
+                            ):
+                                result = rebuild_configured_models_from_cache()
+
+    assert "openai" in result["configured_provider_ids"]
+    assert "openai" in result["providers"]
+    assert configured_path.exists()
 
 
 # ── configured_models structure ───────────────────────────────────────
