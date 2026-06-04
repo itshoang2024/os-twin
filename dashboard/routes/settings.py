@@ -42,6 +42,17 @@ from dashboard.lib.settings.openai_codex_auth import (
     start_codex_device_auth,
     start_codex_oauth,
 )
+from dashboard.lib.settings.github_copilot_auth import (
+    GitHubCopilotDeviceAuthResponse,
+    GitHubCopilotOAuthStartResponse,
+    GitHubCopilotSessionStatus,
+    exchange_github_copilot_oauth_code,
+    github_copilot_oauth_result_page,
+    get_github_copilot_device_auth_status,
+    get_github_copilot_session_status,
+    start_github_copilot_oauth,
+    start_github_copilot_device_auth,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -887,6 +898,70 @@ async def openai_codex_device_status(
 ):
     """Return current dashboard-managed Codex device-login status."""
     return get_codex_device_auth_status()
+
+
+# ── GitHub Copilot / OpenCode Auth Flow ───────────────────────────────
+
+
+@router.get("/github/copilot/session", response_model=GitHubCopilotSessionStatus)
+async def github_copilot_session(
+    user: dict = Depends(get_current_user),
+):
+    """Return whether the local OpenCode GitHub Copilot credential exists."""
+    return get_github_copilot_session_status()
+
+
+@router.post("/github/oauth/start", response_model=GitHubCopilotOAuthStartResponse)
+async def github_copilot_oauth_start(
+    user: dict = Depends(get_current_user),
+):
+    """Start dashboard-managed GitHub OAuth web flow for Copilot."""
+    try:
+        return start_github_copilot_oauth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/github/oauth/callback")
+async def github_copilot_oauth_callback(
+    code: str = Query(""),
+    state: str = Query(""),
+    error: str = Query(""),
+):
+    """Receive GitHub OAuth callback and save the OpenCode Copilot token."""
+    success = False
+    message = ""
+    try:
+        if error:
+            raise RuntimeError(f"GitHub returned error: {error}")
+        exchange_github_copilot_oauth_code(code, state)
+        success = True
+        message = "GitHub Copilot credential saved for OpenCode."
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)
+    return Response(
+        content=github_copilot_oauth_result_page(success=success, message=message),
+        media_type="text/html",
+    )
+
+
+@router.post("/github/copilot/device/start", response_model=GitHubCopilotDeviceAuthResponse)
+async def github_copilot_device_start(
+    user: dict = Depends(get_current_user),
+):
+    """Start dashboard-managed GitHub device-code login for Copilot."""
+    try:
+        return start_github_copilot_device_auth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/github/copilot/device/status", response_model=GitHubCopilotDeviceAuthResponse)
+async def github_copilot_device_status(
+    user: dict = Depends(get_current_user),
+):
+    """Return current dashboard-managed GitHub Copilot login status."""
+    return get_github_copilot_device_auth_status()
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────

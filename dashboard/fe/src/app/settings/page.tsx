@@ -9,6 +9,7 @@ import { SettingsSidebar } from '@/components/settings/SettingsSidebar';
 import { ProviderCard } from '@/components/settings/ProviderCard';
 import { BytedanceProviderCard } from '@/components/settings/BytedanceProviderCard';
 import { OpenAICodexPanel } from '@/components/settings/OpenAICodexPanel';
+import { GitHubCopilotPanel } from '@/components/settings/GitHubCopilotPanel';
 import { DynamicProviderCard } from '@/components/settings/DynamicProviderCard';
 import { AddProviderModal } from '@/components/settings/AddProviderModal';
 import { VaultSecretModal } from '@/components/settings/VaultSecretModal';
@@ -27,6 +28,7 @@ const LEGACY_PRIMARY_PROVIDERS = new Set([
   'openai',
   'anthropic',
   'byteplus',
+  'github-copilot',
 ]);
 
 // Map internal provider names to registry keys (for legacy fallback)
@@ -204,6 +206,7 @@ function SettingsPageContent() {
   const googleSettings   = (providers as Record<string, ProviderSettings>).google    ?? defaultProvider;
   const anthropicSettings = (providers as Record<string, ProviderSettings>).anthropic ?? defaultProvider;
   const openaiSettings   = (providers as Record<string, ProviderSettings>).openai    ?? defaultProvider;
+  const githubCopilotSettings = (providers as Record<string, ProviderSettings>)['github-copilot'] ?? defaultProvider;
   const byteplusSettings = (providers as Record<string, ProviderSettings>).byteplus  ?? defaultProvider;
 
   const allModelIds = allModels.length > 0
@@ -345,6 +348,10 @@ function SettingsPageContent() {
                   onVaultClick={() => handleVaultClick('openai')}
                   vaultSet={vaultStatus['openai'] || false}
                   onSettingsChange={(updates) => updateProvider('openai', openaiSettings, updates)}
+                />
+                <GitHubCopilotPanel
+                  provider={githubCopilotSettings}
+                  onSettingsChange={(updates) => updateProvider('github-copilot', githubCopilotSettings, updates)}
                 />
               </div>
 

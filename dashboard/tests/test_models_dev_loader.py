@@ -568,6 +568,42 @@ def test_rebuild_configured_models_from_cache_picks_up_oauth_openai(tmp_path, fa
 
     assert "openai" in result["configured_provider_ids"]
     assert "openai" in result["providers"]
+
+
+def test_rebuild_configured_models_from_cache_picks_up_github_copilot(tmp_path):
+    from dashboard.lib.settings.models_dev_loader import rebuild_configured_models_from_cache
+
+    auth_path = tmp_path / "auth.json"
+    raw_path = tmp_path / "models_dev_raw.json"
+    configured_path = tmp_path / "configured_models.json"
+
+    auth_path.write_text(json.dumps({"github-copilot": {"type": "oauth", "access": "token"}}))
+    raw_path.write_text(
+        json.dumps(
+            {
+                "github-copilot": {
+                    "id": "github-copilot",
+                    "name": "GitHub Copilot",
+                    "models": {
+                        "gpt-5.2": {
+                            "id": "gpt-5.2",
+                            "name": "GPT-5.2",
+                            "limit": {"context": 400000},
+                        }
+                    },
+                }
+            }
+        )
+    )
+
+    with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", auth_path):
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            with patch("dashboard.lib.settings.models_dev_loader._HOME_RAW_PATH", raw_path):
+                with patch("dashboard.lib.settings.models_dev_loader.CONFIGURED_MODELS_PATH", configured_path):
+                    result = rebuild_configured_models_from_cache()
+
+    assert "github-copilot" in result["configured_provider_ids"]
+    assert result["providers"]["github-copilot"]["models"]["gpt-5.2"]["name"] == "GPT-5.2"
     assert configured_path.exists()
 
 

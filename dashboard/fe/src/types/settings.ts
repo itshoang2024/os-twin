@@ -1,6 +1,6 @@
 export type GoogleDeploymentMode = 'gemini' | 'vertex';
 export type VertexAuthMode = 'service_account' | 'oauth';
-export type OpenAIAuthMode = 'api_key' | 'codex_oauth';
+export type ProviderAuthMode = 'api_key' | 'codex_oauth' | 'copilot_oauth' | string;
 
 export type ModelSource = 'models.dev' | 'custom';
 
@@ -81,7 +81,7 @@ export interface ProviderSettings {
   org_id?: string;
   enabled: boolean;
   default_model?: string;
-  auth_mode?: OpenAIAuthMode;                 // OpenAI only
+  auth_mode?: ProviderAuthMode;
   model_variant?: string;                     // OpenCode --variant for Codex-compatible models
   deployment_mode?: GoogleDeploymentMode;  // Google only
   project_id?: string;                     // Google Vertex only

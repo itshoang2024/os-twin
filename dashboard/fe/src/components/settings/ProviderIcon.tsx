@@ -14,8 +14,9 @@ const LOCAL_ICON_MAP: Record<string, string> = {
   // Providers
   google:              'google',
   anthropic:           'anthropic',
-  openai:              'openai',
+  openai:              'OpenAI',
   byteplus:            'byteplus',
+  'github-copilot':    'github-copilot',
   // Backends
   gemini:              'google',
   'google-vertex':     'vertex',
