@@ -48,6 +48,11 @@ TOKEN_RE = re.compile(
     r"(?i)(sk-[a-z0-9_-]{12,}|bearer\s+[a-z0-9._-]+|"
     r"(access|refresh|id)_token['\"]?\s*[:=]\s*['\"]?[a-z0-9._-]+)"
 )
+ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+DEVICE_URL_RE = re.compile(r"https://auth\.openai\.com/[^\s]+")
+DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{5}\b")
+
+CODEX_CLI_AUTH_JSON = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
 
 
 class CommandResult(BaseModel):
@@ -69,6 +74,14 @@ class CodexSessionStatus(BaseModel):
     connected: bool
 
 
+class CodexDeviceAuthResponse(BaseModel):
+    status: str
+    connected: bool = False
+    verification_url: Optional[str] = None
+    user_code: Optional[str] = None
+    message: Optional[str] = None
+
+
 class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
@@ -77,13 +90,18 @@ _oauth_lock = threading.Lock()
 _oauth_servers: List[ThreadingHTTPServer] = []
 _oauth_shutdown_timer: Optional[threading.Timer] = None
 _pending_oauth: Dict[str, Dict[str, Any]] = {}
+_device_auth_session: Optional[Dict[str, Any]] = None
 
 
 def _sanitized(text: str, *, limit: int = 6000) -> str:
-    redacted = TOKEN_RE.sub("[REDACTED]", text or "")
+    redacted = TOKEN_RE.sub("[REDACTED]", _strip_terminal_control(text or ""))
     if len(redacted) > limit:
         return redacted[:limit] + "\n[truncated]"
     return redacted
+
+
+def _strip_terminal_control(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 def _base64url(data: bytes) -> str:
@@ -161,6 +179,148 @@ def get_codex_session_status() -> CodexSessionStatus:
     return CodexSessionStatus(connected=_auth_json_has_openai_oauth())
 
 
+def _device_auth_response_locked() -> CodexDeviceAuthResponse:
+    session = _device_auth_session
+    if not session:
+        connected = _auth_json_has_openai_oauth()
+        return CodexDeviceAuthResponse(
+            status="connected" if connected else "idle",
+            connected=connected,
+        )
+    connected = session.get("status") == "connected"
+    return CodexDeviceAuthResponse(
+        status=str(session.get("status") or "idle"),
+        connected=connected,
+        verification_url=session.get("verification_url"),
+        user_code=session.get("user_code"),
+        message=session.get("message"),
+    )
+
+
+def get_codex_device_auth_status() -> CodexDeviceAuthResponse:
+    with _oauth_lock:
+        return _device_auth_response_locked()
+
+
+def _update_device_session(session: Dict[str, Any], **updates: Any) -> None:
+    with _oauth_lock:
+        if _device_auth_session is session:
+            session.update(updates)
+
+
+def _complete_device_session_after_oauth_save() -> None:
+    process: Optional[subprocess.Popen] = None
+    with _oauth_lock:
+        session = _device_auth_session
+        if not session:
+            return
+        raw_process = session.get("process")
+        if isinstance(raw_process, subprocess.Popen):
+            process = raw_process
+        session.update(
+            status="connected",
+            message="OpenAI Codex OAuth credential saved for OpenCode.",
+        )
+
+    if process is not None and process.poll() is None:
+        process.terminate()
+
+
+def _capture_device_output(session: Dict[str, Any]) -> None:
+    process = session.get("process")
+    if not isinstance(process, subprocess.Popen):
+        _update_device_session(session, status="error", message="Codex device login process was not available.")
+        return
+
+    try:
+        if process.stdout is not None:
+            for line in process.stdout:
+                raw = _strip_terminal_control(line.rstrip())
+                url_match = DEVICE_URL_RE.search(raw)
+                code_match = DEVICE_CODE_RE.search(raw)
+                updates: Dict[str, Any] = {}
+                if url_match:
+                    updates["verification_url"] = url_match.group(0)
+                if code_match:
+                    updates["user_code"] = code_match.group(0)
+                if updates:
+                    _update_device_session(session, **updates)
+
+        exit_code = process.wait()
+        if exit_code == 0:
+            import_codex_cli_auth_to_opencode()
+            _update_device_session(
+                session,
+                status="connected",
+                message="OpenAI Codex OAuth credential saved for OpenCode.",
+            )
+            return
+
+        _update_device_session(
+            session,
+            status="error",
+            message=f"Codex device login exited with code {exit_code}.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _update_device_session(session, status="error", message=_sanitized(str(exc)))
+
+
+def start_codex_device_auth() -> CodexDeviceAuthResponse:
+    global _device_auth_session
+
+    _ensure_codex_plugin()
+    if shutil.which("codex") is None:
+        raise RuntimeError("Cannot start device login because Codex CLI is not installed.")
+
+    with _oauth_lock:
+        if _device_auth_session:
+            process = _device_auth_session.get("process")
+            if isinstance(process, subprocess.Popen) and process.poll() is None:
+                return _device_auth_response_locked()
+
+        _device_auth_session = {
+            "status": "pending",
+            "message": "Starting Codex device login.",
+            "created_at": time.time(),
+        }
+        session = _device_auth_session
+
+    cmd = [
+        "codex",
+        "login",
+        "-c",
+        'cli_auth_credentials_store="file"',
+        "--device-auth",
+    ]
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=_env_without_project_config(),
+        )
+    except OSError as exc:
+        _update_device_session(session, status="error", message=str(exc))
+        raise RuntimeError(f"Cannot start Codex device login: {exc}") from exc
+
+    _update_device_session(session, process=process, message="Waiting for Codex device code.")
+    thread = threading.Thread(target=_capture_device_output, args=(session,), name="codex-device-auth", daemon=True)
+    thread.start()
+
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        with _oauth_lock:
+            response = _device_auth_response_locked()
+        if response.status in {"connected", "error"} or response.user_code:
+            return response
+        time.sleep(0.1)
+
+    with _oauth_lock:
+        return _device_auth_response_locked()
+
+
 def _ensure_codex_plugin() -> None:
     if _plugin_configured():
         return
@@ -188,6 +348,56 @@ def _save_openai_oauth(tokens: Dict[str, Any]) -> None:
     # The Codex OAuth plugin install/uninstall script also documents this
     # per-provider artifact. Keep it in sync for plugin/version compatibility.
     _write_json_secure(CODEX_AUTH_JSON, auth)
+    _complete_device_session_after_oauth_save()
+
+
+def _decode_jwt_payload(token: str) -> Dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return {}
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode((payload + padding).encode("ascii"))
+        data = json.loads(decoded.decode("utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _jwt_expires_millis(token: str) -> Optional[int]:
+    payload = _decode_jwt_payload(token)
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)) and exp > 0:
+        return int(exp * 1000)
+    return None
+
+
+def _load_codex_cli_oauth_tokens(path: Optional[Path] = None) -> Dict[str, Any]:
+    path = path or CODEX_CLI_AUTH_JSON
+    data = _load_json_object(path)
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        raise RuntimeError(f"Codex auth file at {path} is missing token data.")
+
+    access = tokens.get("access_token")
+    refresh = tokens.get("refresh_token")
+    if not isinstance(access, str) or not access:
+        raise RuntimeError(f"Codex auth file at {path} is missing access_token.")
+    if not isinstance(refresh, str) or not refresh:
+        raise RuntimeError(f"Codex auth file at {path} is missing refresh_token.")
+
+    expires = _jwt_expires_millis(access) or int(time.time() * 1000) + 3600 * 1000
+    return {
+        "access": access,
+        "refresh": refresh,
+        "expires": expires,
+    }
+
+
+def import_codex_cli_auth_to_opencode(path: Optional[Path] = None) -> None:
+    _save_openai_oauth(_load_codex_cli_oauth_tokens(path))
+    _refresh_models_after_auth()
 
 
 def _refresh_models_after_auth() -> None:

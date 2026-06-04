@@ -34,9 +34,12 @@ from dashboard.lib.settings.google_oauth import (
     OAuthSession,
 )
 from dashboard.lib.settings.openai_codex_auth import (
+    CodexDeviceAuthResponse,
     CodexOAuthStartResponse,
     CodexSessionStatus,
+    get_codex_device_auth_status,
     get_codex_session_status,
+    start_codex_device_auth,
     start_codex_oauth,
 )
 
@@ -865,6 +868,25 @@ async def openai_codex_oauth_start(
         return start_codex_oauth()
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/openai/codex/device/start", response_model=CodexDeviceAuthResponse)
+async def openai_codex_device_start(
+    user: dict = Depends(get_current_user),
+):
+    """Start Codex CLI device-code login and bridge it to OpenCode auth."""
+    try:
+        return start_codex_device_auth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/openai/codex/device/status", response_model=CodexDeviceAuthResponse)
+async def openai_codex_device_status(
+    user: dict = Depends(get_current_user),
+):
+    """Return current dashboard-managed Codex device-login status."""
+    return get_codex_device_auth_status()
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────

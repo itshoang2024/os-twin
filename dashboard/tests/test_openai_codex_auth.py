@@ -1,3 +1,4 @@
+import base64
 import json
 import threading
 import time
@@ -6,6 +7,11 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 from dashboard.lib.settings import openai_codex_auth as codex
+
+
+def _jwt_with_exp(exp: int) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode("utf-8")).decode("ascii").rstrip("=")
+    return f"header.{payload}.signature"
 
 
 def test_sanitized_redacts_token_like_values():
@@ -49,6 +55,56 @@ def test_save_openai_oauth_writes_native_and_plugin_files(tmp_path, monkeypatch)
     assert oct(plugin_auth.stat().st_mode & 0o777) == "0o600"
 
 
+def test_import_codex_cli_auth_writes_opencode_oauth(tmp_path, monkeypatch):
+    codex_auth = tmp_path / "codex-auth.json"
+    native_auth = tmp_path / "auth.json"
+    plugin_auth = tmp_path / "openai.json"
+    access = _jwt_with_exp(2000000000)
+    codex_auth.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": access,
+                    "refresh_token": "refresh-secret",
+                    "id_token": "id-secret",
+                    "account_id": "acct",
+                },
+                "last_refresh": "2026-06-04T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(codex, "OPENCODE_AUTH_JSON", native_auth)
+    monkeypatch.setattr(codex, "CODEX_AUTH_JSON", plugin_auth)
+    monkeypatch.setattr(codex, "_refresh_models_after_auth", lambda: None)
+
+    codex.import_codex_cli_auth_to_opencode(codex_auth)
+
+    native = json.loads(native_auth.read_text(encoding="utf-8"))
+    plugin = json.loads(plugin_auth.read_text(encoding="utf-8"))
+    assert native["openai"] == {
+        "type": "oauth",
+        "access": access,
+        "refresh": "refresh-secret",
+        "expires": 2000000000 * 1000,
+    }
+    assert plugin == native["openai"]
+
+
+def test_load_codex_cli_auth_rejects_missing_tokens(tmp_path):
+    codex_auth = tmp_path / "codex-auth.json"
+    codex_auth.write_text(json.dumps({"tokens": {"access_token": "access"}}), encoding="utf-8")
+
+    try:
+        codex._load_codex_cli_oauth_tokens(codex_auth)
+    except RuntimeError as exc:
+        assert "refresh_token" in str(exc)
+    else:
+        raise AssertionError("Expected missing refresh_token to fail")
+
+
 def test_codex_session_status_reports_connected_from_native_auth(tmp_path, monkeypatch):
     native_auth = tmp_path / "auth.json"
     native_auth.write_text(
@@ -59,6 +115,27 @@ def test_codex_session_status_reports_connected_from_native_auth(tmp_path, monke
     monkeypatch.setattr(codex, "OPENCODE_AUTH_JSON", native_auth)
 
     assert codex.get_codex_session_status().connected is True
+
+
+def test_start_codex_device_auth_requires_codex_cli(monkeypatch):
+    monkeypatch.setattr(codex, "_ensure_codex_plugin", lambda: None)
+    monkeypatch.setattr(codex.shutil, "which", lambda name: None)
+
+    try:
+        codex.start_codex_device_auth()
+    except RuntimeError as exc:
+        assert "Codex CLI is not installed" in str(exc)
+    else:
+        raise AssertionError("Expected missing Codex CLI to fail")
+
+
+def test_device_auth_stdout_patterns_parse_url_and_code():
+    text = codex._strip_terminal_control(
+        "Open https://auth.openai.com/codex/device\x1b[0m and enter ABCD-12345"
+    )
+
+    assert codex.DEVICE_URL_RE.search(text).group(0) == "https://auth.openai.com/codex/device"
+    assert codex.DEVICE_CODE_RE.search(text).group(0) == "ABCD-12345"
 
 
 def test_start_codex_oauth_builds_codex_cli_authorize_url(monkeypatch):
@@ -117,6 +194,7 @@ def test_oauth_callback_writes_native_opencode_auth_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(codex, "OPENCODE_AUTH_JSON", native_auth)
     monkeypatch.setattr(codex, "CODEX_AUTH_JSON", plugin_auth)
+    monkeypatch.setattr(codex, "_refresh_models_after_auth", lambda: None)
 
     def fake_exchange(code, received_verifier):
         assert code == "code-xyz"

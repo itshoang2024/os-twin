@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePlanContext } from './PlanWorkspace';
 import { apiGet, apiPut } from '@/lib/api-client';
 import { useSkills } from '@/hooks/use-skills';
@@ -195,6 +195,8 @@ export default function RolesConfigTab() {
   const {
     allModels: configuredModels,
     providers: configuredProviders,
+    isLoading: configuredModelsLoading,
+    isError: configuredModelsError,
     mutate: mutateConfiguredModels,
   } = useConfiguredModels();
   const { addToast } = useNotificationStore();
@@ -349,6 +351,22 @@ export default function RolesConfigTab() {
     scheduleSave(roleName);
   }, [scheduleSave]);
 
+  const fallbackRegistryModels = useMemo(
+    () => Object.values(modelsRegistry).flat().map((m) => ({
+      id: m.id,
+      label: m.label || m.id,
+      context_window: m.context_window,
+      tier: m.tier,
+    })),
+    [modelsRegistry],
+  );
+
+  const roleModelOptions = configuredModels.length > 0
+    ? configuredModels
+    : configuredModelsLoading && !configuredModelsError
+      ? []
+      : fallbackRegistryModels;
+
   const attachSkill = useCallback((roleName: string, skillName: string) => {
     setRoleConfig((prev) => {
       const existing = prev[roleName] || {};
@@ -450,10 +468,11 @@ export default function RolesConfigTab() {
                     <ModelSelect
                       value={cfg.default_model || ''}
                       onChange={(model) => updateRoleField(role.name, 'default_model', model)}
-                      models={configuredModels.length > 0 ? configuredModels : Object.values(modelsRegistry).flat().map((m) => ({ id: m.id, label: m.label || m.id, context_window: m.context_window, tier: m.tier }))}
+                      models={roleModelOptions}
                       providers={configuredProviders}
+                      disabled={configuredModelsLoading && roleModelOptions.length === 0}
                       grouped={false}
-                      placeholder="Select a model"
+                      placeholder={configuredModelsLoading ? 'Loading configured models...' : 'Select a model'}
                     />
                     {provenance.default_model && (
                       <div className="mt-1">
