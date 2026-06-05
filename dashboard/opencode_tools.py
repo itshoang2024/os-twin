@@ -43,12 +43,65 @@ def _resolve_project_root() -> Path:
 def _api_helpers() -> str:
     return textwrap.dedent("""\
     import { tool } from "@opencode-ai/plugin"
+    import { existsSync, readFileSync } from "node:fs"
+    import { join } from "node:path"
 
     const PORT = () => process.env.DASHBOARD_PORT || "__PORT__"
     const BASE = () => `http://127.0.0.1:${PORT()}`
-    const KEY = () => process.env.OSTWIN_API_KEY || ""
     const DASHBOARD_CURL_TIMEOUT_SECONDS = () => process.env.OSTWIN_TOOL_HTTP_TIMEOUT_SECONDS || "30"
     const OPENCODE_CURL_TIMEOUT_SECONDS = () => process.env.OSTWIN_WORKER_TIMEOUT_SECONDS || "75"
+
+    function envFileValue(text: string, key: string): string {
+      for (const raw of text.split(/\\r?\\n/)) {
+        let line = raw.trim()
+        if (!line || line.startsWith("#")) continue
+        if (line.startsWith("export ")) line = line.slice("export ".length).trim()
+        const eq = line.indexOf("=")
+        if (eq < 0 || line.slice(0, eq).trim() !== key) continue
+        let value = line.slice(eq + 1).trim()
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1)
+        }
+        return value.trim()
+      }
+      return ""
+    }
+
+    function envFileKey(path: string): string {
+      try {
+        if (!existsSync(path)) return ""
+        return envFileValue(readFileSync(path, "utf8"), "OSTWIN_API_KEY")
+      } catch {
+        return ""
+      }
+    }
+
+    function apiKeyCandidates(): string[] {
+      const values: string[] = []
+      if (process.env.OSTWIN_API_KEY) values.push(process.env.OSTWIN_API_KEY)
+
+      const ostwinHome = process.env.OSTWIN_HOME ||
+        (process.env.HOME ? join(process.env.HOME, ".ostwin") : "")
+      if (ostwinHome) {
+        values.push(envFileKey(join(ostwinHome, ".env")))
+        values.push(envFileKey(join(ostwinHome, ".env.sh")))
+      }
+
+      const projectDir = process.env.OSTWIN_PROJECT_DIR || process.cwd()
+      values.push(envFileKey(join(projectDir, ".env")))
+      values.push(envFileKey(join(projectDir, ".env.sh")))
+      values.push(envFileKey(join(projectDir, ".agents", ".env")))
+      values.push(envFileKey(join(projectDir, ".agents", ".env.sh")))
+
+      return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean)))
+    }
+
+    function missingApiKeyMessage(): string {
+      return "Ostwin API key is not available to OpenCode tools. Set OSTWIN_API_KEY in ~/.ostwin/.env, then restart the OpenCode server."
+    }
 
     function curlTimeoutFlags(seconds: string): string[] {
       return ["--connect-timeout", "10", "--max-time", seconds]
@@ -67,6 +120,11 @@ def _api_helpers() -> str:
         .map((p) => (p || "").trim())
         .filter(Boolean)
       return parts.join(": ") || String(e)
+    }
+
+    function isUnauthorizedMessage(message: string): boolean {
+      const lower = message.toLowerCase()
+      return lower.includes("401") || lower.includes("unauthorized")
     }
 
     function parseJson(raw: string): any {
@@ -105,20 +163,34 @@ def _api_helpers() -> str:
 
     async function api(path: string, method: string = "GET", body?: unknown): Promise<any> {
       const url = `${BASE()}${path}`
-      const f = [
-        "-sS", "-f",
-        ...curlTimeoutFlags(DASHBOARD_CURL_TIMEOUT_SECONDS()),
-        "-H", `X-API-Key: ${KEY()}`,
-        "-H", "Content-Type: application/json",
-      ]
-      if (method !== "GET") f.push("-X", method)
-      if (body) f.push("-d", JSON.stringify(body))
-      try {
-        const r = await Bun.$`curl ${f} ${url}`.text()
-        return parseJson(r)
-      } catch (e: any) {
-        throw new Error(`Dashboard request failed (${method} ${path}): ${curlErrorMessage(e)}`)
+      const keys = apiKeyCandidates()
+      if (keys.length === 0) throw new Error(missingApiKeyMessage())
+
+      let lastAuthError = ""
+      for (const key of keys) {
+        const f = [
+          "-sS", "-f",
+          ...curlTimeoutFlags(DASHBOARD_CURL_TIMEOUT_SECONDS()),
+          "-H", `X-API-Key: ${key}`,
+          "-H", "Content-Type: application/json",
+        ]
+        if (method !== "GET") f.push("-X", method)
+        if (body) f.push("-d", JSON.stringify(body))
+        try {
+          const r = await Bun.$`curl ${f} ${url}`.text()
+          return parseJson(r)
+        } catch (e: any) {
+          const message = curlErrorMessage(e)
+          if (isUnauthorizedMessage(message)) {
+            lastAuthError = message
+            continue
+          }
+          throw new Error(`Dashboard request failed (${method} ${path}): ${message}`)
+        }
       }
+      throw new Error(
+        `Dashboard rejected the available Ostwin API key(s) (${method} ${path}). Check ~/.ostwin/.env and restart the OpenCode server.${lastAuthError ? ` Last auth error: ${lastAuthError}` : ""}`,
+      )
     }
 
     async function apiGet(path: string): Promise<any> {
@@ -663,15 +735,9 @@ def _tool_get_memories() -> str:
         plan_id: tool.schema.string().describe("The plan ID"),
       },
       async execute(args) {
-        const base = `${BASE()}/api/amem/${args.plan_id}`
-        const hdr = ["-H", `X-API-Key: ${KEY()}`]
         async function apiGet(path: string): Promise<any> {
-          const url = `${base}${path}`
-          try {
-            const f = ["-sS", "-f", ...curlTimeoutFlags(DASHBOARD_CURL_TIMEOUT_SECONDS()), ...hdr]
-            const raw = await Bun.$`curl ${f} ${url}`.text()
-            return JSON.parse(raw)
-          } catch { return null }
+          try { return await api(`/api/amem/${args.plan_id}${path}`) }
+          catch { return null }
         }
         const [notesData, statsData, treeData] = await Promise.all([
           apiGet("/notes"), apiGet("/stats"), apiGet("/tree"),

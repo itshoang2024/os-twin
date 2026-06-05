@@ -688,7 +688,7 @@ with open('$CONFIG_FILE', 'w') as f:
   export PROJECT_DIR="$abs_project_dir"
 
   "$PYTHON" - <<PYEOF
-import json, os, re
+import json, os, re, shlex
 
 config_file = '$CONFIG_FILE'
 env_mcp_file = '$env_mcp_file'
@@ -717,6 +717,22 @@ env_all = {**os.environ, **env_extra}
 def resolve_env_refs(text):
     return re.sub(r'\{env:(\w+)\}', lambda m: env_all.get(m.group(1), m.group(0)), text)
 
+def split_command_text(command):
+    stripped = command.strip()
+    if not stripped:
+        return []
+    try:
+        return shlex.split(stripped)
+    except ValueError:
+        return stripped.split()
+
+def normalize_local_command(command):
+    if isinstance(command, str):
+        return split_command_text(command)
+    if isinstance(command, list) and len(command) == 1 and isinstance(command[0], str):
+        return split_command_text(command[0])
+    return command
+
 # Write .opencode/opencode.json
 # - command arrays: resolve ALL {env:*} to literal paths
 # - environment/headers: RESOLVE {env:*} to literal values from current env (drop only if unresolved)
@@ -730,16 +746,21 @@ env_ref_pattern = re.compile(r'\{env:\w+\}')
 resolved_mcp = {}
 for name, cfg in config.get('mcp', {}).items():
     out = {}
+    is_local = cfg.get('type') == 'local' or ('command' in cfg and cfg.get('type') != 'remote')
     for key, val in cfg.items():
-        if key == 'command' and isinstance(val, list):
+        if key == 'command' and is_local:
+            val = normalize_local_command(val)
             resolved_cmd = []
-            for i, c in enumerate(val):
-                if isinstance(c, str):
-                    c = resolve_env_refs(c)
-                    if i == 0 and c in ('python', 'python3'):
-                        c = python_abs
-                resolved_cmd.append(c)
-            out[key] = resolved_cmd
+            if isinstance(val, list):
+                for i, c in enumerate(val):
+                    if isinstance(c, str):
+                        c = resolve_env_refs(c)
+                        if i == 0 and c in ('python', 'python3'):
+                            c = python_abs
+                    resolved_cmd.append(c)
+                out[key] = resolved_cmd
+            else:
+                out[key] = val
         elif key in ('environment', 'headers') and isinstance(val, dict):
             resolved_env = {}
             for k, v in val.items():
@@ -1228,7 +1249,7 @@ PYEOF
   export PROJECT_DIR="$abs_project_dir"
 
   "$PYTHON" - <<PYEOF
-import json, os, re
+import json, os, re, shlex
 
 project_dir = '$abs_project_dir'
 config_file = os.path.join(project_dir, '.agents', 'mcp', 'config.json')
@@ -1255,6 +1276,22 @@ def resolve_env_refs(text):
         return env_all.get(var, m.group(0))
     return re.sub(r'\{env:(\w+)\}', _repl, text)
 
+def split_command_text(command):
+    stripped = command.strip()
+    if not stripped:
+        return []
+    try:
+        return shlex.split(stripped)
+    except ValueError:
+        return stripped.split()
+
+def normalize_local_command(command):
+    if isinstance(command, str):
+        return split_command_text(command)
+    if isinstance(command, list) and len(command) == 1 and isinstance(command[0], str):
+        return split_command_text(command[0])
+    return command
+
 # 1. Resolve {env:AGENT_DIR} and {env:PROJECT_DIR} in config.json (internal copy)
 with open(config_file) as f:
     raw = f.read()
@@ -1279,18 +1316,23 @@ env_ref_pattern = re.compile(r'\{env:\w+\}')
 resolved_mcp = {}
 for name, cfg in config.get('mcp', {}).items():
     out = {}
+    is_local = cfg.get('type') == 'local' or ('command' in cfg and cfg.get('type') != 'remote')
     for key, val in cfg.items():
-        if key == 'command' and isinstance(val, list):
+        if key == 'command' and is_local:
             # Resolve {env:*} and bare "python" to absolute paths
+            val = normalize_local_command(val)
             resolved_cmd = []
-            for i, c in enumerate(val):
-                if isinstance(c, str):
-                    c = resolve_env_refs(c)
-                    # Resolve bare executable (first element) to absolute path
-                    if i == 0 and c in ('python', 'python3'):
-                        c = python_abs
-                resolved_cmd.append(c)
-            out[key] = resolved_cmd
+            if isinstance(val, list):
+                for i, c in enumerate(val):
+                    if isinstance(c, str):
+                        c = resolve_env_refs(c)
+                        # Resolve bare executable (first element) to absolute path
+                        if i == 0 and c in ('python', 'python3'):
+                            c = python_abs
+                    resolved_cmd.append(c)
+                out[key] = resolved_cmd
+            else:
+                out[key] = val
         elif key in ('environment', 'headers') and isinstance(val, dict):
             # Resolve {env:*} to literal values; drop entries that stay unresolved
             resolved_env = {}

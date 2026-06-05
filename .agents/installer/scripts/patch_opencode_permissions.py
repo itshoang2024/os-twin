@@ -33,6 +33,7 @@ def patch_permissions(config_path: str) -> None:
         "*.env": "allow",
         "*.env.*": "allow",
         "*.env.example": "allow",
+        ".codegraph": "deny"
     }
     perm = config.get("permission")
     if perm is None:
@@ -55,6 +56,7 @@ def patch_permissions(config_path: str) -> None:
                 "*.env": "allow",
                 "*.env.*": "allow",
                 "*.env.example": "allow",
+                ".codegraph": "deny"
             }
         elif isinstance(read_perm, dict):
             read_perm["*"] = "allow"

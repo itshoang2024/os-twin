@@ -4,6 +4,13 @@ BeforeAll {
     $script:InvokeAgent = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path "Invoke-Agent.ps1"
     # Mirror Invoke-Agent.ps1's own $agentsDir resolution: $PSScriptRoot (roles/_base) ../../ = .agents/
     $script:agentsBaseDir = (Resolve-Path "$PSScriptRoot/../../../roles/_base/../..").Path
+
+    function Get-PwshAgentCmd {
+        param([Parameter(Mandatory)][string]$ScriptPath)
+
+        $escapedPath = $ScriptPath -replace "'", "'\''"
+        "pwsh -NoProfile -File '$escapedPath'"
+    }
 }
 
 Describe "Invoke-Agent" {
@@ -79,9 +86,55 @@ Describe "Invoke-Agent" {
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd "pwsh -NoProfile -File $envMock" -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $envMock) -TimeoutSeconds 5
 
             $result.Output | Should -Match "CLAUDE_CODE=1"
+        }
+    }
+
+    Context "Prompt file compilation" {
+        BeforeEach {
+            $script:capturedPrompt = Join-Path $TestDrive "captured-prompt-$(Get-Random).txt"
+            $script:capturePromptMock = Join-Path $TestDrive "capture-prompt-$(Get-Random).ps1"
+            @"
+`$promptFile = `$null
+for (`$i = 0; `$i -lt `$args.Count; `$i++) {
+    if (`$args[`$i] -eq '--file' -and (`$i + 1) -lt `$args.Count -and `$args[`$i + 1] -match 'prompt\.txt$') {
+        `$promptFile = `$args[`$i + 1]
+    }
+}
+if (-not `$promptFile) { throw 'prompt.txt argument not found' }
+Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedPrompt)' -Encoding utf8 -NoNewline
+"@ | Out-File $script:capturePromptMock -Encoding utf8
+        }
+
+        It "compiles prompt.txt from brief.md and TASKS.md" {
+            "# EPIC-123`n`nBuild the auth module." |
+                Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
+            "# Tasks for EPIC-123`n`n- [ ] TASK-001 - Implement login." |
+                Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "LEGACY PROMPT SHOULD NOT APPEAR" `
+                -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 0
+            Test-Path $script:capturedPrompt | Should -BeTrue
+
+            $prompt = Get-Content $script:capturedPrompt -Raw
+            $prompt | Should -Match "Build the auth module"
+            $prompt | Should -Match "TASK-001"
+            $prompt | Should -Not -Match "LEGACY PROMPT SHOULD NOT APPEAR"
+        }
+
+        It "falls back to -Prompt when room prompt files are absent" {
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "fallback prompt body" `
+                -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 0
+            $prompt = Get-Content $script:capturedPrompt -Raw
+            $prompt | Should -Be "fallback prompt body"
         }
     }
 
@@ -93,7 +146,7 @@ Describe "Invoke-Agent" {
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "slow" `
-                -AgentCmd $sleepScript -TimeoutSeconds 2
+                -AgentCmd (Get-PwshAgentCmd $sleepScript) -TimeoutSeconds 2
 
             $result.TimedOut | Should -BeTrue
             $result.ExitCode | Should -Be 124
@@ -279,7 +332,7 @@ Describe "Invoke-Agent" {
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $echoMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $echoMock) -TimeoutSeconds 5
 
             # Must match .agents/skills or .agents\skills (cross-platform)
             $result.Output | Should -Match "SKILLS_DIR_IS:.*\.agents[/\\]skills"
@@ -316,7 +369,7 @@ Write-Output "PROJDIR_CHECK:`$val"
 
                 $result = & $script:InvokeAgent -RoomDir $roomDir `
                     -RoleName "engineer" -Prompt "test" `
-                    -AgentCmd $echoMock -TimeoutSeconds 5
+                    -AgentCmd (Get-PwshAgentCmd $echoMock) -TimeoutSeconds 5
 
                 $result.Output | Should -Match "PROJDIR_CHECK:UNSET" `
                     -Because "--dir CLI flag replaces AGENT_OS_PROJECT_DIR export"
@@ -339,185 +392,173 @@ Write-Output "PROJDIR_CHECK:`$val"
             @"
 `$args | ForEach-Object { `$_ } | Out-File -FilePath '$($script:argsDump)' -Encoding utf8
 "@ | Out-File $script:argsMock -Encoding utf8
+            $script:argsMockCmd = Get-PwshAgentCmd $script:argsMock
         }
 
         It "passes a short positional message and prompt via --file" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "Hello world test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $capturedArgs = Get-Content $script:argsDump
-                # First arg should be the short positional placeholder (required by opencode run)
-                $capturedArgs[0] | Should -Be "..."
-                # Legacy 'start' positional must NOT be present
-                $capturedArgs | Should -Not -Contain "start"
-                # Prompt should NOT appear as inline text on the command line
-                $capturedArgs | Should -Not -Contain "Hello world test"
-                # Prompt file should be attached via --file
-                $capturedArgs | Should -Contain "--file"
-                # Should contain an absolute path to prompt.txt
-                $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
-                $promptArg | Should -Not -BeNullOrEmpty
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $script:argsDump
+            # First arg should be the short positional placeholder (required by opencode run)
+            $capturedArgs[0] | Should -Be "..."
+            # Legacy 'start' positional must NOT be present
+            $capturedArgs | Should -Not -Contain "start"
+            # Prompt should NOT appear as inline text on the command line
+            $capturedArgs | Should -Not -Contain "Hello world test"
+            # Prompt file should be attached via --file
+            $capturedArgs | Should -Contain "--file"
+            # Should contain an absolute path to prompt.txt
+            $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
+            $promptArg | Should -Not -BeNullOrEmpty
         }
 
         It "passes --model flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -Model "openai/gpt-4o" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--model"
-                $args | Should -Contain "openai/gpt-4o"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--model"
+            $args | Should -Contain "openai/gpt-4o"
         }
 
         It "passes --agent flag with role name" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "architect" -Prompt "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--agent"
-                $args | Should -Contain "architect"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--agent"
+            $args | Should -Contain "architect"
         }
 
         It "passes --format flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -Format "json" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--format"
-                $args | Should -Contain "json"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--format"
+            $args | Should -Contain "json"
         }
 
         It "passes --title flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -SessionTitle "My Task Title" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--title"
-                $args | Should -Contain "My Task Title"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--title"
+            $args | Should -Contain "My Task Title"
         }
 
         It "passes --session flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -SessionId "abc-123" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--session"
-                $args | Should -Contain "abc-123"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--session"
+            $args | Should -Contain "abc-123"
         }
 
         It "passes --continue flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "continue from here" `
                 -ContinueSession `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--continue"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--continue"
         }
 
         It "passes --fork flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -ForkSession `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--fork"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--fork"
         }
 
         It "passes --share flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -ShareSession `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--share"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--share"
         }
 
         It "passes --command flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "src/app.test.ts" `
                 -Command "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--command"
-                $args | Should -Contain "test"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--command"
+            $args | Should -Contain "test"
         }
 
         It "passes --file flag for each extra file plus prompt file" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "review these files" `
                 -Files @("file1.txt", "file2.txt") `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $capturedArgs = Get-Content $script:argsDump
-                # --file should appear 3 times: file1.txt, file2.txt, plus prompt.txt
-                $fileFlags = $capturedArgs | Where-Object { $_ -eq "--file" }
-                $fileFlags.Count | Should -Be 3
-                $capturedArgs | Should -Contain "file1.txt"
-                $capturedArgs | Should -Contain "file2.txt"
-                # Prompt file should also be present
-                $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
-                $promptArg | Should -Not -BeNullOrEmpty
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $script:argsDump
+            # --file should appear 3 times: file1.txt, file2.txt, plus prompt.txt
+            $fileFlags = $capturedArgs | Where-Object { $_ -eq "--file" }
+            $fileFlags.Count | Should -Be 3
+            $capturedArgs | Should -Contain "file1.txt"
+            $capturedArgs | Should -Contain "file2.txt"
+            # Prompt file should also be present
+            $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
+            $promptArg | Should -Not -BeNullOrEmpty
         }
 
         It "passes --attach flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -AttachUrl "http://localhost:4096" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--attach"
-                $args | Should -Contain "http://localhost:4096"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--attach"
+            $args | Should -Contain "http://localhost:4096"
         }
 
         It "passes --port flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
                 -Port 8080 `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--port"
-                $args | Should -Contain "8080"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--port"
+            $args | Should -Contain "8080"
         }
 
         It "passes --dir flag with resolved project directory" {
@@ -529,41 +570,38 @@ Write-Output "PROJDIR_CHECK:`$val"
 
             $result = & $script:InvokeAgent -RoomDir $roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $capturedArgs = Get-Content $script:argsDump
-                $capturedArgs | Should -Contain "--dir"
-                $capturedArgs | Should -Contain $projectDir
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $script:argsDump
+            $capturedArgs | Should -Contain "--dir"
+            $capturedArgs | Should -Contain $projectDir
         }
 
         It "does not pass --dir when ProjectDir cannot be resolved" {
             # $script:roomDir is NOT inside .war-rooms — ProjectDir stays empty
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $capturedArgs = Get-Content $script:argsDump
-                $capturedArgs | Should -Not -Contain "--dir"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $script:argsDump
+            $capturedArgs | Should -Not -Contain "--dir"
         }
 
         It "does not pass legacy deepagents flags" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Not -Contain "--auto-approve"
-                $args | Should -Not -Contain "--quiet"
-                $args | Should -Not -Contain "-q"
-                $args | Should -Not -Contain "--shell-allow-list"
-                $args | Should -Not -Contain "--no-mcp"
-                $args | Should -Not -Contain "--mcp-config"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Not -Contain "--auto-approve"
+            $args | Should -Not -Contain "--quiet"
+            $args | Should -Not -Contain "-q"
+            $args | Should -Not -Contain "--shell-allow-list"
+            $args | Should -Not -Contain "--no-mcp"
+            $args | Should -Not -Contain "--mcp-config"
         }
 
         It "passes short message positional, not legacy 'start' or inline prompt" {
@@ -574,29 +612,27 @@ Write-Output "ARGS: `$(`$args -join ' ')"
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test positional prompt" `
-                -AgentCmd $captureMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $captureMock) -TimeoutSeconds 5
 
-            if ($result.Output) {
-                # Should contain the short positional placeholder
-                $result.Output | Should -Match "\.\.\."
-                # Legacy 'start' positional must NOT be present
-                $result.Output | Should -Not -Match "ARGS: start "
-                # Should NOT contain the raw prompt text inline
-                $result.Output | Should -Not -Match "test positional prompt"
-                # Should contain --file (prompt passed via file)
-                $result.Output | Should -Match "--file"
-            }
+            $result.Output | Should -Not -BeNullOrEmpty
+            # Should contain the short positional placeholder
+            $result.Output | Should -Match "\.\.\."
+            # Legacy 'start' positional must NOT be present
+            $result.Output | Should -Not -Match "ARGS: start "
+            # Should NOT contain the raw prompt text inline
+            $result.Output | Should -Not -Match "test positional prompt"
+            # Should contain --file (prompt passed via file)
+            $result.Output | Should -Match "--file"
         }
 
         It "always passes --dangerously-skip-permissions flag" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $script:argsMock -TimeoutSeconds 5
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
-            if (Test-Path $script:argsDump) {
-                $args = Get-Content $script:argsDump
-                $args | Should -Contain "--dangerously-skip-permissions"
-            }
+            Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
+            $args = Get-Content $script:argsDump
+            $args | Should -Contain "--dangerously-skip-permissions"
         }
     }
 
@@ -635,7 +671,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             try {
                 $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                     -RoleName "engineer" -Prompt "test" `
-                    -AgentCmd $captureMock -TimeoutSeconds 5
+                    -AgentCmd (Get-PwshAgentCmd $captureMock) -TimeoutSeconds 5
 
                 $result.Output | Should -Match "MOCK_EXECUTED"
             }
@@ -758,12 +794,12 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 $env:AGENT_OS_CONFIG = Join-Path $TestDrive "nonexistent-$(Get-Random).json"
 
                 $result = & $script:InvokeAgent -RoomDir $script:roomDir `
-                    -RoleName "engineer" -Prompt "test" `
+                    -RoleName "unconfigured-role-for-default" -Prompt "test" `
                     -AgentCmd "echo" -TimeoutSeconds 5
 
                 $result | Should -Not -BeNullOrEmpty
                 # Should resolve to the hardcoded default model
-                $result.Output | Should -Match "google-vertex" `
+                $result.Output | Should -Match "google-vertex/zai-org/glm-5-maas" `
                     -Because "hardcoded default should be used as last resort"
             }
             finally {
@@ -841,13 +877,14 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             @"
 `$args | ForEach-Object { `$_ } | Out-File -FilePath '$($script:safeArgsDump)' -Encoding utf8
 "@ | Out-File $script:safeArgsMock -Encoding utf8
+            $script:safeArgsMockCmd = Get-PwshAgentCmd $script:safeArgsMock
         }
 
         It "produces correct full argument sequence for engineer with resolved ProjectDir" {
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "engineer" -Prompt "Implement the auth feature" `
                 -Model "google-vertex/zai-org/glm-5-maas" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -878,7 +915,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "engineer" -Prompt "test isolation" `
                 -Model "test-model" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -915,7 +952,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $spacedRoom `
                 -RoleName "engineer" -Prompt "test spaces" `
                 -Model "test-model" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -934,7 +971,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "engineer" -Prompt $longPrompt `
                 -Model "test-model" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -969,7 +1006,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -RoleName "engineer" -Prompt "multi-file test" `
                 -Model "test-model" `
                 -Files @("src/main.ts", "README.md") `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -990,7 +1027,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "qa" -Prompt "review code" `
                 -Model "anthropic/claude-sonnet-4-20250514" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -1009,7 +1046,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $flatRoom `
                 -RoleName "engineer" -Prompt "no dir test" `
                 -Model "test-model" `
-                -AgentCmd $script:safeArgsMock -TimeoutSeconds 5
+                -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
@@ -1039,13 +1076,12 @@ Write-Output "ARGS: `$(`$args -join ' ')"
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "retry test" `
-                -AgentCmd $argsMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $argsMock) -TimeoutSeconds 5
 
-            if (Test-Path $argsDump) {
-                $capturedArgs = Get-Content $argsDump
-                $capturedArgs | Should -Contain "--continue" `
-                    -Because "retries file with value > 0 should trigger --continue"
-            }
+            Test-Path $argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $argsDump
+            $capturedArgs | Should -Contain "--continue" `
+                -Because "retries file with value > 0 should trigger --continue"
         }
 
         It "does NOT add --continue when retries file is absent" {
@@ -1059,13 +1095,12 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             # Explicitly NOT passing -ContinueSession
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "no retry" `
-                -AgentCmd $argsMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $argsMock) -TimeoutSeconds 5
 
-            if (Test-Path $argsDump) {
-                $capturedArgs = Get-Content $argsDump
-                $capturedArgs | Should -Not -Contain "--continue" `
-                    -Because "no retries file and no -ContinueSession means no --continue"
-            }
+            Test-Path $argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $argsDump
+            $capturedArgs | Should -Not -Contain "--continue" `
+                -Because "no retries file and no -ContinueSession means no --continue"
         }
 
         It "does NOT add --continue when retries file contains 0" {
@@ -1079,13 +1114,12 @@ Write-Output "ARGS: `$(`$args -join ' ')"
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "zero retry" `
-                -AgentCmd $argsMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $argsMock) -TimeoutSeconds 5
 
-            if (Test-Path $argsDump) {
-                $capturedArgs = Get-Content $argsDump
-                $capturedArgs | Should -Not -Contain "--continue" `
-                    -Because "retries=0 means this is NOT a lifecycle retry"
-            }
+            Test-Path $argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $argsDump
+            $capturedArgs | Should -Not -Contain "--continue" `
+                -Because "retries=0 means this is NOT a lifecycle retry"
         }
 
         It "existing -ContinueSession still works with retries file absent" {
@@ -1098,13 +1132,12 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "explicit continue" `
                 -ContinueSession `
-                -AgentCmd $argsMock -TimeoutSeconds 5
+                -AgentCmd (Get-PwshAgentCmd $argsMock) -TimeoutSeconds 5
 
-            if (Test-Path $argsDump) {
-                $capturedArgs = Get-Content $argsDump
-                $capturedArgs | Should -Contain "--continue" `
-                    -Because "explicit -ContinueSession flag must be preserved"
-            }
+            Test-Path $argsDump | Should -BeTrue -Because "mock should capture args"
+            $capturedArgs = Get-Content $argsDump
+            $capturedArgs | Should -Contain "--continue" `
+                -Because "explicit -ContinueSession flag must be preserved"
         }
     }
 

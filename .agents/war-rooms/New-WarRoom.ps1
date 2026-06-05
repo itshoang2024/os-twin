@@ -303,9 +303,21 @@ if ($TaskDescription -match '(?sm)(^#{2,4} Tasks\s*\n.*?)(?=^#{2,4} |\z)') {
     Write-Verbose "[$RoomId / $TaskRef] brief.md body: $descCharsBefore chars (unchanged)"
 }
 
+function Test-MarkdownHeading {
+    param(
+        [string]$Content,
+        [string]$Heading
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
+
+    $escapedHeading = [regex]::Escape($Heading)
+    return [regex]::IsMatch($Content, "(?im)^#{2,6}\s+$escapedHeading\s*$")
+}
+
 # --- Write assignment brief (includes DoD + AC, EXCLUDES Tasks block) ---
 $dodSection = ""
-if ($DefinitionOfDone -and $DefinitionOfDone.Count -gt 0) {
+if ($DefinitionOfDone -and $DefinitionOfDone.Count -gt 0 -and -not (Test-MarkdownHeading -Content $briefDescription -Heading "Definition of Done")) {
     $dodLines = ($DefinitionOfDone | ForEach-Object { "- [ ] $_" }) -join "`n"
     $dodSection = @"
 
@@ -316,7 +328,7 @@ $dodLines
 }
 
 $acSection = ""
-if ($AcceptanceCriteria -and $AcceptanceCriteria.Count -gt 0) {
+if ($AcceptanceCriteria -and $AcceptanceCriteria.Count -gt 0 -and -not (Test-MarkdownHeading -Content $briefDescription -Heading "Acceptance Criteria")) {
     $acLines = ($AcceptanceCriteria | ForEach-Object { "- [ ] $_" }) -join "`n"
     $acSection = @"
 
@@ -508,4 +520,3 @@ if ($assignmentType -eq 'epic') {
     Write-Output "  │  TASKS.md    → not created (type: $assignmentType)"
 }
 Write-Output "  └───────────────────────────────────────────────────────────────"
-
