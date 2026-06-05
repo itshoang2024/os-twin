@@ -15,7 +15,15 @@ from pydantic import BaseModel, Field
 
 from dashboard.knowledge.namespace import NamespaceManager, NamespaceNotFoundError
 
-CandidateType = Literal["concept_type", "relationship_type", "alias"]
+CandidateType = Literal[
+    "concept_type",
+    "relationship_type",
+    "alias",
+    "metadata_field",
+    "node",
+    "edge",
+    "validation_rule",
+]
 CandidateStatus = Literal["pending", "approved", "mapped", "rejected"]
 
 
@@ -33,7 +41,14 @@ def candidate_id(namespace: str, candidate_type: str, original_label: str, sourc
 
 
 class OntologyCandidate(BaseModel):
-    """Reviewable ontology candidate emitted during extraction."""
+    """Reviewable ontology candidate emitted during extraction.
+
+    ``candidate_type`` describes the queued proposal entity. It is intentionally
+    separate from graph instance ``lifecycle_state`` values such as
+    ``candidate``/``active`` used after an instance is committed to Kuzu.
+    """
+
+    model_config = {"extra": "forbid"}
 
     id: str
     namespace: str
@@ -46,6 +61,8 @@ class OntologyCandidate(BaseModel):
     sample_text: str = ""
     status: CandidateStatus = "pending"
     source_hash: str = ""
+    proposed_payload: dict[str, Any] = Field(default_factory=dict)
+    source_evidence_ref: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     reviewed_at: datetime | None = None
     reviewed_by: str | None = None
@@ -96,6 +113,8 @@ class OntologyCandidateStore:
         confidence: float = 0.5,
         sample_text: str = "",
         source_hash: str = "",
+        proposed_payload: dict[str, Any] | None = None,
+        source_evidence_ref: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> OntologyCandidate:
         self._require_namespace(namespace)
@@ -110,6 +129,10 @@ class OntologyCandidateStore:
                         existing.sample_text = existing.sample_text or sample_text[:500]
                         existing.confidence = max(existing.confidence, confidence)
                         existing.metadata.update(metadata or {})
+                        if proposed_payload:
+                            existing.proposed_payload.update(proposed_payload)
+                        if source_evidence_ref and not existing.source_evidence_ref:
+                            existing.source_evidence_ref = source_evidence_ref
                         records[idx] = existing
                         self._write(namespace, records)
                     return existing
@@ -125,6 +148,8 @@ class OntologyCandidateStore:
                 sample_text=sample_text[:500],
                 status="pending",
                 source_hash=source_hash or "",
+                proposed_payload=proposed_payload or {},
+                source_evidence_ref=source_evidence_ref,
                 metadata=metadata or {},
             )
             records.append(candidate)

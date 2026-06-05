@@ -10,7 +10,7 @@
  */
 
 import useSWR from 'swr';
-import { apiPost, apiDelete } from '@/lib/api-client';
+import { apiPost, apiDelete, fetcher } from '@/lib/api-client';
 
 // Types matching knowledge_models.py
 export interface NamespaceStatsResponse {
@@ -79,6 +79,7 @@ const KNOWLEDGE_BASE = '/knowledge';
 export function useKnowledgeNamespaces() {
   const { data, error, mutate, isLoading } = useSWR<NamespaceMetaResponse[]>(
     `${KNOWLEDGE_BASE}/namespaces`,
+    fetcher,
     {
       revalidateOnFocus: false,
       dedupingInterval: 5000, // Cache for 5 seconds
@@ -138,6 +139,7 @@ export function useKnowledgeNamespaces() {
 export function useKnowledgeNamespace(namespace: string | null) {
   const { data, error, mutate, isLoading } = useSWR<NamespaceMetaResponse>(
     namespace ? `${KNOWLEDGE_BASE}/namespaces/${namespace}` : null,
+    fetcher,
     {
       revalidateOnFocus: false,
       dedupingInterval: 5000,

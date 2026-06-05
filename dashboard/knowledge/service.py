@@ -53,7 +53,7 @@ from dashboard.knowledge.config import EMBEDDING_PROVIDER as _DEFAULT_EMBED_PROV
 from dashboard.knowledge.embeddings import KnowledgeEmbedder  # noqa: WPS433
 from dashboard.knowledge.query import KnowledgeQueryEngine  # noqa: WPS433
 from dashboard.knowledge.ontology.defaults import create_default_ontology_profile
-from dashboard.knowledge.ontology.models import OntologyProfile
+from dashboard.knowledge.ontology.models import OntologyProfile, OntologyUnit
 from dashboard.knowledge.ontology.store import OntologyProfileStore
 from dashboard.knowledge.ontology.audit import (
     OntologyAuditStore,
@@ -62,6 +62,11 @@ from dashboard.knowledge.ontology.audit import (
     validate_migration_safety,
 )
 from dashboard.knowledge.ontology.candidates import OntologyCandidateStore, normalize_candidate_label
+from dashboard.knowledge.ontology.evidence import EvidenceStore
+from dashboard.knowledge.ontology.facts import FactSubjectRef, OntologyFactPromotionService, OntologyFactStore, SuggestedRelationshipMapping
+from dashboard.knowledge.ontology.approval import KuzuGraphInstanceStore, ObservationEventStore, OntologyApprovalService
+from dashboard.knowledge.ontology.analysis import AnalysisStore, FlowDefinition, SimulationScenario, StateMachine, validate_state_transition
+from dashboard.knowledge.ontology.observation import TimeSeriesStore
 from dashboard.knowledge.ontology.packs import DomainPackStore
 from dashboard.knowledge.ontology.validator import (
     validate_node as validate_ontology_node,
@@ -221,6 +226,11 @@ class KnowledgeService:
         self._ontology_store = OntologyProfileStore(self._nm)
         self._ontology_audit_store = OntologyAuditStore(self._nm)
         self._candidate_store = OntologyCandidateStore(self._nm)
+        self._evidence_store = EvidenceStore(self._nm)
+        self._fact_store = OntologyFactStore(self._nm)
+        self._observation_store = ObservationEventStore(self._nm)
+        self._series_store = TimeSeriesStore(self._nm)
+        self._analysis_store = AnalysisStore(self._nm)
         self._domain_pack_store = DomainPackStore(self._nm, self._ontology_store)
 
     # ---- Shared embedder / LLM (lazy) -----------------------------------
@@ -410,9 +420,160 @@ class KnowledgeService:
         explorer = self._get_explorer(namespace)
         result = explorer.enterprise_map(limit=limit, filters=filters)
         candidate_count = self._candidate_store.pending_count(namespace)
+        self._attach_observation_projection(namespace, result, filters=filters)
+        self._attach_analysis_projection(namespace, result)
         result.setdefault("stats", {})["ontology_candidate_count"] = candidate_count
         result.setdefault("meta", {})["ontology_candidate_count"] = candidate_count
         return result
+
+    def _attach_observation_projection(self, namespace: str, result: dict[str, Any], *, filters: dict[str, Any] | None = None) -> None:
+        """Attach observation counts and series refs without fabricating metrics."""
+
+        window = self._resolve_observation_window(namespace, filters or {})
+        subject_ids = [str(item.get("id")) for item in result.get("nodes", []) if item.get("id")]
+        subject_ids.extend(str(item.get("id") or f"{item.get('source')}:{item.get('relationship_type') or item.get('label')}:{item.get('target')}") for item in result.get("edges", []) if item.get("source") and item.get("target"))
+        summary = self._observation_store.summary_for_subjects(namespace, subject_ids, start=window.get("start"), end=window.get("end"))
+        series_refs = self._series_store.refs_for_subjects(namespace, subject_ids)
+        for item in [*(result.get("nodes") or []), *(result.get("edges") or [])]:
+            subject_id = str(item.get("id") or f"{item.get('source')}:{item.get('relationship_type') or item.get('label')}:{item.get('target')}")
+            rec = summary.get(subject_id, {})
+            item["event_count"] = int(rec.get("event_count") or 0)
+            item["active_event_count"] = int(rec.get("active_event_count") or 0)
+            if rec.get("time_range"):
+                item["time_range"] = rec["time_range"]
+            refs = series_refs.get(subject_id) or []
+            if refs:
+                item["series_refs"] = refs
+        total_events = sum(int(rec.get("event_count") or 0) for rec in summary.values())
+        active_events = sum(int(rec.get("active_event_count") or 0) for rec in summary.values())
+        result.setdefault("stats", {})["event_count"] = total_events
+        result.setdefault("stats", {})["active_event_count"] = active_events
+        result.setdefault("meta", {})["time_window"] = window
+        result.setdefault("meta", {})["observation_series_backend"] = "inline-json-mvp"
+
+
+    def _attach_analysis_projection(self, namespace: str, result: dict[str, Any]) -> None:
+        """Attach saved Analysis-plane overlays without inventing workflows or metrics."""
+
+        nodes = result.get("nodes") or []
+        edges = result.get("edges") or []
+        node_by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+        flows = self._analysis_store.list_flows(namespace)
+        machines = self._analysis_store.list_state_machines(namespace)
+        scenarios = self._analysis_store.list_simulation_scenarios(namespace)
+
+        for flow in flows:
+            for step in flow.steps:
+                matched = []
+                if step.node_id and step.node_id in node_by_id:
+                    matched.append(node_by_id[step.node_id])
+                if step.concept_type:
+                    matched.extend(node for node in nodes if str(node.get("concept_type") or node.get("label") or "") == step.concept_type)
+                for node in matched:
+                    refs = list(node.get("flow_refs") or [])
+                    if flow.id not in refs:
+                        refs.append(flow.id)
+                    node["flow_refs"] = refs
+
+        state_overlay_count = 0
+        for machine in machines:
+            state_colors = {state.id: state.color for state in machine.states if state.color}
+            for node in nodes:
+                if str(node.get("concept_type") or node.get("label") or "") != machine.subject_concept_type:
+                    continue
+                metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+                properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+                state = str(metadata.get("state") or properties.get("state") or metadata.get("current_state") or machine.initial_state or "")
+                node["state"] = state
+                node["state_machine_ref"] = machine.id
+                if state_colors.get(state):
+                    node["state_color"] = state_colors[state]
+                state_overlay_count += 1
+
+        for scenario in scenarios:
+            for node_id in scenario.input_node_ids:
+                node = node_by_id.get(node_id)
+                if not node:
+                    continue
+                node["simulation_state"] = scenario.simulation_state
+                refs = list(node.get("simulation_refs") or [])
+                if scenario.id not in refs:
+                    refs.append(scenario.id)
+                node["simulation_refs"] = refs
+
+        result.setdefault("meta", {})["analysis"] = {
+            "flow_count": len(flows),
+            "state_machine_count": len(machines),
+            "simulation_scenario_count": len(scenarios),
+            "state_overlay_count": state_overlay_count,
+            "simulation_provider_required": any(s.simulation_state == "provider_required" for s in scenarios),
+            "provider_contract": "Simulation outputs require provider_id or result_ref; no predictive metrics are generated by the core product.",
+        }
+        result.setdefault("stats", {})["flow_count"] = len(flows)
+        result.setdefault("stats", {})["state_machine_count"] = len(machines)
+        result.setdefault("stats", {})["simulation_scenario_count"] = len(scenarios)
+
+    def list_analysis_definitions(self, namespace: str) -> dict[str, Any]:
+        self._require_namespace(namespace)
+        scenarios = self._analysis_store.list_simulation_scenarios(namespace)
+        return {
+            "namespace": namespace,
+            "flows": [item.model_dump(mode="json", by_alias=True) for item in self._analysis_store.list_flows(namespace)],
+            "state_machines": [item.model_dump(mode="json", by_alias=True) for item in self._analysis_store.list_state_machines(namespace)],
+            "simulation_scenarios": [item.model_dump(mode="json", by_alias=True) for item in scenarios],
+            "provider_contract": {
+                "required_for_outputs": True,
+                "message": "Simulation outputs require a registered provider or saved result reference.",
+                "scenario_states": {item.id: item.simulation_state for item in scenarios},
+            },
+        }
+
+    def upsert_flow_definition(self, namespace: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_namespace(namespace)
+        payload = {**payload, "namespace": namespace}
+        flow = self._analysis_store.upsert_flow(namespace, FlowDefinition.model_validate(payload))
+        return flow.model_dump(mode="json", by_alias=True)
+
+    def upsert_state_machine(self, namespace: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_namespace(namespace)
+        payload = {**payload, "namespace": namespace}
+        machine = self._analysis_store.upsert_state_machine(namespace, StateMachine.model_validate(payload))
+        return machine.model_dump(mode="json", by_alias=True)
+
+    def upsert_simulation_scenario(self, namespace: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_namespace(namespace)
+        payload = {**payload, "namespace": namespace}
+        scenario = self._analysis_store.upsert_simulation_scenario(namespace, SimulationScenario.model_validate(payload))
+        return scenario.model_dump(mode="json", by_alias=True)
+
+    def validate_state_machine_transition(self, namespace: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_namespace(namespace)
+        machine_id = str(payload.get("state_machine_id") or "")
+        machine = next((item for item in self._analysis_store.list_state_machines(namespace) if item.id == machine_id), None)
+        if machine is None:
+            raise ValueError("state_machine_id is required and must reference a saved state machine")
+        issues = validate_state_transition(
+            machine,
+            current_state=str(payload.get("current_state") or ""),
+            event_type=str(payload.get("event_type") or ""),
+            evidence_refs=list(payload.get("evidence_refs") or []),
+            metadata=dict(payload.get("metadata") or {}),
+        )
+        return {"namespace": namespace, "valid": not any(issue.severity == "error" for issue in issues), "issues": [issue.model_dump() for issue in issues]}
+
+    def _resolve_observation_window(self, namespace: str, filters: dict[str, Any]) -> dict[str, Any]:
+        mode = str(filters.get("time_mode") or filters.get("timeMode") or "none")
+        if mode == "fixed_range":
+            return {"mode": mode, "start": filters.get("start") or filters.get("start_at"), "end": filters.get("end") or filters.get("end_at")}
+        if mode == "latest_import":
+            event = self._observation_store.latest_by_type(namespace, "ImportCompleted") or self._observation_store.latest_by_type(namespace, "ImportSubmitted")
+            return {"mode": mode, "start": event.occurred_at.isoformat() if event else None, "end": None, "empty_reason": None if event else "No import observation events recorded."}
+        if mode == "current_profile_version":
+            profile = self.get_ontology_profile(namespace)
+            history = self._ontology_audit_store.list_history(namespace)
+            matching = next((record for record in history if profile is not None and record.new_version == profile.version), None)
+            return {"mode": mode, "start": matching.timestamp.isoformat() if matching else None, "end": None, "profile_version": profile.version if profile else None, "empty_reason": None if matching else "No profile-history timestamp found for current version."}
+        return {"mode": "none", "start": None, "end": None}
 
     def explorer_path(self, namespace: str, source_id: str, target_id: str) -> dict:
         """Find the shortest weighted path between two nodes."""
@@ -480,6 +641,8 @@ class KnowledgeService:
                 language=ns_language,
                 ontology_profile=self.get_ontology_profile(namespace),
                 candidate_store=self._candidate_store,
+                evidence_store=self._evidence_store,
+                fact_store=self._fact_store,
                 namespace=namespace,
             )
 
@@ -700,6 +863,7 @@ class KnowledgeService:
             vector_store_factory=self.get_vector_store,
             kuzu_factory=self.get_kuzu_graph,
             graph_index_factory=self._build_graph_index,
+            evidence_store=self._evidence_store,
         )
         return self._ingestor
 
@@ -753,6 +917,8 @@ class KnowledgeService:
                 language=ns_language,
                 ontology_profile=self.get_ontology_profile(namespace),
                 candidate_store=self._candidate_store,
+                evidence_store=self._evidence_store,
+                fact_store=self._fact_store,
                 namespace=namespace,
             )
 
@@ -887,6 +1053,50 @@ class KnowledgeService:
             raise NamespaceNotFoundError(namespace)
         return meta
 
+
+    def get_ontology_unit(self, namespace: str) -> OntologyUnit | None:
+        """Return the namespace ontology unit identity/governance record, if any."""
+        self._require_namespace(namespace)
+        return self._ontology_store.get_unit(namespace)
+
+    def get_ontology_unit_response(self, namespace: str) -> dict[str, Any]:
+        """Return transport-ready ontology unit metadata."""
+        unit = self.get_ontology_unit(namespace)
+        return {
+            "namespace": namespace,
+            "unit": unit.model_dump(mode="json") if unit is not None else None,
+            "unit_exists": unit is not None,
+        }
+
+    def save_ontology_unit_payload(self, namespace: str, payload: dict[str, Any]) -> OntologyUnit:
+        """Validate and persist ontology unit metadata without publishing a profile.
+
+        Unit updates are metadata edits by default. If an active unit already
+        points at a profile, a partial PUT that omits ``active_profile_id`` must
+        not silently deactivate that profile. Deactivation is intentionally not
+        exposed through this metadata endpoint.
+        """
+        self._require_namespace(namespace)
+        payload_namespace = payload.get("namespace")
+        if payload_namespace is None:
+            payload = {**payload, "namespace": namespace}
+        elif payload_namespace != namespace:
+            raise ValueError("Ontology unit namespace must match path namespace")
+        if payload.get("id") not in (None, namespace):
+            raise ValueError("Ontology unit id must match path namespace")
+
+        existing_unit = self._ontology_store.get_unit(namespace)
+        existing_payload = existing_unit.model_dump(mode="json") if existing_unit is not None else {}
+        merged_payload = {**existing_payload, **payload, "id": namespace, "namespace": namespace}
+        if (
+            existing_unit is not None
+            and existing_unit.active_profile_id is not None
+            and merged_payload.get("active_profile_id") is None
+        ):
+            merged_payload["active_profile_id"] = existing_unit.active_profile_id
+
+        return self._ontology_store.write_unit(OntologyUnit.model_validate(merged_payload))
+
     def get_ontology_profile(self, namespace: str) -> Optional[OntologyProfile]:
         """Return the namespace's active ontology profile, or None for legacy namespaces."""
         return self._ontology_store.get(namespace)
@@ -917,10 +1127,11 @@ class KnowledgeService:
         reason: str = "Profile saved",
         validation_override: dict[str, Any] | None = None,
         operation: str = "profile_save",
+        migration_entries: list[dict[str, Any]] | None = None,
     ) -> OntologyProfile:
         """Persist an ontology profile, history record, migration warnings, and audit event."""
         previous = self.get_ontology_profile(profile.namespace)
-        profile, migration_entries = add_rename_aliases(previous, profile)
+        profile, rename_entries = add_rename_aliases(previous, profile)
         issues = validate_ontology_profile(profile)
         if any(issue.severity == "error" for issue in issues):
             messages = "; ".join(issue.message for issue in issues)
@@ -933,9 +1144,16 @@ class KnowledgeService:
             graph=cached_graph,
         )
         dangerous = [issue for issue in migration_issues if issue.severity == "error"]
-        if dangerous and not validation_override:
-            messages = "; ".join(issue.message for issue in dangerous)
-            raise ValueError(f"Dangerous ontology migration requires validation_override metadata: {messages}")
+        if dangerous:
+            override = validation_override or {}
+            approver = override.get("approved_by") or override.get("approver")
+            ticket = override.get("ticket")
+            if not str(ticket or "").strip() or not str(approver or "").strip():
+                messages = "; ".join(issue.message for issue in dangerous)
+                raise ValueError(
+                    "Dangerous ontology migration requires validation_override metadata "
+                    f"with ticket and approved_by: {messages}"
+                )
 
         diff = diff_profiles(previous, profile)
         written = self._ontology_store.write(profile, set_active=True)
@@ -948,7 +1166,7 @@ class KnowledgeService:
             diff=diff,
             migration_issues=migration_issues,
             validation_override=validation_override,
-            migration_entries=migration_entries,
+            migration_entries=[*rename_entries, *(migration_entries or [])],
             op=operation,
         )
         if cached_graph is not None:
@@ -1082,7 +1300,7 @@ class KnowledgeService:
             "base_version": previous.version if previous else None,
             "target_version": current.version,
             "diff": diff.model_dump(mode="json"),
-            "migration_issues": [issue.model_dump(mode="json") for issue in migration_issues],
+            "migration_issues": [issue.model_dump() for issue in migration_issues],
             "would_mutate": False,
         }
 
@@ -1099,7 +1317,7 @@ class KnowledgeService:
             "target_version": target.version,
             "history_id": record.id,
             "diff": diff.model_dump(mode="json"),
-            "migration_issues": [issue.model_dump(mode="json") for issue in migration_issues],
+            "migration_issues": [issue.model_dump() for issue in migration_issues],
             "would_mutate": False,
         }
 
@@ -1123,6 +1341,192 @@ class KnowledgeService:
             "candidate_count": candidate_count,
             "validation_issue_count": len(issues),
             "validation_issues": [issue.model_dump() for issue in issues],
+        }
+
+
+    def get_ontology_release_observability(self, namespace: str) -> dict[str, Any]:
+        """Return release-gate ontology health signals for PO/QA signoff.
+
+        The report intentionally reads existing stores and validation results; it
+        does not mutate profile history, facts, candidates, graph instances, or
+        observation events.  Counts are grouped so release failures can be traced
+        to source processing, ontology schema, assistant advisory output,
+        governance review, projection, or pack compatibility.
+        """
+
+        self._require_namespace(namespace)
+        profile = self.get_ontology_profile(namespace)
+        effective_profile = profile or create_default_ontology_profile(namespace)
+        validation_issues = validate_ontology_profile(effective_profile)
+        candidates = self._candidate_store.list(namespace)
+        facts = self._fact_store.list(namespace)
+        artifacts = self._evidence_store.list_artifacts(namespace)
+        anchors = self._evidence_store.list_anchors(namespace)
+        provenance_links = self._evidence_store.list_provenance(namespace)
+        events = self._observation_store.list(namespace)
+        installed_state = self._domain_pack_store.get_state(namespace)
+
+        def count_by(records: list[Any], attr: str) -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for record in records:
+                value = str(getattr(record, attr, None) or "unknown")
+                counts[value] = counts.get(value, 0) + 1
+            return dict(sorted(counts.items()))
+
+        extraction_warning_count = sum(len(artifact.limitations) for artifact in artifacts)
+        warning_source_states = {
+            "partial",
+            "sampled",
+            "ocr_needed",
+            "conversion_needed",
+            "failed",
+        }
+        partial_source_count = sum(
+            1
+            for artifact in artifacts
+            if artifact.read_coverage != "full" or artifact.source_state in warning_source_states
+        )
+        assistant_error_count = sum(
+            1
+            for fact in facts
+            if fact.source == "assistant"
+            and any(key in fact.metadata for key in ("parse_error", "assistant_error", "error"))
+        )
+        assistant_error_count += sum(
+            1
+            for event in events
+            if "Assistant" in event.event_type
+            and any(key in event.metadata for key in ("parse_error", "assistant_error", "error"))
+        )
+
+        pack_results: list[dict[str, Any]] = []
+        release_blockers: list[dict[str, Any]] = []
+        pack_compatibility_profile = create_default_ontology_profile(namespace)
+        for manifest in self._domain_pack_store.list_available():
+            # Pack compatibility is tested against the shipped base profile so one
+            # installed pack's aliases do not create false conflicts for another
+            # independently shippable pack. Installed state is reported separately.
+            result = self._domain_pack_store.validate(manifest, pack_compatibility_profile)
+            active_record = installed_state.installed_packs.get(manifest.pack_id)
+            active = active_record is not None and active_record.status == "installed"
+            relationship_families = sorted({rel.family for rel in manifest.relationship_types.values()})
+            pack_payload = {
+                "pack_id": manifest.pack_id,
+                "name": manifest.name,
+                "version": manifest.version,
+                "valid": result.valid,
+                "installed": active,
+                "compatible_profile_versions": list(manifest.compatible_profile_versions),
+                "relationship_families": relationship_families,
+                "issue_count": len(result.issues),
+                "issues": [issue.model_dump() for issue in result.issues],
+                "fixture_count": len(manifest.fixtures),
+                "migration_note_count": len(manifest.migration_notes),
+            }
+            pack_results.append(pack_payload)
+            if not result.valid:
+                release_blockers.append({
+                    "plane": "packs",
+                    "code": "PACK_COMPATIBILITY_FAILED",
+                    "message": (
+                        f"Domain pack {manifest.pack_id} is not compatible with "
+                        f"profile {effective_profile.version}."
+                    ),
+                    "metadata": {"pack_id": manifest.pack_id, "issues": pack_payload["issues"]},
+                })
+            if manifest.pack_id in {"audit-risk", "audit-risk-management", "esg"} and not relationship_families:
+                release_blockers.append({
+                    "plane": "packs",
+                    "code": "RELATIONSHIP_FAMILY_MISSING",
+                    "message": f"Release-blocking pack {manifest.pack_id} has no relationship families.",
+                    "metadata": {"pack_id": manifest.pack_id},
+                })
+
+        if any(issue.severity == "error" for issue in validation_issues):
+            release_blockers.append({
+                "plane": "spec",
+                "code": "PROFILE_VALIDATION_ERRORS",
+                "message": "Active ontology profile has error-severity validation issues.",
+                "metadata": {
+                    "issue_count": len([issue for issue in validation_issues if issue.severity == "error"])
+                },
+            })
+        has_unreviewed_generated_facts = any(
+            fact.source in {"assistant", "extraction"} and fact.review_state in {"assistive", "draft"}
+            for fact in facts
+        )
+        if has_unreviewed_generated_facts:
+            release_blockers.append({
+                "plane": "facts",
+                "code": "UNREVIEWED_FACTS",
+                "message": "Assistant/extraction facts remain advisory or draft and need human review before release.",
+                "metadata": {"fact_states": count_by(facts, "review_state")},
+            })
+        if assistant_error_count:
+            release_blockers.append({
+                "plane": "assistant",
+                "code": "ASSISTANT_ERRORS",
+                "message": "Assistant parse/runtime errors were observed in release evidence.",
+                "metadata": {"assistant_error_count": assistant_error_count},
+            })
+
+        active_unit = self._ontology_store.get_unit(namespace)
+        installed_pack_ids = sorted(
+            pid for pid, record in installed_state.installed_packs.items() if record.status == "installed"
+        )
+
+        return {
+            "namespace": namespace,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "profile": {
+                "exists": profile is not None,
+                "profile_id": effective_profile.profile_id,
+                "version": effective_profile.version,
+                "active_unit": active_unit.model_dump(mode="json") if active_unit else None,
+                "concept_type_count": len(effective_profile.concept_types),
+                "relationship_type_count": len(effective_profile.relationship_types),
+                "validation_issue_count": len(validation_issues),
+                "validation_issues_by_severity": count_by(validation_issues, "severity"),
+            },
+            "candidates": {
+                "total": len(candidates),
+                "by_status": count_by(candidates, "status"),
+                "by_type": count_by(candidates, "candidate_type"),
+                "pending": sum(1 for candidate in candidates if candidate.status == "pending"),
+            },
+            "facts": {
+                "total": len(facts),
+                "by_review_state": count_by(facts, "review_state"),
+                "by_source": count_by(facts, "source"),
+                "approved": sum(1 for fact in facts if fact.review_state == "approved"),
+            },
+            "evidence": {
+                "artifact_count": len(artifacts),
+                "anchor_count": len(anchors),
+                "provenance_link_count": len(provenance_links),
+                "extraction_warning_count": extraction_warning_count,
+                "partial_source_count": partial_source_count,
+                "source_types": count_by(artifacts, "source_type"),
+                "read_coverage": count_by(artifacts, "read_coverage"),
+            },
+            "observations": {
+                "event_count": len(events),
+                "by_event_type": count_by(events, "event_type"),
+                "by_subject_type": count_by(events, "subject_type"),
+            },
+            "assistant": {
+                "advisory_only": True,
+                "error_count": assistant_error_count,
+                "fact_count": sum(1 for fact in facts if fact.source == "assistant"),
+            },
+            "packs": {
+                "installed_pack_ids": installed_pack_ids,
+                "available_pack_count": len(pack_results),
+                "compatible_pack_count": sum(1 for result in pack_results if result["valid"]),
+                "load_results": pack_results,
+            },
+            "release_blockers": release_blockers,
+            "release_ready": not release_blockers,
         }
 
 
@@ -1154,18 +1558,23 @@ class KnowledgeService:
         self._require_namespace(namespace)
         manifest = self._domain_pack_store.load_manifest(pack_id)
         profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
-        result = self._domain_pack_store.install(namespace, manifest, profile)
-        cached_graph = self._kuzu_graphs.get(namespace)
-        if cached_graph is not None:
-            cached_graph.ontology_profile = result.profile
-        self._ontology_audit_store.audit_operation(
-            namespace,
+        result = self._domain_pack_store.install(namespace, manifest, profile, persist_profile=False)
+        saved = self.save_ontology_profile(
+            result.profile,
             actor=actor,
-            op="pack_install",
-            reason=reason,
-            metadata={"pack_id": pack_id, "profile_version": result.profile.version, "action": "install"},
+            reason=reason or f"Install domain pack {pack_id}",
+            operation="pack_install",
+            migration_entries=[{"kind": "domain_pack_install", "pack_id": pack_id, "action": result.action}],
         )
-        return result.model_dump()
+        self._domain_pack_store.write_state(result.state)
+        unit = self._ontology_store.get_unit(namespace)
+        if unit is not None:
+            unit.installed_packs = sorted(pid for pid, rec in result.state.installed_packs.items() if rec.status == "installed")
+            self._ontology_store.write_unit(unit)
+        self._observation_store.create(namespace, event_type="DomainPackInstalled", subject_type="pack", subject_id=pack_id, actor=actor, metadata={"profile_version": saved.version})
+        data = result.model_dump()
+        data["profile"] = saved.model_dump(mode="json")
+        return data
 
     def uninstall_domain_pack(self, namespace: str, pack_id: str, *, actor: str = "anonymous", reason: str = "Domain pack uninstall") -> dict[str, Any]:
         """Disable a domain pack and remove pack-owned profile additions when safe."""
@@ -1174,18 +1583,189 @@ class KnowledgeService:
         profile = self.get_ontology_profile(namespace)
         if profile is None:
             raise ValueError("Cannot uninstall a domain pack before an ontology profile exists")
-        result = self._domain_pack_store.uninstall(namespace, pack_id, profile)
-        cached_graph = self._kuzu_graphs.get(namespace)
-        if cached_graph is not None:
-            cached_graph.ontology_profile = result.profile
-        self._ontology_audit_store.audit_operation(
-            namespace,
+        result = self._domain_pack_store.uninstall(namespace, pack_id, profile, persist_profile=False)
+        saved = self.save_ontology_profile(
+            result.profile,
             actor=actor,
-            op="pack_uninstall",
-            reason=reason,
-            metadata={"pack_id": pack_id, "profile_version": result.profile.version, "action": "uninstall"},
+            reason=reason or f"Uninstall domain pack {pack_id}",
+            operation="pack_uninstall",
+            migration_entries=[{"kind": "domain_pack_uninstall", "pack_id": pack_id, "action": result.action}],
         )
-        return result.model_dump()
+        self._domain_pack_store.write_state(result.state)
+        unit = self._ontology_store.get_unit(namespace)
+        if unit is not None:
+            unit.installed_packs = sorted(pid for pid, rec in result.state.installed_packs.items() if rec.status == "installed")
+            self._ontology_store.write_unit(unit)
+        data = result.model_dump()
+        data["profile"] = saved.model_dump(mode="json")
+        return data
+
+
+    def list_observation_events(
+        self,
+        namespace: str,
+        *,
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+        event_type: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List operational observation events separately from profile history."""
+
+        self._require_namespace(namespace)
+        return [event.model_dump(mode="json") for event in self._observation_store.list(namespace, subject_type=subject_type, subject_id=subject_id, event_type=event_type, start=start, end=end)]
+
+    def list_time_series(self, namespace: str, *, subject_id: str | None = None, metric_id: str | None = None) -> list[dict[str, Any]]:
+        """List inline MVP time-series records for selected object metrics."""
+
+        self._require_namespace(namespace)
+        return [series.model_dump(mode="json") for series in self._series_store.list(namespace, subject_id=subject_id, metric_id=metric_id)]
+
+    def upsert_time_series(
+        self,
+        namespace: str,
+        *,
+        subject_id: str,
+        metric_id: str,
+        unit: str = "count",
+        points: list[dict[str, Any]] | None = None,
+        evidence_refs: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist an MVP inline series without pretending it is production analytics."""
+
+        self._require_namespace(namespace)
+        series = self._series_store.upsert(namespace, subject_id=subject_id, metric_id=metric_id, unit=unit, points=points or [], evidence_refs=evidence_refs or [], metadata=metadata or {})
+        self._observation_store.create(namespace, event_type="TimeSeriesUpdated", subject_type="instance", subject_id=subject_id, actor=str((metadata or {}).get("created_by") or "system"), metadata={"metric_id": metric_id, "series_id": series.id, "storage": "inline-json-mvp"}, evidence_refs=evidence_refs or [])
+        return series.model_dump(mode="json")
+
+
+    def list_ontology_facts(
+        self,
+        namespace: str,
+        *,
+        review_state: str | None = None,
+        source: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List namespace Facts-plane reviewed claims."""
+
+        self._require_namespace(namespace)
+        return [fact.model_dump(mode="json") for fact in self._fact_store.list(namespace, review_state=review_state, source=source)]
+
+    def create_ontology_fact(
+        self,
+        namespace: str,
+        *,
+        statement: str,
+        subjects: list[dict[str, Any]] | None = None,
+        confidence: float = 0.5,
+        source: str = "assistant",
+        evidence_refs: list[str] | None = None,
+        provenance_refs: list[str] | None = None,
+        suggested_mapping: dict[str, Any] | None = None,
+        source_hash: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create an advisory fact proposal without mutating canonical graph data."""
+
+        self._require_namespace(namespace)
+        fact = self._fact_store.create_assistive(
+            namespace,
+            statement=statement,
+            subjects=[FactSubjectRef.model_validate(item) for item in (subjects or [])],
+            confidence=confidence,
+            source=source if source in {"extraction", "assistant", "manual"} else "assistant",
+            evidence_refs=evidence_refs or [],
+            provenance_refs=provenance_refs or [],
+            suggested_mapping=SuggestedRelationshipMapping.model_validate(suggested_mapping) if suggested_mapping else None,
+            source_hash=source_hash,
+            metadata=metadata or {},
+        )
+        self._observation_store.create(
+            namespace,
+            event_type="OntologyFactCreated",
+            subject_type="fact",
+            subject_id=fact.id,
+            created_by=str((metadata or {}).get("created_by") or "assistant"),
+            provenance_refs=fact.provenance_refs or fact.evidence_refs,
+            metadata={"source": fact.source, "review_state": fact.review_state},
+        )
+        return fact.model_dump(mode="json")
+
+    def review_ontology_fact(
+        self,
+        namespace: str,
+        fact_id: str,
+        review_state: str,
+        *,
+        reviewed_by: str = "anonymous",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update a fact review state while keeping it non-canonical."""
+
+        self._require_namespace(namespace)
+        if review_state not in {"draft", "assistive", "reviewed", "approved", "rejected"}:
+            raise ValueError(f"Unsupported fact review state: {review_state}")
+        fact = self._fact_store.update_review_state(namespace, fact_id, review_state, reviewed_by=reviewed_by, metadata=metadata or {})
+        self._observation_store.create(
+            namespace,
+            event_type="OntologyFactReviewed" if review_state != "rejected" else "OntologyFactRejected",
+            subject_type="fact",
+            subject_id=fact.id,
+            created_by=reviewed_by,
+            provenance_refs=fact.provenance_refs or fact.evidence_refs,
+            metadata={"review_state": fact.review_state, **(metadata or {})},
+        )
+        return fact.model_dump(mode="json")
+
+    def promote_ontology_fact_to_edge(
+        self,
+        namespace: str,
+        fact_id: str,
+        *,
+        relationship_type: str | None = None,
+        source_id: str | None = None,
+        target_id: str | None = None,
+        reviewed_by: str = "anonymous",
+    ) -> dict[str, Any]:
+        """Promote an approved fact into a typed graph edge with provenance."""
+
+        self._require_namespace(namespace)
+        promoter = OntologyFactPromotionService(
+            self._nm,
+            KuzuGraphInstanceStore(self.get_kuzu_graph(namespace)),
+            fact_store=self._fact_store,
+            candidate_store=self._candidate_store,
+            profile_store=self._ontology_store,
+            evidence_store=self._evidence_store,
+            observation_store=self._observation_store,
+        )
+        edge = promoter.promote_to_edge(namespace, fact_id, relationship_type=relationship_type, source_id=source_id, target_id=target_id, reviewed_by=reviewed_by)
+        return edge.model_dump(mode="json", exclude_none=True)
+
+    def raise_fact_relationship_candidate(
+        self,
+        namespace: str,
+        fact_id: str,
+        *,
+        relationship_label: str,
+        reviewed_by: str = "anonymous",
+    ) -> dict[str, Any]:
+        """Raise a relationship-type candidate when a fact cannot map to an active type."""
+
+        self._require_namespace(namespace)
+        promoter = OntologyFactPromotionService(
+            self._nm,
+            KuzuGraphInstanceStore(self.get_kuzu_graph(namespace)),
+            fact_store=self._fact_store,
+            candidate_store=self._candidate_store,
+            profile_store=self._ontology_store,
+            evidence_store=self._evidence_store,
+            observation_store=self._observation_store,
+        )
+        candidate = promoter.raise_relationship_candidate(namespace, fact_id, relationship_label=relationship_label, reviewed_by=reviewed_by)
+        return candidate.model_dump(mode="json")
 
 
     def list_ontology_candidates(
@@ -1219,6 +1799,50 @@ class KnowledgeService:
         canonical = normalize_candidate_label(canonical_id or candidate.suggested_canonical or candidate.original_label)
         profile = self.get_ontology_profile(namespace) or create_default_ontology_profile(namespace)
 
+        if candidate.candidate_type in {"node", "edge"}:
+            # EPIC-004 instance candidates are not schema enum changes. Mark the
+            # reviewed candidate approved, then route the write through the typed
+            # approve-write service so Kuzu/graph remains the source of record and
+            # provenance + observation events are emitted exactly once.
+            updated_candidate = self._candidate_store.update_status(
+                namespace,
+                candidate_id,
+                "approved",
+                reviewed_by=reviewed_by,
+                suggested_canonical=canonical,
+                metadata={"approval_kind": "graph_instance"},
+            )
+            approval_service = OntologyApprovalService(
+                self._nm,
+                KuzuGraphInstanceStore(self.get_kuzu_graph(namespace)),
+                candidate_store=self._candidate_store,
+                profile_store=self._ontology_store,
+                evidence_store=self._evidence_store,
+            )
+            instance = approval_service.approve_candidate(namespace, candidate_id, reviewed_by=reviewed_by)
+            self._ontology_audit_store.audit_operation(
+                namespace,
+                actor=reviewed_by,
+                op="candidate_instance_approve",
+                reason="Ontology graph instance candidate approved",
+                metadata={
+                    "candidate_id": candidate_id,
+                    "candidate_type": candidate.candidate_type,
+                    "instance_id": instance.id,
+                    "approval_kind": "graph_instance",
+                },
+            )
+            self._record_candidate_observation(
+                namespace,
+                event_type="OntologyCandidateApproved",
+                candidate=updated_candidate,
+                reviewed_by=reviewed_by,
+                metadata={"instance_id": instance.id, "approval_kind": "graph_instance"},
+            )
+            result = updated_candidate.model_dump(mode="json")
+            result["confirmed_instance"] = instance.model_dump(mode="json", exclude_none=True)
+            return result
+
         if candidate.candidate_type == "concept_type":
             from dashboard.knowledge.ontology.models import ConceptType  # noqa: WPS433
             level = payload.get("abstraction_level") or (next(iter(profile.abstraction_levels), "implementation"))
@@ -1243,6 +1867,32 @@ class KnowledgeService:
                 style=payload.get("style", "solid"),
                 is_directed=bool(payload.get("is_directed", True)),
             )
+        elif candidate.candidate_type == "metadata_field":
+            from dashboard.knowledge.ontology.models import MetadataField  # noqa: WPS433
+            proposed = {**candidate.proposed_payload, **payload}
+            profile.metadata_fields[canonical] = MetadataField(
+                id=canonical,
+                label=proposed.get("label") or candidate.original_label.strip().title(),
+                field_type=proposed.get("field_type", "string"),
+                description=proposed.get("description") or f"Approved metadata field from candidate {candidate.original_label!r}.",
+                required=bool(proposed.get("required", False)),
+                default=proposed.get("default"),
+                allowed_values=list(proposed.get("allowed_values") or []),
+            )
+        elif candidate.candidate_type == "validation_rule":
+            from dashboard.knowledge.ontology.models import ValidationRule  # noqa: WPS433
+            proposed = {**candidate.proposed_payload, **payload}
+            profile.validation_rules.append(
+                ValidationRule(
+                    id=canonical,
+                    label=proposed.get("label") or candidate.original_label.strip().title(),
+                    rule_type=proposed.get("rule_type", "required_metadata"),
+                    severity=proposed.get("severity", "error"),
+                    message=proposed.get("message") or f"Validate {candidate.original_label.strip() or canonical}",
+                    enabled=bool(proposed.get("enabled", True)),
+                    params=dict(proposed.get("params") or {}),
+                )
+            )
         else:
             raise ValueError(f"Unsupported candidate type: {candidate.candidate_type}")
 
@@ -1261,6 +1911,13 @@ class KnowledgeService:
             op="candidate_approve",
             reason="Ontology candidate approved",
             metadata={"candidate_id": candidate_id, "canonical_id": canonical, "profile_version": saved.version},
+        )
+        self._record_candidate_observation(
+            namespace,
+            event_type="OntologyCandidateApproved",
+            candidate=updated,
+            reviewed_by=reviewed_by,
+            metadata={"canonical_id": canonical, "profile_version": saved.version, "approval_kind": "profile_change"},
         )
         return updated.model_dump(mode="json")
 
@@ -1307,6 +1964,13 @@ class KnowledgeService:
             reason="Ontology candidate mapped",
             metadata={"candidate_id": candidate_id, "canonical_id": canonical, "profile_version": saved.version},
         )
+        self._record_candidate_observation(
+            namespace,
+            event_type="OntologyCandidateMapped",
+            candidate=updated,
+            reviewed_by=reviewed_by,
+            metadata={"canonical_id": canonical, "profile_version": saved.version},
+        )
         return updated.model_dump(mode="json")
 
     def reject_ontology_candidate(
@@ -1334,6 +1998,13 @@ class KnowledgeService:
             reason=reason or "Ontology candidate rejected",
             metadata={"candidate_id": candidate_id},
         )
+        self._record_candidate_observation(
+            namespace,
+            event_type="OntologyCandidateRejected",
+            candidate=updated,
+            reviewed_by=reviewed_by,
+            metadata={"reason": reason} if reason else {},
+        )
         return updated.model_dump(mode="json")
 
     def bulk_update_ontology_candidates(
@@ -1360,6 +2031,34 @@ class KnowledgeService:
             else:
                 raise ValueError(f"Unsupported candidate action: {op}")
         return results
+
+
+    def _record_candidate_observation(
+        self,
+        namespace: str,
+        *,
+        event_type: str,
+        candidate: Any,
+        reviewed_by: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append candidate review events without weakening the review gate."""
+
+        provenance_refs = [candidate.source_evidence_ref] if getattr(candidate, "source_evidence_ref", None) else []
+        self._observation_store.create(
+            namespace,
+            event_type=event_type,
+            subject_type="candidate",
+            subject_id=candidate.id,
+            created_by=reviewed_by,
+            provenance_refs=provenance_refs,
+            metadata={
+                "candidate_type": candidate.candidate_type,
+                "status": candidate.status,
+                "source_hash": candidate.source_hash,
+                **(metadata or {}),
+            },
+        )
 
     def normalize_relation(self, relation_type: str, namespace: str) -> Any:
         """Normalize a relationship label for a namespace ontology profile."""
@@ -1510,6 +2209,7 @@ class KnowledgeService:
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             _log_call(namespace, "import_folder", "success", latency_ms, {"actor": actor, "job_id": job_id})
+            self._observation_store.create(namespace, event_type="ImportSubmitted", subject_type="import", subject_id=job_id, actor=actor, metadata={"folder_path": folder_path})
             return job_id
 
         except ImportInProgressError:
@@ -1593,6 +2293,7 @@ class KnowledgeService:
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             _log_call(namespace, "import_text", "success", latency_ms, {"actor": actor})
+            self._observation_store.create(namespace, event_type="ImportCompleted", subject_type="import", subject_id=f"inline:{source_label}", actor=actor, value=result.get("chunks_added", 0), metadata={"source_label": source_label, "chunks_added": result.get("chunks_added", 0), "entities_added": result.get("entities_added", 0), "relations_added": result.get("relations_added", 0)})
             return result
 
         except ImportInProgressError:

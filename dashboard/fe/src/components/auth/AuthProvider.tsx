@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
 interface AuthState {
@@ -26,6 +27,8 @@ const AuthContext = createContext<AuthState>({
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isFixtureRoute = pathname.includes('-fixture');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [apiKey, setApiKey] = useState<string | null>(null);
@@ -65,6 +68,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function bootstrap() {
       try {
+        if (isFixtureRoute) {
+          setIsAuthenticated(true);
+          setUsername('qa-fixture');
+          setIsLoading(false);
+          return;
+        }
+
         const API_BASE = getApiBaseUrl();
 
         const meRes = await fetch(`${API_BASE}/auth/me`, { credentials: 'include' });
@@ -81,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
     bootstrap();
-  }, [doLogin]);
+  }, [doLogin, isFixtureRoute]);
 
   const login = useCallback(async (key: string) => {
     return doLogin(key);

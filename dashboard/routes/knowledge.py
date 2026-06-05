@@ -19,6 +19,7 @@ inside KnowledgeService methods — importing this module is cheap.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -51,21 +52,39 @@ from dashboard.routes.knowledge_models import (
     ImportTextResponse,
     JobStatusResponse,
     NamespaceJobsResponse,
+    OntologyAssistantRequest,
+    OntologyAssistantResponse,
     NamespaceMetaResponse,
     OntologyCandidateActionRequest,
     OntologyCandidateBulkRequest,
     OntologyCandidateListResponse,
     OntologyCandidateResponse,
+    OntologyFactCreateRequest,
+    OntologyFactListResponse,
+    OntologyFactPromoteRequest,
+    OntologyFactPromoteResponse,
+    OntologyFactRelationshipCandidateRequest,
+    OntologyFactRelationshipCandidateResponse,
+    OntologyFactResponse,
+    OntologyFactReviewRequest,
     OntologyProfileDiffRequest,
+    OntologyUnitRequest,
+    OntologyUnitResponse,
     OntologyProfileDiffResponse,
     OntologyProfileHistoryListResponse,
     OntologyProfileHistoryRecordResponse,
     OntologyProfileRequest,
     OntologyProfileResponse,
     OntologyResetDefaultResponse,
+    OntologyReleaseObservabilityResponse,
     OntologySummaryResponse,
     OntologyValidateRequest,
     OntologyValidateResponse,
+    TimeSeriesUpsertRequest,
+    TimeSeriesResponse,
+    TimeSeriesListResponse,
+    ObservationEventResponse,
+    ObservationEventListResponse,
     QueryRequest,
     QueryResultResponse,
     RefreshNamespaceResponse,
@@ -375,6 +394,11 @@ def _namespace_meta_to_response(meta: Any) -> NamespaceMetaResponse:
 
 
 
+def _ontology_unit_to_response(data: dict[str, Any]) -> OntologyUnitResponse:
+    """Convert service ontology unit payload to response model."""
+    return OntologyUnitResponse(**data)
+
+
 def _ontology_profile_to_response(data: dict[str, Any]) -> OntologyProfileResponse:
     """Convert service ontology profile payload to response model."""
     return OntologyProfileResponse(**data)
@@ -542,6 +566,56 @@ async def delete_namespace(
         service = _get_service()
         deleted = await asyncio.to_thread(service.delete_namespace, namespace, actor=actor)
         return DeleteNamespaceResponse(deleted=deleted, namespace=namespace)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/unit",
+    response_model=OntologyUnitResponse,
+    responses={
+        200: {"description": "Ontology unit identity/governance metadata"},
+        400: {"description": "Invalid namespace identifier", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Get namespace ontology unit",
+)
+async def get_ontology_unit(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyUnitResponse:
+    """Return ontology unit identity/governance metadata without requiring a profile."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.get_ontology_unit_response, namespace)
+        return _ontology_unit_to_response(data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.put(
+    "/namespaces/{namespace}/ontology/unit",
+    response_model=OntologyUnitResponse,
+    responses={
+        200: {"description": "Ontology unit saved"},
+        400: {"description": "Invalid unit payload", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Create or update namespace ontology unit",
+)
+async def put_ontology_unit(
+    namespace: str,
+    request: OntologyUnitRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyUnitResponse:
+    """Persist ontology unit metadata independently from profile publication."""
+    try:
+        service = _get_service()
+        unit = await asyncio.to_thread(service.save_ontology_unit_payload, namespace, request.unit)
+        return _ontology_unit_to_response({"namespace": namespace, "unit": unit.model_dump(mode="json"), "unit_exists": True})
     except Exception as exc:
         raise _map_error(exc)
 
@@ -772,6 +846,315 @@ async def get_ontology_summary(
 
 
 @router.get(
+    "/namespaces/{namespace}/ontology/release-observability",
+    response_model=OntologyReleaseObservabilityResponse,
+    responses={
+        200: {"description": "Ontology release-gate observability report"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Report ontology release-gate observability",
+)
+async def get_ontology_release_observability(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyReleaseObservabilityResponse:
+    """Return release-gate health signals across evidence, review, packs, and events."""
+    try:
+        service = _get_service()
+        data = await asyncio.to_thread(service.get_ontology_release_observability, namespace)
+        return OntologyReleaseObservabilityResponse(**data)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+def _is_vocabulary_pack_draft_request(message: str) -> bool:
+    """Detect the governed pack-draft assistant shortcut requested by the UI."""
+    lowered = (message or "").lower()
+    return (
+        ("draft" in lowered or "proposal" in lowered)
+        and ("pack" in lowered or "vocabulary bundle" in lowered or "domain bundle" in lowered)
+    )
+
+
+def _fallback_vocabulary_pack_draft_text(namespace: str, profile_summary: dict[str, Any]) -> str:
+    """Return a small structured pack draft when the live assistant is unavailable.
+
+    The response is deliberately advisory and compact. It gives the UI a valid,
+    reviewable proposal shape with every EPIC-014 pack-draft section while still
+    requiring the normal apply/validate/diff/save governance path before any
+    ontology data can change.
+    """
+    existing_concepts = set(profile_summary.get("concept_types") or [])
+    existing_relationships = set(profile_summary.get("relationship_types") or [])
+    concept_id = "pack_template_concept" if "pack_template_concept" not in existing_concepts else "pack_template_concept_v2"
+    evidence_id = "pack_template_evidence" if "pack_template_evidence" not in existing_concepts else "pack_template_evidence_v2"
+    relation_id = "documents" if "documents" not in existing_relationships else "documents_pack_template"
+    proposal = {
+        "proposed_changes": {
+            "concept_types": {
+                concept_id: {
+                    "id": concept_id,
+                    "label": "Pack Template Concept",
+                    "abstraction_level": "capability",
+                    "default_layer": "pack_template",
+                    "description": "Reviewable placeholder concept for a small customer vocabulary bundle draft.",
+                    "metadata_schema": {"pack_owner": {"id": "pack_owner", "label": "Pack Owner", "field_type": "string"}},
+                    "color": "#2563eb",
+                    "shape": "rounded_rectangle",
+                    "lifecycle_state": "draft",
+                },
+                evidence_id: {
+                    "id": evidence_id,
+                    "label": "Pack Template Evidence",
+                    "abstraction_level": "implementation",
+                    "default_layer": "pack_template",
+                    "description": "Evidence or source artifact used to justify this vocabulary bundle.",
+                    "metadata_schema": {"pack_owner": {"id": "pack_owner", "label": "Pack Owner", "field_type": "string"}},
+                    "color": "#0f766e",
+                    "shape": "document",
+                    "lifecycle_state": "draft",
+                },
+            },
+            "relationship_types": {
+                relation_id: {
+                    "id": relation_id,
+                    "label": "Documents",
+                    "family": "traceability",
+                    "inverse": None,
+                    "description": "Connects pack template concepts to evidence before install review.",
+                    "allowed_source_types": [evidence_id],
+                    "allowed_target_types": [concept_id],
+                    "weight": 0.7,
+                    "style": "solid",
+                    "map_direction": "forward",
+                    "is_directed": True,
+                    "is_system": False,
+                    "lifecycle_state": "draft",
+                }
+            },
+            "layers": {
+                "pack_template": {
+                    "id": "pack_template",
+                    "label": "Pack Template",
+                    "order": 90,
+                    "description": "Draft-only lane for reviewing candidate vocabulary bundle contents.",
+                    "lifecycle_state": "draft",
+                }
+            },
+            "metadata_fields": {
+                "pack_owner": {
+                    "id": "pack_owner",
+                    "label": "Pack Owner",
+                    "field_type": "string",
+                    "description": "Team or partner accountable for reviewing this vocabulary bundle.",
+                    "required": False,
+                    "lifecycle_state": "draft",
+                }
+            },
+            "graph_instruction": {
+                "default_views": [
+                    {"id": "pack_template_review", "label": "Pack Template Review", "lane_dimension": "default_layer", "filters": {}, "description": "Review draft pack contents before governance save."}
+                ],
+                "concept_type_defaults": {
+                    concept_id: {"concept_type": concept_id, "default_layer": "pack_template", "label_template": "{label}", "color": "#2563eb", "shape": "rounded_rectangle"},
+                    evidence_id: {"concept_type": evidence_id, "default_layer": "pack_template", "label_template": "{label}", "color": "#0f766e", "shape": "document"},
+                },
+                "relationship_type_defaults": {
+                    relation_id: {"relationship_type": relation_id, "map_direction": "forward", "label_template": "{label}", "color": "#64748b", "weight": 0.7}
+                },
+                "examples": [
+                    {
+                        "id": "pack_template_fixture",
+                        "description": "Small review fixture for the drafted vocabulary bundle.",
+                        "nodes": [{"id": "source_doc", "type": evidence_id}, {"id": "draft_object", "type": concept_id}],
+                        "edges": [{"source": "source_doc", "target": "draft_object", "relation_type": relation_id}],
+                    }
+                ],
+            },
+            "fixtures": [
+                {
+                    "id": "pack_template_fixture",
+                    "nodes": [{"id": "source_doc", "type": evidence_id}, {"id": "draft_object", "type": concept_id}],
+                    "edges": [{"source": "source_doc", "target": "draft_object", "relation_type": relation_id}],
+                }
+            ],
+            "migration_notes": [
+                f"Draft vocabulary bundle for namespace {namespace}; review, validate, preview diff, and save before installation.",
+                "Generated as a safe fallback because the live assistant was unavailable; treat all sections as advisory.",
+            ],
+        },
+        "rationale": "Small fallback vocabulary bundle proposal for governed review when the assistant backend is unavailable.",
+        "evidence_refs": [],
+    }
+    return (
+        "The live ontology assistant is unavailable, so here is a small advisory vocabulary bundle draft that remains review-only. "
+        "Apply it to the draft only if it matches the source documents, then validate, preview diff, and save through governance.\n"
+        "```json\n"
+        f"{json.dumps(proposal, separators=(',', ':'))}\n"
+        "```"
+    )
+
+
+_PACK_DRAFT_REQUIRED_SECTIONS = {
+    "concept_types",
+    "relationship_types",
+    "layers",
+    "metadata_fields",
+    "graph_instruction",
+    "fixtures",
+    "migration_notes",
+}
+
+
+def _pack_draft_response_is_reviewable(text: str) -> bool:
+    """Return True when assistant text contains the UI-required pack proposal envelope."""
+    match = re.search(r"```json\s*([\s\S]*?)```", text or "", re.IGNORECASE)
+    if not match:
+        return False
+    try:
+        parsed = json.loads(match.group(1).strip())
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    proposed_changes = parsed.get("proposed_changes")
+    if not isinstance(proposed_changes, dict):
+        return False
+    missing = _PACK_DRAFT_REQUIRED_SECTIONS.difference(proposed_changes.keys())
+    if missing:
+        return False
+    return all(
+        isinstance(proposed_changes.get(section), dict)
+        for section in ["concept_types", "relationship_types", "layers", "metadata_fields", "graph_instruction"]
+    ) and all(
+        isinstance(proposed_changes.get(section), list)
+        for section in ["fixtures", "migration_notes"]
+    )
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/assistant",
+    response_model=OntologyAssistantResponse,
+    responses={
+        200: {"description": "AI ontology schema design response"},
+        400: {"description": "Invalid ontology assistant request", "model": ErrorResponse},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Ask the master agent for ontology schema design help",
+)
+async def ask_ontology_assistant(
+    namespace: str,
+    request: OntologyAssistantRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyAssistantResponse:
+    """Use the master agent as a governed ontology schema co-builder.
+
+    This endpoint is advisory only. It does not mutate profile storage; callers
+    must still validate and save profile changes through the ontology profile
+    endpoint.
+    """
+    try:
+        service = _get_service()
+        await asyncio.to_thread(service._require_namespace, namespace)
+        actor = _get_actor(user)
+
+        from dashboard.llm_client import ChatMessage  # noqa: WPS433
+        from dashboard.master_agent import master_chat  # noqa: WPS433
+
+        system_prompt = """\
+You are the Ontology Schema Builder inside OS Twin.
+
+You are an advisory conversational co-builder. You may explain, propose, map,
+or draft ontology changes, but you must never claim that anything was saved or
+approved. The user must explicitly apply proposals to a draft, validate, preview
+diff, save, review candidates, or review facts through governed UI controls.
+
+Allowed proposed_changes top-level sections only:
+- concept_types: objects keyed by stable lowercase id. ConceptType fields only:
+  id, label, abstraction_level, default_layer, description, metadata_schema,
+  metadata_fields, color, shape, lifecycle_state.
+- relationship_types: objects keyed by stable lowercase id. RelationshipType
+  fields only: id, label, family, inverse, description, allowed_source_types,
+  allowed_target_types, weight, style, display_style, map_direction,
+  is_directed, is_system, lifecycle_state.
+- aliases, concept_aliases: string-to-string maps.
+- layers, abstraction_levels, metadata_fields, validation_rules,
+  graph_instruction, fixtures, migration_notes.
+- For vocabulary bundle / pack drafts, include concept_types, relationship_types, layers, metadata_fields, graph_instruction, fixtures, and migration_notes in proposed_changes; these are advisory review payloads only.
+- candidate_actions and fact_actions may be proposed as advisory review actions
+  only; they are not profile draft patches.
+
+When proposing changes, include one strict fenced JSON block and keep it compact:
+```json
+{"proposed_changes": {"concept_types": {}}, "rationale": "why", "evidence_refs": []}
+```
+Use only bounded context supplied below. Do not ask for or reproduce entire raw
+documents. Prefer one or two small valid next steps over broad rewrites.
+"""
+        profile_summary = {
+            "profile_id": request.profile.get("profile_id"),
+            "version": request.profile.get("version"),
+            "status": request.profile.get("status"),
+            "concept_types": list((request.profile.get("concept_types") or {}).keys())[:80],
+            "relationship_types": list((request.profile.get("relationship_types") or {}).keys())[:80],
+            "layers": list((request.profile.get("layers") or {}).keys())[:40],
+            "abstraction_levels": list((request.profile.get("abstraction_levels") or {}).keys())[:40],
+            "metadata_fields": list((request.profile.get("metadata_fields") or {}).keys())[:80],
+            "validation_rule_count": len(request.profile.get("validation_rules") or []),
+        }
+        selected = request.selected or None
+        if isinstance(selected, dict) and "object" in selected:
+            selected = {**selected, "object": json.dumps(selected.get("object"), sort_keys=True)[:4000]}
+        context = {
+            "namespace": namespace,
+            "selected": selected,
+            "bounded_refs": request.context or {},
+            "profile_summary": profile_summary,
+            "advisory_only": True,
+            "governance_required": ["apply_to_draft", "validate", "preview_diff", "save", "candidate_review", "fact_review"],
+        }
+        history = [
+            ChatMessage(role=msg.role if msg.role in {"user", "assistant"} else "user", content=msg.content)
+            for msg in request.history[-8:]
+            if msg.content
+        ]
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            *history,
+            ChatMessage(
+                role="user",
+                content=(
+                    "Current ontology context:\n"
+                    f"{json.dumps(context, indent=2, sort_keys=True)[:20000]}\n\n"
+                    f"User request: {request.message}"
+                ),
+            ),
+        ]
+        conversation_id = f"ontology-schema:{namespace}:{actor}"
+        is_pack_draft_request = _is_vocabulary_pack_draft_request(request.message)
+        try:
+            response = await master_chat(messages, conversation_id=conversation_id)
+            text = response.content or "No response from ontology assistant."
+            if is_pack_draft_request and not _pack_draft_response_is_reviewable(text):
+                logger.warning("Ontology assistant returned non-reviewable vocabulary pack draft; returning fallback")
+                text = _fallback_vocabulary_pack_draft_text(namespace, profile_summary)
+        except Exception:
+            if not is_pack_draft_request:
+                raise
+            logger.exception("Ontology assistant unavailable; returning fallback vocabulary pack draft")
+            text = _fallback_vocabulary_pack_draft_text(namespace, profile_summary)
+        return OntologyAssistantResponse(
+            namespace=namespace,
+            conversation_id=conversation_id,
+            text=text,
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
     "/namespaces/{namespace}/ontology/enterprise-map",
     response_model=EnterpriseMapProjectionResponse,
     responses={
@@ -914,6 +1297,186 @@ async def uninstall_domain_pack(
     except Exception as exc:
         raise _map_error(exc)
 
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/observation/events",
+    response_model=ObservationEventListResponse,
+    summary="List ontology observation events",
+)
+async def list_observation_events(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    subject_type: str | None = Query(default=None),
+    subject_id: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+) -> ObservationEventListResponse:
+    try:
+        service = _get_service()
+        events = await asyncio.to_thread(service.list_observation_events, namespace, subject_type=subject_type, subject_id=subject_id, event_type=event_type, start=start, end=end)
+        return ObservationEventListResponse(namespace=namespace, events=[ObservationEventResponse(**event) for event in events])
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/observation/series",
+    response_model=TimeSeriesListResponse,
+    summary="List ontology MVP time-series records",
+)
+async def list_time_series(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    subject_id: str | None = Query(default=None),
+    metric_id: str | None = Query(default=None),
+) -> TimeSeriesListResponse:
+    try:
+        service = _get_service()
+        series = await asyncio.to_thread(service.list_time_series, namespace, subject_id=subject_id, metric_id=metric_id)
+        return TimeSeriesListResponse(namespace=namespace, series=[TimeSeriesResponse(**item) for item in series])
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.put(
+    "/namespaces/{namespace}/ontology/observation/series",
+    response_model=TimeSeriesResponse,
+    summary="Upsert an MVP ontology time-series record",
+)
+async def upsert_time_series(
+    namespace: str,
+    request: TimeSeriesUpsertRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> TimeSeriesResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        metadata = {**request.metadata, "created_by": actor}
+        series = await asyncio.to_thread(service.upsert_time_series, namespace, subject_id=request.subject_id, metric_id=request.metric_id, unit=request.unit, points=request.points, evidence_refs=request.evidence_refs, metadata=metadata)
+        return TimeSeriesResponse(**series)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.get(
+    "/namespaces/{namespace}/ontology/facts",
+    response_model=OntologyFactListResponse,
+    summary="List reviewed ontology facts",
+)
+async def list_ontology_facts(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    review_state: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+) -> OntologyFactListResponse:
+    try:
+        service = _get_service()
+        facts = await asyncio.to_thread(service.list_ontology_facts, namespace, review_state=review_state, source=source)
+        return OntologyFactListResponse(namespace=namespace, facts=[OntologyFactResponse(**fact) for fact in facts])
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/facts",
+    response_model=OntologyFactResponse,
+    summary="Create an assistive ontology fact",
+)
+async def create_ontology_fact(
+    namespace: str,
+    request: OntologyFactCreateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyFactResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        metadata = {**request.metadata, "created_by": actor}
+        fact = await asyncio.to_thread(
+            service.create_ontology_fact,
+            namespace,
+            statement=request.statement,
+            subjects=request.subjects,
+            confidence=request.confidence,
+            source=request.source,
+            evidence_refs=request.evidence_refs,
+            provenance_refs=request.provenance_refs,
+            suggested_mapping=request.suggested_mapping,
+            source_hash=request.source_hash,
+            metadata=metadata,
+        )
+        return OntologyFactResponse(**fact)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/facts/{fact_id}/review",
+    response_model=OntologyFactResponse,
+    summary="Review or reject an ontology fact",
+)
+async def review_ontology_fact(
+    namespace: str,
+    fact_id: str,
+    request: OntologyFactReviewRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyFactResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        fact = await asyncio.to_thread(service.review_ontology_fact, namespace, fact_id, request.review_state, reviewed_by=actor, metadata=request.metadata)
+        return OntologyFactResponse(**fact)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/facts/{fact_id}/promote-edge",
+    response_model=OntologyFactPromoteResponse,
+    summary="Promote an approved fact to a typed graph edge",
+)
+async def promote_ontology_fact_to_edge(
+    namespace: str,
+    fact_id: str,
+    request: OntologyFactPromoteRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyFactPromoteResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        edge = await asyncio.to_thread(
+            service.promote_ontology_fact_to_edge,
+            namespace,
+            fact_id,
+            relationship_type=request.relationship_type,
+            source_id=request.source_id,
+            target_id=request.target_id,
+            reviewed_by=actor,
+        )
+        return OntologyFactPromoteResponse(namespace=namespace, edge=edge)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/facts/{fact_id}/relationship-candidate",
+    response_model=OntologyFactRelationshipCandidateResponse,
+    summary="Raise a relationship-type candidate from a fact",
+)
+async def raise_fact_relationship_candidate(
+    namespace: str,
+    fact_id: str,
+    request: OntologyFactRelationshipCandidateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> OntologyFactRelationshipCandidateResponse:
+    try:
+        service = _get_service()
+        actor = _get_actor(user)
+        candidate = await asyncio.to_thread(service.raise_fact_relationship_candidate, namespace, fact_id, relationship_label=request.relationship_label, reviewed_by=actor)
+        return OntologyFactRelationshipCandidateResponse(namespace=namespace, candidate=OntologyCandidateResponse(**candidate))
+    except Exception as exc:
+        raise _map_error(exc)
 
 
 @router.get(

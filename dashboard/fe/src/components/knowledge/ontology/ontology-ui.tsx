@@ -1,5 +1,5 @@
 import React from 'react';
-import type { OntologyProfile, OntologyValidationIssue } from '@/hooks/use-ontology';
+import type { EvidenceArtifact, EvidenceAnchor, OntologyCandidate, OntologyProfile, OntologyValidationIssue, ProvenanceLinkDetail } from '@/hooks/use-ontology';
 
 export function keysOf<T>(record: Record<string, T> | undefined): string[] {
   return Object.keys(record ?? {}).sort();
@@ -84,4 +84,73 @@ export function updateProfileRecord<T extends { id: string }>(profile: OntologyP
   record[id] = { ...(record[id] ?? { id }), ...patch } as T;
   (next[key] as unknown as Record<string, T>) = record;
   return next;
+}
+
+
+const limitationLabels: Record<string, string> = {
+  ocr_needed: 'OCR needed',
+  conversion_needed: 'Conversion needed',
+  failed: 'Failed',
+  partial: 'Partial read',
+  sampled: 'Sampled',
+  unsupported: 'Unsupported',
+  empty: 'No readable content',
+};
+
+export function formatEvidenceLocator(locator: EvidenceAnchor['locator'] | undefined): string {
+  if (!locator) return 'No locator recorded';
+  const parts: string[] = [];
+  if (locator.page) parts.push(`page ${locator.page}`);
+  if (locator.section) parts.push(`section ${locator.section}`);
+  if (locator.heading) parts.push(`heading ${locator.heading}`);
+  if (locator.row) parts.push(`row ${locator.row}`);
+  if (locator.column) parts.push(`column ${locator.column}`);
+  if (locator.line_start || locator.line_end) parts.push(`lines ${locator.line_start ?? '?'}-${locator.line_end ?? locator.line_start ?? '?'}`);
+  if (locator.chunk_id !== undefined && locator.chunk_id !== null) parts.push(`chunk ${locator.chunk_id}`);
+  if (locator.timestamp) parts.push(`time ${locator.timestamp}`);
+  return parts.length ? parts.join(' · ') : 'Source-level locator';
+}
+
+export function evidenceStateLabel(artifact?: EvidenceArtifact | null): string {
+  if (!artifact) return 'No source evidence';
+  if (artifact.limitations?.length) return artifact.limitations.map((item) => limitationLabels[item] ?? labelFor(item)).join(', ');
+  return labelFor(artifact.source_state || artifact.read_coverage || 'source');
+}
+
+export function EvidenceBadge({ artifact }: { artifact?: EvidenceArtifact | null }) {
+  const limitation = Boolean(artifact?.limitations?.length);
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold" style={{ borderColor: limitation ? 'var(--color-warning)' : 'var(--color-border)', color: limitation ? 'var(--color-warning)' : 'var(--color-text-muted)', background: limitation ? 'rgba(245,158,11,0.08)' : 'var(--color-background)' }}>
+      <span className="material-symbols-outlined text-[14px]">{artifact ? (limitation ? 'warning' : 'verified') : 'link_off'}</span>
+      {evidenceStateLabel(artifact)}
+    </span>
+  );
+}
+
+export function EvidenceSourcePanel({ evidence, fallbackExcerpt }: { evidence?: ProvenanceLinkDetail | null; fallbackExcerpt?: string }) {
+  const artifact = evidence?.artifact ?? null;
+  const anchor = evidence?.anchor ?? null;
+  if (!artifact && !anchor && !fallbackExcerpt) {
+    return (
+      <div className="rounded-xl border p-3 text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)', background: 'var(--color-background)' }}>
+        No source evidence has been attached yet.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-xl border p-3 text-xs" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <EvidenceBadge artifact={artifact} />
+        {artifact?.source_type && <span style={{ color: 'var(--color-text-muted)' }}>{labelFor(artifact.source_type)}</span>}
+        {artifact?.title && <span className="font-semibold" style={{ color: 'var(--color-text-main)' }}>{artifact.title}</span>}
+      </div>
+      {(anchor?.excerpt || fallbackExcerpt) && <p style={{ color: 'var(--color-text-main)' }}>“{anchor?.excerpt || fallbackExcerpt}”</p>}
+      <p style={{ color: 'var(--color-text-muted)' }}>{formatEvidenceLocator(anchor?.locator)}</p>
+      {artifact?.source_uri && <p className="truncate" title={artifact.source_uri} style={{ color: 'var(--color-text-muted)' }}>{artifact.source_uri}</p>}
+    </div>
+  );
+}
+
+export function CandidateEvidenceSummary({ candidate }: { candidate: OntologyCandidate }) {
+  return <EvidenceSourcePanel evidence={candidate.source_evidence} fallbackExcerpt={candidate.sample_text} />;
 }

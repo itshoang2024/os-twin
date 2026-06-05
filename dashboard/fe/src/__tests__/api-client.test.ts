@@ -123,8 +123,7 @@ describe('api-client response unwrapping', () => {
     expect(result.warnings).toEqual(['partial']);
   });
 
-  it('respects NEXT_PUBLIC_API_BASE_URL if set', async () => {
-    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'https://api.test.com/v1');
+  it('always uses the localhost:3366 backend API base', async () => {
     vi.resetModules();
     
     mockFetch({ plans: [] });
@@ -133,11 +132,9 @@ describe('api-client response unwrapping', () => {
     await fetcher('/plans');
     
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('https://api.test.com/v1/plans'),
+      expect.stringContaining('http://localhost:3366/api/plans'),
       expect.anything()
     );
-    
-    vi.unstubAllEnvs();
   });
 
   it('throws ApiError for non-OK responses', async () => {

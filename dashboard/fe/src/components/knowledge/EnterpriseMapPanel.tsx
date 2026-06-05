@@ -9,11 +9,12 @@ import {
   type ExplorerEdge,
   type ExplorerNode,
 } from '@/hooks/use-knowledge-explorer';
-import { useOntologyProfile, type OntologyProfile } from '@/hooks/use-ontology';
+import { useOntologyObservation, useOntologyProfile, type ObservationEvent, type OntologyProfile, type TimeSeries } from '@/hooks/use-ontology';
 import { ENTERPRISE_MAP_MODULES } from './ontology/enterprise-map';
+import { WorkbenchShell, mapLensAdapter } from './workbench';
 
-type ViewName = 'map' | 'layers' | 'objects' | 'relations' | 'quality';
-type FilterKey = 'layer' | 'objectType' | 'abstraction' | 'relationshipFamily' | 'pack' | 'lifecycle' | 'owner' | 'quality';
+type ViewName = 'map' | 'layers' | 'objects' | 'relations' | 'quality' | 'simulation';
+type FilterKey = 'layer' | 'objectType' | 'abstraction' | 'relationshipFamily' | 'pack' | 'lifecycle' | 'review' | 'owner' | 'quality';
 type ActiveFilters = Record<FilterKey, string[]>;
 
 interface OntologyLayerView {
@@ -46,6 +47,20 @@ interface OntologyObject {
   metadata: Record<string, unknown>;
   properties: Record<string, unknown>;
   validationIssues: Array<Record<string, unknown>>;
+  reviewState: string;
+  confidence?: number | null;
+  provenanceRefs: string[];
+  externalRef: Record<string, unknown> | null;
+  eventCount: number;
+  activeEventCount: number;
+  timeRange: Record<string, unknown> | string | null;
+  seriesRefs: string[];
+  flowRefs: string[];
+  state: string | null;
+  stateColor: string | null;
+  stateMachineRef: string | null;
+  simulationState: string | null;
+  simulationRefs: string[];
   sourceNode?: ExplorerNode | EnterpriseMapNode;
 }
 
@@ -59,6 +74,11 @@ interface OntologyRelation {
   family: string;
   style: string;
   weight: number;
+  reviewState: string;
+  confidence?: number | null;
+  provenanceRefs: string[];
+  externalRef: Record<string, unknown> | null;
+  mapDirection?: string | null;
   isCandidate: boolean;
   validationIssues: Array<Record<string, unknown>>;
 }
@@ -88,7 +108,11 @@ interface OntologyMapData {
     sourceNodeCount?: number;
     sourceEdgeCount?: number;
     limit?: number;
+    flowCount?: number;
+    stateMachineCount?: number;
+    simulationScenarioCount?: number;
   };
+  analysis: { flow_count: number; state_machine_count: number; simulation_scenario_count: number; simulation_provider_required?: boolean; provider_contract?: string };
 }
 
 interface LayoutResult {
@@ -111,9 +135,10 @@ const VIEW_BUTTONS: Array<{ id: ViewName; label: string }> = [
   { id: 'objects', label: 'Object Types' },
   { id: 'relations', label: 'Relations' },
   { id: 'quality', label: 'Quality' },
+  { id: 'simulation', label: 'Simulation' },
 ];
 
-const FILTER_KEYS: FilterKey[] = ['layer', 'objectType', 'abstraction', 'relationshipFamily', 'pack', 'lifecycle', 'owner', 'quality'];
+const FILTER_KEYS: FilterKey[] = ['layer', 'objectType', 'abstraction', 'relationshipFamily', 'pack', 'lifecycle', 'review', 'owner', 'quality'];
 const NODE_W = 178;
 const NODE_H = 68;
 const H_GAP = 16;
@@ -123,6 +148,7 @@ const LANE_PAD_BOTTOM = 16;
 const SVG_PAD_X = 24;
 const PAGE_SIZE_OPTIONS = [40, 80, 160] as const;
 type DensityMode = 'compact' | 'comfortable' | 'spacious';
+type TimeSelectionMode = 'none' | 'fixed_range' | 'latest_import' | 'current_profile_version';
 
 const FALLBACK_LAYER_COLORS = ['#2563eb', '#0f766e', '#b7791f', '#7c3aed', '#be123c', '#475569', '#0e7490', '#9333ea'];
 const RELATION_STYLE: Record<string, string> = {
@@ -154,16 +180,24 @@ const DEFAULT_MAP_DATA: OntologyMapData = {
     candidateEdgeCount: 0,
     ontologyCandidateCount: 0,
     validationIssueCount: 0,
+    flowCount: 0,
+    stateMachineCount: 0,
+    simulationScenarioCount: 0,
   },
+  analysis: { flow_count: 0, state_machine_count: 0, simulation_scenario_count: 0 },
 };
 
 const titleize = (value?: string | null) =>
   String(value || 'unassigned')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase());
 
 const asRecord = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
 const asIssues = (value: unknown): Array<Record<string, unknown>> => Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') as Array<Record<string, unknown>> : [];
+const asStringList = (value: unknown): string[] => Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : (typeof value === 'string' && value.trim() ? [value] : []);
+const optionalNumber = (value: unknown): number | null => { const n = Number(value); return Number.isFinite(n) ? n : null; };
+const optionalRecord = (value: unknown): Record<string, unknown> | null => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null);
 const truncate = (value: string, limit: number) => (value.length > limit ? `${value.slice(0, limit - 3)}...` : value);
 const relationKey = (source: string, target: string) => `${source}->${target}`;
 
@@ -198,8 +232,11 @@ function objectDescription(node: ExplorerNode | EnterpriseMapNode, conceptDescri
 }
 
 function objectQuality(node: ExplorerNode | EnterpriseMapNode) {
+  const projectedQuality = String((node as EnterpriseMapNode).quality_state ?? '').trim();
+  if (projectedQuality) return projectedQuality;
   if (asIssues(node.validation_issues).length) return 'needs_review';
   if (node.lifecycle_state === 'deprecated') return 'deprecated';
+  if (node.lifecycle_state === 'candidate') return 'unverified';
   if (node.lifecycle_state === 'draft') return 'draft';
   return 'healthy';
 }
@@ -235,14 +272,23 @@ function abstractionLabelFromProfile(profile: OntologyProfile | null, abstractio
   return profile?.abstraction_levels?.[abstractionId]?.label ?? null;
 }
 
+function graphConceptInstruction(profile: OntologyProfile | null, conceptId?: string | null) {
+  if (!conceptId) return null;
+  return profile?.graph_instruction?.concept_type_defaults?.[conceptId] ?? null;
+}
+
+function graphRelationshipInstruction(profile: OntologyProfile | null, relationType?: string | null) {
+  if (!relationType) return null;
+  return profile?.graph_instruction?.relationship_type_defaults?.[relationType] ?? null;
+}
+
 function layerIdFromNode(node: ExplorerNode | EnterpriseMapNode, profile: OntologyProfile | null) {
   const enterprise = node as EnterpriseMapNode;
-  const explicit = String(enterprise.layer_id ?? node.layer ?? node.metadata?.layer ?? node.properties?.layer ?? '').trim();
+  const conceptId = String(node.concept_type ?? '').trim();
+  const concept = conceptFromProfile(profile, conceptId);
+  const instruction = graphConceptInstruction(profile, conceptId);
+  const explicit = String(enterprise.layer_id ?? node.layer ?? node.metadata?.layer ?? node.properties?.layer ?? instruction?.default_layer ?? concept?.default_layer ?? '').trim();
   if (explicit) return explicit;
-  const abstraction = String(node.abstraction_level ?? '').trim();
-  if (abstraction === 'portfolio') return profile?.layers?.strategy ? 'strategy' : 'portfolio';
-  if (abstraction === 'capability' || abstraction === 'feature') return profile?.layers?.product ? 'product' : 'product';
-  if (abstraction === 'implementation') return profile?.layers?.delivery ? 'delivery' : 'implementation';
   return 'unassigned';
 }
 
@@ -298,6 +344,20 @@ function mapProjectionData(map: EnterpriseMapProjectionData, profile: OntologyPr
       metadata: asRecord(node.metadata),
       properties: asRecord(node.properties),
       validationIssues: asIssues(node.validation_issues),
+      reviewState: String(node.review_state ?? node.candidate_state ?? 'unreviewed'),
+      confidence: optionalNumber(node.confidence),
+      provenanceRefs: asStringList(node.provenance_refs),
+      externalRef: optionalRecord(node.external_ref),
+      eventCount: Number((node as EnterpriseMapNode).event_count ?? 0),
+      activeEventCount: Number((node as EnterpriseMapNode).active_event_count ?? 0),
+      timeRange: ((node as EnterpriseMapNode).time_range ?? null) as Record<string, unknown> | string | null,
+      seriesRefs: asStringList((node as EnterpriseMapNode).series_refs),
+      flowRefs: asStringList((node as EnterpriseMapNode).flow_refs),
+      state: typeof (node as EnterpriseMapNode).state === 'string' ? String((node as EnterpriseMapNode).state) : null,
+      stateColor: typeof (node as EnterpriseMapNode & { state_color?: unknown }).state_color === 'string' ? String((node as EnterpriseMapNode & { state_color?: unknown }).state_color) : null,
+      stateMachineRef: typeof (node as EnterpriseMapNode & { state_machine_ref?: unknown }).state_machine_ref === 'string' ? String((node as EnterpriseMapNode & { state_machine_ref?: unknown }).state_machine_ref) : null,
+      simulationState: typeof (node as EnterpriseMapNode).simulation_state === 'string' ? String((node as EnterpriseMapNode).simulation_state) : null,
+      simulationRefs: asStringList((node as EnterpriseMapNode & { simulation_refs?: unknown }).simulation_refs),
       sourceNode: node,
     };
   });
@@ -314,9 +374,14 @@ function mapProjectionData(map: EnterpriseMapProjectionData, profile: OntologyPr
       type: relationType,
       label: String(edge.display_label ?? relation?.label ?? titleize(relationType)),
       family: String(edge.family ?? relation?.family ?? 'semantic'),
-      style: String(edge.style ?? relation?.style ?? 'solid'),
-      weight: Number(edge.weight ?? relation?.weight ?? 1),
+      style: String(edge.style ?? relationshipStyle(profile, relationType, null)),
+      weight: Number(edge.weight ?? relationshipWeight(profile, relationType, null)),
       isCandidate: Boolean(edge.is_candidate),
+      reviewState: String(edge.review_state ?? edge.candidate_state ?? 'unreviewed'),
+      confidence: optionalNumber(edge.confidence),
+      provenanceRefs: asStringList(edge.provenance_refs),
+      externalRef: optionalRecord(edge.external_ref),
+      mapDirection: edge.map_direction ?? null,
       validationIssues: asIssues(edge.validation_issues),
     };
   });
@@ -342,14 +407,35 @@ function mapProjectionData(map: EnterpriseMapProjectionData, profile: OntologyPr
       sourceNodeCount: Number(map.stats.source_node_count ?? map.stats.node_count),
       sourceEdgeCount: Number(map.stats.source_edge_count ?? map.stats.edge_count),
       limit: typeof map.stats.limit === 'number' ? map.stats.limit : undefined,
+      flowCount: Number(map.stats.flow_count ?? 0),
+      stateMachineCount: Number(map.stats.state_machine_count ?? 0),
+      simulationScenarioCount: Number(map.stats.simulation_scenario_count ?? 0),
+    },
+    analysis: {
+      flow_count: Number((map.meta?.analysis as Record<string, unknown> | undefined)?.flow_count ?? map.stats.flow_count ?? 0),
+      state_machine_count: Number((map.meta?.analysis as Record<string, unknown> | undefined)?.state_machine_count ?? map.stats.state_machine_count ?? 0),
+      simulation_scenario_count: Number((map.meta?.analysis as Record<string, unknown> | undefined)?.simulation_scenario_count ?? map.stats.simulation_scenario_count ?? 0),
+      simulation_provider_required: Boolean((map.meta?.analysis as Record<string, unknown> | undefined)?.simulation_provider_required),
+      provider_contract: typeof (map.meta?.analysis as Record<string, unknown> | undefined)?.provider_contract === 'string' ? String((map.meta?.analysis as Record<string, unknown> | undefined)?.provider_contract) : undefined,
     },
   };
 }
 
 function relationshipMapDirection(profile: OntologyProfile | null, relationType: string) {
   const relationship = relationFromProfile(profile, relationType);
-  const graphInstruction = profile?.graph_instruction as { relationship_type_defaults?: Record<string, { map_direction?: string }> } | undefined;
-  return String(graphInstruction?.relationship_type_defaults?.[relationType]?.map_direction ?? relationship?.map_direction ?? 'forward');
+  const instruction = graphRelationshipInstruction(profile, relationType);
+  return String(instruction?.map_direction ?? relationship?.map_direction ?? 'forward');
+}
+
+function relationshipStyle(profile: OntologyProfile | null, relationType: string, edgeStyle?: string | null) {
+  const instruction = graphRelationshipInstruction(profile, relationType);
+  if (instruction?.dash) return instruction.dash.startsWith('2') ? 'dotted' : 'dashed';
+  return String(edgeStyle ?? relationFromProfile(profile, relationType)?.style ?? 'solid');
+}
+
+function relationshipWeight(profile: OntologyProfile | null, relationType: string, edgeWeight?: number | null) {
+  const instruction = graphRelationshipInstruction(profile, relationType);
+  return Number(instruction?.weight ?? edgeWeight ?? relationFromProfile(profile, relationType)?.weight ?? 1);
 }
 
 function mapExplorerFallback(nodes: ExplorerNode[], edges: ExplorerEdge[], profile: OntologyProfile | null, namespace: string | null): OntologyMapData {
@@ -363,9 +449,9 @@ function mapExplorerFallback(nodes: ExplorerNode[], edges: ExplorerEdge[], profi
       name: node.name || node.id,
       label: node.label || String(node.concept_type ?? 'object'),
       objectType: String(node.concept_type ?? node.label ?? 'object'),
-      objectTypeLabel: String(concept?.label ?? titleize(node.concept_type ?? node.label)),
-      objectColor: String(concept?.color ?? fallbackColor(String(node.concept_type ?? node.label ?? node.id))),
-      objectShape: concept?.shape ?? null,
+      objectTypeLabel: String(graphConceptInstruction(profile, node.concept_type)?.label_template ? titleize(node.concept_type ?? node.label) : concept?.label ?? titleize(node.concept_type ?? node.label)),
+      objectColor: String(graphConceptInstruction(profile, node.concept_type)?.color ?? concept?.color ?? fallbackColor(String(node.concept_type ?? node.label ?? node.id))),
+      objectShape: graphConceptInstruction(profile, node.concept_type)?.shape ?? concept?.shape ?? null,
       layerId,
       layerLabel: String(layerLabelFromProfile(profile, layerId) ?? titleize(layerId)),
       layerOrder: Number(profile?.layers?.[layerId]?.order ?? 999),
@@ -379,6 +465,20 @@ function mapExplorerFallback(nodes: ExplorerNode[], edges: ExplorerEdge[], profi
       metadata: asRecord(node.metadata),
       properties: asRecord(node.properties),
       validationIssues: asIssues(node.validation_issues),
+      reviewState: String(node.review_state ?? node.candidate_state ?? 'unreviewed'),
+      confidence: optionalNumber(node.confidence),
+      provenanceRefs: asStringList(node.provenance_refs),
+      externalRef: optionalRecord(node.external_ref),
+      eventCount: Number((node as ExplorerNode & Partial<EnterpriseMapNode>).event_count ?? 0),
+      activeEventCount: Number((node as ExplorerNode & Partial<EnterpriseMapNode>).active_event_count ?? 0),
+      timeRange: ((node as ExplorerNode & Partial<EnterpriseMapNode>).time_range ?? null) as Record<string, unknown> | string | null,
+      seriesRefs: asStringList((node as ExplorerNode & Partial<EnterpriseMapNode>).series_refs),
+      flowRefs: asStringList((node as ExplorerNode & Partial<EnterpriseMapNode>).flow_refs),
+      state: typeof (node as ExplorerNode & Partial<EnterpriseMapNode>).state === 'string' ? String((node as ExplorerNode & Partial<EnterpriseMapNode>).state) : null,
+      stateColor: typeof (node as ExplorerNode & Partial<EnterpriseMapNode> & { state_color?: unknown }).state_color === 'string' ? String((node as ExplorerNode & Partial<EnterpriseMapNode> & { state_color?: unknown }).state_color) : null,
+      stateMachineRef: typeof (node as ExplorerNode & Partial<EnterpriseMapNode> & { state_machine_ref?: unknown }).state_machine_ref === 'string' ? String((node as ExplorerNode & Partial<EnterpriseMapNode> & { state_machine_ref?: unknown }).state_machine_ref) : null,
+      simulationState: typeof (node as ExplorerNode & Partial<EnterpriseMapNode>).simulation_state === 'string' ? String((node as ExplorerNode & Partial<EnterpriseMapNode>).simulation_state) : null,
+      simulationRefs: asStringList((node as ExplorerNode & Partial<EnterpriseMapNode> & { simulation_refs?: unknown }).simulation_refs),
       sourceNode: node,
     };
   });
@@ -394,9 +494,14 @@ function mapExplorerFallback(nodes: ExplorerNode[], edges: ExplorerEdge[], profi
       type: relationType,
       label: String(edge.display_label ?? relation?.label ?? titleize(relationType)),
       family: String(edge.family ?? relation?.family ?? 'semantic'),
-      style: String(edge.style ?? relation?.style ?? 'solid'),
-      weight: Number(edge.weight ?? relation?.weight ?? 1),
-      isCandidate: Boolean(edge.is_candidate),
+      style: relationshipStyle(profile, relationType, edge.style),
+      weight: relationshipWeight(profile, relationType, edge.weight),
+      reviewState: String(edge.review_state ?? edge.candidate_state ?? 'unreviewed'),
+      confidence: optionalNumber(edge.confidence),
+      provenanceRefs: asStringList(edge.provenance_refs),
+      externalRef: optionalRecord(edge.external_ref),
+      mapDirection: edge.map_direction ?? null,
+      isCandidate: Boolean(edge.is_candidate || edge.review_state === 'candidate'),
       validationIssues: asIssues(edge.validation_issues),
     };
   });
@@ -421,7 +526,11 @@ function mapExplorerFallback(nodes: ExplorerNode[], edges: ExplorerEdge[], profi
         + relations.reduce((sum, relation) => sum + relation.validationIssues.length, 0),
       sourceNodeCount: objects.length,
       sourceEdgeCount: relations.length,
+      flowCount: 0,
+      stateMachineCount: 0,
+      simulationScenarioCount: 0,
     },
+    analysis: { flow_count: 0, state_machine_count: 0, simulation_scenario_count: 0 },
   };
 }
 
@@ -470,6 +579,7 @@ function filterValues(data: OntologyMapData, key: FilterKey) {
   if (key === 'relationshipFamily') return Array.from(new Set(data.relations.map((relation) => relation.family))).sort();
   if (key === 'pack') return Array.from(new Set(data.objects.map((object) => object.packId))).sort();
   if (key === 'lifecycle') return Array.from(new Set(data.objects.map((object) => object.lifecycleState))).sort();
+  if (key === 'review') return Array.from(new Set([...data.objects.map((object) => object.reviewState), ...data.relations.map((relation) => relation.reviewState)])).sort();
   if (key === 'owner') return Array.from(new Set(data.objects.map((object) => object.owner))).sort();
   return Array.from(new Set(data.objects.map((object) => object.qualityState))).sort();
 }
@@ -490,6 +600,7 @@ function objectVisible(object: OntologyObject, filters: ActiveFilters) {
     && filters.abstraction.includes(object.abstractionId)
     && filters.pack.includes(object.packId)
     && filters.lifecycle.includes(object.lifecycleState)
+    && filters.review.includes(object.reviewState)
     && filters.owner.includes(object.owner)
     && filters.quality.includes(object.qualityState)
   );
@@ -498,7 +609,8 @@ function objectVisible(object: OntologyObject, filters: ActiveFilters) {
 function relationVisible(relation: OntologyRelation, visibleObjectIds: Set<string>, filters: ActiveFilters) {
   return visibleObjectIds.has(relation.mapSource)
     && visibleObjectIds.has(relation.mapTarget)
-    && filters.relationshipFamily.includes(relation.family);
+    && filters.relationshipFamily.includes(relation.family)
+    && filters.review.includes(relation.reviewState);
 }
 
 function computeLayout(data: OntologyMapData, objects: OntologyObject[], hostWidth: number, density: DensityMode = 'comfortable'): LayoutResult {
@@ -561,25 +673,59 @@ function issueText(issue: Record<string, unknown>) {
   return String(issue.message ?? issue.code ?? issue.path ?? 'Ontology validation issue');
 }
 
-export default function EnterpriseMapPanel({ selectedNamespace }: { selectedNamespace: string | null }) {
-  const enterpriseMap = useEnterpriseMap(selectedNamespace, 200);
-  const explorer = useKnowledgeExplorer(selectedNamespace);
+interface EnterpriseMapPanelProps {
+  selectedNamespace: string | null;
+  /** Deterministic browser-QA data. When provided, API hooks are disabled. */
+  fixtureMap?: EnterpriseMapProjectionData;
+  fixtureProfile?: OntologyProfile | null;
+  fixtureInitialSelectedId?: string | null;
+  fixtureObservationEvents?: ObservationEvent[];
+  fixtureTimeSeries?: TimeSeries[];
+  /** Workbench-shell profile draft used for labels/defaults without disabling live map hooks. */
+  profileOverride?: OntologyProfile | null;
+  /** Example-only map used only when no live/projection/explorer objects exist. */
+  fallbackMap?: EnterpriseMapProjectionData | null;
+  /** Optional shell-driven concept type focus from the Spec Lens selection. */
+  conceptTypeFilter?: string | null;
+  onInstanceSelect?: (selection: { id: string; title: string; concept_type: string; source: 'live' | 'example' }) => void;
+}
+
+export default function EnterpriseMapPanel({
+  selectedNamespace,
+  fixtureMap,
+  fixtureProfile,
+  fixtureInitialSelectedId = null,
+  fixtureObservationEvents = [],
+  fixtureTimeSeries = [],
+  profileOverride = null,
+  fallbackMap = null,
+  conceptTypeFilter = null,
+  onInstanceSelect,
+}: EnterpriseMapPanelProps) {
+  const hookNamespace = fixtureMap ? null : selectedNamespace;
+  const enterpriseMap = useEnterpriseMap(hookNamespace, 200);
+  const explorer = useKnowledgeExplorer(hookNamespace);
   const { isSeeded, seed } = explorer;
-  const { profile } = useOntologyProfile(selectedNamespace);
+  const { profile } = useOntologyProfile(hookNamespace);
+  const liveMap = fixtureMap ?? enterpriseMap.map;
+  const effectiveProfile = fixtureProfile ?? profileOverride ?? profile;
+  const shouldUseFallbackMap = !fixtureMap && !liveMap?.nodes.length && !explorer.nodes.length && Boolean(fallbackMap?.nodes.length);
+  const effectiveMap = shouldUseFallbackMap ? fallbackMap : liveMap;
   const [activeView, setActiveView] = React.useState<ViewName>('map');
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [savedFocusId, setSavedFocusId] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(fixtureInitialSelectedId);
+  const [savedFocusId, setSavedFocusId] = React.useState<string | null>(fixtureInitialSelectedId);
   const [page, setPage] = React.useState(0);
   const [pageSize, setPageSize] = React.useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [density, setDensity] = React.useState<DensityMode>('comfortable');
+  const [timeMode, setTimeMode] = React.useState<TimeSelectionMode>('none');
   const [hostWidth, setHostWidth] = React.useState(980);
   const graphHostRef = React.useRef<HTMLDivElement | null>(null);
   const svgUid = React.useId().replace(/:/g, '');
 
   React.useEffect(() => {
-    if (!selectedNamespace || isSeeded || enterpriseMap.isLoading || enterpriseMap.map?.nodes.length) return;
+    if (fixtureMap || fallbackMap || !selectedNamespace || isSeeded || enterpriseMap.isLoading || effectiveMap?.nodes.length) return;
     void seed(40);
-  }, [enterpriseMap.isLoading, enterpriseMap.map?.nodes.length, isSeeded, seed, selectedNamespace]);
+  }, [enterpriseMap.isLoading, effectiveMap?.nodes.length, fallbackMap, fixtureMap, isSeeded, seed, selectedNamespace]);
 
   React.useEffect(() => {
     const host = graphHostRef.current;
@@ -595,24 +741,24 @@ export default function EnterpriseMapPanel({ selectedNamespace }: { selectedName
     return () => observer.disconnect();
   }, []);
 
-  const enterpriseSignature = enterpriseMap.map
+  const enterpriseSignature = effectiveMap
     ? [
-      enterpriseMap.map.layers.map((layer) => `${layer.id}:${layer.label}:${layer.order}:${layer.count}`).join('|'),
-      enterpriseMap.map.nodes.map((node) => `${node.id}:${node.name}:${node.layer_id}:${node.layer_label}:${node.concept_type}:${node.lifecycle_state}:${node.pack_id}`).join('|'),
-      enterpriseMap.map.edges.map((edge) => `${edge.source}:${edge.target}:${edge.map_source}:${edge.map_target}:${edge.relationship_type || edge.label}`).join('|'),
-      enterpriseMap.map.stats.ontology_candidate_count ?? 0,
+      effectiveMap.layers.map((layer) => `${layer.id}:${layer.label}:${layer.order}:${layer.count}`).join('|'),
+      effectiveMap.nodes.map((node) => `${node.id}:${node.name}:${node.layer_id}:${node.layer_label}:${node.concept_type}:${node.lifecycle_state}:${node.pack_id}`).join('|'),
+      effectiveMap.edges.map((edge) => `${edge.source}:${edge.target}:${edge.map_source}:${edge.map_target}:${edge.relationship_type || edge.label}`).join('|'),
+      effectiveMap.stats.ontology_candidate_count ?? 0,
     ].join('::')
     : 'no-enterprise-map';
   const graphSignature = [
     explorer.nodes.map((node) => `${node.id}:${node.name}:${node.layer}:${node.concept_type}:${node.lifecycle_state}:${node.pack_id}`).join('|'),
     explorer.edges.map((edge) => `${edge.source}:${edge.target}:${edge.relationship_type || edge.label}`).join('|'),
   ].join('::');
-  const profileSignature = profile ? JSON.stringify({ profile_id: profile.profile_id, version: profile.version, concept_types: profile.concept_types, relationship_types: profile.relationship_types, layers: profile.layers }) : 'no-profile';
+  const profileSignature = effectiveProfile ? JSON.stringify({ profile_id: effectiveProfile.profile_id, version: effectiveProfile.version, concept_types: effectiveProfile.concept_types, relationship_types: effectiveProfile.relationship_types, graph_instruction: effectiveProfile.graph_instruction, layers: effectiveProfile.layers }) : 'no-profile';
 
   const data = React.useMemo(() => {
-    if (enterpriseMap.map?.nodes.length) return mapProjectionData(enterpriseMap.map, profile, selectedNamespace);
-    if (explorer.nodes.length) return mapExplorerFallback(explorer.nodes, explorer.edges, profile, selectedNamespace);
-    return { ...DEFAULT_MAP_DATA, ...profileMeta(null, profile, selectedNamespace) };
+    if (effectiveMap?.nodes.length) return mapProjectionData(effectiveMap, effectiveProfile, selectedNamespace);
+    if (!fixtureMap && explorer.nodes.length) return mapExplorerFallback(explorer.nodes, explorer.edges, effectiveProfile, selectedNamespace);
+    return { ...DEFAULT_MAP_DATA, ...profileMeta(null, effectiveProfile, selectedNamespace) };
     // Hook adapters can return new identities while carrying identical graph content.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enterpriseSignature, graphSignature, profileSignature, selectedNamespace]);
@@ -625,6 +771,15 @@ export default function EnterpriseMapPanel({ selectedNamespace }: { selectedName
     setPage(0);
   }, [data, savedFocusId]);
 
+  React.useEffect(() => {
+    if (!conceptTypeFilter) return;
+    setFilters((current) => ({
+      ...current,
+      objectType: data.objects.some((object) => object.objectType === conceptTypeFilter) ? [conceptTypeFilter] : current.objectType,
+    }));
+    setPage(0);
+  }, [conceptTypeFilter, data.objects]);
+
   const filteredObjects = React.useMemo(() => data.objects.filter((object) => objectVisible(object, filters)), [data.objects, filters]);
   const totalPages = Math.max(1, Math.ceil(filteredObjects.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
@@ -636,7 +791,20 @@ export default function EnterpriseMapPanel({ selectedNamespace }: { selectedName
   );
   const layout = React.useMemo(() => computeLayout(data, visibleObjects, hostWidth, density), [data, visibleObjects, hostWidth, density]);
   const selectedObject = selectedId ? data.objects.find((object) => object.id === selectedId) ?? null : null;
+  const mapSourceKind: 'live' | 'example' = shouldUseFallbackMap ? 'example' : 'live';
+  const hookObservation = useOntologyObservation(hookNamespace, selectedId);
+  const rawObservationEvents = fixtureMap ? fixtureObservationEvents.filter((event) => !selectedId || event.subject_id === selectedId) : hookObservation.events;
+  const rawTimeSeries = fixtureMap ? fixtureTimeSeries.filter((item) => !selectedId || item.subject_id === selectedId) : hookObservation.series;
+  const observationEvents = React.useMemo(
+    () => filterEventsForTimeMode(rawObservationEvents, timeMode, selectedObject, data.profileVersion),
+    [rawObservationEvents, timeMode, selectedObject, data.profileVersion],
+  );
+  const observationSeries = React.useMemo(
+    () => filterSeriesForTimeMode(rawTimeSeries, timeMode, observationEvents, selectedObject, data.profileVersion),
+    [rawTimeSeries, timeMode, observationEvents, selectedObject, data.profileVersion],
+  );
   const connected = React.useMemo(() => connectedObjectIds(data, selectedId), [data, selectedId]);
+  const workbenchModel = React.useMemo(() => mapLensAdapter(effectiveMap, selectedNamespace ?? undefined), [effectiveMap, selectedNamespace]);
   const graphEdges = React.useMemo(() => {
     const seenTypes = new Set<string>();
     return visibleRelations.flatMap<GraphEdge>((relation) => {
@@ -665,36 +833,20 @@ export default function EnterpriseMapPanel({ selectedNamespace }: { selectedName
   }, []);
 
   const selectObject = React.useCallback((id: string) => {
+    const object = data.objects.find((item) => item.id === id);
     setSelectedId(id);
     setSavedFocusId(id);
     setActiveView('map');
-  }, []);
+    if (object) onInstanceSelect?.({ id: object.id, title: object.name, concept_type: object.objectType, source: mapSourceKind });
+  }, [data.objects, mapSourceKind, onInstanceSelect]);
 
   return (
+    <WorkbenchShell model={workbenchModel} passthrough>
     <div className="enterprise-map-shell" data-testid="enterprise-map-panel" data-modules={ENTERPRISE_MAP_MODULES.join(',')}>
       <style>{MAP_PANEL_CSS}</style>
-      <header className="emp-header">
-        <div>
-          <h1>Enterprise Ontology Map</h1>
-          <div className="emp-meta">
-            {data.namespace ? <span>{data.namespace}</span> : <span>No namespace selected</span>}
-            <span>Profile {data.profileId} v{data.profileVersion}</span>
-            <span>{data.profileStatus}</span>
-          </div>
-        </div>
-        <nav className="emp-view-toggle" aria-label="Views">
-          {VIEW_BUTTONS.map((button) => (
-            <button
-              key={button.id}
-              type="button"
-              className={activeView === button.id ? 'active' : undefined}
-              onClick={() => setActiveView(button.id)}
-            >
-              {button.label}
-            </button>
-          ))}
-        </nav>
-      </header>
+      <EnterpriseMapHeader data={data} activeView={activeView} onViewChange={setActiveView} />
+      {shouldUseFallbackMap ? <div className="emp-example-banner" data-testid="enterprise-map-example-banner">Examples only — no confirmed company instances are available for this namespace. These cards come from GraphInstruction/domain-pack fallbacks and are not persisted.</div> : null}
+      {conceptTypeFilter ? <div className="emp-filter-banner" data-testid="enterprise-map-concept-filter">Map Lens filtered to type: <strong>{titleize(conceptTypeFilter)}</strong></div> : null}
 
       <SummaryBar data={data} visibleObjectCount={visibleObjects.length} visibleRelationCount={visibleRelations.length} />
       <LargeGraphControls
@@ -711,50 +863,135 @@ export default function EnterpriseMapPanel({ selectedNamespace }: { selectedName
         onRestoreFocus={() => savedFocusId && setSelectedId(savedFocusId)}
       />
       <OntologyPrinciples data={data} />
+      <MapObjectSelectionRail objects={visibleObjects} onSelectObject={selectObject} />
 
       <div className="emp-layout">
         <FiltersSidebar data={data} filters={filters} onToggle={toggleFilter} />
 
         <main className="emp-main">
-          <section className={`emp-main-view ${activeView === 'map' ? 'active' : ''}`}>
-            <div className="emp-graph-host" ref={graphHostRef}>
-              <GraphSvg
-                data={data}
-                layout={layout}
-                graphEdges={graphEdges}
-                selectedId={selectedId}
-                connected={connected}
-                svgUid={svgUid}
-                onSelectObject={(id) => { setSelectedId(id); if (id) setSavedFocusId(id); }}
-              />
-            </div>
-            <button
-              className={`emp-focus-hint ${selectedId ? 'show' : ''}`}
-              type="button"
-              onClick={() => setSelectedId(null)}
-            >
-              Clear focus
-            </button>
-            <Legend data={data} />
-          </section>
-
-          <section className={`emp-main-view ${activeView === 'layers' ? 'active' : ''}`}>
-            <LayersView data={data} onSelectObject={selectObject} />
-          </section>
-          <section className={`emp-main-view ${activeView === 'objects' ? 'active' : ''}`}>
-            <ObjectTypesView data={data} onSelectObject={selectObject} />
-          </section>
-          <section className={`emp-main-view ${activeView === 'relations' ? 'active' : ''}`}>
-            <RelationsView data={data} onSelectObject={selectObject} />
-          </section>
-          <section className={`emp-main-view ${activeView === 'quality' ? 'active' : ''}`}>
-            <QualityView data={data} onSelectObject={selectObject} />
-          </section>
+          <TimeSelectionControls mode={timeMode} onModeChange={(nextMode) => setTimeMode(nextMode)} />
+          <EnterpriseMapViews
+            activeView={activeView}
+            data={data}
+            layout={layout}
+            graphEdges={graphEdges}
+            selectedId={selectedId}
+            connected={connected}
+            svgUid={svgUid}
+            graphHostRef={graphHostRef}
+            onSelectObject={(id) => { setSelectedId(id); if (id) { setSavedFocusId(id); const object = data.objects.find((item) => item.id === id); if (object) onInstanceSelect?.({ id: object.id, title: object.name, concept_type: object.objectType, source: mapSourceKind }); } }}
+            onClearFocus={() => setSelectedId(null)}
+            onInspectObject={selectObject}
+          />
+          <SeriesTimePanel selectedObject={selectedObject} mode={timeMode} events={observationEvents} series={observationSeries} isLoading={fixtureMap ? false : hookObservation.isLoading} error={fixtureMap ? null : hookObservation.error} />
         </main>
 
         <DetailSidebar data={data} selectedObject={selectedObject} onSelectObject={selectObject} />
       </div>
     </div>
+    </WorkbenchShell>
+  );
+}
+
+
+function EnterpriseMapHeader({ data, activeView, onViewChange }: { data: OntologyMapData; activeView: ViewName; onViewChange: (view: ViewName) => void }) {
+  return (
+    <header className="emp-header">
+      <div>
+        <h1>Enterprise Ontology Map</h1>
+        <div className="emp-meta">
+          {data.namespace ? <span>{data.namespace}</span> : <span>No namespace selected</span>}
+          <span>Profile {data.profileId} v{data.profileVersion}</span>
+          <span>{data.profileStatus}</span>
+        </div>
+      </div>
+      <nav className="emp-view-toggle" aria-label="Views">
+        {VIEW_BUTTONS.map((button) => (
+          <button
+            key={button.id}
+            type="button"
+            className={activeView === button.id ? 'active' : undefined}
+            onClick={() => onViewChange(button.id)}
+          >
+            {button.label}
+          </button>
+        ))}
+      </nav>
+    </header>
+  );
+}
+
+function EnterpriseMapViews({
+  activeView,
+  data,
+  layout,
+  graphEdges,
+  selectedId,
+  connected,
+  svgUid,
+  graphHostRef,
+  onSelectObject,
+  onClearFocus,
+  onInspectObject,
+}: {
+  activeView: ViewName;
+  data: OntologyMapData;
+  layout: LayoutResult;
+  graphEdges: GraphEdge[];
+  selectedId: string | null;
+  connected: Set<string>;
+  svgUid: string;
+  graphHostRef: React.RefObject<HTMLDivElement | null>;
+  onSelectObject: (id: string | null) => void;
+  onClearFocus: () => void;
+  onInspectObject: (id: string) => void;
+}) {
+  return (
+    <>
+      <section className={`emp-main-view ${activeView === 'map' ? 'active' : ''}`}>
+        <div className="emp-graph-host" ref={graphHostRef}>
+          <GraphSvg
+            data={data}
+            layout={layout}
+            graphEdges={graphEdges}
+            selectedId={selectedId}
+            connected={connected}
+            svgUid={svgUid}
+            onSelectObject={onSelectObject}
+          />
+          <NodeHitOverlay
+            objects={data.objects}
+            layout={layout}
+            onSelectObject={onSelectObject}
+          />
+          <FlowStateOverlay data={data} selectedId={selectedId} onSelectObject={onSelectObject} />
+        </div>
+        <button
+          className={`emp-focus-hint ${selectedId ? 'show' : ''}`}
+          type="button"
+          onClick={onClearFocus}
+        >
+          Clear focus
+        </button>
+        <Legend data={data} />
+      </section>
+
+      <section className={`emp-main-view ${activeView === 'layers' ? 'active' : ''}`}>
+        <LayersView data={data} onSelectObject={onInspectObject} />
+      </section>
+      <section className={`emp-main-view ${activeView === 'objects' ? 'active' : ''}`}>
+        <ObjectTypesView data={data} onSelectObject={onInspectObject} />
+      </section>
+      <section className={`emp-main-view ${activeView === 'relations' ? 'active' : ''}`}>
+        <RelationsView data={data} onSelectObject={onInspectObject} />
+      </section>
+      <section className={`emp-main-view ${activeView === 'quality' ? 'active' : ''}`}>
+        <QualityView data={data} onSelectObject={onInspectObject} />
+      </section>
+      <section className={`emp-main-view ${activeView === 'simulation' ? 'active' : ''}`}>
+        <SimulationView data={data} onSelectObject={onInspectObject} />
+      </section>
+    </>
   );
 }
 
@@ -859,6 +1096,7 @@ function FiltersSidebar({ data, filters, onToggle }: { data: OntologyMapData; fi
     { key: 'relationshipFamily', label: 'Relationship family', color: (value) => fallbackColor(value) },
     { key: 'pack', label: 'Pack', color: () => null },
     { key: 'lifecycle', label: 'Lifecycle', color: (value) => fallbackColor(value) },
+    { key: 'review', label: 'Review state', color: (value) => fallbackColor(value) },
     { key: 'owner', label: 'Owner', color: () => null },
     { key: 'quality', label: 'Quality state', color: (value) => fallbackColor(value) },
   ];
@@ -903,6 +1141,7 @@ function countFilterValues(data: OntologyMapData, key: FilterKey) {
   if (key === 'relationshipFamily') return countBy(data.relations, 'family');
   if (key === 'pack') return countBy(data.objects, 'packId');
   if (key === 'lifecycle') return countBy(data.objects, 'lifecycleState');
+  if (key === 'review') return countBy(data.objects, 'reviewState');
   if (key === 'owner') return countBy(data.objects, 'owner');
   return countBy(data.objects, 'qualityState');
 }
@@ -987,7 +1226,7 @@ function GraphSvg({
       {data.objects.map((object) => {
         const pos = layout.positions[object.id];
         if (!pos) return null;
-        let cls = 'emp-node';
+        let cls = `emp-node ${object.lifecycleState === 'candidate' ? 'candidate-instance' : ''} ${object.reviewState === 'pending' ? 'pending-candidate-entity' : ''}`;
         if (selectedId) {
           if (object.id === selectedId) cls += ' selected';
           else if (connected.has(object.id)) cls += ' related';
@@ -998,19 +1237,10 @@ function GraphSvg({
             key={object.id}
             className={cls}
             data-testid={`enterprise-node-${object.id}`}
-            role="button"
-            aria-label={`Select ${object.name}`}
-            tabIndex={0}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onSelectObject(object.id);
-              }
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelectObject(object.id);
-            }}
+            aria-hidden="true"
+            onPointerDown={() => onSelectObject(object.id)}
+            onMouseDown={() => onSelectObject(object.id)}
+            onClick={() => onSelectObject(object.id)}
           >
             <rect
               x={pos.x}
@@ -1020,13 +1250,18 @@ function GraphSvg({
               rx={object.objectShape === 'rectangle' ? 2 : object.objectShape === 'diamond' ? 0 : 7}
               fill={`${object.objectColor}18`}
               stroke={object.objectColor}
-              strokeWidth="1.6"
-              strokeDasharray={object.validationIssues.length ? '5 4' : undefined}
+              strokeWidth={object.lifecycleState === 'candidate' ? '2.2' : '1.6'}
+              strokeDasharray={object.lifecycleState === 'candidate' ? '2 3' : object.validationIssues.length ? '5 4' : undefined}
             />
             <text x={pos.x + 9} y={pos.y + 17} className="id" fill="#354052">{truncate(object.id, 18)}</text>
             <text x={pos.x + 9} y={pos.y + 35} className="name" fill="#182230">{truncate(object.name, 24)}</text>
             <text x={pos.x + 9} y={pos.y + 54} className="meta" fill="#526071">{truncate(object.objectTypeLabel, 17)} - {truncate(object.lifecycleState, 10)}</text>
             <circle cx={pos.x + NODE_W - 13} cy={pos.y + 15} r="5" fill={object.objectColor} />
+            {object.lifecycleState === 'candidate' && <text x={pos.x + NODE_W - 42} y={pos.y + 18} className="badge-text" fill="#92400e">C</text>}
+            {object.validationIssues.length > 0 && <text x={pos.x + NODE_W - 30} y={pos.y + 18} className="badge-text" fill="#b91c1c">!</text>}
+            {object.activeEventCount > 0 && <text x={pos.x + NODE_W - 19} y={pos.y + 34} className="badge-text" fill="#166534">A</text>}
+            {object.eventCount > 0 && <text x={pos.x + NODE_W - 48} y={pos.y + 54} className="badge-text" fill="#1d4ed8">{object.eventCount}</text>}
+            <title>{`Select ${object.name}. ${object.eventCount} observation events.`}</title>
           </g>
         );
       })}
@@ -1041,6 +1276,68 @@ function pathBetween(x1: number, y1: number, x2: number, y2: number) {
   const dy = Math.abs(y2 - y1);
   const c = Math.max(36, dy * 0.35);
   return `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`;
+}
+
+function MapObjectSelectionRail({ objects, onSelectObject }: { objects: OntologyObject[]; onSelectObject: (id: string) => void }) {
+  const railRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+
+    const handleNativeSelection = (event: MouseEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const button = target?.closest<HTMLButtonElement>('[data-map-object-id]');
+      const objectId = button?.dataset.mapObjectId;
+      if (!objectId) return;
+      event.preventDefault();
+      onSelectObject(objectId);
+    };
+
+    rail.addEventListener('mousedown', handleNativeSelection);
+    rail.addEventListener('click', handleNativeSelection);
+    return () => {
+      rail.removeEventListener('mousedown', handleNativeSelection);
+      rail.removeEventListener('click', handleNativeSelection);
+    };
+  }, [onSelectObject]);
+
+  if (!objects.length) return null;
+  return (
+    <div ref={railRef} className="emp-selection-rail" aria-label="Visible map objects">
+      {objects.slice(0, 8).map((object) => (
+        <button key={object.id} type="button" data-map-object-id={object.id} aria-label={`Focus ${object.name}`}>
+          <span>{object.name}</span>
+          <small>{object.objectTypeLabel} · {object.lifecycleState}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NodeHitOverlay({ objects, layout, onSelectObject }: { objects: OntologyObject[]; layout: LayoutResult; onSelectObject: (id: string | null) => void }) {
+  return (
+    <div className="emp-node-hit-overlay" aria-label="Enterprise map node hit targets">
+      {objects.map((object) => {
+        const pos = layout.positions[object.id];
+        if (!pos) return null;
+        return (
+          <button
+            key={object.id}
+            type="button"
+            className="emp-node-overlay-button"
+            aria-label={`Select ${object.name}. ${object.eventCount} observation events.`}
+            style={{ left: pos.x, top: pos.y, width: NODE_W, height: NODE_H }}
+            onPointerDown={() => onSelectObject(object.id)}
+            onMouseDown={() => onSelectObject(object.id)}
+            onClick={() => onSelectObject(object.id)}
+          >
+            <span className="emp-sr-only">Select {object.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function Legend({ data }: { data: OntologyMapData }) {
@@ -1058,6 +1355,197 @@ function Legend({ data }: { data: OntologyMapData }) {
       <div className="emp-legend-title">Line style = relationship type style</div>
       <div className="emp-legend-item">Solid, dashed, dotted, and bold styles come from the relationship definition.</div>
     </div>
+  );
+}
+
+function dateMs(value?: string | null) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function selectedRangeMs(selectedObject: OntologyObject | null) {
+  const range = optionalRecord(selectedObject?.timeRange);
+  return { start: dateMs(String(range?.start ?? '')), end: dateMs(String(range?.end ?? '')) };
+}
+
+function eventMatchesCurrentProfile(event: ObservationEvent, profileVersion: string) {
+  const metadata = asRecord(event.metadata);
+  return String(metadata.profile_version ?? metadata.profileVersion ?? '') === profileVersion
+    || String(metadata.active_profile_version ?? '') === profileVersion
+    || event.subject_type === 'profile';
+}
+
+function filterEventsForTimeMode(events: ObservationEvent[], mode: TimeSelectionMode, selectedObject: OntologyObject | null, profileVersion: string) {
+  if (mode === 'none') return events;
+  if (mode === 'current_profile_version') return events.filter((event) => eventMatchesCurrentProfile(event, profileVersion));
+  if (mode === 'latest_import') {
+    const latestImport = events
+      .filter((event) => event.event_type.toLowerCase().includes('import'))
+      .map((event) => dateMs(event.occurred_at))
+      .filter((value): value is number => value !== null)
+      .sort((a, b) => b - a)[0];
+    return latestImport ? events.filter((event) => (dateMs(event.occurred_at) ?? 0) >= latestImport) : [];
+  }
+  const range = selectedRangeMs(selectedObject);
+  const fallbackStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const start = range.start ?? fallbackStart;
+  const end = range.end ?? Date.now();
+  return events.filter((event) => {
+    const occurred = dateMs(event.occurred_at);
+    return occurred !== null && occurred >= start && occurred <= end;
+  });
+}
+
+function filterSeriesForTimeMode(series: TimeSeries[], mode: TimeSelectionMode, events: ObservationEvent[], selectedObject: OntologyObject | null, profileVersion: string) {
+  if (mode === 'none') return series;
+  const eventTimes = new Set(events.map((event) => event.occurred_at));
+  const range = selectedRangeMs(selectedObject);
+  return series.map((item) => ({
+    ...item,
+    points: item.points.filter((point) => {
+      if (mode === 'current_profile_version') {
+        const metadata = asRecord(point.metadata);
+        return String(metadata.profile_version ?? metadata.profileVersion ?? '') === profileVersion;
+      }
+      if (mode === 'latest_import') return eventTimes.has(point.timestamp) || events.some((event) => dateMs(point.timestamp) !== null && dateMs(event.occurred_at) !== null && (dateMs(point.timestamp) as number) >= (dateMs(event.occurred_at) as number));
+      const timestamp = dateMs(point.timestamp);
+      const start = range.start ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const end = range.end ?? Date.now();
+      return timestamp !== null && timestamp >= start && timestamp <= end;
+    }),
+  })).filter((item) => item.points.length > 0);
+}
+
+function TimeSelectionControls({ mode, onModeChange }: { mode: TimeSelectionMode; onModeChange: (mode: TimeSelectionMode) => void }) {
+  const options: Array<{ id: TimeSelectionMode; label: string }> = [
+    { id: 'none', label: 'All time' },
+    { id: 'fixed_range', label: 'Fixed range' },
+    { id: 'latest_import', label: 'Latest import' },
+    { id: 'current_profile_version', label: 'Current profile' },
+  ];
+  return (
+    <div className="emp-time-controls" aria-label="Observation time selection" role="group">
+      <span>Time</span>
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={mode === option.id ? 'active' : ''}
+          aria-pressed={mode === option.id}
+          data-testid={`time-mode-${option.id}`}
+          onClick={() => onModeChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SeriesTimePanel({ selectedObject, mode, events, series, isLoading, error }: { selectedObject: OntologyObject | null; mode: TimeSelectionMode; events: ObservationEvent[]; series: TimeSeries[]; isLoading: boolean; error: string | null }) {
+  const isFilteredWindow = mode !== 'none';
+  const candidateEvents = events.filter((event) => event.event_type.toLowerCase().includes('candidate')).length;
+  const validationEvents = events.filter((event) => event.event_type.toLowerCase().includes('validation') || event.event_type.toLowerCase().includes('issue')).length;
+  const activeEvents = events.filter((event) => isActiveObservationEvent(event)).length;
+  const eventMetricValue = isFilteredWindow ? events.length : selectedObject?.eventCount || events.length;
+  const activeMetricValue = isFilteredWindow ? activeEvents : selectedObject?.activeEventCount ?? activeEvents;
+  const eventMetricHint = isFilteredWindow
+    ? `${mode.replace(/_/g, ' ')} window`
+    : selectedObject?.timeRange ? formatTimeRange(selectedObject.timeRange) : 'No time range recorded';
+  return (
+    <section className="emp-series-panel" aria-label="Series and time panel" data-testid="series-time-panel">
+      <div className="emp-series-head">
+        <div>
+          <h3>Series / Time</h3>
+          <p>{selectedObject ? `Observation signals for ${selectedObject.name}` : 'Select an object to inspect real observation signals.'}</p>
+        </div>
+        <span className="emp-badge">{mode.replace(/_/g, ' ')}</span>
+      </div>
+      {error ? <div className="emp-empty error">Could not load observation data: {error}</div> : null}
+      {isLoading ? <div className="emp-empty">Loading observation signals...</div> : null}
+      {!selectedObject && !isLoading ? <div className="emp-empty">No object selected. The panel stays empty rather than showing mock metrics.</div> : null}
+      {selectedObject && !isLoading && !error ? (
+        <div className="emp-series-grid">
+          <MetricCard label="Events" value={eventMetricValue} hint={eventMetricHint} />
+          <MetricCard label="Active" value={activeMetricValue} hint={isFilteredWindow ? 'active events in selected window' : 'confirmed/approved/issue events'} />
+          <MetricCard label="Candidates" value={candidateEvents} hint={isFilteredWindow ? 'candidate events in selected window' : 'candidate lifecycle events'} />
+          <MetricCard label="Validation" value={(isFilteredWindow ? 0 : selectedObject.validationIssues.length) + validationEvents} hint={isFilteredWindow ? 'validation events in selected window' : 'object issues + events'} />
+          <div className="emp-series-list">
+            <strong>Metric keys</strong>
+            {series.length ? series.map((item) => <span key={item.id}>{item.metric_id} ({item.points.length} pts)</span>) : <span>No time-series records for this selection.</span>}
+          </div>
+          <div className="emp-series-list">
+            <strong>Recent events</strong>
+            {events.length ? events.slice(0, 4).map((event) => <span key={event.id}>{titleize(event.event_type)} · {new Date(event.occurred_at).toLocaleString()}</span>) : <span>No observation events recorded for this object.</span>}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function MetricCard({ label, value, hint }: { label: string; value: number; hint: string }) {
+  return <div className="emp-metric-card"><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>;
+}
+
+function isActiveObservationEvent(event: ObservationEvent) {
+  const type = event.event_type.toLowerCase();
+  const value = String(event.value ?? '').toLowerCase();
+  return type.includes('approved') || type.includes('validation') || type.includes('issue') || value === 'approved' || value === 'warning' || value === 'active';
+}
+
+function formatTimeRange(value: Record<string, unknown> | string | null) {
+  if (!value) return 'No time window';
+  if (typeof value === 'string') return value;
+  const start = value.start ? new Date(String(value.start)).toLocaleDateString() : 'unknown';
+  const end = value.end ? new Date(String(value.end)).toLocaleDateString() : 'unknown';
+  return `${start} → ${end}`;
+}
+
+function FlowStateOverlay({ data, selectedId, onSelectObject }: { data: OntologyMapData; selectedId: string | null; onSelectObject: (id: string | null) => void }) {
+  const flowObjects = data.objects.filter((object) => object.flowRefs.length || object.state);
+  if (!flowObjects.length) return null;
+  return (
+    <div className="emp-analysis-overlay" aria-label="Flow and state overlays" data-testid="analysis-overlay">
+      <strong>Flow / state overlays</strong>
+      {flowObjects.slice(0, 4).map((object) => (
+        <button key={object.id} type="button" className={selectedId === object.id ? 'active' : undefined} onClick={() => onSelectObject(object.id)}>
+          <span>{object.name}</span>
+          <small>{object.flowRefs.length ? `${object.flowRefs.length} flow` : 'no flow'} · {object.state ? `state ${object.state}` : 'state pending'}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SimulationView({ data, onSelectObject }: { data: OntologyMapData; onSelectObject: (id: string) => void }) {
+  const scenarioObjects = data.objects.filter((object) => object.simulationState || object.simulationRefs.length);
+  return (
+    <>
+      <h2 className="emp-panel-title">Simulation extension point</h2>
+      <p className="emp-panel-subtitle">Simulation is provider-backed only. The core product stores scenarios and assumptions, but does not generate predictions or fake metrics.</p>
+      <div className="emp-simulation-rail" data-testid="simulation-rail">
+        {!data.analysis.simulation_scenario_count ? (
+          <div className="emp-empty">No simulation scenario exists for this namespace. Add a saved scenario and a provider before any outputs can appear.</div>
+        ) : null}
+        {data.analysis.simulation_scenario_count > 0 && data.analysis.simulation_provider_required ? (
+          <div className="emp-empty warning">Provider required: saved scenarios are present, but no registered analysis provider or saved result backs outputs yet.</div>
+        ) : null}
+        {data.analysis.provider_contract ? <div className="emp-provider-contract">{data.analysis.provider_contract}</div> : null}
+        {scenarioObjects.length ? (
+          <div className="emp-group-grid">
+            {scenarioObjects.map((object) => (
+              <article className="emp-group-card" key={object.id}>
+                <div className="name">{object.name}</div>
+                <div className="emp-pill-row"><span className="emp-pill">{object.simulationState?.replace(/_/g, ' ')}</span><span className="emp-pill">{object.simulationRefs.length} scenario refs</span></div>
+                <button type="button" onClick={() => onSelectObject(object.id)}>Inspect graph object</button>
+              </article>
+            ))}
+          </div>
+        ) : data.analysis.simulation_scenario_count ? <div className="emp-empty">Scenarios exist, but none reference currently visible graph nodes.</div> : null}
+      </div>
+    </>
   );
 }
 
@@ -1082,7 +1570,15 @@ function DetailSidebar({ data, selectedObject, onSelectObject }: { data: Ontolog
           <span className="emp-badge" style={{ borderColor: layerColor(selectedObject.layerId, selectedObject.layerLabel), background: `${layerColor(selectedObject.layerId, selectedObject.layerLabel)}16` }}>{selectedObject.layerLabel}</span>
           <span className="emp-badge" style={{ borderColor: selectedObject.objectColor, background: `${selectedObject.objectColor}18` }}>{selectedObject.objectTypeLabel}</span>
           <span className="emp-badge">{selectedObject.abstractionLabel}</span>
-          <span className="emp-badge">{selectedObject.lifecycleState}</span>
+          <span className="emp-badge">{selectedObject.lifecycleState === 'candidate' ? 'unverified candidate instance' : selectedObject.lifecycleState}</span>
+          {selectedObject.eventCount > 0 && <span className="emp-badge emp-badge-event">{selectedObject.eventCount} events</span>}
+          {selectedObject.activeEventCount > 0 && <span className="emp-badge emp-badge-active">active event</span>}
+          {selectedObject.validationIssues.length > 0 && <span className="emp-badge emp-badge-warning">validation issue</span>}
+          {selectedObject.reviewState && <span className="emp-badge">review: {selectedObject.reviewState}</span>}
+          {selectedObject.flowRefs.length > 0 && <span className="emp-badge emp-badge-flow">{selectedObject.flowRefs.length} flow refs</span>}
+          {selectedObject.state && <span className="emp-badge emp-badge-state" style={{ borderColor: selectedObject.stateColor ?? undefined }}>state: {selectedObject.state}</span>}
+          {selectedObject.simulationState && <span className="emp-badge emp-badge-sim">simulation: {selectedObject.simulationState.replace(/_/g, ' ')}</span>}
+          <span className="emp-badge">{selectedObject.provenanceRefs.length ? 'source-backed' : 'no source ref'}</span>
           <span className="emp-badge">{selectedObject.packId}</span>
         </div>
         <DetailField label="Description">{selectedObject.description}</DetailField>
@@ -1091,6 +1587,13 @@ function DetailSidebar({ data, selectedObject, onSelectObject }: { data: Ontolog
           Object type: <strong>{selectedObject.objectTypeLabel}</strong><br />
           Abstraction: <strong>{selectedObject.abstractionLabel}</strong><br />
           Owner: <strong>{selectedObject.owner}</strong>
+        </DetailField>
+        <DetailField label="Trust metadata">
+          Lifecycle: <strong>{selectedObject.lifecycleState}</strong><br />
+          Review: <strong>{selectedObject.reviewState}</strong><br />
+          Confidence: <strong>{formatConfidence(selectedObject.confidence)}</strong><br />
+          Provenance refs: <strong>{selectedObject.provenanceRefs.length ? selectedObject.provenanceRefs.join(', ') : 'none'}</strong><br />
+          External ref: <strong>{formatExternalRef(selectedObject.externalRef)}</strong>
         </DetailField>
         <DetailField label="Incoming relationships">
           <RelationChips relations={incoming} data={data} direction="incoming" onSelectObject={onSelectObject} empty="None" />
@@ -1101,6 +1604,12 @@ function DetailSidebar({ data, selectedObject, onSelectObject }: { data: Ontolog
         <DetailField label="Metadata">
           <MetadataTable metadata={selectedObject.metadata} />
         </DetailField>
+        <DetailField label="Analysis">
+          Flows: <strong>{selectedObject.flowRefs.length ? selectedObject.flowRefs.join(', ') : 'none'}</strong><br />
+          State machine: <strong>{selectedObject.stateMachineRef ?? 'none'}</strong><br />
+          State: <strong>{selectedObject.state ?? 'not configured'}</strong><br />
+          Simulation: <strong>{selectedObject.simulationState ? selectedObject.simulationState.replace(/_/g, ' ') : 'no scenario linked'}</strong>
+        </DetailField>
         <DetailField label="Validation">
           {selectedObject.validationIssues.length ? <IssueList issues={selectedObject.validationIssues} /> : 'No object-level validation issues.'}
         </DetailField>
@@ -1108,6 +1617,18 @@ function DetailSidebar({ data, selectedObject, onSelectObject }: { data: Ontolog
     </aside>
   );
 }
+
+function formatConfidence(value?: number | null) {
+  return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'not recorded';
+}
+
+function formatExternalRef(value?: Record<string, unknown> | null) {
+  if (!value) return 'none';
+  const system = String(value.system ?? 'external');
+  const id = String(value.id ?? value.external_id ?? 'unknown');
+  return `${system}:${id}`;
+}
+
 
 function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1128,6 +1649,7 @@ function RelationChips({ relations, data, direction, onSelectObject, empty }: { 
         return (
           <button key={`${relationKey(relation.mapSource, relation.mapTarget)}-${relation.type}`} type="button" onClick={() => onSelectObject(peerId)}>
             {relation.label}: {peer ? peer.name : peerId}
+            <span className="emp-relation-meta">{relation.reviewState ?? 'unreviewed'}{relation.provenanceRefs.length ? ' · source-backed' : ''}{relation.externalRef ? ` · ${formatExternalRef(relation.externalRef)}` : ''}</span>
           </button>
         );
       })}
@@ -1309,6 +1831,8 @@ function ObjectButtons({ objects, onSelectObject }: { objects: OntologyObject[];
 }
 
 const MAP_PANEL_CSS = `
+.emp-example-banner, .emp-filter-banner { margin: 0 0 12px; border: 1px solid rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.12); color: #92400e; border-radius: 14px; padding: 10px 14px; font-size: 12px; font-weight: 700; }
+.emp-filter-banner { border-color: rgba(37, 99, 235, 0.28); background: rgba(37, 99, 235, 0.08); color: #1d4ed8; }
 .enterprise-map-shell {
   --emp-bg: #f7f8fa;
   --emp-panel: #ffffff;
@@ -1578,8 +2102,92 @@ const MAP_PANEL_CSS = `
 .emp-node .meta {
   font-size: 10px;
 }
+.emp-node text,
+.emp-node circle,
+.emp-node title {
+  pointer-events: none;
+}
+.emp-node:focus-visible rect {
+  outline: none;
+  filter: drop-shadow(0 0 0 rgba(37, 99, 235, 0.46)) drop-shadow(0 2px 5px rgba(37, 99, 235, 0.22));
+}
+.emp-selection-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--emp-line);
+  border-bottom: 1px solid var(--emp-line);
+  background: #f8fafc;
+}
+.emp-selection-rail button {
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #fff;
+  color: #172033;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 760;
+}
+.emp-selection-rail small { color: #64748b; font-weight: 650; }
+.emp-node-hit-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: auto;
+}
+.emp-node-overlay-button {
+  position: absolute;
+  z-index: 2;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.emp-node-overlay-button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.46);
+  outline-offset: -3px;
+  border-radius: 7px;
+}
+.emp-node-hit-target {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.emp-node-hit-target:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.46);
+  outline-offset: -3px;
+}
+.emp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .emp-node.dimmed { opacity: 0.18; }
 .emp-node.related { opacity: 0.88; }
+.emp-node.candidate-instance rect {
+  fill: rgba(245, 158, 11, 0.12);
+  filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0.18));
+}
+.emp-node.pending-candidate-entity rect {
+  stroke-dasharray: 7 4;
+}
 .emp-node.selected rect {
   stroke-width: 2.6;
   filter: drop-shadow(0 2px 5px rgba(37, 99, 235, 0.22));
@@ -1604,6 +2212,7 @@ const MAP_PANEL_CSS = `
 }
 .emp-legend {
   position: fixed;
+  pointer-events: none;
   right: 348px;
   bottom: 16px;
   width: 266px;
@@ -1696,6 +2305,12 @@ const MAP_PANEL_CSS = `
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+.emp-relation-meta {
+  display: block;
+  color: #64748b;
+  font-size: 10px;
+  margin-top: 2px;
 }
 .emp-relations button,
 .emp-object-buttons button,
@@ -1864,4 +2479,30 @@ const MAP_PANEL_CSS = `
   .emp-plan-grid,
   .emp-quality-grid { grid-template-columns: 1fr; }
 }
+
+.emp-analysis-overlay {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  z-index: 3;
+  width: min(260px, calc(100% - 28px));
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.94);
+  box-shadow: 0 12px 30px rgba(15,23,42,0.12);
+  padding: 10px;
+  display: grid;
+  gap: 7px;
+}
+.emp-analysis-overlay strong { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #475569; }
+.emp-analysis-overlay button { border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; text-align: left; padding: 7px 8px; cursor: pointer; }
+.emp-analysis-overlay button.active { border-color: #2563eb; background: #eff6ff; }
+.emp-analysis-overlay span { display: block; font-weight: 760; color: #172033; }
+.emp-analysis-overlay small { color: #64748b; }
+.emp-simulation-rail { display: grid; gap: 12px; }
+.emp-provider-contract { border: 1px dashed #94a3b8; border-radius: 12px; background: #f8fafc; padding: 10px 12px; color: #475569; }
+.emp-empty.warning { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+.emp-badge-flow { border-color: #0ea5e9; background: #e0f2fe; }
+.emp-badge-state { background: #f8fafc; }
+.emp-badge-sim { border-color: #8b5cf6; background: #f5f3ff; }
 `;

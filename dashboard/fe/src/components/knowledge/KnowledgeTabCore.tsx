@@ -6,6 +6,7 @@ import { useKnowledgeNamespaces } from '@/hooks/use-knowledge-namespaces';
 import { useKnowledgeImportMonitor } from '@/hooks/use-knowledge-import';
 import { useKnowledgeQuery } from '@/hooks/use-knowledge-query';
 import { useNotificationStore } from '@/lib/stores/notificationStore';
+import { useUIStore } from '@/lib/stores/uiStore';
 import NamespaceSidebar from '@/components/knowledge/NamespaceSidebar';
 import NamespaceOverview from '@/components/knowledge/NamespaceOverview';
 import NamespaceList from '@/components/knowledge/NamespaceList';
@@ -76,11 +77,13 @@ export default function KnowledgeTabCore({
   const [showMetricsPanel, setShowMetricsPanel] = useState(false);
   const router = useRouter();
   const addToast = useNotificationStore((state) => state.addToast);
+  const { namespaceSidebarCollapsed, toggleNamespaceSidebar } = useUIStore();
 
   // Hooks
   const {
     namespaces,
     isLoading: namespacesLoading,
+    isError: namespacesError,
     createNamespace,
     refresh: refreshNamespaces,
   } = useKnowledgeNamespaces();
@@ -103,7 +106,6 @@ export default function KnowledgeTabCore({
     jobs,
     graphCounts,
     activeJob,
-    latestJob,
     isLoading: jobsLoading,
     startImport,
     refreshJobs,
@@ -290,6 +292,40 @@ export default function KnowledgeTabCore({
     ? detailTabs.filter(t => t.id !== 'overview')
     : detailTabs;
 
+  // Error state — surface auth/proxy/runtime failures instead of spinning forever.
+  if (namespacesError && !namespaces) {
+    const errorMessage = namespacesError instanceof Error
+      ? namespacesError.message
+      : 'Knowledge namespaces could not be loaded.';
+    return (
+      <div className={`h-full flex items-center justify-center ${className}`}>
+        <div className="text-center space-y-4 max-w-md">
+          <span
+            className="material-symbols-outlined text-[48px]"
+            style={{ color: 'var(--color-danger)' }}
+          >
+            error
+          </span>
+          <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text-main)' }}>
+            Knowledge namespaces could not be loaded
+          </h3>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            {errorMessage}
+          </p>
+          <button
+            type="button"
+            onClick={() => refreshNamespaces()}
+            className="rounded-full border px-4 py-2 text-sm font-semibold transition hover:-translate-y-0.5"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+
   // Loading state
   if (namespacesLoading && !namespaces) {
     return (
@@ -438,8 +474,13 @@ export default function KnowledgeTabCore({
     <div className={`h-full flex overflow-hidden ${className}`}>
       {/* Left sidebar — namespace list */}
       <div
-        className="w-[260px] shrink-0 border-r flex flex-col"
-        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        className="shrink-0 border-r flex flex-col overflow-hidden transition-all duration-200 ease-out"
+        style={{
+          width: namespaceSidebarCollapsed ? 56 : 260,
+          minWidth: namespaceSidebarCollapsed ? 56 : 260,
+          borderColor: 'var(--color-border)',
+          background: 'var(--color-surface)',
+        }}
       >
         <NamespaceSidebar
           namespaces={displayNamespaces ?? []}
@@ -447,10 +488,12 @@ export default function KnowledgeTabCore({
           onSelect={handleSelectNamespace}
           onCreateClick={() => setShowCreateModal(true)}
           isLoading={namespacesLoading}
+          collapsed={namespaceSidebarCollapsed}
+          onToggleCollapsed={toggleNamespaceSidebar}
         />
 
         {/* Metrics toggle at bottom of sidebar */}
-        {showMetrics && (
+        {showMetrics && !namespaceSidebarCollapsed && (
           <div className="shrink-0 border-t" style={{ borderColor: 'var(--color-border)' }}>
             <button
               onClick={() => setShowMetricsPanel(!showMetricsPanel)}
@@ -476,6 +519,32 @@ export default function KnowledgeTabCore({
 
       {/* Right detail area — query-first unified view */}
       <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--color-background)' }}>
+        {selectedNamespace && (
+          <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+            <nav className="flex max-w-full items-center gap-1 overflow-x-auto" aria-label="Knowledge detail views" data-testid="knowledge-detail-tabs">
+              {visibleDetailTabs.map((tab) => {
+                const isActive = activeDetailView === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveDetailView(tab.id)}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                      isActive
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-text-muted hover:bg-surface-hover hover:text-text-main'
+                    }`}
+                    aria-label={tab.label}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{tab.icon}</span>
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        )}
         <div className="flex-1 overflow-hidden">
           {!selectedNamespace ? (
             /* No namespace selected */

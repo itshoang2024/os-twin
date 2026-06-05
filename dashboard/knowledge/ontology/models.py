@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -13,6 +15,26 @@ _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 LifecycleState = Literal["draft", "active", "deprecated", "retired"]
+
+
+class OntologyUnitLifecycle(str, Enum):
+    """Lifecycle states for the namespace-scoped ontology aggregate root."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    RETIRED = "retired"
+
+
+ONTOLOGY_LIFECYCLE_STATES = frozenset(item.value for item in OntologyUnitLifecycle)
+
+
+def is_ontology_lifecycle_state(value: str) -> bool:
+    """Return whether ``value`` is a schema/unit lifecycle state, not review status."""
+
+    return value in ONTOLOGY_LIFECYCLE_STATES
+
+
 OntologyProfileStatus = Literal["draft", "active", "deprecated", "archived"]
 RelationshipFamily = Literal[
     "composition",
@@ -20,12 +42,17 @@ RelationshipFamily = Literal[
     "flow",
     "semantic",
     "ownership",
+    "classification",
+    "causality",
+    "temporal",
     "validation",
     "traceability",
     "assurance",
     "synchronization",
 ]
 RelationshipStyle = Literal["solid", "dashed", "dotted", "bold"]
+RelationshipCardinality = Literal["one_to_one", "one_to_many", "many_to_one", "many_to_many"]
+SourceMappingKind = Literal["document", "database", "api", "file", "event", "manual", "derived", "other"]
 MetadataFieldType = Literal["string", "number", "integer", "boolean", "array", "object", "date", "datetime", "enum"]
 ValidationRuleType = Literal[
     "required_metadata",
@@ -49,6 +76,103 @@ class StrictOntologyModel(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class OntologyUnit(StrictOntologyModel):
+    """Namespace-scoped ontology unit persisted as ``ontology/unit.json``.
+
+    The unit is the durable lifecycle/configuration wrapper for a namespace's
+    ontology profile. Its ``id`` is intentionally derived from the namespace so
+    existing namespace-keyed APIs do not need to be re-keyed. Entity candidate
+    review status remains separate from profile/unit lifecycle state.
+    """
+
+    id: str | None = None
+    namespace: str
+    active_profile_id: str | None = None
+    name: str = ""
+    purpose: str = ""
+    domain: str = ""
+    expected_users: list[str] = Field(default_factory=list)
+    source_material: list[str] = Field(default_factory=list)
+    governance_mode: str = "manual"
+    lifecycle: OntologyUnitLifecycle = OntologyUnitLifecycle.ACTIVE
+    installed_packs: list[str] = Field(default_factory=list)
+    auto_confirm_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("namespace")
+    @classmethod
+    def _namespace_has_value(cls, value: str) -> str:
+        if not value:
+            raise ValueError("OntologyUnit.namespace is required")
+        return value
+
+    @field_validator("active_profile_id")
+    @classmethod
+    def _active_profile_id_is_identifier(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_identifier(value, "OntologyUnit.active_profile_id")
+
+    @field_validator("name", "purpose", "domain", "governance_mode")
+    @classmethod
+    def _unit_text_fields_are_strings(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("expected_users", "source_material")
+    @classmethod
+    def _unit_lists_are_strings(cls, value: list[str]) -> list[str]:
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @field_validator("installed_packs")
+    @classmethod
+    def _installed_packs_are_unique(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("OntologyUnit.installed_packs must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def _derive_and_validate_id(self) -> OntologyUnit:
+        derived_id = self.namespace
+        if self.id is None:
+            self.id = derived_id
+        elif self.id != derived_id:
+            raise ValueError("OntologyUnit.id must be derived from namespace")
+        if self.active_profile_id is not None and ":" in self.active_profile_id and not self.active_profile_id.startswith(f"{self.namespace}:"):
+            raise ValueError("OntologyUnit.active_profile_id cannot point outside namespace")
+        return self
+
+
+class SourceMapping(StrictOntologyModel):
+    """Traceability from an ontology schema element to an upstream data source.
+
+    Source mappings are intentionally declarative metadata. They let domains
+    such as audit, ingestion, and evidence review map a concept, relationship,
+    or property definition to source systems without mutating graph instances.
+    """
+
+    source_id: str
+    source_type: SourceMappingKind = "other"
+    source_label: str = ""
+    field_path: str = ""
+    transform: str = ""
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    notes: str = ""
+
+    @field_validator("source_id")
+    @classmethod
+    def _source_id_has_value(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("SourceMapping.source_id is required")
+        return value
+
+    @field_validator("source_label", "field_path", "transform", "notes")
+    @classmethod
+    def _source_text_fields_are_strings(cls, value: str) -> str:
+        return value.strip()
+
+
 class MetadataField(StrictOntologyModel):
     """Field definition used inside concept metadata schemas."""
 
@@ -60,6 +184,7 @@ class MetadataField(StrictOntologyModel):
     default: Any = None
     allowed_values: list[str] = Field(default_factory=list)
     lifecycle_state: LifecycleState = "active"
+    source_mappings: list[SourceMapping] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -95,6 +220,7 @@ class Layer(StrictOntologyModel):
     order: int = Field(ge=0)
     description: str = ""
     lifecycle_state: LifecycleState = "active"
+    source_mappings: list[SourceMapping] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -114,6 +240,7 @@ class ConceptType(StrictOntologyModel):
     color: str = "#64748b"
     shape: str = "rounded_rectangle"
     lifecycle_state: LifecycleState = "active"
+    source_mappings: list[SourceMapping] = Field(default_factory=list)
 
     @field_validator("id", "abstraction_level")
     @classmethod
@@ -150,7 +277,9 @@ class RelationshipType(StrictOntologyModel):
     map_direction: MapDirection = "forward"
     is_directed: bool = True
     is_system: bool = False
+    cardinality: RelationshipCardinality | None = None
     lifecycle_state: LifecycleState = "active"
+    source_mappings: list[SourceMapping] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod

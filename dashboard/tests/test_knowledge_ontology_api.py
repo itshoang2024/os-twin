@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,6 +39,63 @@ def client(mock_service: MagicMock) -> Iterator[TestClient]:
 
 class TestOntologyProfileAPI:
     """Tests for /api/knowledge/namespaces/{namespace}/ontology endpoints."""
+
+
+    def test_get_unit_returns_draft_identity(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        mock_service.get_ontology_unit_response.return_value = {
+            "namespace": "demo",
+            "unit_exists": True,
+            "unit": {
+                "id": "demo",
+                "namespace": "demo",
+                "active_profile_id": None,
+                "name": "Audit Process Unit",
+                "purpose": "Govern audit process vocabulary",
+                "domain": "audit",
+                "expected_users": ["auditor"],
+                "source_material": ["policy.pdf"],
+                "governance_mode": "strict",
+            },
+        }
+
+        response = client.get("/api/knowledge/namespaces/demo/ontology/unit", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["unit_exists"] is True
+        assert data["unit"]["active_profile_id"] is None
+        assert data["unit"]["name"] == "Audit Process Unit"
+        mock_service.get_ontology_unit_response.assert_called_once_with("demo")
+
+    def test_put_unit_saves_identity_without_profile_publication(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        unit = MagicMock()
+        unit.model_dump.return_value = {
+            "id": "demo",
+            "namespace": "demo",
+            "active_profile_id": None,
+            "name": "Build Software Unit",
+            "purpose": "Model software delivery",
+            "domain": "software",
+            "expected_users": ["engineer"],
+            "source_material": ["repo"],
+            "governance_mode": "manual",
+        }
+        mock_service.save_ontology_unit_payload.return_value = unit
+
+        response = client.put(
+            "/api/knowledge/namespaces/demo/ontology/unit",
+            headers=auth_headers,
+            json={"unit": unit.model_dump.return_value},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["unit"]["active_profile_id"] is None
+        mock_service.save_ontology_unit_payload.assert_called_once()
+        mock_service.save_ontology_profile_payload.assert_not_called()
 
     def test_get_profile_returns_default_suggestion_for_legacy_namespace(
         self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
@@ -151,6 +209,175 @@ class TestOntologyProfileAPI:
         assert data["concept_type_count"] == 8
         assert data["relation_type_count"] == 9
         assert data["alias_count"] == 4
+
+
+    def test_ontology_assistant_uses_bounded_context_and_stable_conversation(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        async def fake_master_chat(messages, conversation_id):
+            fake_master_chat.messages = messages
+            fake_master_chat.conversation_id = conversation_id
+            return type("Response", (), {"content": "Proposed only."})()
+
+        mock_service._require_namespace.return_value = None
+        profile = {
+            "profile_id": "enterprise_feature_map",
+            "version": "1.0.0",
+            "concept_types": {"feature": {"id": "feature", "label": "Feature", "description": "x" * 10000}},
+            "relationship_types": {},
+            "layers": {},
+            "abstraction_levels": {},
+            "metadata_fields": {},
+            "validation_rules": [],
+        }
+        with patch("dashboard.master_agent.master_chat", side_effect=fake_master_chat):
+            response = client.post(
+                "/api/knowledge/namespaces/demo/ontology/assistant",
+                headers=auth_headers,
+                json={
+                    "message": "Review selected",
+                    "profile": profile,
+                    "selected": {"kind": "concept", "id": "feature", "object": profile["concept_types"]["feature"]},
+                    "context": {"evidence_refs": ["anchor-1"], "candidate_refs": [{"id": "cand-1"}]},
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["conversation_id"] == "ontology-schema:demo:api-key-user"
+        assert fake_master_chat.conversation_id == "ontology-schema:demo:api-key-user"
+        prompt = fake_master_chat.messages[0].content
+        user_context = fake_master_chat.messages[-1].content
+        assert "advisory conversational co-builder" in prompt
+        assert "apply_to_draft" in user_context
+        assert "anchor-1" in user_context
+        assert "x" * 5000 not in user_context
+        assert '"profile"' not in user_context
+        mock_service.save_ontology_profile_payload.assert_not_called()
+
+    def test_ontology_assistant_preserves_recent_history_roles(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        async def fake_master_chat(messages, conversation_id):
+            fake_master_chat.messages = messages
+            return type("Response", (), {"content": "ok"})()
+
+        mock_service._require_namespace.return_value = None
+        with patch("dashboard.master_agent.master_chat", side_effect=fake_master_chat):
+            response = client.post(
+                "/api/knowledge/namespaces/demo/ontology/assistant",
+                headers=auth_headers,
+                json={
+                    "message": "Map candidate",
+                    "profile": {"profile_id": "p", "version": "1", "concept_types": {}, "relationship_types": {}, "layers": {}, "abstraction_levels": {}, "metadata_fields": {}},
+                    "history": [{"role": "assistant", "content": "Prior advisory answer"}],
+                },
+            )
+
+        assert response.status_code == 200
+        assert any(msg.role == "assistant" and msg.content == "Prior advisory answer" for msg in fake_master_chat.messages)
+
+
+
+    def test_ontology_assistant_returns_fallback_pack_draft_when_master_fails(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        async def failing_master_chat(messages, conversation_id):
+            raise RuntimeError("Internal Server Error")
+
+        mock_service._require_namespace.return_value = None
+        profile = {
+            "profile_id": "enterprise_feature_map",
+            "version": "1.0.0",
+            "concept_types": {"feature": {"id": "feature", "label": "Feature"}},
+            "relationship_types": {},
+            "layers": {},
+            "abstraction_levels": {},
+            "metadata_fields": {},
+            "validation_rules": [],
+        }
+        with patch("dashboard.master_agent.master_chat", side_effect=failing_master_chat):
+            response = client.post(
+                "/api/knowledge/namespaces/demo/ontology/assistant",
+                headers=auth_headers,
+                json={
+                    "message": "Draft a small vocabulary bundle proposal with concept_types, relationship_types, layers, metadata_fields, graph_instruction, fixtures, and migration_notes.",
+                    "profile": profile,
+                },
+            )
+
+        assert response.status_code == 200
+        text = response.json()["text"]
+        assert "```json" in text
+        raw = text.split("```json", 1)[1].split("```", 1)[0].strip()
+        proposed = json.loads(raw)["proposed_changes"]
+        for section in [
+            "concept_types",
+            "relationship_types",
+            "layers",
+            "metadata_fields",
+            "graph_instruction",
+            "fixtures",
+            "migration_notes",
+        ]:
+            assert section in proposed
+        mock_service.save_ontology_profile_payload.assert_not_called()
+
+    def test_ontology_assistant_falls_back_for_nonconforming_pack_draft_success(
+        self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
+    ) -> None:
+        async def nonconforming_master_chat(messages, conversation_id):
+            return type(
+                "Response",
+                (),
+                {
+                    "content": (
+                        "Here is a bundle draft.\n"
+                        "```json\n"
+                        '{"bundle_id":"audit-risk","namespace":"demo","status":"draft","concepts":[]}\n'
+                        "```"
+                    )
+                },
+            )()
+
+        mock_service._require_namespace.return_value = None
+        profile = {
+            "profile_id": "enterprise_feature_map",
+            "version": "1.0.0",
+            "concept_types": {},
+            "relationship_types": {},
+            "layers": {},
+            "abstraction_levels": {},
+            "metadata_fields": {},
+            "validation_rules": [],
+        }
+        with patch("dashboard.master_agent.master_chat", side_effect=nonconforming_master_chat):
+            response = client.post(
+                "/api/knowledge/namespaces/demo/ontology/assistant",
+                headers=auth_headers,
+                json={
+                    "message": "Draft pack from these docs as a reviewable vocabulary bundle proposal.",
+                    "profile": profile,
+                },
+            )
+
+        assert response.status_code == 200
+        text = response.json()["text"]
+        raw = text.split("```json", 1)[1].split("```", 1)[0].strip()
+        parsed = json.loads(raw)
+        assert "proposed_changes" in parsed
+        assert "bundle_id" not in parsed
+        proposed = parsed["proposed_changes"]
+        for section in [
+            "concept_types",
+            "relationship_types",
+            "layers",
+            "metadata_fields",
+            "graph_instruction",
+            "fixtures",
+            "migration_notes",
+        ]:
+            assert section in proposed
+        mock_service.save_ontology_profile_payload.assert_not_called()
 
     def test_ontology_endpoint_maps_invalid_namespace_to_404(
         self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock

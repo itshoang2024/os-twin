@@ -4,6 +4,8 @@ import { persist } from 'zustand/middleware';
 interface UIState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  namespaceSidebarCollapsed: boolean;
+  toggleNamespaceSidebar: () => void;
   activePlanId: string | null;
   setActivePlanId: (id: string | null) => void;
   theme: 'light' | 'dark';
@@ -20,6 +22,8 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       sidebarCollapsed: false,
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      namespaceSidebarCollapsed: false,
+      toggleNamespaceSidebar: () => set((s) => ({ namespaceSidebarCollapsed: !s.namespaceSidebarCollapsed })),
       activePlanId: null,
       setActivePlanId: (id) => set({ activePlanId: id }),
       theme: 'light',
@@ -45,6 +49,7 @@ export const useUIStore = create<UIState>()(
       name: 'ui-storage',
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
+        namespaceSidebarCollapsed: state.namespaceSidebarCollapsed,
         theme: state.theme,
       }),
     }

@@ -6,9 +6,9 @@ interface ThreadsResponse {
   total: number;
 }
 
-export function usePlanningThreads(limit = 20, offset = 0) {
+export function usePlanningThreads(limit = 20, offset = 0, enabled = true) {
   const { data, error, mutate, isLoading } = useSWR<ThreadsResponse>(
-    `/plans/threads?limit=${limit}&offset=${offset}`,
+    enabled ? `/plans/threads?limit=${limit}&offset=${offset}` : null,
     {
       refreshInterval: 0, // manual refresh only
     }

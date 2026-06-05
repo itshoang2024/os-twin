@@ -51,7 +51,7 @@ describe('TestConnectionButton', () => {
     fireEvent.click(screen.getByText('Test Connection'));
 
     await waitFor(() => {
-      // Must use apiPost (which respects NEXT_PUBLIC_API_BASE_URL), not raw fetch
+      // Must use apiPost, which routes through the fixed localhost:3366 API base.
       expect(apiPost).toHaveBeenCalled();
     });
   });
@@ -107,11 +107,11 @@ describe('TestConnectionButton', () => {
     render(<TestConnectionButton version="claude-opus-4" />);
     fireEvent.click(screen.getByText('Test Connection'));
 
-    expect(screen.getByText('Testing...')).toBeInTheDocument();
+    expect(screen.getByText('Testing…')).toBeInTheDocument();
 
     resolvePromise!({ status: 'ok', latency_ms: 100 });
     await waitFor(() => {
-      expect(screen.queryByText('Testing...')).not.toBeInTheDocument();
+      expect(screen.queryByText('Testing…')).not.toBeInTheDocument();
     });
   });
 });

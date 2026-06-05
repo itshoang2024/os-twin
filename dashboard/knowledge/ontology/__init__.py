@@ -1,6 +1,18 @@
 """Ontology profile models and namespace-scoped persistence."""
 
 from dashboard.knowledge.ontology.defaults import create_default_ontology_profile
+from dashboard.knowledge.ontology.analysis import (
+    AnalysisStore,
+    FlowDefinition,
+    FlowStep,
+    SimulationMetricDefinition,
+    SimulationProviderContract,
+    SimulationScenario,
+    StateDefinition,
+    StateMachine,
+    StateTransition,
+    validate_state_transition,
+)
 from dashboard.knowledge.ontology.graph_instruction import (
     ConceptGraphInstruction,
     GraphDefaultView,
@@ -17,9 +29,36 @@ from dashboard.knowledge.ontology.models import (
     MetadataField,
     OntologyProfile,
     OntologyProfileStatus,
+    ONTOLOGY_LIFECYCLE_STATES,
+    OntologyUnit,
+    OntologyUnitLifecycle,
     RelationshipFamily,
     RelationshipType,
     ValidationRule,
+    is_ontology_lifecycle_state,
+)
+
+from dashboard.knowledge.ontology.approval import (
+    GraphInstanceStore,
+    InMemoryGraphInstanceStore,
+    KuzuGraphInstanceStore,
+    OntologyApprovalService,
+    OntologyMutationError,
+)
+from dashboard.knowledge.ontology.observation import (
+    ObservationEvent,
+    ObservationEventStore,
+    TimeSeries,
+    TimeSeriesPoint,
+    TimeSeriesStore,
+)
+from dashboard.knowledge.ontology.instances import (
+    EdgeReviewState,
+    ExternalRef,
+    InstanceValidationIssue,
+    NodeLifecycleState,
+    OntologyEdge,
+    OntologyNode,
 )
 from dashboard.knowledge.ontology.normalizer import (
     GLOBAL_RELATION_ALIASES,
@@ -39,6 +78,16 @@ from dashboard.knowledge.ontology.validator import (
 )
 
 __all__ = [
+    "AnalysisStore",
+    "FlowDefinition",
+    "FlowStep",
+    "SimulationMetricDefinition",
+    "SimulationProviderContract",
+    "SimulationScenario",
+    "StateDefinition",
+    "StateMachine",
+    "StateTransition",
+    "validate_state_transition",
     "AbstractionLevel",
     "ConceptGraphInstruction",
     "ConceptType",
@@ -46,16 +95,36 @@ __all__ = [
     "GraphInstruction",
     "GraphInstructionExample",
     "GraphLayoutHint",
+    "GraphInstanceStore",
+    "InMemoryGraphInstanceStore",
+    "KuzuGraphInstanceStore",
+    "ObservationEvent",
+    "ObservationEventStore",
+    "TimeSeries",
+    "TimeSeriesPoint",
+    "TimeSeriesStore",
+    "OntologyApprovalService",
+    "OntologyMutationError",
+    "EdgeReviewState",
+    "ExternalRef",
+    "InstanceValidationIssue",
+    "NodeLifecycleState",
+    "OntologyEdge",
+    "OntologyNode",
     "Layer",
     "LifecycleState",
     "MetadataField",
     "OntologyProfile",
     "OntologyProfileStatus",
+    "ONTOLOGY_LIFECYCLE_STATES",
+    "OntologyUnit",
+    "OntologyUnitLifecycle",
     "OntologyProfileStore",
     "RelationshipFamily",
     "RelationshipGraphInstruction",
     "RelationshipType",
     "ValidationRule",
+    "is_ontology_lifecycle_state",
     "GLOBAL_RELATION_ALIASES",
     "NormalizedRelation",
     "RenderedRelation",

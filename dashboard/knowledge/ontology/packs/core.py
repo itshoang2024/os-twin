@@ -465,7 +465,7 @@ class DomainPackStore:
         return validate_domain_pack(manifest, profile)
 
     def install(
-        self, namespace: str, manifest: DomainPackManifest, profile: OntologyProfile
+        self, namespace: str, manifest: DomainPackManifest, profile: OntologyProfile, *, persist_profile: bool = True
     ) -> DomainPackOperationResult:
         state = self.get_state(namespace)
         previous_state = state.model_copy(deep=True)
@@ -480,18 +480,23 @@ class DomainPackStore:
             status="installed",
             additions=_manifest_additions(manifest),
         )
-        try:
-            self._profile_store.write(validation.profile, set_active=True)
-            self.write_state(state)
-        except Exception:
-            self._profile_store.write(previous_profile, set_active=True)
-            self.write_state(previous_state)
-            raise
+        if persist_profile:
+            try:
+                self._profile_store.write(validation.profile, set_active=True)
+                self.write_state(state)
+                unit = self._profile_store.get_unit(namespace)
+                if unit is not None:
+                    unit.installed_packs = sorted(pid for pid, rec in state.installed_packs.items() if rec.status == "installed")
+                    self._profile_store.write_unit(unit)
+            except Exception:
+                self._profile_store.write(previous_profile, set_active=True)
+                self.write_state(previous_state)
+                raise
         return DomainPackOperationResult(
             namespace, manifest.pack_id, "install", True, validation.profile, state, validation.issues
         )
 
-    def uninstall(self, namespace: str, pack_id: str, profile: OntologyProfile) -> DomainPackOperationResult:
+    def uninstall(self, namespace: str, pack_id: str, profile: OntologyProfile, *, persist_profile: bool = True) -> DomainPackOperationResult:
         state = self.get_state(namespace)
         previous_state = state.model_copy(deep=True)
         previous_profile = profile.model_copy(deep=True)
@@ -507,13 +512,18 @@ class DomainPackStore:
         next_profile = uninstall_domain_pack(profile, manifest, remaining_manifests)
         installed.status = "disabled"
         installed.disabled_at = datetime.now(UTC)
-        try:
-            self._profile_store.write(next_profile, set_active=True)
-            self.write_state(state)
-        except Exception:
-            self._profile_store.write(previous_profile, set_active=True)
-            self.write_state(previous_state)
-            raise
+        if persist_profile:
+            try:
+                self._profile_store.write(next_profile, set_active=True)
+                self.write_state(state)
+                unit = self._profile_store.get_unit(namespace)
+                if unit is not None:
+                    unit.installed_packs = sorted(pid for pid, rec in state.installed_packs.items() if rec.status == "installed")
+                    self._profile_store.write_unit(unit)
+            except Exception:
+                self._profile_store.write(previous_profile, set_active=True)
+                self.write_state(previous_state)
+                raise
         return DomainPackOperationResult(namespace, pack_id, "uninstall", False, next_profile, state, [])
 
 

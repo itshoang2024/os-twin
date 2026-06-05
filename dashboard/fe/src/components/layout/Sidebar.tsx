@@ -21,27 +21,23 @@ const navItems = [
 export default function Sidebar({ className = '', ...props }: React.ComponentPropsWithoutRef<'aside'>) {
   const pathname = usePathname();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
-  const { threads, isLoading: threadsLoading } = usePlanningThreads(5);
+  const isFixtureRoute = pathname.includes('-fixture');
+  const { threads, isLoading: threadsLoading } = usePlanningThreads(5, 0, !isFixtureRoute);
 
-  // Auto-collapse logic for 1024px - 1280px
+  // Auto-collapse on narrower desktop widths without overriding manual collapse.
   useEffect(() => {
     const handleResize = () => {
       const width = window.innerWidth;
-      if (width >= 1024 && width <= 1280) {
-        if (!sidebarCollapsed) {
-          useUIStore.setState({ sidebarCollapsed: true });
-        }
-      } else if (width > 1280) {
-        if (sidebarCollapsed) {
-          useUIStore.setState({ sidebarCollapsed: false });
-        }
+      const shouldAutoCollapse = width >= 1024 && width <= 1280;
+      if (shouldAutoCollapse && !useUIStore.getState().sidebarCollapsed) {
+        useUIStore.setState({ sidebarCollapsed: true });
       }
     };
 
     window.addEventListener('resize', handleResize);
-    handleResize(); // Initial check
+    handleResize();
     return () => window.removeEventListener('resize', handleResize);
-  }, [sidebarCollapsed]);
+  }, []);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -79,6 +75,19 @@ export default function Sidebar({ className = '', ...props }: React.ComponentPro
             </span>
             <span className="text-[10px]" style={{ color: 'var(--color-text-faint)' }}>Command Center</span>
           </div>
+        )}
+        {!sidebarCollapsed && (
+          <button
+            onClick={toggleSidebar}
+            className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-surface-hover"
+            style={{ color: 'var(--color-text-muted)' }}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+              chevron_left
+            </span>
+          </button>
         )}
       </div>
 

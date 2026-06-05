@@ -10,6 +10,7 @@ import PlanGrid from '@/components/dashboard/PlanGrid';
 import StatsRow from '@/components/dashboard/StatsRow';
 import { TemplatePicker } from '@/components/dashboard/TemplatePicker';
 import { templateCatalog, loadTemplateContent, type TemplateCatalogEntry } from '@/data/template-catalog';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 import type { ImageAttachment } from '@/types';
 
 const commandExamples = [
@@ -83,7 +84,7 @@ ${templateContent}
         body.title = title;
       }
 
-      const resp = await fetch((process.env.NEXT_PUBLIC_API_BASE_URL || '/api') + '/plans/threads', {
+      const resp = await fetch(`${getApiBaseUrl()}/plans/threads`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

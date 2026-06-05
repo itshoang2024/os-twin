@@ -153,6 +153,24 @@ class RetentionPolicyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class OntologyUnitRequest(BaseModel):
+    """Request body for PUT /api/knowledge/namespaces/{namespace}/ontology/unit."""
+
+    unit: dict[str, Any] = Field(
+        ...,
+        description="OntologyUnit JSON payload to validate and persist. The namespace must match the path.",
+        examples=[{"namespace": "docs", "active_profile_id": None, "name": "Audit Process Ontology"}],
+    )
+
+
+class OntologyUnitResponse(BaseModel):
+    """Response for ontology unit lookup and writes."""
+
+    namespace: str = Field(..., description="Namespace for the ontology unit")
+    unit: Optional[dict[str, Any]] = Field(default=None, description="Ontology unit JSON, if one exists")
+    unit_exists: bool = Field(..., description="True when ontology/unit.json exists or legacy synthesis succeeded")
+
+
 class OntologyProfileRequest(BaseModel):
     """Request body for PUT /api/knowledge/namespaces/{namespace}/ontology/profile."""
 
@@ -292,6 +310,22 @@ class OntologySummaryResponse(BaseModel):
     validation_issues: list[OntologyValidationIssueResponse] = Field(default_factory=list)
 
 
+class OntologyReleaseObservabilityResponse(BaseModel):
+    """Release-gate health report for the ontology lifecycle."""
+
+    namespace: str
+    generated_at: str
+    profile: dict[str, Any] = Field(default_factory=dict)
+    candidates: dict[str, Any] = Field(default_factory=dict)
+    facts: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    observations: dict[str, Any] = Field(default_factory=dict)
+    assistant: dict[str, Any] = Field(default_factory=dict)
+    packs: dict[str, Any] = Field(default_factory=dict)
+    release_blockers: list[dict[str, Any]] = Field(default_factory=list)
+    release_ready: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Enterprise Map Projection Models (EPIC-009)
 # ---------------------------------------------------------------------------
@@ -327,11 +361,33 @@ class EnterpriseMapNodeResponse(BaseModel):
     layer_order: Optional[int] = None
     pack_id: Optional[str] = None
     lifecycle_state: Optional[str] = None
+    review_state: Optional[str] = None
+    confidence: Optional[float] = None
+    provenance_refs: list[str] = Field(default_factory=list)
+    external_ref: Optional[dict[str, Any]] = None
     owner: Optional[str] = None
     description: Optional[str] = None
     map_group: Optional[str] = None
     data_store: Optional[str] = None
     sync_mode: Optional[str] = None
+    quality_state: Optional[str] = None
+    candidate_state: Optional[str] = None
+    event_count: Optional[Any] = None
+    active_event_count: Optional[Any] = None
+    time_range: Optional[Any] = None
+    series_refs: Optional[Any] = None
+    flow_refs: Optional[Any] = None
+    state: Optional[Any] = None
+    simulation_state: Optional[Any] = None
+    simulation_refs: Optional[Any] = None
+    state_machine_ref: Optional[Any] = None
+    state_color: Optional[Any] = None
+    phase: Optional[Any] = None
+    track: Optional[Any] = None
+    priority: Optional[Any] = None
+    effort: Optional[Any] = None
+    prerequisites: Optional[Any] = None
+    acceptance: Optional[Any] = None
     ontology_path: EnterpriseMapOntologyPathResponse = Field(default_factory=EnterpriseMapOntologyPathResponse)
     validation_issues: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -339,6 +395,7 @@ class EnterpriseMapNodeResponse(BaseModel):
 class EnterpriseMapEdgeResponse(BaseModel):
     """Ontology-aware relationship returned by /ontology/enterprise-map."""
 
+    id: Optional[str] = None
     source: str
     target: str
     label: Optional[str] = None
@@ -354,6 +411,28 @@ class EnterpriseMapEdgeResponse(BaseModel):
     map_source: Optional[str] = None
     map_target: Optional[str] = None
     map_direction: Optional[str] = None
+    map_group: Optional[str] = None
+    review_state: Optional[str] = None
+    confidence: Optional[float] = None
+    provenance_refs: list[str] = Field(default_factory=list)
+    external_ref: Optional[dict[str, Any]] = None
+    candidate_state: Optional[str] = None
+    event_count: Optional[Any] = None
+    active_event_count: Optional[Any] = None
+    time_range: Optional[Any] = None
+    series_refs: Optional[Any] = None
+    flow_refs: Optional[Any] = None
+    state: Optional[Any] = None
+    simulation_state: Optional[Any] = None
+    simulation_refs: Optional[Any] = None
+    state_machine_ref: Optional[Any] = None
+    state_color: Optional[Any] = None
+    phase: Optional[Any] = None
+    track: Optional[Any] = None
+    priority: Optional[Any] = None
+    effort: Optional[Any] = None
+    prerequisites: Optional[Any] = None
+    acceptance: Optional[Any] = None
     is_candidate: bool = False
     validation_issues: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -391,6 +470,11 @@ class EnterpriseMapStatsResponse(BaseModel):
     source_node_count: Optional[int] = None
     source_edge_count: Optional[int] = None
     ontology_candidate_count: Optional[int] = None
+    event_count: int = 0
+    active_event_count: int = 0
+    flow_count: int = 0
+    state_machine_count: int = 0
+    simulation_scenario_count: int = 0
     limit: Optional[int] = None
     filtered: bool = False
 
@@ -402,6 +486,9 @@ class EnterpriseMapMetaResponse(BaseModel):
     profile_exists: bool = False
     ontology_candidate_count: int = 0
     graph_instruction: dict[str, Any] = Field(default_factory=dict)
+    time_window: dict[str, Any] = Field(default_factory=dict)
+    observation_series_backend: str = "inline-json-mvp"
+    analysis: dict[str, Any] = Field(default_factory=dict)
 
 
 class EnterpriseMapProjectionResponse(BaseModel):
@@ -444,6 +531,9 @@ class DomainPackManifestResponse(BaseModel):
     metadata_fields: dict[str, Any] = Field(default_factory=dict)
     validation_rules: list[dict[str, Any]] = Field(default_factory=list)
     graph_instruction: dict[str, Any] = Field(default_factory=dict)
+    time_window: dict[str, Any] = Field(default_factory=dict)
+    observation_series_backend: str = "inline-json-mvp"
+    analysis: dict[str, Any] = Field(default_factory=dict)
     fixtures: list[dict[str, Any]] = Field(default_factory=list)
     migration_notes: list[str] = Field(default_factory=list)
 
@@ -511,6 +601,8 @@ class OntologyCandidateResponse(BaseModel):
     sample_text: str
     status: str
     source_hash: str = ""
+    proposed_payload: dict[str, Any] = Field(default_factory=dict)
+    source_evidence_ref: Optional[str] = None
     created_at: datetime
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
@@ -520,6 +612,162 @@ class OntologyCandidateResponse(BaseModel):
 class OntologyCandidateListResponse(BaseModel):
     namespace: str
     candidates: list[OntologyCandidateResponse] = Field(default_factory=list)
+
+
+class FactSubjectResponse(BaseModel):
+    kind: str
+    id: str
+    label: str = ""
+    concept_type: Optional[str] = None
+
+
+class SuggestedRelationshipMappingResponse(BaseModel):
+    relationship_type: Optional[str] = None
+    source_id: Optional[str] = None
+    target_id: Optional[str] = None
+    source_kind: str = "node"
+    target_kind: str = "node"
+    direction: str = "forward"
+    confidence: Optional[float] = None
+
+
+class OntologyFactResponse(BaseModel):
+    id: str
+    namespace: str
+    statement: str
+    subjects: list[FactSubjectResponse] = Field(default_factory=list)
+    subject_ids: list[str] = Field(default_factory=list)
+    confidence: float
+    review_state: str
+    source: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    provenance_refs: list[str] = Field(default_factory=list)
+    suggested_mapping: Optional[SuggestedRelationshipMappingResponse] = None
+    source_hash: str = ""
+    promoted_edge_id: Optional[str] = None
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyFactListResponse(BaseModel):
+    namespace: str
+    facts: list[OntologyFactResponse] = Field(default_factory=list)
+
+
+class OntologyFactCreateRequest(BaseModel):
+    statement: str = Field(..., min_length=1, max_length=2000)
+    subjects: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    source: Literal["extraction", "assistant", "manual"] = "assistant"
+    evidence_refs: list[str] = Field(default_factory=list)
+    provenance_refs: list[str] = Field(default_factory=list)
+    suggested_mapping: Optional[dict[str, Any]] = None
+    source_hash: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyFactReviewRequest(BaseModel):
+    review_state: Literal["draft", "assistive", "reviewed", "approved", "rejected"]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyFactPromoteRequest(BaseModel):
+    relationship_type: Optional[str] = None
+    source_id: Optional[str] = None
+    target_id: Optional[str] = None
+
+
+class OntologyFactRelationshipCandidateRequest(BaseModel):
+    relationship_label: str = Field(..., min_length=1, max_length=120)
+
+
+class OntologyFactPromoteResponse(BaseModel):
+    namespace: str
+    edge: dict[str, Any]
+
+
+class OntologyFactRelationshipCandidateResponse(BaseModel):
+    namespace: str
+    candidate: OntologyCandidateResponse
+
+
+class ObservationEventResponse(BaseModel):
+    id: str
+    namespace: str
+    event_type: str
+    subject_type: str
+    subject_id: str
+    occurred_at: datetime
+    actor: Optional[str] = None
+    value: Optional[Any] = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ObservationEventListResponse(BaseModel):
+    namespace: str
+    events: list[ObservationEventResponse] = Field(default_factory=list)
+
+
+class TimeSeriesPointResponse(BaseModel):
+    timestamp: datetime
+    value: float
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TimeSeriesResponse(BaseModel):
+    id: str
+    namespace: str
+    subject_id: str
+    metric_id: str
+    unit: str = "count"
+    points: list[TimeSeriesPointResponse] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class TimeSeriesListResponse(BaseModel):
+    namespace: str
+    series: list[TimeSeriesResponse] = Field(default_factory=list)
+
+
+class TimeSeriesUpsertRequest(BaseModel):
+    subject_id: str = Field(..., min_length=1)
+    metric_id: str = Field(..., min_length=1)
+    unit: str = "count"
+    points: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyAssistantMessageRequest(BaseModel):
+    """Prior chat turn sent to the ontology assistant."""
+
+    role: str
+    content: str
+
+
+class OntologyAssistantRequest(BaseModel):
+    """Request body for AI-assisted ontology schema design."""
+
+    message: str = Field(..., description="User instruction for schema design")
+    profile: dict[str, Any] = Field(..., description="Current draft ontology profile")
+    selected: Optional[dict[str, Any]] = Field(default=None, description="Selected schema graph element")
+    context: Optional[dict[str, Any]] = Field(default=None, description="Bounded candidate, evidence, fact, pack, or namespace refs")
+    history: list[OntologyAssistantMessageRequest] = Field(default_factory=list)
+
+
+class OntologyAssistantResponse(BaseModel):
+    """Text response from the ontology schema assistant."""
+
+    namespace: str
+    conversation_id: str
+    text: str
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +1263,7 @@ __all__ = [
     "RetentionPolicyRequest",  # EPIC-004
     "OntologyProfileRequest",
     "OntologyValidateRequest",
+    "OntologyAssistantRequest",
     "ResearchRequest",
     "ResearchSearchRequest",
     "ResearchIngestItem",
@@ -1037,10 +1286,13 @@ __all__ = [
     "RefreshNamespaceResponse",
     "RetentionPolicyResponse",  # EPIC-004
     "OntologyValidationIssueResponse",
+    "OntologyUnitRequest",
+    "OntologyUnitResponse",
     "OntologyProfileResponse",
     "OntologyValidateResponse",
     "OntologyResetDefaultResponse",
     "OntologySummaryResponse",
+    "OntologyAssistantResponse",
     "EnterpriseMapOntologyPathResponse",
     "EnterpriseMapNodeResponse",
     "EnterpriseMapEdgeResponse",
@@ -1049,6 +1301,11 @@ __all__ = [
     "EnterpriseMapStatsResponse",
     "EnterpriseMapMetaResponse",
     "EnterpriseMapProjectionResponse",
+    "TimeSeriesUpsertRequest",
+    "TimeSeriesListResponse",
+    "TimeSeriesResponse",
+    "ObservationEventListResponse",
+    "ObservationEventResponse",
     "ResearchResponse",
     "ResearchSourceResponse",
     "ResearchSearchResponse",

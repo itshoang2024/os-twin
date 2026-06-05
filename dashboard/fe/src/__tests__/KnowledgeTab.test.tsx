@@ -126,6 +126,10 @@ vi.mock('@/hooks/use-knowledge-import', () => ({
   useKnowledgeImport: vi.fn(() => ({
     startImport: vi.fn(),
   })),
+  useKnowledgeTextImport: vi.fn(() => ({
+    startImportText: vi.fn(),
+    isLoading: false,
+  })),
   useKnowledgeImportMonitor: vi.fn(() => ({
     jobs: [],
     graphCounts: { entities: 0, chunks: 0, relations: 0 },
@@ -270,8 +274,21 @@ vi.mock('@/components/plan/PlanWorkspace', () => ({
   })),
 }));
 
+vi.mock('@/components/knowledge/ontology/OntologyPanel', () => ({
+  default: ({ selectedNamespace }: { selectedNamespace: string | null }) => (
+    <div data-testid="ontology-panel">Ontology panel: {selectedNamespace}</div>
+  ),
+}));
+
+vi.mock('@/components/knowledge/EnterpriseMapPanel', () => ({
+  default: ({ selectedNamespace }: { selectedNamespace: string | null }) => (
+    <div data-testid="enterprise-map-panel">Enterprise Map panel: {selectedNamespace}</div>
+  ),
+}));
+
 // Import after mocks
 import KnowledgeTab from '@/components/plan/KnowledgeTab';
+import KnowledgeTabCore from '@/components/knowledge/KnowledgeTabCore';
 import NamespaceList from '@/components/knowledge/NamespaceList';
 import ImportPanel from '@/components/knowledge/ImportPanel';
 
@@ -384,6 +401,55 @@ describe('KnowledgeTab', () => {
         description: expect.stringContaining('test-plan-id')
       });
     });
+  });
+});
+
+describe('KnowledgeTabCore', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows ontology and enterprise map tabs in the global namespace detail view', async () => {
+    const { useKnowledgeNamespaces } = await import('@/hooks/use-knowledge-namespaces');
+    (useKnowledgeNamespaces as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      namespaces: [
+        {
+          schema_version: 1,
+          name: 'test-namespace',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          language: 'English',
+          description: 'Test namespace',
+          embedding_model: 'text-embedding-3-small',
+          embedding_dimension: 1536,
+          stats: {
+            files_indexed: 10,
+            chunks: 100,
+            entities: 50,
+            relations: 25,
+            vectors: 100,
+            bytes_on_disk: 1024000,
+          },
+          imports: [],
+        },
+      ],
+      isLoading: false,
+      isError: null,
+      createNamespace: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    render(<KnowledgeTabCore defaultNamespace="test-namespace" headerVariant="minimal" showMetrics={false} />);
+
+    const tabs = await screen.findByTestId('knowledge-detail-tabs');
+    expect(tabs).toHaveTextContent('Ontology');
+    expect(tabs).toHaveTextContent('Enterprise Map');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ontology' }));
+    expect(screen.getByTestId('ontology-panel')).toHaveTextContent('test-namespace');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enterprise Map' }));
+    expect(screen.getByTestId('enterprise-map-panel')).toHaveTextContent('test-namespace');
   });
 });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { apiGet, apiPatch } from '@/lib/api-client';
 
 interface Notification {
@@ -15,6 +16,8 @@ interface Notification {
 }
 
 export default function NotificationBell() {
+  const pathname = usePathname();
+  const isFixtureRoute = pathname.includes('-fixture');
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -29,8 +32,8 @@ export default function NotificationBell() {
       }
     };
 
-    fetchNotifications();
-  }, []);
+    if (!isFixtureRoute) fetchNotifications();
+  }, [isFixtureRoute]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

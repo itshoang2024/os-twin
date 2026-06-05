@@ -71,6 +71,7 @@ def project_enterprise_map(
 def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     props = _as_dict(node.get("properties"))
     metadata = _as_dict(node.get("metadata"))
+    instance_metadata = _as_dict(node.get("instance_metadata"))
     concept_id = _string(
         node.get("concept_type") or props.get("concept_type") or props.get("type") or node.get("label")
     )
@@ -94,7 +95,7 @@ def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict
         or "No purpose metadata available."
     )
 
-    return {
+    projected = {
         **node,
         "concept_type": concept_id or None,
         "concept_label": _format_label(
@@ -122,6 +123,16 @@ def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict
             metadata.get("data_store") or props.get("data_store") or node.get("pack_id") or "knowledge_graph"
         ),
         "sync_mode": _string(metadata.get("sync_mode") or props.get("sync_mode") or "sync"),
+        "lifecycle_state": _string(node.get("lifecycle_state") or instance_metadata.get("lifecycle_state") or metadata.get("lifecycle_state") or props.get("lifecycle_state") or "active"),
+        "review_state": _optional_string(node.get("review_state") or instance_metadata.get("review_state") or metadata.get("review_state") or props.get("review_state")),
+        "confidence": _optional_float(node.get("confidence") or instance_metadata.get("confidence") or metadata.get("confidence") or props.get("confidence")),
+        "provenance_refs": _as_list(node.get("provenance_refs") or instance_metadata.get("provenance_refs") or metadata.get("provenance_refs") or props.get("provenance_refs")),
+        "external_ref": _optional_dict(node.get("external_ref") or instance_metadata.get("external_ref") or metadata.get("external_ref") or props.get("external_ref")),
+        "quality_state": _node_quality_state(node, metadata, props),
+        "candidate_state": _optional_string(node.get("candidate_state") or metadata.get("candidate_state") or props.get("candidate_state")),
+        "metadata": metadata,
+        "properties": props,
+        "validation_issues": _as_list(node.get("validation_issues") or metadata.get("validation_issues") or props.get("validation_issues")),
         "ontology_path": {
             "layer": layer_id,
             "abstraction_level": abstraction_id or None,
@@ -130,10 +141,37 @@ def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict
             "lifecycle_state": node.get("lifecycle_state"),
         },
     }
+    _copy_optional_fields(
+        projected,
+        node,
+        metadata,
+        props,
+        (
+            "event_count",
+            "active_event_count",
+            "time_range",
+            "series_refs",
+            "flow_refs",
+            "state",
+            "simulation_state",
+            "simulation_refs",
+            "state_machine_ref",
+            "state_color",
+            "phase",
+            "track",
+            "priority",
+            "effort",
+            "prerequisites",
+            "acceptance",
+        ),
+    )
+    return projected
 
 
 def _project_edge(edge: dict[str, Any], profile: Any) -> dict[str, Any]:
-    rel_type = _string(edge.get("relationship_type") or edge.get("label") or "relates")
+    props = _as_dict(edge.get("properties"))
+    metadata = _as_dict(edge.get("metadata"))
+    rel_type = _string(edge.get("relationship_type") or props.get("relationship_type") or edge.get("label") or "relates")
     source = _string(edge.get("source"))
     target = _string(edge.get("target"))
     relationship = (getattr(profile, "relationship_types", {}) or {}).get(rel_type) if profile else None
@@ -160,20 +198,52 @@ def _project_edge(edge: dict[str, Any], profile: Any) -> dict[str, Any]:
         getattr(instruction, "inverse_label_template", None),
         edge.get("inverse_label") or getattr(relationship, "inverse", None) or "",
     )
-    return {
+    projected = {
         **edge,
+        "id": _string(edge.get("id") or f"{source}:{rel_type}:{target}"),
         "relationship_type": rel_type,
         "display_label": display_label,
         "inverse_label": inverse_label or None,
         "family": _string(edge.get("family") or getattr(relationship, "family", None) or getattr(instruction, "group", None) or "semantic"),
         "style": _style_from_instruction(edge, relationship, instruction),
-        "color": edge.get("color") or getattr(instruction, "color", None),
-        "weight": float(edge.get("weight") or getattr(instruction, "weight", None) or getattr(relationship, "weight", None) or 1.0),
+        "color": getattr(instruction, "color", None) or edge.get("color"),
+        "weight": float(getattr(instruction, "weight", None) or edge.get("weight") or getattr(relationship, "weight", None) or 1.0),
         "map_source": map_source,
         "map_target": map_target,
         "map_direction": direction,
         "map_group": _string(getattr(instruction, "group", None) or getattr(relationship, "family", None) or "semantic"),
+        "review_state": _optional_string(edge.get("review_state") or metadata.get("review_state") or props.get("review_state") or edge.get("status")),
+        "confidence": _optional_float(edge.get("confidence") or metadata.get("confidence") or props.get("confidence")),
+        "provenance_refs": _as_list(edge.get("provenance_refs") or metadata.get("provenance_refs") or props.get("provenance_refs")),
+        "external_ref": _optional_dict(edge.get("external_ref") or metadata.get("external_ref") or props.get("external_ref")),
+        "candidate_state": _optional_string(edge.get("candidate_state") or ("pending" if edge.get("is_candidate") else None)),
+        "validation_issues": _as_list(edge.get("validation_issues") or metadata.get("validation_issues") or props.get("validation_issues")),
     }
+    _copy_optional_fields(
+        projected,
+        edge,
+        metadata,
+        props,
+        (
+            "event_count",
+            "active_event_count",
+            "time_range",
+            "series_refs",
+            "flow_refs",
+            "state",
+            "simulation_state",
+            "simulation_refs",
+            "state_machine_ref",
+            "state_color",
+            "phase",
+            "track",
+            "priority",
+            "effort",
+            "prerequisites",
+            "acceptance",
+        ),
+    )
+    return projected
 
 
 def _profile_layers(profile: Any) -> dict[str, dict[str, Any]]:
@@ -307,13 +377,65 @@ def _format_label(template: Any, fallback: Any) -> str:
 
 
 def _style_from_instruction(edge: dict[str, Any], relationship: Any, instruction: Any) -> str:
-    explicit = _string(edge.get("style") or getattr(relationship, "style", None) or getattr(relationship, "display_style", None))
-    if explicit:
-        return explicit
     dash = _string(getattr(instruction, "dash", None))
     if dash:
         return "dotted" if dash.startswith("2") else "dashed"
+    explicit = _string(edge.get("style"))
+    if explicit:
+        return explicit
+    relationship_style = _string(getattr(relationship, "style", None) or getattr(relationship, "display_style", None))
+    if relationship_style:
+        return relationship_style
     return "solid"
+
+
+def _node_quality_state(node: dict[str, Any], metadata: dict[str, Any], props: dict[str, Any]) -> str:
+    explicit = _optional_string(node.get("quality_state") or metadata.get("quality_state") or props.get("quality_state"))
+    if explicit:
+        return explicit
+    if _as_list(node.get("validation_issues") or metadata.get("validation_issues") or props.get("validation_issues")):
+        return "needs_review"
+    lifecycle = _string(node.get("lifecycle_state") or metadata.get("lifecycle_state") or props.get("lifecycle_state"))
+    if lifecycle in {"draft", "deprecated", "retired"}:
+        return lifecycle
+    return "healthy"
+
+
+def _copy_optional_fields(
+    projected: dict[str, Any],
+    primary: dict[str, Any],
+    metadata: dict[str, Any],
+    props: dict[str, Any],
+    field_names: tuple[str, ...],
+) -> None:
+    for field_name in field_names:
+        for source in (primary, metadata, props):
+            if field_name in source and source[field_name] is not None:
+                projected[field_name] = source[field_name]
+                break
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _optional_string(value: Any) -> str | None:
+    text = _string(value)
+    return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_dict(value: Any) -> dict[str, Any] | None:
+    data = _as_dict(value)
+    return data or None
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

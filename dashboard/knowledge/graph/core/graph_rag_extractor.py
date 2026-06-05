@@ -90,6 +90,8 @@ class GraphRAGExtractor(TransformComponent):
     num_workers: int = 1
     ontology_profile: Optional[Any] = None
     candidate_store: Optional[Any] = None
+    evidence_store: Optional[Any] = None
+    fact_store: Optional[Any] = None
     namespace: str = ""
 
     def __init__(
@@ -103,6 +105,8 @@ class GraphRAGExtractor(TransformComponent):
         embedder: Optional[KnowledgeEmbedder] = None,
         ontology_profile: Optional[Any] = None,
         candidate_store: Optional[Any] = None,
+        evidence_store: Optional[Any] = None,
+        fact_store: Optional[Any] = None,
         namespace: str = "",
         # Legacy kwargs accepted for back-compat; ignored.
         extract_prompt: Any = None,
@@ -121,6 +125,8 @@ class GraphRAGExtractor(TransformComponent):
         self.num_workers = num_workers
         self.ontology_profile = ontology_profile
         self.candidate_store = candidate_store
+        self.evidence_store = evidence_store
+        self.fact_store = fact_store
         self.namespace = namespace or getattr(ontology_profile, "namespace", "") or ""
 
     # -- Sync entrypoint ------------------------------------------------
@@ -275,8 +281,10 @@ class GraphRAGExtractor(TransformComponent):
 
         source_hash = str(node.metadata.get("file_hash") or node.metadata.get("chunk_hash") or "")
         source = str(node.metadata.get("file_path") or node.metadata.get("filename") or node.id_)
+        evidence_anchor_id = str(node.metadata.get("evidence_anchor_id") or "")
         sample_text = text[:500]
         candidate_count = 0
+        fact_count = 0
 
         normalized_entities: list = []
         entity_type_by_name: dict[str, str] = {}
@@ -299,11 +307,16 @@ class GraphRAGExtractor(TransformComponent):
                         sample_text=sample_text,
                         suggested_canonical=normalized.normalized,
                         confidence=float(item.get("confidence") or 0.5),
-                        metadata={"node_id": str(node.id_), "entity_name": item.get("name", "")},
+                        metadata={"node_id": str(node.id_), "entity_name": item.get("name", ""), "evidence_anchor_id": evidence_anchor_id},
+                        evidence_anchor_id=evidence_anchor_id,
                     )
                     if candidate is not None and candidate.status == "pending":
                         candidate_count += 1
                     item["ontology_candidate_id"] = getattr(candidate, "id", None)
+                    if candidate is not None:
+                        item["source_evidence_ref"] = getattr(candidate, "source_evidence_ref", None)
+                    if candidate is not None:
+                        item["source_evidence_ref"] = getattr(candidate, "source_evidence_ref", None)
                 entity_type_by_name[str(item.get("name", ""))] = str(item.get("type", ""))
                 normalized_entities.append(item)
             else:
@@ -329,15 +342,30 @@ class GraphRAGExtractor(TransformComponent):
                         confidence=float(item.get("confidence") or 0.5),
                         metadata={
                             "node_id": str(node.id_),
+                            "evidence_anchor_id": evidence_anchor_id,
                             "source_entity": item.get("source", ""),
                             "target_entity": item.get("target", ""),
                             "source_type": entity_type_by_name.get(str(item.get("source", "")), ""),
                             "target_type": entity_type_by_name.get(str(item.get("target", "")), ""),
                         },
+                        evidence_anchor_id=evidence_anchor_id,
                     )
                     if candidate is not None and candidate.status == "pending":
                         candidate_count += 1
                     item["ontology_candidate_id"] = getattr(candidate, "id", None)
+                    fact = self._record_fact(
+                        statement=str(item.get("description") or f"{item.get('source', '')} {raw_label} {item.get('target', '')}"),
+                        relation=item,
+                        source=source,
+                        source_hash=source_hash,
+                        confidence=float(item.get("confidence") or 0.5),
+                        evidence_ref=getattr(candidate, "source_evidence_ref", None),
+                        source_type=entity_type_by_name.get(str(item.get("source", "")), ""),
+                        target_type=entity_type_by_name.get(str(item.get("target", "")), ""),
+                    )
+                    if fact is not None:
+                        fact_count += 1
+                        item["ontology_fact_id"] = getattr(fact, "id", None)
                 normalized_relations.append(item)
             else:
                 normalized_relations.append(rel)
@@ -345,15 +373,77 @@ class GraphRAGExtractor(TransformComponent):
         if candidate_count and self.metrics is not None:
             self.metrics.candidate_count += candidate_count
         node.metadata["ontology_candidate_count"] = candidate_count
+        node.metadata["ontology_fact_count"] = fact_count
         return normalized_entities, normalized_relations
 
+    def _record_fact(self, **kwargs: Any) -> Any | None:
+        """Persist an assistive fact for an uncertain extracted relationship."""
+
+        if self.fact_store is None or not self.namespace:
+            return None
+        try:
+            from dashboard.knowledge.ontology.facts import FactSubjectRef, SuggestedRelationshipMapping
+
+            relation = kwargs.get("relation") or {}
+            evidence_ref = kwargs.get("evidence_ref")
+            source_label = str(relation.get("source") or "")
+            target_label = str(relation.get("target") or "")
+            subjects = [
+                FactSubjectRef(kind="label", id=source_label, label=source_label, concept_type=kwargs.get("source_type") or None),
+                FactSubjectRef(kind="label", id=target_label, label=target_label, concept_type=kwargs.get("target_type") or None),
+            ]
+            return self.fact_store.create_assistive(
+                self.namespace,
+                statement=kwargs.get("statement") or f"{source_label} {relation.get('relation', '')} {target_label}",
+                subjects=subjects,
+                confidence=kwargs.get("confidence", 0.5),
+                source="extraction",
+                evidence_refs=[evidence_ref] if evidence_ref else [],
+                provenance_refs=[evidence_ref] if evidence_ref else [],
+                suggested_mapping=SuggestedRelationshipMapping(relationship_type=None, source_id=source_label, target_id=target_label, source_kind="label", target_kind="label", confidence=kwargs.get("confidence", 0.5)),
+                source_hash=kwargs.get("source_hash", ""),
+                metadata={"source": kwargs.get("source", ""), "relation": relation.get("relation", "")},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to persist ontology fact: %s", exc)
+            return None
+
     def _record_candidate(self, **kwargs: Any) -> Any | None:
-        """Persist a candidate if candidate storage is configured."""
+        """Persist a candidate and, when possible, append a provenance link.
+
+        Chunk metadata may carry ``evidence_anchor_id`` from ingestion.  We only
+        create a provenance link after the candidate id is known, and we never
+        fabricate provenance when the source produced no readable anchor.
+        """
 
         if self.candidate_store is None or not self.namespace:
             return None
+        evidence_anchor_id = str(kwargs.pop("evidence_anchor_id", "") or "")
         try:
-            return self.candidate_store.upsert_pending(self.namespace, **kwargs)
+            candidate = self.candidate_store.upsert_pending(self.namespace, **kwargs)
+            if evidence_anchor_id and self.evidence_store is not None and getattr(candidate, "id", None):
+                link = self.evidence_store.create_provenance_link(
+                    self.namespace,
+                    subject_type="candidate",
+                    subject_id=candidate.id,
+                    evidence_anchor_id=evidence_anchor_id,
+                    relation="derived_from",
+                    metadata={"source": kwargs.get("source", "")},
+                )
+                if getattr(candidate, "source_evidence_ref", None) != link.id:
+                    candidate = self.candidate_store.upsert_pending(
+                        self.namespace,
+                        candidate_type=kwargs["candidate_type"],
+                        original_label=kwargs["original_label"],
+                        source=kwargs.get("source", "extraction"),
+                        source_hash=kwargs.get("source_hash", ""),
+                        sample_text=kwargs.get("sample_text", ""),
+                        suggested_canonical=kwargs.get("suggested_canonical"),
+                        confidence=kwargs.get("confidence", 0.5),
+                        source_evidence_ref=link.id,
+                        metadata={"evidence_anchor_id": evidence_anchor_id},
+                    )
+            return candidate
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to persist ontology candidate: %s", exc)
             return None
@@ -419,7 +509,7 @@ class GraphRAGExtractor(TransformComponent):
             relation_metadata["relationship_description"] = desc
             relation_metadata["node_id"] = str(node.id_)
             if isinstance(rel, dict):
-                for key in ("original_relation", "ontology_normalization", "ontology_candidate_id"):
+                for key in ("original_relation", "ontology_normalization", "ontology_candidate_id", "ontology_fact_id"):
                     if rel.get(key) is not None:
                         relation_metadata[key] = rel.get(key)
             existing_relations.append(

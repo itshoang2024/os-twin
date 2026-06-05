@@ -6,9 +6,10 @@ from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from dashboard.knowledge.llm import KnowledgeLLM
 from dashboard.knowledge.namespace import NamespaceManager
-from dashboard.knowledge.ontology.candidates import OntologyCandidateStore
+from dashboard.knowledge.ontology.candidates import OntologyCandidate, OntologyCandidateStore
 from dashboard.knowledge.ontology.defaults import create_default_ontology_profile
 from dashboard.routes.knowledge import router
 from fastapi import FastAPI
@@ -66,6 +67,61 @@ def test_candidate_store_reject_prevents_same_source_reappearing(tmp_path) -> No
     assert again.id == candidate.id
     assert again.status == "rejected"
     assert len(store.list("demo")) == 1
+
+
+def test_candidate_model_supports_broadened_types_payload_and_strictness(tmp_path) -> None:
+    nm = NamespaceManager(base_dir=tmp_path)
+    nm.create("demo")
+    store = OntologyCandidateStore(nm)
+
+    for candidate_type in ["metadata_field", "node", "edge", "validation_rule"]:
+        candidate = store.upsert_pending(
+            "demo",
+            candidate_type=candidate_type,
+            original_label=f"{candidate_type} proposal",
+            source="inline://proposal",
+            source_hash=f"hash-{candidate_type}",
+            proposed_payload={"id": f"{candidate_type}_proposal", "kind": candidate_type},
+            source_evidence_ref="prov-link-1",
+        )
+        assert candidate.candidate_type == candidate_type
+        assert candidate.proposed_payload["kind"] == candidate_type
+        assert candidate.source_evidence_ref == "prov-link-1"
+
+    payload = store.list("demo")[0].model_dump(mode="json")
+    with pytest.raises(ValidationError):
+        OntologyCandidate.model_validate({**payload, "lifecycle_state": "candidate"})
+
+
+def test_pending_candidate_upsert_merges_proposed_payload_and_evidence_ref(tmp_path) -> None:
+    nm = NamespaceManager(base_dir=tmp_path)
+    nm.create("demo")
+    store = OntologyCandidateStore(nm)
+
+    first = store.upsert_pending(
+        "demo",
+        candidate_type="node",
+        original_label="Billing API",
+        source="inline://proposal",
+        source_hash="hash-node",
+        proposed_payload={"name": "Billing API"},
+        source_evidence_ref="prov-original",
+    )
+    second = store.upsert_pending(
+        "demo",
+        candidate_type="node",
+        original_label="Billing API",
+        source="inline://proposal",
+        source_hash="hash-node",
+        proposed_payload={"concept_type": "service"},
+        source_evidence_ref="prov-later",
+        confidence=0.9,
+    )
+
+    assert second.id == first.id
+    assert second.confidence == 0.9
+    assert second.proposed_payload == {"name": "Billing API", "concept_type": "service"}
+    assert second.source_evidence_ref == "prov-original"
 
 
 @pytest.fixture(autouse=True)
@@ -209,6 +265,89 @@ def test_candidate_approval_updates_profile_and_future_normalization(tmp_path) -
     assert "powers" in profile.relationship_types
     assert normalize_relation("powers", profile).classification == "canonical"
 
+
+
+def test_candidate_approval_routes_metadata_fields_and_validation_rules(tmp_path) -> None:
+    from dashboard.knowledge.ontology.approval import ObservationEventStore
+    from dashboard.knowledge.service import KnowledgeService
+
+    nm = NamespaceManager(base_dir=tmp_path)
+    nm.create("demo")
+    service = KnowledgeService(namespace_manager=nm)
+    service.save_ontology_profile(create_default_ontology_profile("demo"))
+
+    field_candidate = service._candidate_store.upsert_pending(  # noqa: SLF001
+        "demo",
+        candidate_type="metadata_field",
+        original_label="Control Owner",
+        source="inline://demo",
+        source_hash="hash-field",
+        proposed_payload={"field_type": "string", "description": "Named accountable control owner."},
+        source_evidence_ref="prov-field",
+    )
+    rule_candidate = service._candidate_store.upsert_pending(  # noqa: SLF001
+        "demo",
+        candidate_type="validation_rule",
+        original_label="Control owner required",
+        source="inline://demo",
+        source_hash="hash-rule",
+        proposed_payload={
+            "rule_type": "required_metadata",
+            "severity": "warning",
+            "message": "Controls should include an owner",
+            "params": {"field": "control_owner"},
+        },
+    )
+
+    approved_field = service.approve_ontology_candidate("demo", field_candidate.id, reviewed_by="tester", canonical_id="control_owner")
+    approved_rule = service.approve_ontology_candidate("demo", rule_candidate.id, reviewed_by="tester", canonical_id="control_owner_required")
+
+    profile = service.get_ontology_profile("demo")
+    assert approved_field["status"] == "approved"
+    assert approved_rule["status"] == "approved"
+    assert profile is not None
+    assert profile.metadata_fields["control_owner"].field_type == "string"
+    assert profile.metadata_fields["control_owner"].description == "Named accountable control owner."
+    assert any(rule.id == "control_owner_required" and rule.params["field"] == "control_owner" for rule in profile.validation_rules)
+
+    events = ObservationEventStore(nm).list("demo")
+    approved_events = [event for event in events if event.event_type == "OntologyCandidateApproved"]
+    assert {event.subject_id for event in approved_events} == {field_candidate.id, rule_candidate.id}
+    assert any(event.provenance_refs == ["prov-field"] for event in approved_events)
+
+
+def test_candidate_map_and_reject_emit_observation_events(tmp_path) -> None:
+    from dashboard.knowledge.ontology.approval import ObservationEventStore
+    from dashboard.knowledge.service import KnowledgeService
+
+    nm = NamespaceManager(base_dir=tmp_path)
+    nm.create("demo")
+    service = KnowledgeService(namespace_manager=nm)
+    service.save_ontology_profile(create_default_ontology_profile("demo"))
+    map_candidate = service._candidate_store.upsert_pending(  # noqa: SLF001
+        "demo",
+        candidate_type="concept_type",
+        original_label="Screen",
+        source="inline://demo",
+        source_hash="hash-map",
+        source_evidence_ref="prov-map",
+    )
+    reject_candidate = service._candidate_store.upsert_pending(  # noqa: SLF001
+        "demo",
+        candidate_type="relationship_type",
+        original_label="powers",
+        source="inline://demo",
+        source_hash="hash-reject",
+    )
+
+    service.map_ontology_candidate("demo", map_candidate.id, "feature", reviewed_by="tester")
+    service.reject_ontology_candidate("demo", reject_candidate.id, reviewed_by="tester", reason="too noisy")
+
+    events = ObservationEventStore(nm).list("demo")
+    by_type = {event.event_type: event for event in events}
+    assert by_type["OntologyCandidateMapped"].subject_id == map_candidate.id
+    assert by_type["OntologyCandidateMapped"].provenance_refs == ["prov-map"]
+    assert by_type["OntologyCandidateRejected"].metadata["reason"] == "too noisy"
 
 def test_graph_extractor_no_profile_preserves_legacy_labels(tmp_path) -> None:
     from dashboard.knowledge.graph.core.graph_rag_extractor import GraphRAGExtractor

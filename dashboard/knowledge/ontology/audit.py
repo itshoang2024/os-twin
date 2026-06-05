@@ -92,6 +92,7 @@ def diff_profiles(previous: OntologyProfile | None, current: OntologyProfile) ->
         "metadata_fields",
         "layers",
         "abstraction_levels",
+        "graph_instruction",
     ]
     added: dict[str, list[str]] = {}
     removed: dict[str, list[str]] = {}
@@ -101,6 +102,10 @@ def diff_profiles(previous: OntologyProfile | None, current: OntologyProfile) ->
     for section in sections:
         prev_section = prev_data.get(section) or {}
         curr_section = curr_data.get(section) or {}
+        if not isinstance(prev_section, dict):
+            prev_section = {}
+        if not isinstance(curr_section, dict):
+            curr_section = {}
         prev_keys = set(prev_section)
         curr_keys = set(curr_section)
         added[section] = sorted(curr_keys - prev_keys)

@@ -2,7 +2,7 @@
   "aliases": {
     "calls_api": "integrates_with",
     "multi_tenant_for": "contains",
-    "syncs_with": "integrates_with"
+    "integration_syncs_with": "integrates_with"
   },
   "compatible_profile_versions": [
     "1.x",

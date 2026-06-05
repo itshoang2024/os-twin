@@ -1,13 +1,22 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import useSWR from 'swr';
 import { PlanningThread, PlanningMessage, ImageAttachment } from '@/types';
 import { apiPost } from '@/lib/api-client';
-
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 
 interface ThreadDetailResponse {
   thread: PlanningThread;
   messages: PlanningMessage[];
+}
+
+interface StreamEvent {
+  token?: string;
+  error?: string;
+  done?: boolean;
+}
+
+function asError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 export function usePlanningThread(id: string) {
@@ -23,7 +32,7 @@ export function usePlanningThread(id: string) {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Derive final messages from SWR + optimistic additions
-  const serverMessages = data?.messages || [];
+  const serverMessages = useMemo(() => data?.messages || [], [data?.messages]);
   const messages = isStreaming || optimisticMessages.length > 0 
     ? [...serverMessages, ...optimisticMessages]
     : serverMessages;
@@ -72,7 +81,7 @@ export function usePlanningThread(id: string) {
     }
 
     try {
-      const response = await fetch(`${BASE_URL}/plans/threads/${id}/messages/stream`, {
+      const response = await fetch(`${getApiBaseUrl()}/plans/threads/${id}/messages/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -110,7 +119,7 @@ export function usePlanningThread(id: string) {
             const dataStr = line.slice(6);
             if (!dataStr.trim() || dataStr === '[DONE]') continue;
 
-            let eventData: any;
+            let eventData: StreamEvent;
             try {
               eventData = JSON.parse(dataStr);
             } catch (e) {
@@ -150,9 +159,10 @@ export function usePlanningThread(id: string) {
         setOptimisticMessages([]);
       });
 
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setError(err);
+    } catch (err: unknown) {
+      const nextError = asError(err);
+      if (nextError.name !== 'AbortError') {
+        setError(nextError);
       }
       setIsStreaming(false);
       // Remove optimistic message on error? SWR mutate will restore server state
@@ -167,8 +177,8 @@ export function usePlanningThread(id: string) {
         working_dir: workingDir
       });
       return result;
-    } catch (err: any) {
-      setError(err);
+    } catch (err: unknown) {
+      setError(asError(err));
       throw err;
     }
   }, [id]);

@@ -1,9 +1,9 @@
 import useSWR from 'swr';
 import { DashboardStats } from '@/types';
 
-export function useStats() {
+export function useStats(enabled = true) {
   const isMockRealtime = process.env.NEXT_PUBLIC_ENABLE_MOCK_REALTIME === 'true';
-  const { data: rawData, error, mutate, isLoading } = useSWR<Record<string, unknown>>('/stats', {
+  const { data: rawData, error, mutate, isLoading } = useSWR<Record<string, unknown>>(enabled ? '/stats' : null, {
     refreshInterval: isMockRealtime ? 10000 : 0,
   });
 

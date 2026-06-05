@@ -41,6 +41,12 @@ class GraphLayoutHint(StrictGraphInstructionModel):
     group_by: list[str] = Field(default_factory=lambda: ["default_layer", "concept_type"])
     sort_by: list[str] = Field(default_factory=lambda: ["layer_order", "label"])
     density: Literal["compact", "comfortable", "spacious"] = "comfortable"
+    # EPIC-015 View-plane draft controls. These fields keep visual changes
+    # governed inside the profile diff/history flow instead of becoming
+    # untyped frontend-only state.
+    mode: str = "layered"
+    color_by: str = "type"
+    fallback_color: str | None = None
 
 
 class GraphDefaultView(StrictGraphInstructionModel):
@@ -50,6 +56,11 @@ class GraphDefaultView(StrictGraphInstructionModel):
     label: str
     lane_dimension: LaneDimension = "default_layer"
     filters: dict[str, list[str]] = Field(default_factory=dict)
+    excluded_filters: dict[str, list[str]] = Field(default_factory=dict)
+    color_by: str | None = None
+    style_property: str = ""
+    selected_node_ids: list[str] = Field(default_factory=list)
+    search_around: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     description: str = ""
 
     @field_validator("id")

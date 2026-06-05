@@ -66,6 +66,13 @@ from dashboard.knowledge.namespace import (
     NamespaceNotFoundError,
 )
 from dashboard.knowledge.vector_store import NamespaceVectorStore
+from dashboard.knowledge.ontology.evidence import (
+    EvidenceAnchor,
+    EvidenceArtifact,
+    EvidenceLocator,
+    EvidenceStore,
+    source_type_for_extension,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +295,7 @@ class Ingestor:
         vector_store_factory: Callable[[str], NamespaceVectorStore] | None = None,
         kuzu_factory: Callable[[str], Any] | None = None,
         graph_index_factory: Callable[[str], Any] | None = None,
+        evidence_store: EvidenceStore | None = None,
     ) -> None:
         self._nm = namespace_manager or NamespaceManager()
         # Embedder + llm are lazy-instantiated on first use to keep imports
@@ -306,6 +314,7 @@ class Ingestor:
         # extraction, graph writes, and vector writes all flow through
         # the llama-index pipeline — matching the query-engine schema.
         self._graph_index_factory = graph_index_factory
+        self._evidence_store = evidence_store or EvidenceStore(self._nm)
         self._graph_indexes: dict[str, Any] = {}
         self._graph_index_lock = threading.Lock()
         # One store per namespace — keeps zvec handle / Kuzu connection alive
@@ -512,6 +521,83 @@ class Ingestor:
             for block in iter(lambda: fh.read(64 * 1024), b""):
                 h.update(block)
         return h.hexdigest()
+
+    # ---- Evidence ------------------------------------------------------
+
+    def _record_source_artifact(
+        self,
+        namespace: str,
+        file_entry: FileEntry,
+        *,
+        read_coverage: str = "unread",
+        source_state: str = "partial",
+        limitations: list[str] | None = None,
+        error: str | None = None,
+    ) -> EvidenceArtifact:
+        """Create/update the EvidenceArtifact for a source file.
+
+        This records source truth even when parsing later fails, allowing PO/QA
+        reviewers to see unread, OCR-needed, conversion-needed, and failed states.
+        """
+        path = Path(file_entry.path)
+        artifact = EvidenceArtifact(
+            id=EvidenceStore.artifact_id(namespace, file_entry.path, file_entry.content_hash),
+            ontology_unit_id=namespace,
+            source_type=source_type_for_extension(file_entry.extension),
+            source_uri=file_entry.path,
+            title=path.name,
+            checksum=file_entry.content_hash,
+            ingested_by="ingestion",
+            read_coverage=read_coverage,  # type: ignore[arg-type]
+            source_state=source_state,  # type: ignore[arg-type]
+            limitations=limitations or (["empty"] if read_coverage == "unread" else []),  # type: ignore[list-item]
+            metadata={
+                "filename": path.name,
+                "extension": file_entry.extension,
+                "file_size": file_entry.size,
+                "mtime": file_entry.mtime,
+                **({"error": error} if error else {}),
+            },
+        )
+        return self._evidence_store.upsert_artifact(namespace, artifact)
+
+    def _attach_evidence_anchors(
+        self,
+        namespace: str,
+        artifact: EvidenceArtifact,
+        chunks: list[dict],
+    ) -> list[dict]:
+        """Create anchors for readable chunks and place anchor ids in chunk metadata."""
+        anchored: list[dict] = []
+        for chunk in chunks:
+            metadata = dict(chunk.get("metadata") or {})
+            chunk_index = int(metadata.get("chunk_index") or 0)
+            locator = EvidenceLocator(
+                page=metadata.get("page") or metadata.get("page_start"),
+                line_start=metadata.get("line_start"),
+                line_end=metadata.get("line_end"),
+                chunk_id=str(metadata.get("chunk_id") or chunk_index),
+            )
+            anchor = EvidenceAnchor(
+                id=EvidenceStore.anchor_id(artifact.id, locator.chunk_id, locator),
+                artifact_id=artifact.id,
+                locator=locator,
+                excerpt=str(chunk.get("text") or "")[:1000],
+                extraction_method="parser",
+                confidence=1.0,
+                metadata={
+                    "file_path": metadata.get("file_path"),
+                    "filename": metadata.get("filename"),
+                    "chunk_index": chunk_index,
+                    "total_chunks": metadata.get("total_chunks"),
+                },
+            )
+            self._evidence_store.upsert_anchor(namespace, anchor)
+            metadata["evidence_artifact_id"] = artifact.id
+            metadata["evidence_anchor_id"] = anchor.id
+            metadata["extraction_method"] = "parser"
+            anchored.append({"text": chunk.get("text", ""), "metadata": metadata})
+        return anchored
 
     # ---- Parse / chunk -------------------------------------------------
 
@@ -1011,13 +1097,29 @@ class Ingestor:
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Force-reingest pre-cleanup failed for %s: %s", fe.path, exc)
 
-            # 3c) Parse → chunk.
+            # 3c) Parse → chunk. Record source artifact before parsing so
+            # unread/failed states are visible and never become evidence claims.
+            artifact = self._record_source_artifact(
+                namespace,
+                fe,
+                read_coverage="unread",
+                source_state="ocr_needed" if fe.extension in IMAGE_EXTENSIONS else "partial",
+                limitations=["ocr_needed"] if fe.extension in IMAGE_EXTENSIONS else ["empty"],
+            )
             t_parse_start = time.monotonic()
             try:
                 chunks = self._parse_file(fe, options)
             except Exception as exc:  # noqa: BLE001
                 t_parse = time.monotonic() - t_parse_start
                 files_failed += 1
+                self._record_source_artifact(
+                    namespace,
+                    fe,
+                    read_coverage="failed",
+                    source_state="failed",
+                    limitations=["failed"],
+                    error=str(exc),
+                )
                 logger.exception("Parse failed for %s (%.3fs)", fe.path, t_parse)
                 err = f"{fe.path}: parse failed: {exc}"
                 errors.append(err)
@@ -1035,6 +1137,13 @@ class Ingestor:
 
             if not chunks:
                 # Empty / unreadable — count as skipped, not a hard failure.
+                self._record_source_artifact(
+                    namespace,
+                    fe,
+                    read_coverage="unread",
+                    source_state="ocr_needed" if fe.extension in IMAGE_EXTENSIONS else "conversion_needed",
+                    limitations=["ocr_needed"] if fe.extension in IMAGE_EXTENSIONS else ["conversion_needed", "empty"],
+                )
                 files_skipped += 1
                 emit(
                     JobEvent(
@@ -1047,6 +1156,15 @@ class Ingestor:
                     )
                 )
                 continue
+
+            artifact = self._record_source_artifact(
+                namespace,
+                fe,
+                read_coverage="full",
+                source_state="read",
+                limitations=[],
+            )
+            chunks = self._attach_evidence_anchors(namespace, artifact, chunks)
 
             # 3d) Embed + (optional) extract.
             t_extract_start = time.monotonic()

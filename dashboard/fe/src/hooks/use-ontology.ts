@@ -15,6 +15,20 @@ export interface OntologyValidationIssue {
   metadata?: Record<string, unknown>;
 }
 
+export type OntologyRelationshipFamily = 'composition' | 'dependency' | 'flow' | 'semantic' | 'ownership' | 'classification' | 'causality' | 'temporal' | 'validation' | 'traceability' | 'assurance' | 'synchronization';
+export type OntologyRelationshipCardinality = 'one_to_one' | 'one_to_many' | 'many_to_one' | 'many_to_many';
+
+export interface OntologySourceMapping {
+  source_id: string;
+  source_type?: 'document' | 'database' | 'api' | 'file' | 'event' | 'manual' | 'derived' | 'other' | string;
+  source_label?: string;
+  field_path?: string;
+  transform?: string;
+  confidence?: number | null;
+  notes?: string;
+  [key: string]: unknown;
+}
+
 export interface OntologyMetadataField {
   id: string;
   label: string;
@@ -22,6 +36,7 @@ export interface OntologyMetadataField {
   allowed_values?: string[];
   description?: string;
   required?: boolean;
+  source_mappings?: OntologySourceMapping[];
   [key: string]: unknown;
 }
 
@@ -52,6 +67,7 @@ export interface OntologyConceptType {
   metadata_fields?: string[];
   color?: string;
   shape?: string;
+  source_mappings?: OntologySourceMapping[];
   [key: string]: unknown;
 }
 
@@ -60,7 +76,7 @@ export type OntologyMapDirection = 'forward' | 'reversed' | 'bidirectional' | 'n
 export interface OntologyRelationshipType {
   id: string;
   label: string;
-  family?: string;
+  family?: OntologyRelationshipFamily | string;
   inverse?: string;
   allowed_source_types?: string[];
   allowed_target_types?: string[];
@@ -68,7 +84,9 @@ export interface OntologyRelationshipType {
   style?: string;
   display_style?: string;
   map_direction?: OntologyMapDirection;
+  cardinality?: OntologyRelationshipCardinality | null;
   description?: string;
+  source_mappings?: OntologySourceMapping[];
   [key: string]: unknown;
 }
 
@@ -77,6 +95,15 @@ export interface GraphInstructionDefaultView {
   label: string;
   lane_dimension?: string;
   filters?: Record<string, string[]>;
+  excluded_filters?: Record<string, string[]>;
+  color_by?: string;
+  style_property?: string;
+  selected_node_ids?: string[];
+  search_around?: {
+    direction?: string;
+    relationship_family?: string;
+    depth?: number;
+  };
   description?: string;
 }
 
@@ -129,6 +156,30 @@ export interface OntologyProfile {
   validation_rules?: Array<Record<string, unknown>>;
   graph_instruction?: GraphInstruction;
   [key: string]: unknown;
+}
+
+export interface OntologyUnit {
+  id?: string | null;
+  namespace: string;
+  active_profile_id?: string | null;
+  name?: string;
+  purpose?: string;
+  domain?: string;
+  expected_users?: string[];
+  source_material?: string[];
+  governance_mode?: string;
+  lifecycle?: string;
+  installed_packs?: string[];
+  auto_confirm_threshold?: number;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface OntologyUnitResponse {
+  namespace: string;
+  unit: OntologyUnit | null;
+  unit_exists: boolean;
 }
 
 export interface OntologyProfileResponse {
@@ -206,16 +257,157 @@ export interface DomainPackManifest {
   graph_instruction?: GraphInstruction;
   fixtures?: Array<Record<string, unknown>>;
   migration_notes?: string[];
+  dependencies?: string[];
 }
 
 export interface DomainPackListResponse {
   packs: DomainPackManifest[];
 }
 
+export interface DomainPackValidateResponse {
+  namespace: string;
+  pack_id: string;
+  valid: boolean;
+  issues: OntologyValidationIssue[];
+  profile?: OntologyProfile | null;
+  manifest?: DomainPackManifest | null;
+}
+
 export interface DomainPackInstalledResponse {
   namespace: string;
   schema_version: number;
-  installed_packs: Record<string, unknown>;
+  installed_packs: Record<string, { pack_id?: string; name?: string; version?: string; status?: string; additions?: Record<string, string[]>; installed_at?: string; disabled_at?: string | null } | unknown>;
+}
+
+export interface EvidenceArtifact {
+  id: string;
+  source_type: string;
+  source_uri?: string | null;
+  title?: string | null;
+  checksum?: string;
+  read_coverage?: string;
+  source_state?: string;
+  limitations?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface EvidenceAnchor {
+  id: string;
+  artifact_id: string;
+  locator?: Record<string, string | number | null | undefined>;
+  excerpt?: string;
+  extraction_method?: string;
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProvenanceLinkDetail {
+  provenance_link?: Record<string, unknown> | null;
+  anchor?: EvidenceAnchor | null;
+  artifact?: EvidenceArtifact | null;
+}
+
+export interface OntologyFactSubject {
+  kind: 'node' | 'candidate' | 'label' | string;
+  id: string;
+  label?: string;
+  concept_type?: string | null;
+}
+
+export interface OntologyFactSuggestedMapping {
+  relationship_type?: string | null;
+  source_id?: string | null;
+  target_id?: string | null;
+  source_kind?: string;
+  target_kind?: string;
+  direction?: string;
+  confidence?: number | null;
+}
+
+export interface OntologyFact {
+  id: string;
+  namespace: string;
+  statement: string;
+  subjects: OntologyFactSubject[];
+  subject_ids: string[];
+  confidence: number;
+  review_state: 'draft' | 'assistive' | 'reviewed' | 'approved' | 'rejected' | string;
+  source: 'extraction' | 'assistant' | 'manual' | string;
+  evidence_refs: string[];
+  provenance_refs: string[];
+  suggested_mapping?: OntologyFactSuggestedMapping | null;
+  source_hash?: string;
+  promoted_edge_id?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OntologyFactListResponse {
+  namespace: string;
+  facts: OntologyFact[];
+}
+
+export interface OntologyFactCreateRequest {
+  statement: string;
+  subjects?: OntologyFactSubject[];
+  confidence?: number;
+  source?: 'extraction' | 'assistant' | 'manual';
+  evidence_refs?: string[];
+  provenance_refs?: string[];
+  suggested_mapping?: OntologyFactSuggestedMapping | null;
+  source_hash?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OntologyFactPromoteRequest {
+  relationship_type?: string | null;
+  source_id?: string | null;
+  target_id?: string | null;
+}
+
+export interface ObservationEvent {
+  id: string;
+  namespace: string;
+  event_type: string;
+  subject_type: string;
+  subject_id: string;
+  occurred_at: string;
+  actor?: string | null;
+  value?: string | number | boolean | null;
+  evidence_refs: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ObservationEventListResponse {
+  namespace: string;
+  events: ObservationEvent[];
+}
+
+export interface TimeSeriesPoint {
+  timestamp: string;
+  value: number;
+  evidence_refs?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface TimeSeries {
+  id: string;
+  namespace: string;
+  subject_id: string;
+  metric_id: string;
+  unit: string;
+  points: TimeSeriesPoint[];
+  evidence_refs: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimeSeriesListResponse {
+  namespace: string;
+  series: TimeSeries[];
 }
 
 export interface OntologyCandidate {
@@ -230,6 +422,9 @@ export interface OntologyCandidate {
   sample_text: string;
   status: string;
   source_hash?: string;
+  proposed_payload?: Record<string, unknown>;
+  source_evidence_ref?: string | null;
+  source_evidence?: ProvenanceLinkDetail | null;
   created_at: string;
   reviewed_at?: string | null;
   reviewed_by?: string | null;
@@ -239,6 +434,25 @@ export interface OntologyCandidate {
 export interface OntologyCandidateListResponse {
   namespace: string;
   candidates: OntologyCandidate[];
+}
+
+export interface OntologyAssistantMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface OntologyAssistantRequest {
+  message: string;
+  profile: OntologyProfile;
+  selected?: Record<string, unknown> | null;
+  context?: Record<string, unknown> | null;
+  history?: OntologyAssistantMessage[];
+}
+
+export interface OntologyAssistantResponse {
+  namespace: string;
+  conversation_id: string;
+  text: string;
 }
 
 export interface OntologyCandidateActionRequest {
@@ -253,7 +467,33 @@ export interface OntologyCandidateBulkAction extends OntologyCandidateActionRequ
 }
 
 export function getEditableProfile(response: OntologyProfileResponse | undefined): OntologyProfile | null {
-  return response?.profile ?? response?.default_profile ?? null;
+  return response?.profile ?? null;
+}
+
+
+export function useOntologyUnit(namespace: string | null) {
+  const key = namespace ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/unit` : null;
+  const { data, error, isLoading, mutate } = useSWR<OntologyUnitResponse>(key, { revalidateOnFocus: false });
+
+  const saveUnit = async (unit: Partial<OntologyUnit>): Promise<OntologyUnitResponse> => {
+    if (!namespace) throw new Error('Namespace is required');
+    const saved = await apiPut<OntologyUnitResponse>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/unit`,
+      { unit: { ...unit, namespace } },
+    );
+    await mutate(saved, false);
+    return saved;
+  };
+
+  return {
+    data,
+    unit: data?.unit ?? null,
+    unitExists: Boolean(data?.unit_exists),
+    isLoading,
+    error: error ? String(error) : null,
+    refresh: mutate,
+    saveUnit,
+  };
 }
 
 export function useOntologyProfile(namespace: string | null) {
@@ -293,6 +533,7 @@ export function useOntologyProfile(namespace: string | null) {
   return {
     data,
     profile: getEditableProfile(data),
+    suggestedProfile: data?.profile_exists ? null : data?.default_profile ?? null,
     profileExists: Boolean(data?.profile_exists),
     defaultSuggested: Boolean(data?.default_suggested),
     validationIssues: data?.validation_issues ?? [],
@@ -367,6 +608,14 @@ export function useOntologyPacks(namespace: string | null) {
     { revalidateOnFocus: false },
   );
 
+  const validatePack = async (packId: string): Promise<DomainPackValidateResponse> => {
+    if (!namespace) throw new Error('Namespace is required');
+    return apiPost<DomainPackValidateResponse>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/packs/validate`,
+      { pack_id: packId },
+    );
+  };
+
   const installPack = async (packId: string) => {
     if (!namespace) throw new Error('Namespace is required');
     const result = await apiPost(
@@ -392,8 +641,83 @@ export function useOntologyPacks(namespace: string | null) {
     installed: installed.data ?? null,
     isLoading: available.isLoading || installed.isLoading,
     error: available.error || installed.error ? String(available.error || installed.error) : null,
+    validatePack,
     installPack,
     uninstallPack,
+  };
+}
+
+export function useOntologyFacts(namespace: string | null, reviewState = '') {
+  const key = namespace
+    ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/facts${reviewState ? `?review_state=${encodeURIComponent(reviewState)}` : ''}`
+    : null;
+  const { data, error, isLoading, mutate } = useSWR<OntologyFactListResponse>(key, { revalidateOnFocus: false });
+
+  const createFact = async (request: OntologyFactCreateRequest): Promise<OntologyFact> => {
+    if (!namespace) throw new Error('Namespace is required');
+    const fact = await apiPost<OntologyFact>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/facts`,
+      request,
+    );
+    await mutate();
+    return fact;
+  };
+
+  const reviewFact = async (factId: string, review_state: OntologyFact['review_state'], metadata: Record<string, unknown> = {}): Promise<OntologyFact> => {
+    if (!namespace) throw new Error('Namespace is required');
+    const fact = await apiPost<OntologyFact>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/facts/${encodeURIComponent(factId)}/review`,
+      { review_state, metadata },
+    );
+    await mutate();
+    return fact;
+  };
+
+  const promoteFactToEdge = async (factId: string, request: OntologyFactPromoteRequest = {}): Promise<Record<string, unknown>> => {
+    if (!namespace) throw new Error('Namespace is required');
+    const result = await apiPost<Record<string, unknown>>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/facts/${encodeURIComponent(factId)}/promote-edge`,
+      request,
+    );
+    await mutate();
+    return result;
+  };
+
+  const raiseRelationshipCandidate = async (factId: string, relationshipLabel: string): Promise<Record<string, unknown>> => {
+    if (!namespace) throw new Error('Namespace is required');
+    const result = await apiPost<Record<string, unknown>>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/facts/${encodeURIComponent(factId)}/relationship-candidate`,
+      { relationship_label: relationshipLabel },
+    );
+    await mutate();
+    return result;
+  };
+
+  return {
+    facts: data?.facts ?? [],
+    isLoading,
+    error: error ? String(error) : null,
+    refresh: mutate,
+    createFact,
+    reviewFact,
+    promoteFactToEdge,
+    raiseRelationshipCandidate,
+  };
+}
+
+export function useOntologyObservation(namespace: string | null, subjectId?: string | null) {
+  const query = subjectId ? `?subject_id=${encodeURIComponent(subjectId)}` : '';
+  const eventsKey = namespace ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/observation/events${query}` : null;
+  const seriesKey = namespace ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/observation/series${query}` : null;
+  const events = useSWR<ObservationEventListResponse>(eventsKey, { revalidateOnFocus: false });
+  const series = useSWR<TimeSeriesListResponse>(seriesKey, { revalidateOnFocus: false });
+
+  return {
+    events: events.data?.events ?? [],
+    series: series.data?.series ?? [],
+    isLoading: events.isLoading || series.isLoading,
+    error: events.error || series.error ? String(events.error || series.error) : null,
+    refresh: async () => { await events.mutate(); await series.mutate(); },
   };
 }
 
@@ -453,4 +777,16 @@ export function useOntologyCandidates(namespace: string | null, status = 'pendin
     rejectCandidate,
     bulkUpdateCandidates,
   };
+}
+
+export function useOntologyAssistant(namespace: string | null) {
+  const askAssistant = async (request: OntologyAssistantRequest): Promise<OntologyAssistantResponse> => {
+    if (!namespace) throw new Error('Namespace is required');
+    return apiPost<OntologyAssistantResponse>(
+      `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/assistant`,
+      request,
+    );
+  };
+
+  return { askAssistant };
 }

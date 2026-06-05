@@ -6,6 +6,7 @@ import {
   useOntologyCandidates,
   useOntologyPacks,
   useOntologyProfile,
+  useOntologyUnit,
   useOntologySummary,
   useOntologyValidation,
 } from '../use-ontology';
@@ -75,7 +76,8 @@ describe('ontology hooks', () => {
     expect(fetcher).toHaveBeenCalledWith('/knowledge/namespaces/demo/ontology/profile');
     expect(result.current.profileExists).toBe(false);
     expect(result.current.defaultSuggested).toBe(true);
-    expect(result.current.profile).toEqual(profile);
+    expect(result.current.profile).toBeNull();
+    expect(result.current.suggestedProfile).toEqual(profile);
   });
 
   it('surfaces ontology profile loading errors without retrying', async () => {
@@ -162,11 +164,26 @@ describe('ontology hooks', () => {
     const fetcher = vi.fn().mockResolvedValue({ packs: [] });
 
     renderHook(() => useOntologyProfile(null), { wrapper: swrWrapper(fetcher) });
+    renderHook(() => useOntologyUnit(null), { wrapper: swrWrapper(fetcher) });
     renderHook(() => useOntologySummary(null), { wrapper: swrWrapper(fetcher) });
     renderHook(() => useOntologyCandidates(null), { wrapper: swrWrapper(fetcher) });
 
     await act(async () => {});
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('loads and saves ontology unit metadata without a profile', async () => {
+    const unit = { namespace: 'demo', active_profile_id: null, name: 'Audit Unit', purpose: 'Govern audits', domain: 'audit', expected_users: ['auditor'], source_material: ['policy'], governance_mode: 'strict' };
+    const fetcher = vi.fn().mockResolvedValue({ namespace: 'demo', unit, unit_exists: true });
+    mockApiPut.mockResolvedValue({ namespace: 'demo', unit, unit_exists: true });
+
+    const { result } = renderHook(() => useOntologyUnit('demo'), { wrapper: swrWrapper(fetcher) });
+
+    await waitFor(() => expect(result.current.unit).toEqual(unit));
+    expect(fetcher).toHaveBeenCalledWith('/knowledge/namespaces/demo/ontology/unit');
+
+    await act(async () => { await result.current.saveUnit({ active_profile_id: null, name: 'Audit Unit' }); });
+    expect(mockApiPut).toHaveBeenCalledWith('/knowledge/namespaces/demo/ontology/unit', { unit: { active_profile_id: null, name: 'Audit Unit', namespace: 'demo' } });
   });
 
   it('saves ontology profiles through the profile API', async () => {

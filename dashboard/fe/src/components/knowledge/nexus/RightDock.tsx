@@ -4,10 +4,11 @@ import React from 'react';
 import { useNexusContext } from './NexusContext';
 import ContextualCard from './ContextualCard';
 import { Icon } from './Icon';
+import FactReviewPanel from './FactReviewPanel';
 
 export default function RightDock({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const ctx = useNexusContext();
-  const { graph, actions, path } = ctx;
+  const { graph, actions, path, namespace } = ctx;
 
   if (collapsed || !graph.selectedNode) {
     return (
@@ -54,6 +55,7 @@ export default function RightDock({ collapsed, onToggle }: { collapsed: boolean;
           onClose={() => path.handleNodeClick(null)}
           docked
         />
+        <FactReviewPanel namespace={namespace.selectedNamespace} subjectId={graph.selectedNode.id} />
       </div>
     </div>
   );

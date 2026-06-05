@@ -2,15 +2,15 @@ import { useEffect, useRef } from 'react';
 import { useNotificationStore } from '@/lib/stores/notificationStore';
 import { useStats } from './use-stats';
 
-export function useRealtimeSim() {
+export function useRealtimeSim(enabled = true) {
   const isMockRealtime = process.env.NEXT_PUBLIC_ENABLE_MOCK_REALTIME === 'true';
   const { addToast } = useNotificationStore();
-  const { stats } = useStats();
+  const { stats } = useStats(enabled);
   
   const lastStatsRef = useRef(stats);
 
   useEffect(() => {
-    if (!isMockRealtime) return;
+    if (!enabled || !isMockRealtime) return;
 
     // Check for "escalations" or important changes in stats
     if (stats && lastStatsRef.current) {
@@ -23,10 +23,10 @@ export function useRealtimeSim() {
       }
     }
     lastStatsRef.current = stats;
-  }, [stats, isMockRealtime, addToast]);
+  }, [stats, enabled, isMockRealtime, addToast]);
 
   useEffect(() => {
-    if (!isMockRealtime) return;
+    if (!enabled || !isMockRealtime) return;
 
     // Randomly simulate an escalation every now and then if polling is active
     const interval = setInterval(() => {
@@ -52,5 +52,5 @@ export function useRealtimeSim() {
     }, 15000); // Check for random event every 15s
 
     return () => clearInterval(interval);
-  }, [isMockRealtime, addToast]);
+  }, [enabled, isMockRealtime, addToast]);
 }

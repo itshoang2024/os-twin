@@ -37,13 +37,17 @@ def test_seed_domain_pack_manifests_exist_and_validate(tmp_path: Path) -> None:
         "public-sector",
         "esg",
         "audit-risk-management",
+        "audit-risk",
         "ecommerce-logistics",
     }
+    seen_families = set()
     for manifest in manifests:
         assert manifest.compatible_profile_versions
         assert manifest.fixtures
         assert manifest.graph_instruction.default_views
         assert isinstance(manifest.migration_notes, list)
+        seen_families.update(rel.family for rel in manifest.relationship_types.values())
+    assert {"validation", "assurance", "synchronization"} & seen_families
 
 
 def test_pack_manifest_requires_acceptance_criteria_fields() -> None:
@@ -472,3 +476,62 @@ def test_epic008_unknown_concepts_and_relations_become_review_candidates() -> No
 
     assert any(issue.code == "CANDIDATE_RELATION_TYPE" for issue in node_issues)
     assert node_issues[0].metadata["candidate"] == "mystery_relation"
+
+
+
+def test_default_packs_and_dm03_relationship_families_validate(tmp_path: Path) -> None:
+    _, profile_store, pack_store = _store(tmp_path)
+    profile = create_default_ontology_profile("demo")
+    profile_store.write(profile)
+
+    loaded_pack_ids = {manifest.pack_id for manifest in pack_store.list_available()}
+    assert loaded_pack_ids >= {
+        "financial-services",
+        "technology-saas",
+        "retail-consumer",
+        "public-sector",
+        "esg",
+        "audit-risk-management",
+        "audit-risk",
+        "ecommerce-logistics",
+    }
+    for family in ["classification", "causality", "temporal"]:
+        payload = {
+            "pack_id": f"{family}-pack",
+            "name": f"{family.title()} Pack",
+            "version": "1.0.0",
+            "compatible_profile_versions": ["1.x"],
+            "relationship_types": {
+                f"{family}_rel": {
+                    "id": f"{family}_rel",
+                    "label": f"{family.title()} Relation",
+                    "family": family,
+                }
+            },
+            "fixtures": [{"id": f"{family}-fixture"}],
+            "migration_notes": ["DM-03 proposed family coverage."],
+        }
+        manifest = DomainPackManifest.model_validate(payload)
+        result = pack_store.validate(manifest, profile)
+        assert result.valid is True
+
+
+def test_pack_install_and_uninstall_append_profile_history_without_mixing_observation_events(tmp_path: Path) -> None:
+    nm = NamespaceManager(base_dir=tmp_path / "kb")
+    nm.create("demo")
+    service = KnowledgeService(namespace_manager=nm)
+    service.save_ontology_profile(create_default_ontology_profile("demo"), actor="alice", reason="Seed")
+
+    service.install_domain_pack("demo", "financial-services", actor="po", reason="Install finance vocabulary")
+    latest = service.list_ontology_profile_history("demo")[0]
+    assert latest["actor"] == "po"
+    assert latest["reason"] == "Install finance vocabulary"
+    assert any(entry["kind"] == "domain_pack_install" for entry in latest["migration_entries"])
+    assert "financial_product" in latest["diff"]["added"]["concept_types"]
+
+    service.uninstall_domain_pack("demo", "financial-services", actor="po", reason="Disable finance vocabulary")
+    latest = service.list_ontology_profile_history("demo")[0]
+    assert any(entry["kind"] == "domain_pack_uninstall" for entry in latest["migration_entries"])
+    assert "financial_product" in latest["diff"]["removed"]["concept_types"]
+    assert service.list_observation_events("demo", event_type="DomainPackInstalled")
+    assert all("event_type" not in record for record in service.list_ontology_profile_history("demo"))

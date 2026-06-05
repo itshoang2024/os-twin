@@ -44,6 +44,12 @@ export interface ExplorerNode {
   lifecycle_state?: string | null;
   metadata?: Record<string, unknown>;
   validation_issues?: Array<Record<string, unknown>>;
+  quality_state?: string | null;
+  candidate_state?: string | null;
+  review_state?: string | null;
+  confidence?: number | null;
+  provenance_refs?: string[];
+  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
 }
 
 /** Enhanced edge with label, weight, and direction. */
@@ -65,6 +71,12 @@ export interface ExplorerEdge {
   inverse_label?: string | null;
   style?: 'solid' | 'dashed' | 'dotted' | 'bold' | string | null;
   is_candidate?: boolean;
+  review_state?: string | null;
+  candidate_state?: string | null;
+  confidence?: number | null;
+  provenance_refs?: string[];
+  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
+  map_direction?: 'forward' | 'reversed' | string | null;
   validation_issues?: Array<Record<string, unknown>>;
 }
 
@@ -103,7 +115,41 @@ export interface EnterpriseMapAbstractionLevel {
   description?: string;
 }
 
-export interface EnterpriseMapNode extends ExplorerNode {
+export type OntologyVisualTimeRange = { start?: string | null; end?: string | null; [key: string]: unknown } | string | null;
+
+export interface EnterpriseMapExternalRef {
+  system: string;
+  id: string;
+  uri?: string | null;
+}
+
+export interface OntologyExternalRef {
+  system?: string | null;
+  id?: string | null;
+  uri?: string | null;
+  [key: string]: unknown;
+}
+
+export interface OntologyVisualExtensions {
+  event_count?: number | null;
+  active_event_count?: number | null;
+  time_range?: OntologyVisualTimeRange;
+  series_refs?: string[];
+  flow_refs?: string[];
+  state?: string | null;
+  simulation_state?: string | null;
+  simulation_refs?: string[];
+  state_machine_ref?: string | null;
+  state_color?: string | null;
+  phase?: string | null;
+  track?: string | null;
+  priority?: string | number | null;
+  effort?: string | number | null;
+  prerequisites?: string[];
+  acceptance?: string[] | string | null;
+}
+
+export interface EnterpriseMapNode extends ExplorerNode, OntologyVisualExtensions {
   concept_label?: string | null;
   concept_color?: string | null;
   concept_shape?: string | null;
@@ -116,6 +162,12 @@ export interface EnterpriseMapNode extends ExplorerNode {
   map_group?: string | null;
   data_store?: string | null;
   sync_mode?: string | null;
+  quality_state?: string | null;
+  candidate_state?: string | null;
+  review_state?: string | null;
+  confidence?: number | null;
+  provenance_refs?: string[];
+  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
   ontology_path?: {
     layer?: string | null;
     abstraction_level?: string | null;
@@ -125,7 +177,15 @@ export interface EnterpriseMapNode extends ExplorerNode {
   };
 }
 
-export interface EnterpriseMapEdge extends ExplorerEdge {
+export interface EnterpriseMapEdge extends ExplorerEdge, OntologyVisualExtensions {
+  id?: string | null;
+  color?: string | null;
+  review_state?: string | null;
+  candidate_state?: string | null;
+  confidence?: number | null;
+  provenance_refs?: string[];
+  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
+  validation_issues?: Array<Record<string, unknown>>;
   map_source?: string | null;
   map_target?: string | null;
   map_direction?: 'forward' | 'reversed' | string | null;

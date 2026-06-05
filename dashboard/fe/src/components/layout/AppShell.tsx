@@ -8,9 +8,12 @@ import { KeyboardShortcutManager } from '@/components/ui/KeyboardShortcutManager
 import { KeyboardShortcutHelp } from '@/components/ui/KeyboardShortcutHelp';
 import { SearchModal } from '@/components/ui/SearchModal';
 import { useAgentNavigation } from '@/hooks/use-agent-navigation';
+import { usePathname } from 'next/navigation';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  useRealtimeSim();
+  const pathname = usePathname();
+  const isFixtureRoute = pathname.includes('-fixture');
+  useRealtimeSim(!isFixtureRoute);
   useAgentNavigation();
 
   return (

@@ -117,6 +117,36 @@ def test_rename_creates_alias_and_rollback_preview_does_not_mutate_current_profi
     assert service.get_ontology_profile("demo").version == "1.1.0"
 
 
+
+def test_view_plane_graph_instruction_changes_appear_in_profile_diff(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    base = create_default_ontology_profile("demo")
+    target = base.model_copy(deep=True)
+    target.version = "1.1.0"
+    payload = target.model_dump(mode="json")
+    payload["graph_instruction"]["default_views"] = [
+        {"id": "ontology_visual_analysis", "label": "Analysis", "lane_dimension": "layer", "color_by": "lifecycle"}
+    ]
+
+    result = service.diff_ontology_profiles("demo", base_profile=base.model_dump(mode="json"), target_profile=payload)
+
+    assert "default_views" in result["diff"]["changed"]["graph_instruction"]
+    assert "graph_instruction.default_views" in result["diff"]["changed_paths"]
+
+
+def test_dangerous_override_requires_ticket_and_approver_metadata(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    profile = create_default_ontology_profile("demo")
+    service.save_ontology_profile(profile, actor="alice", reason="Seed")
+    service._kuzu_graphs["demo"] = FakeGraph(["depends_on"])  # noqa: SLF001
+    next_profile = profile.model_copy(deep=True)
+    next_profile.version = "1.1.0"
+    next_profile.relationship_types.pop("depends_on")
+    next_profile.relationship_types["enables"].inverse = None
+
+    with pytest.raises(ValueError, match="ticket and approved_by"):
+        service.save_ontology_profile(next_profile, actor="alice", reason="Remove relation", validation_override={"ticket": "ONT-9"})
+
 def test_candidate_approval_is_auditable(tmp_path: Path) -> None:
     service = make_service(tmp_path)
     service.save_ontology_profile(create_default_ontology_profile("demo"), actor="alice", reason="Seed")

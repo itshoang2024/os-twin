@@ -1,24 +1,25 @@
-const browserApiBase = '/api';
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
-function isBrowser(): boolean {
-  return globalThis?.window !== undefined;
-}
+// Use a same-origin API path by default. In Next dev, next.config.ts rewrites
+// /api/* to the FastAPI backend; in production, FastAPI serves the static
+// frontend and /api is already same-origin. This avoids CORS/auth failures
+// during browser QA while still allowing explicit remote API overrides.
+export const API_BASE_URL = (configuredApiBaseUrl || '/api').replace(/\/$/, '');
 
 export function getApiBaseUrl(): string {
-  // Always prioritize the environment variable if set, even in the browser.
-  // This allows overriding the API base for development or testing (e.g. Playwright).
-  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
-    return process.env.NEXT_PUBLIC_API_BASE_URL;
-  }
-
-  return browserApiBase;
+  return API_BASE_URL;
 }
 
 export function getWebSocketUrl(): string {
-  if (isBrowser()) {
-    return globalThis.window.location.origin.replace(/^http/, 'ws') + '/api/ws';
+  const apiBase = getApiBaseUrl();
+  if (/^https?:\/\//.test(apiBase)) {
+    return apiBase.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws';
   }
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3366/api';
-  return apiBase.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws';
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${apiBase}/ws`;
+  }
+
+  return `ws://localhost:3366${apiBase}/ws`;
 }
