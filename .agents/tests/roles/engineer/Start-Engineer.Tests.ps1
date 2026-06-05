@@ -3,8 +3,8 @@
 BeforeAll {
     $script:StartEngineer = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/engineer").Path "Start-Engineer.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/engineer").Path ".." "..")).Path
-    $script:ChannelServer = Join-Path $script:agentsDir "mcp" "channel-server.py"
     $script:TestDepsReady = Join-Path $script:agentsDir "plan" "Test-DependenciesReady.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
 
     # codegraph is available in this repo, but it indexes Python/TS/JS and does
     # not index these PowerShell runners; rg/Pester are the source of truth here.
@@ -18,17 +18,8 @@ BeforeAll {
             [Parameter(Mandatory)][AllowEmptyString()][string]$Body
         )
 
-        $py = @'
-import importlib.util
-import sys
-
-server, room, from_role, to_role, msg_type, ref, body = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("channel_server", server)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-module.post_message(room, from_role, to_role, msg_type, ref, body)
-'@
-        $py | python3 - $script:ChannelServer $RoomDir $From $To $Type $Ref $Body | Out-Null
+        Write-TestChannelMessage -RoomDir $RoomDir -From $From -To $To `
+            -Type $Type -Ref $Ref -Body $Body | Out-Null
     }
 
     function New-CaptureAgent {
