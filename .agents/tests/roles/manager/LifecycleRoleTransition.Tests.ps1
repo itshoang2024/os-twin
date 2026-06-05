@@ -26,33 +26,30 @@ BeforeAll {
             initial_state = "developing"
             max_retries   = 3
             states        = @{
-                developing   = @{
-                    role    = "game-engineer"
-                    type    = "work"
-                    signals = @{
-                        done  = @{ target = "review" }
-                        error = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
-                optimize     = @{
-                    role    = "game-engineer"
-                    type    = "work"
-                    signals = @{
-                        done  = @{ target = "review" }
-                        error = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
+	                developing   = @{
+	                    role    = "game-engineer"
+	                    type    = "work"
+	                    signals = @{
+	                        done = @{ target = "review" }
+	                    }
+	                }
+	                optimize     = @{
+	                    role    = "game-engineer"
+	                    type    = "work"
+	                    signals = @{
+	                        done = @{ target = "review" }
+	                    }
+	                }
 	                review       = @{
 	                    role    = "game-qa"
 	                    type    = "review"
 	                    signals = @{
 	                        done     = @{ target = "passed" }
-	                        pass     = @{ target = "passed" }
-	                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
-                        escalate = @{ target = "triage" }
-                        error    = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
+		                        pass     = @{ target = "passed" }
+		                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
+	                        escalate = @{ target = "triage" }
+	                    }
+	                }
                 triage       = @{
                     role    = "manager"
                     type    = "triage"

@@ -3,6 +3,29 @@
 BeforeAll {
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../lifecycle").Path "..")).Path
     $script:ResolvePipeline = Join-Path $script:agentsDir "lifecycle" "Resolve-Pipeline.ps1"
+
+    function Assert-NoLifecycleErrorSignal {
+        param([Parameter(Mandatory)]$Lifecycle)
+
+        $stateEntries = if ($Lifecycle.states -is [System.Collections.IDictionary]) {
+            $Lifecycle.states.GetEnumerator()
+        } else {
+            $Lifecycle.states.PSObject.Properties | ForEach-Object {
+                [pscustomobject]@{ Key = $_.Name; Value = $_.Value }
+            }
+        }
+
+        foreach ($entry in $stateEntries) {
+            $signals = $entry.Value.signals
+            if (-not $signals) { continue }
+            $signalNames = if ($signals -is [System.Collections.IDictionary]) {
+                @($signals.Keys)
+            } else {
+                @($signals.PSObject.Properties.Name)
+            }
+            $signalNames | Should -Not -Contain "error" -Because "state '$($entry.Key)' must not model runtime failures as lifecycle signals"
+        }
+    }
 }
 
 Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
@@ -39,11 +62,6 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc.states."review-2".signals.done.target | Should -Be "passed"
         $lc.states."review-2".signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
 
-        # Error signal on evaluator states (crash-loop guard)
-        $lc.states."review-2".signals.error | Should -Not -BeNullOrEmpty
-        $lc.states."review-2".signals.error.target | Should -Be "failed"
-        $lc.states."review-2".signals.error.actions | Should -Contain "increment_retries"
-
         # Evaluator fail → optimize (worker's optimize state)
         $lc.states."review-2".signals.fail.target | Should -Be "optimize"
 
@@ -52,6 +70,7 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc.states.fixing.role | Should -Be "game-architect"
         $lc.states.fixing.type | Should -Be "work"
         $lc.states.fixing.signals.done.target | Should -Be "review"
+        Assert-NoLifecycleErrorSignal $lc
     }
 
     It "Builds lifecycle with single candidate — QA review injected" {
@@ -94,9 +113,7 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc.states.review.signals.done.target | Should -Be "passed"
         $lc.states.review.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
 
-        # Error signal present on injected review
-        $lc.states.review.signals.error | Should -Not -BeNullOrEmpty
-        $lc.states.review.signals.error.target | Should -Be "failed"
+        Assert-NoLifecycleErrorSignal $lc
     }
 
     It "JSON output is valid and contains version 2" {
@@ -118,7 +135,7 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $parsed.states.'failed-final'.type | Should -Be "terminal"
     }
 
-    It "All evaluator states include error signal targeting failed" {
+    It "All generated states omit error lifecycle signals" {
         $roles = @(
             [PSCustomObject]@{ Name = 'designer'; InstanceType = 'worker' },
             [PSCustomObject]@{ Name = 'design-reviewer'; InstanceType = 'evaluator' },
@@ -134,13 +151,11 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
             $state = $lc.states[$stateName]
             $state | Should -Not -BeNullOrEmpty -Because "state '$stateName' should exist"
             $state.type | Should -Be 'review'
-            $state.signals.error | Should -Not -BeNullOrEmpty -Because "evaluator state '$stateName' must handle agent crashes"
-            $state.signals.error.target | Should -Be 'failed'
-            $state.signals.error.actions | Should -Contain 'increment_retries'
         }
+        Assert-NoLifecycleErrorSignal $lc
     }
 
-    It "Worker and evaluator error signals both target failed state" {
+    It "Worker and evaluator states both omit error lifecycle signals" {
         $roles = @(
             [PSCustomObject]@{ Name = 'eng'; InstanceType = 'worker' },
             [PSCustomObject]@{ Name = 'qa'; InstanceType = 'evaluator' }
@@ -150,10 +165,7 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         $lc = Build-LifecycleV2 -RoleOverrides $roles -MaxRetries 3
 
-        # Worker error signal
-        $lc.states.developing.signals.error.target | Should -Be 'failed'
-        # Evaluator error signal (review, position-based naming)
-        $lc.states.'review'.signals.error.target | Should -Be 'failed'
+        Assert-NoLifecycleErrorSignal $lc
     }
 
     It "Routes security capability review to security-specialist while keeping assigned role as worker" {

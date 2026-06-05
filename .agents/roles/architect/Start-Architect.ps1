@@ -57,10 +57,14 @@ if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = 300 }
 # --- Read/Create per-role config file (architect_{id}.json) ---
 $archConfigs = Get-ChildItem -Path $RoomDir -Filter "architect_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
 if ($archConfigs) {
-    $archRoleConfig = Get-Content $archConfigs[0].FullName -Raw | ConvertFrom-Json
-    $archRoleConfig.status = "active"
-    $archRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archConfigs[0].FullName -Encoding utf8
     $archRoleConfigFile = $archConfigs[0].FullName
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status "active" -ConfigFile $archRoleConfigFile | Out-Null
+    } else {
+        $archRoleConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
+        $archRoleConfig.status = "active"
+        $archRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    }
 }
 else {
     $archModel = "google-vertex/gemini-3-flash-preview"
@@ -80,6 +84,9 @@ else {
     }
     $archRoleConfigFile = Join-Path $RoomDir "architect_001.json"
     $archRoleConfigObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status "active" -ConfigFile $archRoleConfigFile | Out-Null
+    }
 }
 
 # --- Read task ref ---
@@ -304,14 +311,14 @@ $signalType = if (Get-Command Convert-VerdictToLifecycleSignal -ErrorAction Sile
 
 # --- Handle agent result ---
 if ($result.TimedOut) {
-    $signalType = "error"
+    $signalType = ""
     $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
 }
 elseif ($result.ExitCode -ne 0) {
-    $signalType = "error"
+    $signalType = ""
     $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Architect agent failed on $taskRef with exit code $($result.ExitCode)."
@@ -329,18 +336,13 @@ elseif ($signalType -eq "fail") {
 }
 else {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — posting as error."
+        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — leaving lifecycle signal empty."
     }
 }
 
-if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-    $body = if ($signalType -eq "error") {
-        "VERDICT: ERROR`n`narchitect could not complete $taskRef cleanly. Full output: $outputArtifact"
-    } else {
-        "VERDICT: $displayVerdict`n`narchitect completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
-    }
-    $postType = if ($signalType) { $signalType } else { "error" }
-    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "architect" -Type $postType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
+if ($signalType -and (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue)) {
+    $body = "VERDICT: $displayVerdict`n`narchitect completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
+    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "architect" -Type $signalType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---
@@ -350,9 +352,14 @@ if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
 
 # --- Update per-role config status ---
 if (Test-Path $archRoleConfigFile) {
-    $archFinalConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
-    $archFinalConfig.status = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
-    $archFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    $finalStatus = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status $finalStatus -ConfigFile $archRoleConfigFile | Out-Null
+    } else {
+        $archFinalConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
+        $archFinalConfig.status = $finalStatus
+        $archFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    }
 }
 
 exit $result.ExitCode

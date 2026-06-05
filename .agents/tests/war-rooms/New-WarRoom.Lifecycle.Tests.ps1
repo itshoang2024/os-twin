@@ -3,6 +3,16 @@
 
 BeforeAll {
     $script:NewWarRoom = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "New-WarRoom.ps1"
+
+    function Assert-NoLifecycleErrorSignal {
+        param([Parameter(Mandatory)]$Lifecycle)
+
+        foreach ($stateEntry in $Lifecycle.states.PSObject.Properties) {
+            $signals = $stateEntry.Value.signals
+            if (-not $signals) { continue }
+            @($signals.PSObject.Properties.Name) | Should -Not -Contain "error" -Because "state '$($stateEntry.Name)' must not model runtime failures as lifecycle signals"
+        }
+    }
 }
 
 Describe "New-WarRoom lifecycle.json" {
@@ -130,6 +140,16 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.passed.type | Should -Be "terminal"
             $lc.states.'failed-final'.type | Should -Be "terminal"
         }
+
+        It "does not create error lifecycle signals in any generated state" {
+            & $script:NewWarRoom -RoomId "room-bi-02" -TaskRef "EPIC-021" `
+                                 -TaskDescription "No error signals" `
+                                 -WarRoomsDir $script:warRoomsDir `
+                                 -CandidateRoles @("engineer", "architect", "qa")
+
+            $lc = Get-Content (Join-Path $script:warRoomsDir "room-bi-02" "lifecycle.json") -Raw | ConvertFrom-Json
+            Assert-NoLifecycleErrorSignal $lc
+        }
     }
 
     Context "Pipeline precedence" {
@@ -199,9 +219,7 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.failed.type        | Should -Be "decision"
             $lc.states.passed.type        | Should -Be "terminal"
             $lc.states.'failed-final'.type | Should -Be "terminal"
-            # Review must have error signal to handle evaluator crashes
-            $lc.states.review.signals.error | Should -Not -BeNullOrEmpty
-            $lc.states.review.signals.error.target | Should -Be "failed"
+            Assert-NoLifecycleErrorSignal $lc
         }
     }
 

@@ -5,7 +5,7 @@
 .DESCRIPTION
     Reads the task brief and latest instruction from the war-room channel,
     builds a role-specific prompt, runs the agent via Invoke-Agent.ps1,
-    and posts the result (done/error) back to the channel.
+    and posts the lifecycle result back to the channel.
 
     Replaces: roles/engineer/run.sh
 
@@ -104,9 +104,13 @@ if (Test-Path $roomConfigFile) {
 # around so the post-run block at the bottom can flip status → completed/failed.
 $engineerConfigs = Get-ChildItem -Path $RoomDir -Filter "engineer_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
 if ($engineerConfigs) {
-    $latestRoleConfig = Get-Content $engineerConfigs[0].FullName -Raw | ConvertFrom-Json
-    $latestRoleConfig.status = "active"
-    $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $engineerConfigs[0].FullName -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "engineer" -Status "active" -ConfigFile $engineerConfigs[0].FullName | Out-Null
+    } else {
+        $latestRoleConfig = Get-Content $engineerConfigs[0].FullName -Raw | ConvertFrom-Json
+        $latestRoleConfig.status = "active"
+        $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $engineerConfigs[0].FullName -Encoding utf8
+    }
 }
 
 # --- Resolve instance-specific working directory ---
@@ -335,24 +339,23 @@ elseif ($result.TimedOut) {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
-    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-        Write-LifecycleSignal -RoomDir $RoomDir -FromRole "engineer" -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`nEngineer timed out after ${TimeoutSeconds}s." -SkipIfFresh | Out-Null
-    }
 }
 else {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Failed on $taskRef with exit code $($result.ExitCode)."
     }
-    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-        Write-LifecycleSignal -RoomDir $RoomDir -FromRole "engineer" -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`nEngineer failed with exit code $($result.ExitCode)." -SkipIfFresh | Out-Null
-    }
 }
 
 # --- Update per-role config status ---
 if ($engineerConfigs) {
-    $latestRoleConfig = Get-Content $engineerConfigs[0].FullName -Raw | ConvertFrom-Json
-    $latestRoleConfig.status = if ($result.ExitCode -eq 0) { "completed" } else { "failed" }
-    $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $engineerConfigs[0].FullName -Encoding utf8
+    $finalStatus = if ($result.ExitCode -eq 0) { "completed" } else { "failed" }
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "engineer" -Status $finalStatus -ConfigFile $engineerConfigs[0].FullName | Out-Null
+    } else {
+        $latestRoleConfig = Get-Content $engineerConfigs[0].FullName -Raw | ConvertFrom-Json
+        $latestRoleConfig.status = $finalStatus
+        $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $engineerConfigs[0].FullName -Encoding utf8
+    }
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---

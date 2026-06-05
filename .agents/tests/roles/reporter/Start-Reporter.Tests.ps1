@@ -155,13 +155,15 @@ $TestDrive
             $msgs[0].from | Should -Be "reporter"
         }
 
-        It "can post error message to channel" {
-            & $script:PostMessage -RoomDir $script:roomDir -From "reporter" -To "manager" `
-                                  -Type "error" -Ref "TASK-010" -Body "Failed to generate PDF"
+        It "does not need an error channel message to represent reporter failure" {
+            @{
+                role = "reporter"
+                instance_id = "001"
+                status = "failed"
+            } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:roomDir "reporter_001.json") -Encoding utf8
 
-            $msgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "error" -Last 1 -AsObject
-            $msgs.Count | Should -Be 1
-            $msgs[0].body | Should -Match "Failed to generate PDF"
+            $cfg = Get-Content (Join-Path $script:roomDir "reporter_001.json") -Raw | ConvertFrom-Json
+            $cfg.status | Should -Be "failed"
         }
     }
 

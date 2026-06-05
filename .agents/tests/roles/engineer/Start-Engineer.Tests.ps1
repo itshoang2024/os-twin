@@ -3,8 +3,8 @@
 BeforeAll {
     $script:StartEngineer = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/engineer").Path "Start-Engineer.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/engineer").Path ".." "..")).Path
-    $script:ChannelServer = Join-Path $script:agentsDir "mcp" "channel-server.py"
     $script:TestDepsReady = Join-Path $script:agentsDir "plan" "Test-DependenciesReady.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
 
     # codegraph is available in this repo, but it indexes Python/TS/JS and does
     # not index these PowerShell runners; rg/Pester are the source of truth here.
@@ -18,17 +18,8 @@ BeforeAll {
             [Parameter(Mandatory)][AllowEmptyString()][string]$Body
         )
 
-        $py = @'
-import importlib.util
-import sys
-
-server, room, from_role, to_role, msg_type, ref, body = sys.argv[1:]
-spec = importlib.util.spec_from_file_location("channel_server", server)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-module.post_message(room, from_role, to_role, msg_type, ref, body)
-'@
-        $py | python3 - $script:ChannelServer $RoomDir $From $To $Type $Ref $Body | Out-Null
+        Write-TestChannelMessage -RoomDir $RoomDir -From $From -To $To `
+            -Type $Type -Ref $Ref -Body $Body | Out-Null
     }
 
     function New-CaptureAgent {
@@ -181,6 +172,32 @@ $TestDrive
             # Channel file may not exist yet, but post will create it
             New-Item -ItemType File -Path $channelFile -Force | Out-Null
             Test-Path $channelFile | Should -BeTrue
+        }
+    }
+
+    Context "Wrapper failure handling" {
+        It "marks role config failed without posting channel error when agent exits non-zero" {
+            New-Item -ItemType File -Path (Join-Path $script:roomDir "channel.jsonl") -Force | Out-Null
+            @{
+                role        = "engineer"
+                instance_id = "001"
+                status      = "pending"
+            } | ConvertTo-Json -Depth 5 | Out-File (Join-Path $script:roomDir "engineer_001.json") -Encoding utf8
+
+            $failingAgent = Join-Path $TestDrive "engineer-fails.ps1"
+            "Write-Output 'engineer failed'; exit 7" | Out-File $failingAgent -Encoding ascii
+            $escapedFailingAgent = $failingAgent -replace "'", "'\''"
+            $env:ENGINEER_CMD = "pwsh -NoProfile -File '$escapedFailingAgent'"
+
+            & pwsh -NoProfile -File $script:StartEngineer -RoomDir $script:roomDir -TimeoutSeconds 10 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 7
+
+            $roleConfig = Get-Content (Join-Path $script:roomDir "engineer_001.json") -Raw | ConvertFrom-Json
+            $roleConfig.status | Should -Be "failed"
+            $roleConfig.status_updated_epoch | Should -Not -BeNullOrEmpty
+
+            $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
+            $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
         }
     }
 

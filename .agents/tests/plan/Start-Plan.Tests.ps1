@@ -9,10 +9,16 @@ BeforeAll {
     $script:planParserModule = Join-Path $script:repoLibDir "PlanParser.psm1"
     
     function global:Get-OstwinConfig {
-        return [PSCustomObject]@{
-            manager = [PSCustomObject]@{
+        param([string]$ConfigPath = '')
+        $manager = if ($global:MockManagerConfig) {
+            $global:MockManagerConfig
+        } else {
+            [PSCustomObject]@{
                 auto_expand_plan = $false
             }
+        }
+        return [PSCustomObject]@{
+            manager = $manager
         }
     }
     
@@ -28,8 +34,15 @@ BeforeAll {
     }
 }
 
+AfterAll {
+    Remove-Variable -Name MockManagerConfig -Scope Global -ErrorAction SilentlyContinue
+}
+
 Describe "Start-Plan" {
     BeforeEach {
+        $global:MockManagerConfig = [PSCustomObject]@{
+            auto_expand_plan = $false
+        }
         $global:testLogs = @()
         $script:logs = @()
         $script:projectDir = Join-Path $TestDrive "project-$(Get-Random)"
@@ -641,6 +654,87 @@ depends_on: [EPIC-001, EPIC-003]
             $epicCall.DependsOn | Should -Contain "PLAN-REVIEW"
             $epicCall.DependsOn | Should -Contain "EPIC-001"
             $epicCall.DependsOn | Should -Contain "EPIC-003"
+        }
+    }
+
+    Context "Runtime settings propagation" {
+        It "creates plan rooms with configured retry and timeout settings" {
+            $savedWarRoomsDir = $env:WARROOMS_DIR
+            $savedOstwinHome = $env:OSTWIN_HOME
+            $global:MockManagerConfig = [PSCustomObject]@{
+                auto_expand_plan      = $false
+                max_engineer_retries  = 7
+                state_timeout_seconds = 1800
+            }
+            $env:WARROOMS_DIR = Join-Path $script:projectDir ".war-rooms"
+            Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue
+
+            try {
+                $mockNewWarRoom = @'
+param(
+    [string]$RoomId,
+    [string]$TaskRef,
+    [string]$TaskDescription,
+    [string]$WorkingDir,
+    [string]$WarRoomsDir,
+    [string]$PlanId,
+    [string]$AssignedRole,
+    [string[]]$CandidateRoles = @(),
+    [string[]]$DefinitionOfDone = @(),
+    [string[]]$AcceptanceCriteria = @(),
+    [string[]]$DependsOn = @(),
+    [int]$MaxRetries = 3,
+    [int]$TimeoutSeconds = 900
+)
+if (-not (Test-Path $WarRoomsDir)) {
+    New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
+}
+$roomDir = Join-Path $WarRoomsDir $RoomId
+New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+@{
+    room_id = $RoomId
+    task_ref = $TaskRef
+    plan_id = $PlanId
+    assignment = @{ assigned_role = $AssignedRole }
+    constraints = @{
+        max_retries = $MaxRetries
+        timeout_seconds = $TimeoutSeconds
+    }
+} | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
+'@
+                $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+                $plan = Join-Path $TestDrive "runtime-settings-plan.md"
+                @"
+# Plan: Runtime Settings
+working_dir: $script:projectDir
+
+## EPIC-001 - Configurable Room Contract
+- Build the configurable runtime contract.
+
+#### Definition of Done
+- [ ] Room config contains custom constraints.
+
+#### Acceptance Criteria
+- [ ] Retry count comes from manager settings.
+- [ ] Timeout comes from manager settings.
+"@ | Out-File $plan -Encoding utf8
+
+                & $script:StartPlan -PlanFile $plan -ProjectDir $script:projectDir -SkipLoop *>&1 | Out-Null
+
+                $roomConfigPath = Join-Path $script:projectDir ".war-rooms/room-001/config.json"
+                $roomConfig = Get-Content $roomConfigPath -Raw | ConvertFrom-Json
+
+                $roomConfig.constraints.max_retries | Should -Be 7
+                $roomConfig.constraints.timeout_seconds | Should -Be 1800
+            }
+            finally {
+                if ($savedWarRoomsDir) { $env:WARROOMS_DIR = $savedWarRoomsDir }
+                else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+
+                if ($savedOstwinHome) { $env:OSTWIN_HOME = $savedOstwinHome }
+                else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+            }
         }
     }
 

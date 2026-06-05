@@ -91,24 +91,21 @@ function Build-LifecycleV2 {
         role    = $workerRole
         type    = 'work'
         signals = [ordered]@{
-            done  = [ordered]@{ target = $firstEvalTarget }
-            error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+            done = [ordered]@{ target = $firstEvalTarget }
         }
     }
     $states['optimize'] = [ordered]@{
         role    = $workerRole
         type    = 'work'
         signals = [ordered]@{
-            done  = [ordered]@{ target = $firstEvalTarget }
-            error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+            done = [ordered]@{ target = $firstEvalTarget }
         }
     }
     $states['fixing'] = [ordered]@{
         role    = $workerRole
         type    = 'work'
         signals = [ordered]@{
-            done  = [ordered]@{ target = $firstEvalTarget }
-            error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+            done = [ordered]@{ target = $firstEvalTarget }
         }
     }
 
@@ -130,7 +127,6 @@ function Build-LifecycleV2 {
                 pass     = [ordered]@{ target = $nextTarget } # legacy success signal
                 fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
                 escalate = [ordered]@{ target = 'triage' }
-                error    = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
             }
         }
     }
@@ -145,7 +141,6 @@ function Build-LifecycleV2 {
                 pass     = [ordered]@{ target = 'passed' } # legacy success signal
                 fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
                 escalate = [ordered]@{ target = 'triage' }
-                error    = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
             }
         }
     }

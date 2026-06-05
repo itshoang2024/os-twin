@@ -107,6 +107,12 @@ $TestDrive
             Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal "pass" | Should -Be "pass"
         }
 
+        It "maps VERDICT: ERROR to no lifecycle signal" {
+            $verdict = Get-AgentVerdict -Output "VERDICT: ERROR"
+            $verdict | Should -Be "ERROR"
+            Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal "done" | Should -Be ""
+        }
+
         It "returns empty for no verdict" {
             $output = "Indeterminate review result."
             Get-AgentVerdict -Output $output | Should -Be ""
@@ -120,6 +126,25 @@ $TestDrive
         It "parses VERDICT: ESCALATE from inline format" {
             $output = "The result is VERDICT: ESCALATE because the requirements are wrong."
             Get-AgentVerdict -Output $output | Should -Be "ESCALATE"
+        }
+    }
+
+    Context "Wrapper failure handling" {
+        It "marks role config failed without posting channel error when agent exits non-zero" {
+            $failingAgent = Join-Path $TestDrive "qa-fails.ps1"
+            "Write-Output 'qa failed'; exit 7" | Out-File $failingAgent -Encoding ascii
+            $escapedFailingAgent = $failingAgent -replace "'", "'\''"
+            $env:QA_CMD = "pwsh -NoProfile -File '$escapedFailingAgent'"
+
+            & pwsh -NoProfile -File $script:StartQA -RoomDir $script:roomDir -TimeoutSeconds 10 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 7
+
+            $roleConfig = Get-Content (Join-Path $script:roomDir "qa_001.json") -Raw | ConvertFrom-Json
+            $roleConfig.status | Should -Be "failed"
+            $roleConfig.status_updated_epoch | Should -Not -BeNullOrEmpty
+
+            $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
+            $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
         }
     }
 
