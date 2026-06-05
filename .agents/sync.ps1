@@ -70,7 +70,7 @@ Write-Host "  [synced] core framework files"
 
 $channelDir = Join-Path $TargetAgents "channel"
 if (-not (Test-Path $channelDir)) { New-Item -ItemType Directory -Path $channelDir -Force | Out-Null }
-foreach ($script in @("post.sh", "read.sh", "wait-for.sh", "Post-Message.ps1", "Read-Messages.ps1", "Wait-ForMessage.ps1")) {
+foreach ($script in @("read.sh", "wait-for.sh", "Read-Messages.ps1", "Wait-ForMessage.ps1")) {
     $src = Join-Path $SourceAgents "channel" $script
     if (Test-Path $src) {
         Copy-Item -Path $src -Destination (Join-Path $channelDir $script) -Force

@@ -14,8 +14,9 @@
 .PARAMETER RoleName
     Role identifier (engineer, qa, architect, etc.). Passed as --agent.
 .PARAMETER Prompt
-    Fallback prompt text. When brief.md or TASKS.md exist in RoomDir, prompt.txt
-    is compiled from those room files instead.
+    Full role prompt text. prompt.txt is compiled as: role prompt, latest
+    channel.jsonl body, then TASKS.md. When omitted or blank, prompt.txt
+    falls back to brief.md for the role prompt layer.
 .PARAMETER Model
     Model to use (provider/model format). Passed as --model / -m.
 .PARAMETER TimeoutSeconds
@@ -65,6 +66,7 @@ param(
     [string]$RoleName,
 
     [Parameter(Mandatory)]
+    [AllowEmptyString()]
     [string]$Prompt,
 
     [string]$Model = '',
@@ -407,18 +409,65 @@ function Get-CompiledPromptText {
         [Parameter(Mandatory)]
         [string]$RoomDir,
 
-        [Parameter(Mandatory)]
+        [AllowNull()]
+        [AllowEmptyString()]
         [string]$FallbackPrompt
     )
 
     $promptParts = [System.Collections.Generic.List[string]]::new()
-    foreach ($fileName in @("brief.md", "TASKS.md")) {
-        $path = Join-Path $RoomDir $fileName
-        if (Test-Path $path) {
-            $content = Get-Content $path -Raw -ErrorAction SilentlyContinue
-            if ($content) {
-                $promptParts.Add($content.TrimEnd())
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackPrompt)) {
+        $promptParts.Add($FallbackPrompt.TrimEnd())
+    }
+    else {
+        $briefPath = Join-Path $RoomDir "brief.md"
+        if (Test-Path $briefPath) {
+            $briefContent = Get-Content $briefPath -Raw -ErrorAction SilentlyContinue
+            if ($briefContent) {
+                $promptParts.Add($briefContent.TrimEnd())
             }
+        }
+    }
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (Test-Path $channelPath) {
+        $lastChannelItem = $null
+        $lastChannelBody = $null
+        try {
+            foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    $lastChannelItem = $line.TrimEnd()
+                }
+            }
+            if ($lastChannelItem) {
+                $parsedChannelItem = $lastChannelItem | ConvertFrom-Json
+                if ($parsedChannelItem.PSObject.Properties.Name -contains 'body') {
+                    $lastChannelBody = [string]$parsedChannelItem.body
+                }
+            }
+        }
+        catch { }
+
+        if (-not [string]::IsNullOrWhiteSpace($lastChannelBody)) {
+            $channelSection = @"
+## Last Effort
+
+$($lastChannelBody.TrimEnd())
+"@
+            $promptParts.Add($channelSection.TrimEnd())
+        }
+    }
+
+    $tasksPath = Join-Path $RoomDir "TASKS.md"
+    if (Test-Path $tasksPath) {
+        $tasksContent = Get-Content $tasksPath -Raw -ErrorAction SilentlyContinue
+        if (-not [string]::IsNullOrWhiteSpace($tasksContent)) {
+            $tasksSection = @"
+## Sub-Tasks (TASKS.md)
+
+$($tasksContent.TrimEnd())
+"@
+            $promptParts.Add($tasksSection.TrimEnd())
         }
     }
 
@@ -429,9 +478,9 @@ function Get-CompiledPromptText {
     return $FallbackPrompt
 }
 
-# Write prompt to a file to avoid shell escaping issues. The attached prompt is
-# the room payload: brief.md followed by TASKS.md, falling back to -Prompt for
-# direct/test invocations that do not have room files.
+# Write prompt to a file to avoid shell escaping issues. The caller-provided
+# role prompt is primary, latest current channel.jsonl body follows as context,
+# then TASKS.md is appended last to keep the agent focused on the checklist.
 $compiledPrompt = Get-CompiledPromptText -RoomDir $absRoomDir -FallbackPrompt $Prompt
 $promptFile = Join-Path $artifactsDir "prompt.txt"
 $compiledPrompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force

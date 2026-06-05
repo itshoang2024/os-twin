@@ -80,7 +80,8 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "qa"
-            $lc.states.'review'.signals.pass.target | Should -Be "passed"
+            $lc.states.'review'.signals.done.target | Should -Be "passed"
+            $lc.states.'review'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
             $lc.states.'review'.signals.fail.target | Should -Be "optimize"
         }
 
@@ -107,9 +108,11 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-04" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "architect"
-            $lc.states.'review'.signals.pass.target | Should -Be "review-2"
+            $lc.states.'review'.signals.done.target | Should -Be "review-2"
+            $lc.states.'review'.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
             $lc.states.'review-2'.role | Should -Be "qa"
-            $lc.states.'review-2'.signals.pass.target | Should -Be "passed"
+            $lc.states.'review-2'.signals.done.target | Should -Be "passed"
+            $lc.states.'review-2'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
         }
     }
 
@@ -212,6 +215,7 @@ Describe "New-WarRoom lifecycle.json" {
 
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-ur-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.'review'.role | Should -Be "data-scientist"
+            $lc.states.'review'.signals.done | Should -Not -BeNullOrEmpty
             $lc.states.'review'.signals.pass | Should -Not -BeNullOrEmpty
         }
     }

@@ -3,8 +3,30 @@
 BeforeAll {
     $script:StartArchitect = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/architect").Path "Start-Architect.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/architect").Path ".." "..")).Path
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
+
+    function New-CaptureArchitectAgent {
+        param([Parameter(Mandatory)][string]$CapturePath)
+
+        $scriptPath = Join-Path $TestDrive "capture-architect-$(Get-Random).ps1"
+        $escapedCapture = $CapturePath -replace "'", "''"
+        @"
+`$promptFile = `$null
+for (`$i = 0; `$i -lt `$args.Count; `$i++) {
+    if (`$args[`$i] -eq '--file' -and (`$i + 1) -lt `$args.Count -and `$args[`$i + 1] -match 'prompt\.txt$') {
+        `$promptFile = `$args[`$i + 1]
+    }
+}
+if (-not `$promptFile) { throw 'prompt.txt argument not found' }
+Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$escapedCapture' -Encoding utf8 -NoNewline
+Write-Output 'VERDICT: DONE'
+"@ | Out-File $scriptPath -Encoding utf8
+
+        $escapedScript = $scriptPath -replace "'", "'\''"
+        return "pwsh -NoProfile -File '$escapedScript'"
+    }
 }
 
 Describe "Start-Architect" {
@@ -36,7 +58,8 @@ $TestDrive
         # and calls it via PowerShell's call operator in a pwsh wrapper.
         $script:mockAgentPath = Join-Path $TestDrive "mock-arch.ps1"
         "Write-Output `"`$env:MOCK_OUT`"" | Out-File $script:mockAgentPath -Encoding ascii
-        $mockCli = $script:mockAgentPath
+        $escapedMockAgentPath = $script:mockAgentPath -replace "'", "'\''"
+        $mockCli = "pwsh -NoProfile -File '$escapedMockAgentPath'"
         $script:configFile = Join-Path $TestDrive "config-arch.json"
         @{
             engineer = @{
@@ -116,62 +139,27 @@ $TestDrive
         }
     }
 
-    Context "Tool Noise Stripping" {
-        It "removes MCP and tool call noise from output" {
-            $env:MOCK_OUT = "Loading MCP`n🔧 Calling tool: read_file`nSystem.Management.Automation noise`n`nHere is the architecture:`nVERDICT: PASS"
-            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 5
-            
-            $passMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "pass" -Last 1 -AsObject
-            $body = $passMsgs[0].body
-            $body | Should -Not -Match "Loading MCP"
-            $body | Should -Not -Match "🔧 Calling tool"
-            $body | Should -Match "Here is the architecture:"
-        }
-    }
+    Context "PLAN-REVIEW prompt assembly" {
+        It "includes latest manager review or plan-update body in prompt.txt" {
+            "PLAN-REVIEW" | Out-File (Join-Path $script:roomDir "task-ref") -Encoding utf8 -NoNewline
+            "# PLAN-REVIEW`n`nUnified Plan Negotiation" |
+                Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
 
-    Context "Verdict Fallback" {
-        It "injects VERDICT: PASS and posts pass signal if no verdict is present" {
-            $env:MOCK_OUT = 'RECOMMENDATION: REDESIGN'
-            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 5
-            
-            $passMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "pass" -Last 1 -AsObject
-            $passMsgs.Count | Should -Be 1
-            $passMsgs[0].body | Should -Match "RECOMMENDATION: REDESIGN"
-            $passMsgs[0].body | Should -Match "VERDICT: PASS"
+            $capturedPrompt = Join-Path $TestDrive "captured-architect-prompt-$(Get-Random).txt"
+            $env:ARCHITECT_CMD = New-CaptureArchitectAgent -CapturePath $capturedPrompt
 
-            # Ensure 'done' is not double-posted
-            $doneMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "done" -Last 1 -AsObject
-            if ($doneMsgs) { $doneMsgs.Count | Should -Be 0 }
-        }
+            & $script:PostMessage -RoomDir $script:roomDir -From "manager" -To "architect" `
+                -Type "review" -Ref "PLAN-REVIEW" -Body "OLD PLAN BODY" | Out-Null
+            & $script:PostMessage -RoomDir $script:roomDir -From "manager" -To "architect" `
+                -Type "plan-update" -Ref "PLAN-REVIEW" -Body "LATEST PLAN UPDATE BODY" | Out-Null
+            & $script:PostMessage -RoomDir $script:roomDir -From "qa" -To "manager" `
+                -Type "pass" -Ref "PLAN-REVIEW" -Body "Irrelevant last physical channel line" | Out-Null
 
-        It "does not override explicit VERDICT: REJECT" {
-            $env:MOCK_OUT = "RECOMMENDATION: REDESIGN`n`nVERDICT: REJECT"
-            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 5
-            
-            $failMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "fail" -Last 1 -AsObject
-            $failMsgs.Count | Should -Be 1
-            $failMsgs[0].body | Should -Match "VERDICT: REJECT"
-            $failMsgs[0].body | Should -Not -Match "VERDICT: PASS"
-        }
-    }
+            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 10
 
-    Context "Signal Broadcasting" {
-        It "posts a 'pass' signal when output explicitly contains VERDICT: PASS" {
-            $env:MOCK_OUT = "Review completed.`n`nVERDICT: PASS"
-            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 5
-            
-            $passMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "pass" -Last 1 -AsObject
-            $passMsgs.Count | Should -Be 1
-            $passMsgs[0].body | Should -Match "VERDICT: PASS"
-        }
-
-        It "posts a 'fail' signal when output explicitly contains VERDICT: REJECT" {
-            $env:MOCK_OUT = "Review rejected.`n`nVERDICT: REJECT"
-            & $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 5
-            
-            $failMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "fail" -Last 1 -AsObject
-            $failMsgs.Count | Should -Be 1
-            $failMsgs[0].body | Should -Match "VERDICT: REJECT"
+            $prompt = Get-Content $capturedPrompt -Raw
+            $prompt | Should -Match "## Current Plan Review Body"
+            $prompt | Should -Match "LATEST PLAN UPDATE BODY"
         }
     }
 }

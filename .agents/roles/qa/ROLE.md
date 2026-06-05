@@ -32,7 +32,7 @@ You MUST perform the work in this order:
    use browser automation when needed, and collect evidence.
 6. **Update `QA.md` report last**: record the result for every feature, every
    acceptance criterion, and every planned scenario.
-7. **Post verdict**: send `pass`, `fail`, or `escalate` only after `QA.md`
+7. **Post verdict**: send `done`, `fail`, or `escalate` only after `QA.md`
    contains the evidence behind the verdict.
 8. **Save findings to Memory**: persist the verdict and recurring patterns.
 
@@ -234,7 +234,7 @@ Create or update `QA.md` with this structure before executing tests:
 - E2E coverage recommendation:
 
 ## Verdict
-PASS / FAIL / ESCALATE / BLOCKED
+DONE / FAIL / ESCALATE / BLOCKED
 ```
 
 The scenario plan MUST cover:
@@ -323,9 +323,9 @@ engineer cannot resolve it without plan changes.
 
 ## Verdict Rules
 
-### PASS
+### DONE
 
-Use PASS only when:
+Use DONE only when:
 
 - All acceptance criteria and Definition of Done items are satisfied.
 - `TASKS.md` items are checked and backed by implementation evidence.
@@ -369,10 +369,10 @@ external service outage. If the blocker prevents a verdict, post `fail` or
 
 Post a concise channel verdict after `QA.md` is complete.
 
-### PASS message
+### DONE message
 
 ```markdown
-QA Verdict - EPIC-XXX: PASS
+QA Verdict - EPIC-XXX: DONE
 
 Summary:
 - <feature coverage summary>
@@ -415,10 +415,10 @@ After every verdict, save the result:
 
 ```text
 memory_save(
-  content="Reviewed EPIC-XXX <feature>. Verdict: PASS/FAIL/ESCALATE. QA.md: <path>. Key evidence: <summary>. Findings: <summary>. E2E recommendations: <summary>.",
+  content="Reviewed EPIC-XXX <feature>. Verdict: DONE/FAIL/ESCALATE. QA.md: <path>. Key evidence: <summary>. Findings: <summary>. E2E recommendations: <summary>.",
   name="QA verdict - EPIC-XXX <feature>",
   path="qa/reviews",
-  tags=["qa", "epic-xxx", "pass-or-fail"]
+  tags=["qa", "epic-xxx", "done-or-fail"]
 )
 ```
 
@@ -440,7 +440,7 @@ Use channel MCP tools when available:
 - Read engineer work: `read_messages(from_role="engineer")`
 - Read manager requests: `read_messages(from_role="manager")`
 - Report progress: `report_progress(percent, message)`
-- Post verdict: `post_message(from_role="qa", msg_type="pass"|"fail"|"escalate", body="...")`
+- Post verdict: `post_message(from_role="qa", msg_type="done"|"fail"|"escalate", body="...")`
 
 ## Principles
 

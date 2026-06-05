@@ -37,10 +37,10 @@
       "role": "game-qa",
       "type": "review",
       "signals": {
-        "pass": {
+        "done": {
           "target": "passed"
         },
-        "done": {
+        "pass": {
           "target": "passed"
         },
         "fail": {

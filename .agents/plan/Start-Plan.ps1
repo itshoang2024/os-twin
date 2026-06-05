@@ -86,7 +86,6 @@ $managerLoop = Join-Path $agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
 $buildDag = Join-Path $agentsDir "plan" "Build-DependencyGraph.ps1"
 $buildPlanningDag = Join-Path $agentsDir "plan" "Build-PlanningDAG.ps1"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $agentsDir "channel" "Post-Message.ps1"
 $waitForMessage = Join-Path $agentsDir "channel" "Wait-ForMessage.ps1"
 
 # --- Import modules ---
@@ -184,9 +183,8 @@ if (-not $DryRun -and -not (Test-Path $room000Dir)) {
             if ($r0Status -in @('developing', 'optimize', 'review', 'triage', 'failed', 'failed-final')) {
                 Write-Host "  → Resetting room-000 to pending (was: $r0Status)" -ForegroundColor Yellow
                 "pending" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
-                # Clear stale channel messages
-                $channelFile = Join-Path $room000Dir "channel.jsonl"
-                if (Test-Path $channelFile) { "" | Out-File -FilePath $channelFile -Encoding utf8 }
+                # Do not mutate channel.jsonl here. Channel content is owned by
+                # agents posting through the ostwin-channel MCP post_message tool.
                 # Clear old PID files
                 $pidDir = Join-Path $room000Dir "pids"
                 if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
@@ -859,10 +857,9 @@ $shouldNegotiate = -not $Resume -and -not $Unified
 while ($shouldNegotiate) {
     if (-not $Review) { break }
 
-    $reviewMsgId = & $postMessage -RoomDir $room000Dir -From "manager" -To "architect" -Type "review" -Ref "PLAN-REVIEW" -Body $planContent
-    Write-Host "Plan posted to room-000 for review. Waiting for approval (timeout: ${planReviewTimeout}s)..." -ForegroundColor Cyan
+    Write-Host "Waiting for plan approval/update via MCP-authored channel message (timeout: ${planReviewTimeout}s)..." -ForegroundColor Cyan
 
-    $waitResultRaw = & $waitForMessage -RoomDir $room000Dir -WaitType "plan-approve", "plan-reject", "plan-update" -After $reviewMsgId -TimeoutSeconds $planReviewTimeout
+    $waitResultRaw = & $waitForMessage -RoomDir $room000Dir -WaitType "plan-approve", "plan-reject", "plan-update" -TimeoutSeconds $planReviewTimeout
     
     if ($LASTEXITCODE -ne 0 -or -not $waitResultRaw) {
         Write-Error "Plan negotiation timed out or failed."

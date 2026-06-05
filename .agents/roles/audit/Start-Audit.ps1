@@ -36,7 +36,6 @@ $scriptDir = $PSScriptRoot
 $agentsDir = (Resolve-Path (Join-Path $scriptDir ".." "..")).Path
 $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import logging ---
@@ -50,6 +49,35 @@ function Write-Log {
     } else {
         Write-Host "[$Level] $Message"
     }
+}
+
+function Get-LastChannelItemBody {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (-not (Test-Path $channelPath)) { return $null }
+
+    $lastLine = $null
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $lastLine = $line.TrimEnd()
+            }
+        }
+    }
+    catch { return $null }
+
+    if (-not $lastLine) { return $null }
+
+    try {
+        $lastItem = $lastLine | ConvertFrom-Json
+        if ($lastItem.PSObject.Properties.Name -contains 'body') {
+            return [string]$lastItem.body
+        }
+    }
+    catch { }
+
+    return $null
 }
 
 # --- Load config ---
@@ -79,7 +107,6 @@ function Cleanup-And-Exit {
     param([int]$ExitCode, [string]$ErrorMsg = "")
     if ($ErrorMsg) {
         Write-Log "ERROR" "[AUDIT] Error: $ErrorMsg"
-        & $postMessage -RoomDir $RoomDir -From "audit" -To "manager" -Type "error" -Ref $taskRef -Body $ErrorMsg
     }
     # PID file is NOT removed here — manager-owned lifecycle
     exit $ExitCode
@@ -142,14 +169,9 @@ $isEpic = $taskRef -match '^EPIC-'
 # --- Read latest task or fix message ---
 $latestBody = ""
 try {
-    $msgs = & $readMessages -RoomDir $RoomDir -Last 1 -AsObject
-    if ($msgs) {
-        foreach ($m in ($msgs | Sort-Object { $_.ts } -Descending)) {
-            if ($m.type -in @('task', 'fix')) {
-                $latestBody = $m.body
-                break
-            }
-        }
+    $msgs = & $readMessages -RoomDir $RoomDir -FilterType @('task', 'fix') -Last 1 -AsObject
+    if ($msgs -and $msgs.Count -gt 0) {
+        $latestBody = $msgs[-1].body
     }
 } catch { }
 
@@ -208,17 +230,15 @@ if (Test-Path $dagFile) {
     if ($myNode -and $myNode.depends_on -and $myNode.depends_on.Count -gt 0) {
         $sections = @()
         foreach ($depRef in $myNode.depends_on) {
+            if ($depRef -eq 'PLAN-REVIEW') { continue }
             $depNode = $dag.nodes.$depRef
             if (-not $depNode) { continue }
             $depRoomDir = Join-Path (Split-Path $RoomDir) $depNode.room_id
-            try {
-                $depDoneMsgs = & $readMessages -RoomDir $depRoomDir -FilterType "done" -Last 1 -AsObject
-                if ($depDoneMsgs -and $depDoneMsgs.Count -gt 0) {
-                    $body = $depDoneMsgs[-1].body
-                    if ($body.Length -gt 10240) { $body = $body.Substring(0, 10240) + "`n[TRUNCATED]" }
-                    $sections += "### $depRef`n$body"
-                }
-            } catch { }
+            $lastBody = Get-LastChannelItemBody -RoomDir $depRoomDir
+            if ($lastBody) {
+                if ($lastBody.Length -gt 10240) { $lastBody = $lastBody.Substring(0, 10240) + "`n[TRUNCATED]" }
+                $sections += "### $depRef`n$lastBody"
+            }
         }
         if ($sections.Count -gt 0) {
             $predecessorSection = "`n`n## Predecessor Outputs`n`n$($sections -join "`n`n")"
@@ -233,9 +253,9 @@ if ($isEpic) {
 
     if ($hasExistingTasks) {
         $instructions = @"
-You are continuing an investigation — TASKS.md already exists (see above).
+You are continuing an investigation — TASKS.md already exists and is included at the end of this prompt.
 
-1. Review the TASKS.md — checked tasks ([x]) were completed previously
+1. Review the TASKS.md section at the end of this prompt — checked tasks ([x]) were completed previously
 2. Focus on unchecked investigation steps ([ ]) and any new findings
 3. Update TASKS.md if new investigation threads emerge
 4. After completing each step, check it off: - [x] INVESTIGATION-001 — Description
@@ -340,25 +360,16 @@ if ($output -match '(?i)(DECISION:\s*ESCALATE|ESCALATE.*immediately|material fin
     $isEscalation = $true
 }
 
-# --- Post result to channel ---
+# --- Handle agent result ---
 if ($result.ExitCode -eq 0) {
     if ($isEscalation) {
-        & $postMessage -RoomDir $RoomDir -From "audit" -To "manager" `
-                       -Type "escalate" -Ref $taskRef -Body $output
         Write-Log "WARN" "[AUDIT] ESCALATION on $taskRef — material risk detected."
     } else {
-        & $postMessage -RoomDir $RoomDir -From "audit" -To "manager" `
-                       -Type "done" -Ref $taskRef -Body $output
         Write-Log "INFO" "[AUDIT] Completed investigation on $taskRef."
     }
 } elseif ($result.TimedOut) {
-    & $postMessage -RoomDir $RoomDir -From "audit" -To "manager" `
-                   -Type "error" -Ref $taskRef -Body "Auditor timed out after ${TimeoutSeconds}s"
     Write-Log "ERROR" "[AUDIT] Timed out on $taskRef after ${TimeoutSeconds}s."
 } else {
-    & $postMessage -RoomDir $RoomDir -From "audit" -To "manager" `
-                   -Type "error" -Ref $taskRef `
-                   -Body "Auditor exited with code $($result.ExitCode): $($result.Output)"
     Write-Log "ERROR" "[AUDIT] Failed on $taskRef with exit code $($result.ExitCode)."
 }
 

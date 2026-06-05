@@ -7,7 +7,7 @@ description: Meta-analysis of QA verdicts to ensure review quality. Catches leni
 
 ## Purpose
 
-QA's verdict is not the final word. The staff-manager reviews QA's own work to ensure review quality is high. A rubber-stamped PASS is worse than a thorough FAIL.
+QA's verdict is not the final word. The staff-manager reviews QA's own work to ensure review quality is high. A rubber-stamped DONE is worse than a thorough FAIL.
 
 ## The Meta-Review Checklist
 
@@ -53,7 +53,7 @@ Is the severity assessment correct?
 |----------------|---------|
 | P0 classified as P3 | Data corruption bug marked as "minor style issue" |
 | P3 classified as P0 | Naming convention violation marked as "blocker" |
-| PASS with open P1s | "Passing with notes" but notes contain critical issues |
+| DONE with open P1s | "Passing with notes" but notes contain critical issues |
 | FAIL without specifics | "Failing" but no actionable feedback for the engineer |
 
 ## Output Format
@@ -61,7 +61,7 @@ Is the severity assessment correct?
 ```markdown
 ## Review of QA Verdict: [Epic/Task ID]
 
-**QA Verdict:** PASS / FAIL
+**QA Verdict:** DONE / FAIL
 **Staff Assessment:** ✅ Upheld / 🔴 Overruled
 
 ### Execution Evidence
@@ -86,8 +86,8 @@ Is the severity assessment correct?
 
 ## When to Use
 
-- After every QA PASS on critical epics (auth, payments, data pipeline)
-- After QA PASS on epics that touch shared interfaces
+- After every QA DONE on critical epics (auth, payments, data pipeline)
+- After QA DONE on epics that touch shared interfaces
 - When a previously-passed epic later causes integration failures
 - Periodically as a calibration exercise (every 5th QA verdict)
 

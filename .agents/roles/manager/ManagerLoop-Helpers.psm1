@@ -395,7 +395,6 @@ function Get-OutputSignal {
 function Invoke-SignalActions {
     [CmdletBinding()]
     param([string]$RoomDir, [string[]]$Actions, [string]$TaskRef, [string]$BaseRole)
-    $postMessage  = _ctx 'postMessage'
     $readMessages = _ctx 'readMessages'
 
     foreach ($action in $Actions) {
@@ -406,12 +405,10 @@ function Invoke-SignalActions {
                 ($r + 1).ToString() | Out-File -FilePath $retriesFile -Encoding utf8 -NoNewline
             }
             'post_fix' {
-                $feedback = Get-LatestBody $RoomDir "fail"
-                if (-not $feedback) { $feedback = Get-LatestBody $RoomDir "escalate" }
-                if (-not $feedback) { $feedback = Get-LatestBody $RoomDir "error" }
-                if ($feedback) {
-                    & $postMessage -RoomDir $RoomDir -From "manager" -To $BaseRole -Type "fix" -Ref $TaskRef -Body $feedback
-                }
+                # No PowerShell channel synthesis. The worker prompt now receives
+                # current channel.jsonl context directly from Invoke-Agent; fixes
+                # must be posted by agents through the MCP channel tool.
+                Write-Log "DEBUG" "[$TaskRef] post_fix action skipped; channel writes are MCP-only."
             }
             'revise_brief' {
                 $briefFile   = Join-Path $RoomDir "brief.md"

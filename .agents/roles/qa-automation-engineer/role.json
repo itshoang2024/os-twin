@@ -1,6 +1,6 @@
 {
   "name": "qa-automation-engineer",
-  "description": "Cross-platform browser feature automation tester - verifies runtime targets, automates browser testing via agent-browser, Chrome DevTools, or Playwright, captures screenshot evidence, and produces QA reports with PASS/FAIL/BLOCKED verdicts.",
+  "description": "Cross-platform browser feature automation tester - verifies runtime targets, automates browser testing via agent-browser, Chrome DevTools, or Playwright, captures screenshot evidence, and produces QA reports with DONE/FAIL/BLOCKED verdicts.",
   "capabilities": [
     "browser-automation",
     "screenshot-capture",

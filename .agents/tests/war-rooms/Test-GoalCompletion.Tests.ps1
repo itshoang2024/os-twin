@@ -3,6 +3,9 @@
 BeforeAll {
     $script:TestGoalCompletion = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "Test-GoalCompletion.ps1"
     $script:NewWarRoom = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "New-WarRoom.ps1"
+    $script:agentsDir = Split-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
 }
 
 Describe "Test-GoalCompletion" {
@@ -163,9 +166,8 @@ Describe "Test-GoalCompletion" {
             $roomDir = New-TestRoom -RoomId "room-g60" `
                 -DoD @("authentication module complete")
 
-            # Post a done message to the channel
-            $PostMessage = Join-Path (Split-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path) "channel" "Post-Message.ps1"
-            & $PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
+            # Seed a done message to the channel
+            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                            -Type "done" -Ref "TASK-TEST" -Body "authentication module complete and tested"
 
             $result = & $script:TestGoalCompletion -RoomDir $roomDir

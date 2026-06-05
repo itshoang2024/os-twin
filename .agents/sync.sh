@@ -42,7 +42,7 @@ rsync -a \
 echo "  [synced] core framework files"
 
 # Sync channel tools (bash + PowerShell)
-for script in post.sh read.sh wait-for.sh Post-Message.ps1 Read-Messages.ps1 Wait-ForMessage.ps1; do
+for script in read.sh wait-for.sh Read-Messages.ps1 Wait-ForMessage.ps1; do
   [[ -f "$SOURCE_AGENTS/channel/$script" ]] && cp "$SOURCE_AGENTS/channel/$script" "$TARGET_AGENTS/channel/$script"
 done
 echo "  [synced] channel tools"

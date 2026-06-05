@@ -5,7 +5,6 @@
 #   - Set-WarRoomStatus atomic writes under lock
 #   - Test-PidAlive start-time cross-check for PID reuse detection
 #   - Write-PidFile creates both .pid and .start files
-#   - Write-ChannelLine appends correctly under lock
 
 BeforeAll {
     Import-Module (Join-Path (Resolve-Path "$PSScriptRoot/../lib").Path "Lock.psm1") -Force
@@ -170,75 +169,5 @@ Describe "Write-PidFile" {
 
         # .start file may or may not exist (process was not found)
         # But the function should not throw
-    }
-}
-
-# ─── Write-ChannelLine ──────────────────────────────────────────────────────
-
-Describe "Write-ChannelLine" {
-
-    It "appends a single JSON line to the channel file" {
-        $channelFile = Join-Path $TestDrive "channel.jsonl"
-        # Create an empty file without BOM or extra content
-        New-Item -ItemType File -Path $channelFile -Force | Out-Null
-
-        $json = '{"type":"task","body":"hello"}'
-        Write-ChannelLine -ChannelFile $channelFile -JsonLine $json
-
-        # Force array to avoid single-string unwrap (indexing a string returns a char)
-        [string[]]$lines = @(Get-Content $channelFile | Where-Object { $_ -match '\S' })
-        $lines.Count | Should -Be 1
-        $lines[0] | Should -Be $json
-    }
-
-    It "appends multiple lines in order" {
-        $channelFile = Join-Path $TestDrive "channel-multi.jsonl"
-        New-Item -ItemType File -Path $channelFile -Force | Out-Null
-
-        Write-ChannelLine -ChannelFile $channelFile -JsonLine '{"seq":1}'
-        Write-ChannelLine -ChannelFile $channelFile -JsonLine '{"seq":2}'
-        Write-ChannelLine -ChannelFile $channelFile -JsonLine '{"seq":3}'
-
-        $lines = Get-Content $channelFile | Where-Object { $_ -match '\S' }
-        $lines.Count | Should -Be 3
-        $lines[0] | Should -Be '{"seq":1}'
-        $lines[1] | Should -Be '{"seq":2}'
-        $lines[2] | Should -Be '{"seq":3}'
-    }
-
-    It "creates a .lock file for the channel" {
-        $channelFile = Join-Path $TestDrive "channel-lock.jsonl"
-        New-Item -ItemType File -Path $channelFile -Force | Out-Null
-
-        Write-ChannelLine -ChannelFile $channelFile -JsonLine '{"test":true}'
-
-        Test-Path "$channelFile.lock" | Should -BeTrue
-    }
-
-    It "handles concurrent writers without data loss" {
-        $channelFile = Join-Path $TestDrive "channel-concurrent.jsonl"
-        New-Item -ItemType File -Path $channelFile -Force | Out-Null
-
-        $jobs = 1..5 | ForEach-Object {
-            $idx = $_
-            Start-Job -ScriptBlock {
-                param($LockModPath, $UtilsModPath, $ChFile, $Index)
-                Import-Module $LockModPath -Force
-                Import-Module $UtilsModPath -Force
-                Write-ChannelLine -ChannelFile $ChFile -JsonLine "{`"writer`":$Index}"
-            } -ArgumentList `
-                (Join-Path (Resolve-Path "$PSScriptRoot/../lib").Path "Lock.psm1"),
-                (Join-Path (Resolve-Path "$PSScriptRoot/../lib").Path "Utils.psm1"),
-                $channelFile, $idx
-        }
-
-        $jobs | Wait-Job -Timeout 30 | Out-Null
-        $jobs | ForEach-Object {
-            $_ | Receive-Job -ErrorAction SilentlyContinue | Out-Null
-            $_ | Remove-Job -Force
-        }
-
-        $lines = Get-Content $channelFile | Where-Object { $_ -match '\S' }
-        $lines.Count | Should -Be 5
     }
 }

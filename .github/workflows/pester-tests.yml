@@ -36,38 +36,24 @@ jobs:
       - name: Install Python dependencies
         shell: bash
         run: |
-          pip install httpx
+          python -m pip install --upgrade pip
+          python -m pip install httpx
 
-      - name: Run plan tests (isolated to avoid cross-test module pollution)
-        shell: pwsh
-        run: |
-          $config = New-PesterConfiguration
-          $config.Run.Path = '.agents/tests/plan/'
-          $config.Run.Exit = $true
-          $config.Output.Verbosity = 'Detailed'
-          $config.TestResult.Enabled = $true
-          $config.TestResult.OutputFormat = 'JUnitXml'
-          $config.TestResult.OutputPath = 'test-results/pester-plan-results.xml'
-          New-Item -ItemType Directory -Path 'test-results' -Force | Out-Null
-          Invoke-Pester -Configuration $config
-
-      - name: Run all other Pester tests
+      - name: Run all .agents PowerShell unit tests
         shell: pwsh
         run: |
           $config = New-PesterConfiguration
           $config.Run.Path = @(
-            '.agents/tests/channel/',
-            '.agents/tests/dynamic_roles/',
-            '.agents/tests/lib/',
-            '.agents/tests/lifecycle/',
-            '.agents/tests/roles/',
-            '.agents/tests/war-rooms/'
+            '.agents/tests/',
+            '.agents/bin/tests/',
+            '.agents/installer/tests/windows/'
           )
+          $config.Filter.ExcludeTag = @('Integration', 'Slow')
           $config.Run.Exit = $true
-          $config.Output.Verbosity = 'Detailed'
+          $config.Output.Verbosity = 'Normal'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'JUnitXml'
-          $config.TestResult.OutputPath = 'test-results/pester-results.xml'
+          $config.TestResult.OutputPath = 'test-results/pester-agents-results.xml'
           New-Item -ItemType Directory -Path 'test-results' -Force | Out-Null
           Invoke-Pester -Configuration $config
 
