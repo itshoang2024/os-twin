@@ -1,3 +1,6 @@
+'use client';
+
+import { useSyncExternalStore } from 'react';
 import EnterpriseMapPanel from '@/components/knowledge/EnterpriseMapPanel';
 import type { EnterpriseMapProjectionData } from '@/hooks/use-knowledge-explorer';
 import type { ObservationEvent, OntologyProfile, TimeSeries } from '@/hooks/use-ontology';
@@ -111,6 +114,53 @@ const fixtureMap: EnterpriseMapProjectionData = {
   },
 };
 
+
+const emptyFixtureMap: EnterpriseMapProjectionData = {
+  nodes: [],
+  edges: [],
+  layers: [],
+  abstraction_levels: [],
+  concept_type_counts: {},
+  relationship_type_counts: {},
+  relationship_family_counts: {},
+  stats: {
+    node_count: 0,
+    edge_count: 0,
+    layer_count: 0,
+    concept_type_count: 0,
+    relationship_type_count: 0,
+    candidate_edge_count: 0,
+    validation_issue_count: 0,
+    ontology_candidate_count: 2,
+    flow_count: 0,
+    state_machine_count: 0,
+    simulation_scenario_count: 0,
+    limit: 200,
+  },
+};
+
+const exampleFallbackMap: EnterpriseMapProjectionData = {
+  ...fixtureMap,
+  nodes: fixtureMap.nodes.map((node) => ({
+    ...node,
+    id: `example-${node.id}`,
+    name: `Example ${node.name}`,
+    review_state: 'example',
+    provenance_refs: [],
+    external_ref: null,
+  })),
+  edges: fixtureMap.edges.map((edge) => ({
+    ...edge,
+    source: `example-${edge.source}`,
+    target: `example-${edge.target}`,
+    map_source: edge.map_source ? `example-${edge.map_source}` : edge.map_source,
+    map_target: edge.map_target ? `example-${edge.map_target}` : edge.map_target,
+    review_state: 'example',
+    provenance_refs: [],
+    external_ref: null,
+  })),
+};
+
 const fixtureObservationEvents: ObservationEvent[] = [
   {
     id: 'obs-import-1', namespace: 'qa-enterprise-map-fixture', event_type: 'ImportCompleted',
@@ -155,18 +205,52 @@ const fixtureTimeSeries: TimeSeries[] = [
   },
 ];
 
+type EnterpriseMapFixtureTruthState = 'live' | 'example' | 'empty';
+
+function truthStateFromLocation(): EnterpriseMapFixtureTruthState {
+  if (typeof window === 'undefined') return 'live';
+  const stateParam = new URLSearchParams(window.location.search).get('state');
+  return stateParam === 'empty' ? 'empty' : stateParam === 'example' ? 'example' : 'live';
+}
+
+function subscribeToLocationChanges(onStoreChange: () => void) {
+  window.addEventListener('popstate', onStoreChange);
+  return () => window.removeEventListener('popstate', onStoreChange);
+}
+
+function serverTruthStateSnapshot(): EnterpriseMapFixtureTruthState {
+  return 'live';
+}
+
 export default function EnterpriseMapFixturePanel() {
+  const truthState = useSyncExternalStore(subscribeToLocationChanges, truthStateFromLocation, serverTruthStateSnapshot);
+  const isEmpty = truthState === 'empty';
+  const isExample = truthState === 'example';
+  const liveFixtureMap = isEmpty || isExample ? emptyFixtureMap : fixtureMap;
+  const fallbackMap = isExample ? exampleFallbackMap : null;
+
   return (
     <main className="h-full overflow-auto bg-[var(--color-background)] p-6" data-testid="enterprise-map-fixture-panel">
       <div className="mx-auto max-w-7xl">
         <div className="mb-4 rounded-2xl border p-4" style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
-          <p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-muted)' }}>EPIC-004 QA Fixture</p>
+          <p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--color-text-muted)' }}>EPIC-005 QA Fixture</p>
           <h1 className="mt-2 text-2xl font-black" style={{ color: 'var(--color-text-main)' }}>Enterprise Map trust metadata fixture</h1>
           <p className="mt-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Deterministic browser-test fixture for reviewed instances, candidate lifecycle styling, review-state filters, provenance refs, and external system links. This route does not call backend APIs.
+            Deterministic browser-test fixture for live, example, and empty Map Lens truth states. Current state: <strong data-testid="fixture-truth-state">{truthState}</strong>.
           </p>
         </div>
-        <EnterpriseMapPanel selectedNamespace="qa-enterprise-map-fixture" fixtureMap={fixtureMap} fixtureProfile={fixtureProfile} fixtureInitialSelectedId="evidence-1" fixtureObservationEvents={fixtureObservationEvents} fixtureTimeSeries={fixtureTimeSeries} />
+        <EnterpriseMapPanel
+          selectedNamespace="qa-enterprise-map-fixture"
+          fixtureMap={liveFixtureMap}
+          fixtureProfile={fixtureProfile}
+          fallbackMap={fallbackMap}
+          fixtureInitialSelectedId={isEmpty || isExample ? null : 'evidence-1'}
+          fixtureObservationEvents={isEmpty || isExample ? [] : fixtureObservationEvents}
+          fixtureTimeSeries={isEmpty || isExample ? [] : fixtureTimeSeries}
+          onImportData={() => undefined}
+          onApproveCandidates={() => undefined}
+          onCreateSampleData={() => undefined}
+        />
       </div>
     </main>
   );

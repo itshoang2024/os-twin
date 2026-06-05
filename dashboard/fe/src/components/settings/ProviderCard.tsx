@@ -181,7 +181,7 @@ export function ProviderCard({
               >
                 <div className="flex justify-between items-center mb-2">
                   <span className={`text-sm font-bold ${deploymentMode === 'gemini' ? 'text-blue-800' : 'text-slate-900'
-                    }`}>GOOGLE</span>
+                    }`}>GEMINI</span>
                   <span className="material-symbols-outlined text-sm" style={{
                     fontVariationSettings: deploymentMode === 'gemini' ? "'FILL' 1" : "'FILL' 0",
                     color: deploymentMode === 'gemini' ? '#2563eb' : '#94a3b8',
@@ -226,7 +226,7 @@ export function ProviderCard({
             /* Gemini API: API Key via vault */
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 block">
-                GOOGLE_API_KEY
+                API Access Key
               </label>
               <button
                 onClick={onVaultClick}
@@ -431,7 +431,7 @@ export function ProviderCard({
             )}
           </div>
           <span className="text-[10px] font-mono text-slate-500 uppercase">
-            MODE: {deploymentMode === 'gemini' ? 'GOOGLE' : deploymentMode.toUpperCase()}
+            MODE: {deploymentMode === 'gemini' ? 'GEMINI' : deploymentMode.toUpperCase()}
           </span>
         </div>
       </section>

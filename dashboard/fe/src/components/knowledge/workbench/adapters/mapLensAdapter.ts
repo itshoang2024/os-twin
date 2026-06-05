@@ -1,12 +1,14 @@
 import type { EnterpriseMapProjectionData } from '@/hooks/use-knowledge-explorer';
 import type { WorkbenchFacet, WorkbenchModel } from '../model/workbenchModel';
 
+type MapState = 'live' | 'example' | 'empty';
+
 function buckets(values: string[]) {
   const counts = values.reduce<Record<string, number>>((acc, value) => { const key = value || 'unknown'; acc[key] = (acc[key] ?? 0) + 1; return acc; }, {});
   return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)).map(([id, count]) => ({ id, label: id, count }));
 }
 
-export function mapLensAdapter(map: EnterpriseMapProjectionData | null | undefined, modelId = 'enterprise-map'): WorkbenchModel {
+export function mapLensAdapter(map: EnterpriseMapProjectionData | null | undefined, modelId = 'enterprise-map', mapState: MapState = 'live'): WorkbenchModel {
   const nodes = (map?.nodes ?? []).map((node) => ({
     id: String(node.id),
     label: String(node.name ?? node.label ?? node.id),
@@ -37,11 +39,11 @@ export function mapLensAdapter(map: EnterpriseMapProjectionData | null | undefin
   return {
     id: modelId,
     title: 'Enterprise Map Lens',
-    subtitle: `${nodes.length} object nodes · ${edges.length} edges`,
+    subtitle: mapState === 'empty' ? 'No graph objects yet' : `${nodes.length} object nodes · ${edges.length} edges`,
     nodes,
     edges,
     facets,
     layers: (map?.layers ?? []).map((layer) => ({ id: String(layer.id), label: String(layer.label ?? layer.id), order: Number(layer.order ?? 0), count: Number(layer.count ?? 0) })),
-    metadata: { source: 'mapLensAdapter', stats: map?.stats ?? {} },
+    metadata: { source: 'mapLensAdapter', mapState, stats: map?.stats ?? {} },
   };
 }

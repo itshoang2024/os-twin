@@ -1572,6 +1572,10 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
                   profileOverride={draft}
                   fallbackMap={exampleMap ?? undefined}
                   conceptTypeFilter={selectedConceptType ?? undefined}
+                  selectedInstanceId={selection?.kind === 'instance' ? selection.id : null}
+                  onImportData={() => { setLens('spec'); setLeftTab('sources'); setRightTab('governance'); }}
+                  onApproveCandidates={() => { setLens('spec'); setLeftTab('candidates'); setRightTab('governance'); }}
+                  onCreateSampleData={handlePreviewSeedTemplate}
                   onInstanceSelect={(item) => {
                     handleSelectionChange({ kind: 'instance', id: item.id, instance_id: item.id, concept_type: item.concept_type, title: item.title, source: item.source });
                     setRightTab('object');

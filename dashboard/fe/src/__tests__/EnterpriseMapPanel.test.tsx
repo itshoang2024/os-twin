@@ -6,6 +6,7 @@ import EnterpriseMapPanel from '@/components/knowledge/EnterpriseMapPanel';
 import EnterpriseMapFixturePanel from '@/components/knowledge/ontology/EnterpriseMapFixturePanel';
 
 const getNodeDetail = vi.fn();
+const seedMock = vi.fn();
 
 const observationState = vi.hoisted(() => ({
   events: [
@@ -63,7 +64,7 @@ vi.mock('@/hooks/use-knowledge-explorer', () => ({
     isLoading: false,
     error: null,
   }),
-  useKnowledgeExplorer: () => ({ nodes, edges, isSeeded: true, seed: vi.fn(), getNodeDetail }),
+  useKnowledgeExplorer: () => ({ nodes, edges, isSeeded: false, seed: seedMock, getNodeDetail }),
 }));
 
 vi.mock('@/hooks/use-ontology', () => ({
@@ -87,6 +88,7 @@ vi.mock('@/hooks/use-ontology', () => ({
 describe('EnterpriseMapPanel', () => {
   beforeEach(() => {
     getNodeDetail.mockResolvedValue({ node: null, edges: [], stats: {} });
+    seedMock.mockClear();
     observationState.events = [
       { id: 'event-import', namespace: 'demo', event_type: 'ImportCompleted', subject_type: 'node', subject_id: 'risk-1', occurred_at: '2026-06-01T00:00:00Z', actor: 'importer', value: true, evidence_refs: ['prov-risk'], metadata: { profile_version: '1.0.0' } },
       { id: 'event-candidate', namespace: 'demo', event_type: 'OntologyCandidateCreated', subject_type: 'candidate', subject_id: 'risk-1', occurred_at: '2026-06-02T00:00:00Z', actor: 'assistant', value: 'pending', evidence_refs: ['prov-risk'], metadata: { profile_version: '1.0.0' } },
@@ -100,6 +102,73 @@ describe('EnterpriseMapPanel', () => {
     ];
     observationState.isLoading = false;
     observationState.error = null;
+  });
+
+
+  it('renders the empty map truth state without auto-seeding demo data', () => {
+    const emptyMap = {
+      nodes: [],
+      edges: [],
+      layers: [],
+      abstraction_levels: [],
+      concept_type_counts: {},
+      relationship_type_counts: {},
+      relationship_family_counts: {},
+      stats: { node_count: 0, edge_count: 0, layer_count: 0, concept_type_count: 0, relationship_type_count: 0, candidate_edge_count: 0, validation_issue_count: 0, ontology_candidate_count: 2 },
+    };
+    const onImportData = vi.fn();
+    const onApproveCandidates = vi.fn();
+    const onCreateSampleData = vi.fn();
+
+    render(<EnterpriseMapPanel selectedNamespace="empty-ns" fixtureMap={emptyMap} onImportData={onImportData} onApproveCandidates={onApproveCandidates} onCreateSampleData={onCreateSampleData} />);
+
+    expect(screen.getByTestId('enterprise-map-empty-state')).toBeInTheDocument();
+    expect(screen.getByText(/No graph objects yet/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('enterprise-map-example-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('enterprise-map-graph')).not.toBeInTheDocument();
+    expect(seedMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('enterprise-map-empty-import'));
+    fireEvent.click(screen.getByTestId('enterprise-map-empty-approve'));
+    fireEvent.click(screen.getByTestId('enterprise-map-empty-sample'));
+    expect(onImportData).toHaveBeenCalledTimes(1);
+    expect(onApproveCandidates).toHaveBeenCalledTimes(1);
+    expect(onCreateSampleData).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders labeled example data when only fallback examples exist', () => {
+    const emptyLiveMap = {
+      nodes: [],
+      edges: [],
+      layers: [],
+      abstraction_levels: [],
+      concept_type_counts: {},
+      relationship_type_counts: {},
+      relationship_family_counts: {},
+      stats: { node_count: 0, edge_count: 0, layer_count: 0, concept_type_count: 0, relationship_type_count: 0, candidate_edge_count: 0, validation_issue_count: 0, ontology_candidate_count: 0 },
+    };
+    const exampleMap = {
+      ...emptyLiveMap,
+      nodes: [{ ...nodes[0], id: 'example-risk', name: 'Example vendor risk', review_state: 'example', provenance_refs: [] }],
+      layers: [{ id: 'governance', label: 'Governance', order: 1, count: 1 }],
+      concept_type_counts: { risk: 1 },
+      stats: { ...emptyLiveMap.stats, node_count: 1, layer_count: 1, concept_type_count: 1 },
+    };
+
+    render(<EnterpriseMapPanel selectedNamespace="example-ns" fixtureMap={emptyLiveMap} fallbackMap={exampleMap} />);
+
+    expect(screen.getByTestId('enterprise-map-example-banner')).toHaveTextContent('[Example Data]');
+    expect(screen.queryByTestId('enterprise-map-empty-state')).not.toBeInTheDocument();
+    expect(screen.getByTestId('enterprise-node-example-risk')).toBeInTheDocument();
+  });
+
+  it('syncs externally selected map instances for lens switch preservation', async () => {
+    const { rerender } = render(<EnterpriseMapPanel selectedNamespace="demo" selectedInstanceId="risk-1" />);
+    const detail = await waitFor(() => screen.getByRole('dialog', { name: /detail drawer/i }));
+    expect(within(detail).getByText(/Vendor outage risk/i)).toBeInTheDocument();
+
+    rerender(<EnterpriseMapPanel selectedNamespace="demo" selectedInstanceId="control-1" />);
+    const updatedDetail = await waitFor(() => screen.getByRole('dialog', { name: /detail drawer/i }));
+    expect(within(updatedDetail).getByText(/Failover control/i)).toBeInTheDocument();
   });
 
   it('renders audit-risk and ecommerce fixtures with all required relationship families', () => {

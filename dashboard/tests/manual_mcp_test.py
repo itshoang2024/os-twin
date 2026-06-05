@@ -9,7 +9,7 @@ async def test_mcp():
         print(f"- {t.name}: {t.description[:50]}...")
     
     print("\nCalling knowledge_list_namespaces...")
-    res = await mcp.call_tool("knowledge_list_namespaces", {})
+    res = await mcp.call_tool("list_namespaces", {})
     print(f"Result: {res}")
 
 if __name__ == "__main__":

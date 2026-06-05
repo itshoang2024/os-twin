@@ -95,6 +95,14 @@ describe('mapLensAdapter', () => {
     expect(adapted.nodes[0]).toMatchObject({ id: 'risk-1', label: 'Vendor risk', type: 'risk', layerId: 'governance' });
     expect(adapted.edges[0]).toMatchObject({ source: 'risk-1', target: 'control-1', type: 'mitigates', style: 'dashed' });
     expect(adapted.facets?.find((facet) => facet.id === 'object_type')?.buckets[0]).toMatchObject({ id: 'risk', count: 1 });
+    expect(adapted.metadata?.mapState).toBe('live');
+  });
+
+  it('exposes empty map state as a single adapter discriminator', () => {
+    const adapted = mapLensAdapter(null, 'empty-ns', 'empty');
+    expect(adapted.subtitle).toBe('No graph objects yet');
+    expect(adapted.metadata?.mapState).toBe('empty');
+    expect(adapted.nodes).toEqual([]);
   });
 });
 

@@ -1,5 +1,6 @@
 
 import os
+import asyncio
 import json
 import requests
 
@@ -11,7 +12,7 @@ def test_gate():
     from dashboard.knowledge.mcp_server import knowledge_delete_namespace
     
     print("Testing knowledge_delete_namespace without confirm...")
-    res = knowledge_delete_namespace("some-ns", confirm=False)
+    res = asyncio.run(knowledge_delete_namespace("some-ns", confirm=False))
     print(f"Result: {json.dumps(res, indent=2)}")
     
     if res.get("code") == "CONFIRMATION_REQUIRED":

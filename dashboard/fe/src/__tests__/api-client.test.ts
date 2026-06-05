@@ -123,7 +123,7 @@ describe('api-client response unwrapping', () => {
     expect(result.warnings).toEqual(['partial']);
   });
 
-  it('always uses the localhost:3366 backend API base', async () => {
+  it('uses the browser-safe same-origin API base by default', async () => {
     vi.resetModules();
     
     mockFetch({ plans: [] });
@@ -132,7 +132,7 @@ describe('api-client response unwrapping', () => {
     await fetcher('/plans');
     
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('http://localhost:3366/api/plans'),
+      '/api/plans',
       expect.anything()
     );
   });

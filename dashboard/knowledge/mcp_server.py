@@ -677,6 +677,19 @@ async def web_research(
         return _err("INTERNAL_ERROR", str(exc))
 
 
+# Backward-compatible direct-call aliases. The MCP tool decorator exposes the
+# concise tool names, while older tests/importers still import the public
+# knowledge_* function names directly from this module.
+knowledge_list_namespaces = list_namespaces
+knowledge_create_namespace = create_namespace
+knowledge_delete_namespace = delete_namespace
+knowledge_import_folder = import_folder
+knowledge_import_text = import_text
+knowledge_get_import_status = get_import_status
+knowledge_query = query
+knowledge_web_research = web_research
+
+
 __all__ = [
     "mcp",
     "get_mcp_app",

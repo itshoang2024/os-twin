@@ -49,6 +49,7 @@ export function extractFieldsFromTemplate(
   const fields: TemplateField[] = [];
   const groupsMap = new Map<string, TemplateGroup>();
   let currentGroup = 'basics';
+  let currentGroupOptional = false;
   groupsMap.set(currentGroup, { id: 'basics', label: 'The basics' });
 
   const lines = promptTemplate.split('\n');
@@ -58,6 +59,7 @@ export function extractFieldsFromTemplate(
     // Detect group boundaries from markdown headings
     const headingMatch = line.match(/^##\s+(.+)/);
     if (headingMatch) {
+      currentGroupOptional = /\(optional\)|optional/i.test(headingMatch[1]);
       const label = headingMatch[1].replace(/\s*\(optional\)\s*/i, '').trim();
       const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
       if (!groupsMap.has(id)) {
@@ -72,10 +74,10 @@ export function extractFieldsFromTemplate(
     let match: RegExpExecArray | null;
     while ((match = placeholderRegex.exec(line)) !== null) {
       const hint = match[1].trim();
-      const isOptional = /\(optional\)/i.test(line) || /optional/i.test(hint);
+      const isOptional = currentGroupOptional || /\(optional\)/i.test(line) || /optional/i.test(hint);
 
       // Derive a label from the preceding markdown line content
-      let label = line.replace(placeholderRegex, '').replace(/^[-*#\s]+/, '').replace(/:?\s*$/, '').trim();
+      let label = line.replace(/\{\{[^}]*\}\}/g, '').replace(/^[-*#\s]+/, '').replace(/:?\s*$/, '').trim();
       if (!label || label === '-') {
         // Use the heading above or the hint
         label = hint.startsWith('e.g.') ? `Item ${fieldIndex + 1}` : hint.split(',')[0];
@@ -123,9 +125,18 @@ export function computeCompleteness(promptTemplate: string, currentValue: string
   // Extract labels for unfilled fields
   const unfilledLabels: string[] = [];
   const lines = currentValue.split('\n');
+  let currentHeading = '';
   for (const line of lines) {
-    if (/\{\{[^}]*\}\}/.test(line)) {
-      const label = line.replace(/\{\{[^}]*\}\}/g, '').replace(/^[-*#\s]+/, '').replace(/:?\s*$/, '').trim();
+    const headingMatch = line.match(/^##\s+(.+)/);
+    if (headingMatch) {
+      currentHeading = headingMatch[1].replace(/\s*\(optional\)\s*/i, '').trim();
+    }
+
+    const placeholderMatch = line.match(/\{\{([^}]*)\}\}/);
+    if (placeholderMatch) {
+      const inlineLabel = line.replace(/\{\{[^}]*\}\}/g, '').replace(/^[-*#\s]+/, '').replace(/:?\s*$/, '').trim();
+      const hint = placeholderMatch[1].trim();
+      const label = inlineLabel || (hint.startsWith('e.g.') ? hint : '') || currentHeading;
       if (label) unfilledLabels.push(label);
     }
   }

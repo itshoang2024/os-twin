@@ -14,6 +14,7 @@ import { ENTERPRISE_MAP_MODULES } from './ontology/enterprise-map';
 import { WorkbenchShell, mapLensAdapter } from './workbench';
 
 type ViewName = 'map' | 'layers' | 'objects' | 'relations' | 'quality' | 'simulation';
+export type MapState = 'live' | 'example' | 'empty';
 type FilterKey = 'layer' | 'objectType' | 'abstraction' | 'relationshipFamily' | 'pack' | 'lifecycle' | 'review' | 'owner' | 'quality';
 type ActiveFilters = Record<FilterKey, string[]>;
 
@@ -687,7 +688,12 @@ interface EnterpriseMapPanelProps {
   fallbackMap?: EnterpriseMapProjectionData | null;
   /** Optional shell-driven concept type focus from the Spec Lens selection. */
   conceptTypeFilter?: string | null;
+  /** Shell-controlled selected graph instance, preserved across Spec/Map lens switches. */
+  selectedInstanceId?: string | null;
   onInstanceSelect?: (selection: { id: string; title: string; concept_type: string; source: 'live' | 'example' }) => void;
+  onImportData?: () => void;
+  onApproveCandidates?: () => void;
+  onCreateSampleData?: () => void;
 }
 
 export default function EnterpriseMapPanel({
@@ -700,7 +706,11 @@ export default function EnterpriseMapPanel({
   profileOverride = null,
   fallbackMap = null,
   conceptTypeFilter = null,
+  selectedInstanceId = null,
   onInstanceSelect,
+  onImportData,
+  onApproveCandidates,
+  onCreateSampleData,
 }: EnterpriseMapPanelProps) {
   const hookNamespace = fixtureMap ? null : selectedNamespace;
   const enterpriseMap = useEnterpriseMap(hookNamespace, 200);
@@ -709,8 +719,10 @@ export default function EnterpriseMapPanel({
   const { profile } = useOntologyProfile(hookNamespace);
   const liveMap = fixtureMap ?? enterpriseMap.map;
   const effectiveProfile = fixtureProfile ?? profileOverride ?? profile;
-  const shouldUseFallbackMap = !fixtureMap && !liveMap?.nodes.length && !explorer.nodes.length && Boolean(fallbackMap?.nodes.length);
-  const effectiveMap = shouldUseFallbackMap ? fallbackMap : liveMap;
+  const hasLiveObjects = Boolean(liveMap?.nodes.length || (!fixtureMap && explorer.nodes.length));
+  const hasExampleObjects = !hasLiveObjects && Boolean(fallbackMap?.nodes.length);
+  const mapState: MapState = hasLiveObjects ? 'live' : hasExampleObjects ? 'example' : 'empty';
+  const effectiveMap = mapState === 'example' ? fallbackMap : liveMap;
   const [activeView, setActiveView] = React.useState<ViewName>('map');
   const [selectedId, setSelectedId] = React.useState<string | null>(fixtureInitialSelectedId);
   const [savedFocusId, setSavedFocusId] = React.useState<string | null>(fixtureInitialSelectedId);
@@ -722,10 +734,8 @@ export default function EnterpriseMapPanel({
   const graphHostRef = React.useRef<HTMLDivElement | null>(null);
   const svgUid = React.useId().replace(/:/g, '');
 
-  React.useEffect(() => {
-    if (fixtureMap || fallbackMap || !selectedNamespace || isSeeded || enterpriseMap.isLoading || effectiveMap?.nodes.length) return;
-    void seed(40);
-  }, [enterpriseMap.isLoading, effectiveMap?.nodes.length, fallbackMap, fixtureMap, isSeeded, seed, selectedNamespace]);
+  void isSeeded;
+  void seed;
 
   React.useEffect(() => {
     const host = graphHostRef.current;
@@ -767,9 +777,10 @@ export default function EnterpriseMapPanel({
 
   React.useEffect(() => {
     setFilters(buildInitialFilters(data));
-    setSelectedId(savedFocusId && data.objects.some((object) => object.id === savedFocusId) ? savedFocusId : null);
+    const shellSelection = selectedInstanceId && data.objects.some((object) => object.id === selectedInstanceId) ? selectedInstanceId : null;
+    setSelectedId(shellSelection ?? (savedFocusId && data.objects.some((object) => object.id === savedFocusId) ? savedFocusId : null));
     setPage(0);
-  }, [data, savedFocusId]);
+  }, [data, savedFocusId, selectedInstanceId]);
 
   React.useEffect(() => {
     if (!conceptTypeFilter) return;
@@ -791,7 +802,7 @@ export default function EnterpriseMapPanel({
   );
   const layout = React.useMemo(() => computeLayout(data, visibleObjects, hostWidth, density), [data, visibleObjects, hostWidth, density]);
   const selectedObject = selectedId ? data.objects.find((object) => object.id === selectedId) ?? null : null;
-  const mapSourceKind: 'live' | 'example' = shouldUseFallbackMap ? 'example' : 'live';
+  const mapSourceKind: 'live' | 'example' = mapState === 'example' ? 'example' : 'live';
   const hookObservation = useOntologyObservation(hookNamespace, selectedId);
   const rawObservationEvents = fixtureMap ? fixtureObservationEvents.filter((event) => !selectedId || event.subject_id === selectedId) : hookObservation.events;
   const rawTimeSeries = fixtureMap ? fixtureTimeSeries.filter((item) => !selectedId || item.subject_id === selectedId) : hookObservation.series;
@@ -804,7 +815,7 @@ export default function EnterpriseMapPanel({
     [rawTimeSeries, timeMode, observationEvents, selectedObject, data.profileVersion],
   );
   const connected = React.useMemo(() => connectedObjectIds(data, selectedId), [data, selectedId]);
-  const workbenchModel = React.useMemo(() => mapLensAdapter(effectiveMap, selectedNamespace ?? undefined), [effectiveMap, selectedNamespace]);
+  const workbenchModel = React.useMemo(() => mapLensAdapter(effectiveMap, selectedNamespace ?? undefined, mapState), [effectiveMap, mapState, selectedNamespace]);
   const graphEdges = React.useMemo(() => {
     const seenTypes = new Set<string>();
     return visibleRelations.flatMap<GraphEdge>((relation) => {
@@ -845,11 +856,20 @@ export default function EnterpriseMapPanel({
     <div className="enterprise-map-shell" data-testid="enterprise-map-panel" data-modules={ENTERPRISE_MAP_MODULES.join(',')}>
       <style>{MAP_PANEL_CSS}</style>
       <EnterpriseMapHeader data={data} activeView={activeView} onViewChange={setActiveView} />
-      {shouldUseFallbackMap ? <div className="emp-example-banner" data-testid="enterprise-map-example-banner">Examples only — no confirmed company instances are available for this namespace. These cards come from GraphInstruction/domain-pack fallbacks and are not persisted.</div> : null}
+      {mapState === 'example' ? <div className="emp-example-banner" data-testid="enterprise-map-example-banner">[Example Data] Examples only — no confirmed company instances are available for this namespace. These cards come from GraphInstruction/domain-pack fallbacks and are not persisted.</div> : null}
       {conceptTypeFilter ? <div className="emp-filter-banner" data-testid="enterprise-map-concept-filter">Map Lens filtered to type: <strong>{titleize(conceptTypeFilter)}</strong></div> : null}
 
-      <SummaryBar data={data} visibleObjectCount={visibleObjects.length} visibleRelationCount={visibleRelations.length} />
-      <LargeGraphControls
+      {mapState === 'empty' ? (
+        <EmptyMapState
+          namespace={selectedNamespace}
+          pendingCandidateCount={effectiveMap?.stats?.ontology_candidate_count ?? 0}
+          onImportData={onImportData}
+          onApproveCandidates={onApproveCandidates}
+          onCreateSampleData={onCreateSampleData}
+        />
+      ) : null}
+      {mapState !== 'empty' ? <SummaryBar data={data} visibleObjectCount={visibleObjects.length} visibleRelationCount={visibleRelations.length} /> : null}
+      {mapState !== 'empty' ? <LargeGraphControls
         filteredCount={filteredObjects.length}
         visibleCount={visibleObjects.length}
         page={safePage}
@@ -861,7 +881,8 @@ export default function EnterpriseMapPanel({
         onPageSizeChange={(nextSize) => { setPageSize(nextSize); setPage(0); }}
         onDensityChange={setDensity}
         onRestoreFocus={() => savedFocusId && setSelectedId(savedFocusId)}
-      />
+      /> : null}
+      {mapState !== 'empty' ? (<>
       <OntologyPrinciples data={data} />
       <MapObjectSelectionRail objects={visibleObjects} onSelectObject={selectObject} />
 
@@ -888,11 +909,38 @@ export default function EnterpriseMapPanel({
 
         <DetailSidebar data={data} selectedObject={selectedObject} onSelectObject={selectObject} />
       </div>
+      </>) : null}
     </div>
     </WorkbenchShell>
   );
 }
 
+
+function EmptyMapState({ namespace, pendingCandidateCount, onImportData, onApproveCandidates, onCreateSampleData }: { namespace: string | null; pendingCandidateCount: number; onImportData?: () => void; onApproveCandidates?: () => void; onCreateSampleData?: () => void }) {
+  const actions = [
+    { id: 'import', label: 'Import graph objects', hint: 'Bring in documents or connectors so live Kuzu/projection data can populate the map.', onClick: onImportData },
+    { id: 'approve', label: 'Approve candidates', hint: pendingCandidateCount ? `${pendingCandidateCount} pending candidate(s) can become governed object types or relationships.` : 'Review candidate proposals before they become governed graph objects.', onClick: onApproveCandidates },
+    { id: 'sample', label: 'Create sample data', hint: 'Load a clearly labeled [Example Data] template for exploration without pretending it is live.', onClick: onCreateSampleData },
+  ];
+  return (
+    <section className="emp-empty-state" data-testid="enterprise-map-empty-state" aria-label="No graph objects yet">
+      <div className="emp-empty-state-icon" aria-hidden="true">∅</div>
+      <div>
+        <p className="emp-empty-eyebrow">{namespace ?? 'No namespace'} · live map state</p>
+        <h2>No graph objects yet</h2>
+        <p>No live projection objects or labeled examples are available. The Map Lens stays empty until you import data, approve candidates, or intentionally create sample data.</p>
+      </div>
+      <div className="emp-empty-actions">
+        {actions.map((action) => (
+          <button key={action.id} type="button" data-testid={`enterprise-map-empty-${action.id}`} onClick={action.onClick}>
+            <strong>{action.label}</strong>
+            <span>{action.hint}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function EnterpriseMapHeader({ data, activeView, onViewChange }: { data: OntologyMapData; activeView: ViewName; onViewChange: (view: ViewName) => void }) {
   return (
@@ -1833,6 +1881,15 @@ function ObjectButtons({ objects, onSelectObject }: { objects: OntologyObject[];
 const MAP_PANEL_CSS = `
 .emp-example-banner, .emp-filter-banner { margin: 0 0 12px; border: 1px solid rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.12); color: #92400e; border-radius: 14px; padding: 10px 14px; font-size: 12px; font-weight: 700; }
 .emp-filter-banner { border-color: rgba(37, 99, 235, 0.28); background: rgba(37, 99, 235, 0.08); color: #1d4ed8; }
+.emp-empty-state { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 18px; align-items: start; margin: 18px; padding: 28px; border: 1px dashed #cbd5e1; border-radius: 22px; background: #fff; box-shadow: 0 10px 30px rgba(15,23,42,.06); }
+.emp-empty-state-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; background: #f1f5f9; color: #64748b; font-size: 28px; font-weight: 800; }
+.emp-empty-state h2 { margin: 2px 0 6px; font-size: 22px; }
+.emp-empty-state p { margin: 0; color: var(--emp-muted); max-width: 720px; }
+.emp-empty-eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 800; color: #64748b !important; }
+.emp-empty-actions { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.emp-empty-actions button { border: 1px solid #cbd5e1; border-radius: 16px; background: #f8fafc; color: #0f172a; padding: 14px; text-align: left; cursor: pointer; }
+.emp-empty-actions button strong { display: block; font-size: 13px; margin-bottom: 5px; }
+.emp-empty-actions button span { display: block; color: #64748b; font-size: 12px; line-height: 1.45; }
 .enterprise-map-shell {
   --emp-bg: #f7f8fa;
   --emp-panel: #ffffff;

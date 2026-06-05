@@ -3,6 +3,70 @@ import type { SimulationInput, SimNode, SimLink, SimulationOptions } from './typ
 
 const hasWorker = typeof Worker !== 'undefined';
 
+function seedInitialPositions(nodes: SimNode[], previous: SimNode[] = []): SimNode[] {
+  const previousById = new Map(previous.map((node) => [node.id, node]));
+  const radius = Math.max(120, nodes.length * 24);
+  return nodes.map((node, index) => {
+    const prior = previousById.get(node.id);
+    if (typeof prior?.x === 'number' && typeof prior?.y === 'number') {
+      return { ...node, x: prior.x, y: prior.y, z: typeof prior.z === 'number' ? prior.z : 0 };
+    }
+    if (typeof node.x === 'number' && typeof node.y === 'number') {
+      return { ...node, z: typeof node.z === 'number' ? node.z : 0 };
+    }
+    const angle = nodes.length ? (index / nodes.length) * Math.PI * 2 : 0;
+    return {
+      ...node,
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
+      z: typeof node.z === 'number' ? node.z : 0,
+    };
+  });
+}
+
+function seedNodePositions(nodes: SimNode[], previous: SimNode[] = [], dimension: SimulationOptions['dimension'] = '2d'): SimNode[] {
+  const previousById = new Map(previous.map((node) => [node.id, node]));
+  const count = Math.max(nodes.length, 1);
+  const radius = Math.max(120, count * 24);
+  const is2D = (dimension ?? '2d') === '2d';
+  return nodes.map((node, index) => {
+    const prior = previousById.get(node.id);
+    if (typeof node.x === 'number' && typeof node.y === 'number') {
+      return { ...node, z: is2D ? 0 : (node.z ?? 0) };
+    }
+    if (prior && typeof prior.x === 'number' && typeof prior.y === 'number') {
+      return { ...node, x: prior.x, y: prior.y, z: is2D ? 0 : (prior.z ?? 0) };
+    }
+    const angle = (index / count) * Math.PI * 2;
+    return {
+      ...node,
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
+      z: is2D ? 0 : Math.round(((index % 7) - 3) * 32),
+    };
+  });
+}
+
+function endpointId(endpoint: string | SimNode): string {
+  return typeof endpoint === 'string' ? endpoint : endpoint.id;
+}
+
+function simulationInputKey(input: SimulationInput, options: SimulationOptions): string {
+  const nodeKey = input.nodes
+    .map((node) => [node.id, node.x ?? '', node.y ?? '', node.z ?? ''].join('@'))
+    .join('|');
+  const linkKey = input.links
+    .map((link) => [endpointId(link.source), endpointId(link.target), link.weight ?? ''].join('>'))
+    .join('|');
+  return [
+    options.dimension ?? '3d',
+    options.width ?? '',
+    options.height ?? '',
+    nodeKey,
+    linkKey,
+  ].join('::');
+}
+
 export function useForceSimulation(
   input: SimulationInput | null,
   options: SimulationOptions = {}
@@ -55,7 +119,7 @@ export function useForceSimulation(
         workerRef.current = null;
       }
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!input || input.nodes.length === 0) {
@@ -68,15 +132,16 @@ export function useForceSimulation(
       return;
     }
 
-    const key = `${input.nodes.length}:${input.links.length}`;
+    const key = simulationInputKey(input, options);
     if (key === inputKeyRef.current) return;
     inputKeyRef.current = key;
 
-    nodesDataRef.current = input.nodes.map(n => ({ ...n }));
+    const previousNodes = nodesDataRef.current;
+    nodesDataRef.current = seedNodePositions(input.nodes, previousNodes, options.dimension);
     linksDataRef.current = [...input.links];
 
     if (workerRef.current) {
-      initWorker(workerRef.current, input, options, nodesDataRef);
+      initWorker(workerRef.current, { ...input, nodes: nodesDataRef.current }, options);
       isRunningRef.current = true;
     }
   }, [input, options]);
@@ -86,6 +151,12 @@ export function useForceSimulation(
       if (pendingStepRef.current) return;
       pendingStepRef.current = true;
       workerRef.current.postMessage({ type: 'step' });
+    } else {
+      // In jsdom or browsers without Worker support, keep coordinates defined so
+      // callers can render immediately while the real worker path remains async.
+      nodesDataRef.current = seedInitialPositions(nodesDataRef.current);
+      isRunningRef.current = false;
+      for (const fn of subscribersRef.current) fn();
     }
   }, []);
 
@@ -129,11 +200,9 @@ export function useForceSimulation(
 function initWorker(
   worker: Worker,
   input: SimulationInput,
-  options: SimulationOptions,
-  nodesDataRef: React.MutableRefObject<SimNode[]>
+  options: SimulationOptions
 ) {
-  const is2D = (options.dimension ?? '2d') === '2d';
-
+  type SimNodeWithCommunity = SimNode & { community_id?: string | number };
   // Create serializable versions of nodes and links
   const nodes = input.nodes.map(n => ({
     id: n.id,
@@ -142,7 +211,7 @@ function initWorker(
     z: n.z,
     degree: n.degree ?? 0,
     roleScale: n.roleScale ?? 1.0,
-    community_id: ('community_id' in n) ? (n as any).community_id : undefined
+    community_id: (n as SimNodeWithCommunity).community_id
   }));
 
   const links = input.links.map(l => ({
