@@ -227,9 +227,12 @@ $roleConfigs = Get-ChildItem -Path $RoomDir -Filter "${baseRole}_*.json" -ErrorA
 if ($roleConfigs) {
     $latestRoleConfig = Get-Content $roleConfigs[0].FullName -Raw | ConvertFrom-Json
     if ($latestRoleConfig.model) { $roleInstanceModel = $latestRoleConfig.model }
-    # Update status to active
-    $latestRoleConfig.status = "active"
-    $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigs[0].FullName -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName $baseRole -Status "active" -ConfigFile $roleConfigs[0].FullName | Out-Null
+    } else {
+        $latestRoleConfig.status = "active"
+        $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigs[0].FullName -Encoding utf8
+    }
 }
 
 # --- Write per-role context.md ---
@@ -468,6 +471,7 @@ $outputArtifact = if ($result.PSObject.Properties.Name -contains "OutputFile" -a
 }
 
 # --- Post result to channel ---
+$finalRoleStatus = if ($result.ExitCode -eq 0) { "completed" } else { "failed" }
 if ($result.ExitCode -eq 0) {
     $successSignal = if (Get-Command Get-PreferredLifecycleSuccessSignal -ErrorAction SilentlyContinue) {
         Get-PreferredLifecycleSuccessSignal -RoomDir $RoomDir -DefaultSignal "done"
@@ -487,7 +491,7 @@ if ($result.ExitCode -eq 0) {
                 "PASS" { $successSignal }
                 "FAIL" { "fail" }
                 "ESCALATE" { "escalate" }
-                default { "error" }
+                default { "" }
             }
         }
         
@@ -500,10 +504,11 @@ if ($result.ExitCode -eq 0) {
         $cleanOutput = ($cleanLines -join "`n").Trim()
         if (-not $cleanOutput) { $cleanOutput = $result.Output }
         
-        if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
+        if ($postType -and (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue)) {
             $body = "VERDICT: $finalVerdict`n`n$baseRole completed $taskRef with lifecycle signal '$postType'. Full output: $outputArtifact"
             Write-LifecycleSignal -RoomDir $RoomDir -FromRole $baseRole -Type $postType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
         }
+        if (-not $postType) { $finalRoleStatus = "failed" }
 
         Write-Log "INFO" "[$baseRole] Evaluator finished $taskRef with verdict $finalVerdict."
     } else {
@@ -515,23 +520,21 @@ if ($result.ExitCode -eq 0) {
     }
 }
 elseif ($result.TimedOut) {
-    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-        Write-LifecycleSignal -RoomDir $RoomDir -FromRole $baseRole -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`n$baseRole timed out after ${TimeoutSeconds}s." -SkipIfFresh | Out-Null
-    }
     Write-Log "ERROR" "[$baseRole] Timed out on $taskRef after ${TimeoutSeconds}s."
 }
 else {
-    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-        Write-LifecycleSignal -RoomDir $RoomDir -FromRole $baseRole -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`n$baseRole failed with exit code $($result.ExitCode)." -SkipIfFresh | Out-Null
-    }
     Write-Log "ERROR" "[$baseRole] Failed on $taskRef with exit code $($result.ExitCode)."
 }
 
 # --- Update per-role config status ---
 if ($roleConfigs) {
-    $latestRoleConfig = Get-Content $roleConfigs[0].FullName -Raw | ConvertFrom-Json
-    $latestRoleConfig.status = if ($result.ExitCode -eq 0) { "completed" } else { "failed" }
-    $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigs[0].FullName -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName $baseRole -Status $finalRoleStatus -ConfigFile $roleConfigs[0].FullName | Out-Null
+    } else {
+        $latestRoleConfig = Get-Content $roleConfigs[0].FullName -Raw | ConvertFrom-Json
+        $latestRoleConfig.status = $finalRoleStatus
+        $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigs[0].FullName -Encoding utf8
+    }
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---

@@ -38,9 +38,9 @@ BeforeAll {
                 initial_state = "developing"
                 max_retries   = 3
                 states        = @{
-                    developing = @{ role = "engineer"; type = "work";
-                        signals = @{ done = @{ target = "review" }; error = @{ target = "failed"; actions = @("increment_retries") } }
-	                    }
+	                    developing = @{ role = "engineer"; type = "work";
+	                        signals = @{ done = @{ target = "review" } }
+		                    }
 		            review = @{ role = "qa"; type = "review";
 		                signals = [ordered]@{ done = @{ target = "passed" }; pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
 		            }
@@ -359,6 +359,15 @@ Describe "Find-LatestSignal" {
         $sig | Should -Be "done"
     }
 
+    It "ignores legacy error entries even when lifecycle.json still contains them" {
+        $script:lc.states.developing.signals |
+            Add-Member -NotePropertyName "error" -NotePropertyValue @{ target = "failed" } -Force
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        & $script:postMsg -RoomDir $script:rd -From "engineer" -To "manager" -Type "error" -Ref "TASK-TEST" -Body "wrapper failed"
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "developing" | Should -BeNull
+    }
+
     It "rejects signal from wrong sender role" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
         # 'developing' state expects role=engineer; post as QA instead
@@ -404,6 +413,65 @@ Describe "Find-LatestSignal" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
         & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "please fix"
         Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "triage" | Should -Be "fix"
+    }
+}
+
+# ===========================================================================
+# Role run status
+# ===========================================================================
+Describe "Role run status orchestration failure detection" {
+    BeforeEach {
+        $script:wd = Join-Path $TestDrive "rrs-$(Get-Random)"
+        New-Item -ItemType Directory -Path $script:wd -Force | Out-Null
+        Set-TestContext -RoomsDir $script:wd
+        $script:rd = New-TestRoom -Base $script:wd -Status "review"
+        "review" | Out-File -FilePath (Join-Path $script:rd "status") -Encoding utf8 -NoNewline
+        [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString() |
+            Out-File -FilePath (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "active"
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+    }
+
+    It "stamps role configs when manager marks a run active" {
+        Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "active" | Should -Not -BeNullOrEmpty
+        $cfg = Get-Content (Join-Path $script:rd "qa_001.json") -Raw | ConvertFrom-Json
+        $cfg.status | Should -Be "active"
+        $cfg.status_updated_epoch | Should -Not -BeNullOrEmpty
+        $cfg.status_state | Should -Be "review"
+    }
+
+    It "detects fresh failed role config for manager-owned failed routing" {
+        Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "failed" | Out-Null
+        $failedRun = Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa"
+        $failedRun | Should -Not -BeNullOrEmpty
+        $failedRun.Role | Should -Be "qa"
+    }
+
+    It "ignores stale failed role config from a previous state attempt" {
+        $oldEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 120
+        $newEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "failed"
+            status_updated_epoch = $oldEpoch
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+        $newEpoch.ToString() | Out-File -FilePath (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+
+        Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa" | Should -BeNull
+    }
+
+    It "ignores failed role config without wrapper freshness timestamp" {
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "failed"
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+
+        Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa" | Should -BeNull
     }
 }
 

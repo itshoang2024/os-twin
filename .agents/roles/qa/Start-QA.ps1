@@ -5,7 +5,7 @@
 .DESCRIPTION
     Reads the engineer's "done" message from the channel, builds a QA review
     prompt, runs the agent via Invoke-Agent.ps1, parses VERDICT from output,
-    and posts done/fail/error back to the channel.
+    and posts lifecycle verdicts back to the channel.
 
     Replaces: roles/qa/run.sh
 
@@ -86,10 +86,14 @@ if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = 300 }
 $qaConfigs = Get-ChildItem -Path $RoomDir -Filter "qa_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
 if ($qaConfigs) {
     # Existing QA config — update status to active
-    $qaRoleConfig = Get-Content $qaConfigs[0].FullName -Raw | ConvertFrom-Json
-    $qaRoleConfig.status = "active"
-    $qaRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaConfigs[0].FullName -Encoding utf8
     $qaRoleConfigFile = $qaConfigs[0].FullName
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status "active" -ConfigFile $qaRoleConfigFile | Out-Null
+    } else {
+        $qaRoleConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
+        $qaRoleConfig.status = "active"
+        $qaRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    }
 }
 else {
     # First QA assignment — create qa_001.json
@@ -110,6 +114,9 @@ else {
     }
     $qaRoleConfigFile = Join-Path $RoomDir "qa_001.json"
     $qaRoleConfigObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status "active" -ConfigFile $qaRoleConfigFile | Out-Null
+    }
 }
 
 # --- Read task ref ---
@@ -415,14 +422,14 @@ $signalType = if (Get-Command Convert-VerdictToLifecycleSignal -ErrorAction Sile
 
 # --- Handle agent result ---
 if ($result.TimedOut) {
-    $signalType = "error"
+    $signalType = ""
     $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
 }
 elseif ($result.ExitCode -ne 0) {
-    $signalType = "error"
+    $signalType = ""
     $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "QA agent failed on $taskRef with exit code $($result.ExitCode)."
@@ -445,27 +452,25 @@ elseif ($signalType -eq "escalate") {
 }
 else {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — posting as error."
+        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — leaving lifecycle signal empty."
     }
 }
 
-if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
-    $body = if ($signalType -eq "error") {
-        "VERDICT: ERROR`n`nqa could not complete $taskRef cleanly. Full output: $outputArtifact"
-    } elseif ($signalType) {
-        "VERDICT: $displayVerdict`n`nqa completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
-    } else {
-        "VERDICT: ERROR`n`nqa output did not contain a supported final verdict. Full output: $outputArtifact"
-    }
-    $postType = if ($signalType) { $signalType } else { "error" }
-    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "qa" -Type $postType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
+if ($signalType -and (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue)) {
+    $body = "VERDICT: $displayVerdict`n`nqa completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
+    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "qa" -Type $signalType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
 }
 
 # --- Update per-role config status ---
 if (Test-Path $qaRoleConfigFile) {
-    $qaFinalConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
-    $qaFinalConfig.status = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
-    $qaFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    $finalStatus = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status $finalStatus -ConfigFile $qaRoleConfigFile | Out-Null
+    } else {
+        $qaFinalConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
+        $qaFinalConfig.status = $finalStatus
+        $qaFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    }
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---
@@ -473,6 +478,6 @@ if (Test-Path $qaRoleConfigFile) {
 # the room state. Removing PID here causes a race: manager polls, finds no PID,
 # and re-spawns before processing the channel signal.
 
-Write-Host "[QA] Finished $taskRef in $roomName — verdict: $(if ($displayVerdict) { $displayVerdict } else { 'UNPARSED' }), signal: $(if ($signalType) { $signalType } else { 'error' }), exitCode: $($result.ExitCode)"
+Write-Host "[QA] Finished $taskRef in $roomName — verdict: $(if ($displayVerdict) { $displayVerdict } else { 'UNPARSED' }), signal: $(if ($signalType) { $signalType } else { 'none' }), exitCode: $($result.ExitCode)"
 
 exit $result.ExitCode

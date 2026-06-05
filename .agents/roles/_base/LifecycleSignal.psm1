@@ -34,10 +34,38 @@ function Convert-VerdictToLifecycleSignal {
         "FAIL" { return "fail" }
         "ESCALATE" { return "escalate" }
         "BLOCKED" { return "escalate" }
-        "ERROR" { return "error" }
+        "ERROR" { return "" }
         "REJECT" { return "fail" }
         default { return "" }
     }
+}
+
+function Set-LifecycleRoleStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$RoleName,
+        [Parameter(Mandatory)][ValidateSet("pending", "active", "completed", "failed")][string]$Status,
+        [AllowEmptyString()][string]$ConfigFile = ""
+    )
+
+    $targetFile = $ConfigFile
+    if (-not $targetFile) {
+        $baseRole = $RoleName -replace ':.*$', ''
+        $roleConfigs = Get-ChildItem -Path $RoomDir -Filter "${baseRole}_*.json" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending
+        if ($roleConfigs) { $targetFile = $roleConfigs[0].FullName }
+    }
+    if (-not $targetFile -or -not (Test-Path $targetFile)) { return $null }
+
+    $cfg = Get-Content $targetFile -Raw | ConvertFrom-Json
+    $epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $iso = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $cfg.status = $Status
+    $cfg | Add-Member -NotePropertyName "status_updated_epoch" -NotePropertyValue $epoch -Force
+    $cfg | Add-Member -NotePropertyName "status_updated_at" -NotePropertyValue $iso -Force
+    $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $targetFile -Encoding utf8
+    return $targetFile
 }
 
 function Get-PreferredLifecycleSuccessSignal {
@@ -175,4 +203,4 @@ function Write-LifecycleSignal {
     return [pscustomobject]$msg
 }
 
-Export-ModuleMember -Function Get-AgentVerdict, Convert-VerdictToLifecycleSignal, Get-PreferredLifecycleSuccessSignal, Test-FreshLifecycleSignal, Write-LifecycleSignal
+Export-ModuleMember -Function Get-AgentVerdict, Convert-VerdictToLifecycleSignal, Get-PreferredLifecycleSuccessSignal, Set-LifecycleRoleStatus, Test-FreshLifecycleSignal, Write-LifecycleSignal

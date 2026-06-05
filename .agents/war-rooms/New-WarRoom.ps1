@@ -431,16 +431,14 @@ if (-not (Test-Path $lifecyclePath)) {
                     role    = $primaryRole
                     type    = 'work'
                     signals = [ordered]@{
-                        done  = [ordered]@{ target = 'review' }
-                        error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+                        done = [ordered]@{ target = 'review' }
                     }
                 }
                 optimize = [ordered]@{
                     role    = $primaryRole
                     type    = 'work'
                     signals = [ordered]@{
-                        done  = [ordered]@{ target = 'review' }
-                        error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+                        done = [ordered]@{ target = 'review' }
                     }
                 }
                 review = [ordered]@{

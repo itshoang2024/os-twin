@@ -88,8 +88,9 @@ Each room has a `lifecycle.json` that defines a **signal-driven state machine**.
 
 ```
 pending → developing → review → passed
-              ↓ error      ↓ fail
-            failed → triage → developing (retry)
+                           ↓ fail
+            triage → developing (retry)
+            failed → developing (runtime retry)
             (retries exhausted → failed-final)
 ```
 
@@ -115,8 +116,7 @@ pending → developing → review → passed
       "role": "engineer",
       "type": "work",
       "signals": {
-        "done":  { "target": "review" },
-        "error": { "target": "failed", "actions": ["increment_retries"] }
+        "done":  { "target": "review" }
       }
     },
     "review": {
@@ -125,8 +125,7 @@ pending → developing → review → passed
       "signals": {
         "pass":     { "target": "passed" },
         "fail":     { "target": "developing", "actions": ["increment_retries", "post_fix"] },
-        "escalate": { "target": "triage" },
-        "error":    { "target": "failed", "actions": ["increment_retries"] }
+        "escalate": { "target": "triage" }
       }
     },
     "failed": {
@@ -189,7 +188,7 @@ When a signal matches, the manager executes its `actions` array before transitio
 | Action | Effect |
 |---|---|
 | `increment_retries` | Bumps the `retries` counter file by 1 |
-| `post_fix` | Reads the latest fail/error body and posts a `fix` message to the next worker |
+| `post_fix` | Uses the latest fail feedback when routing work back to the next worker |
 | `revise_brief` | Appends triage context to `brief.md` for the next iteration |
 
 ---
@@ -240,7 +239,7 @@ The manager implements multiple safety mechanisms to prevent runaway behavior:
 
 ### 1. Crash-respawn counter (infinite loop guard)
 
-**Problem:** An agent crashes immediately on spawn (e.g., MCP schema error). No signal is posted. The manager sees no PID and no signal, so it respawns. The agent crashes again. Infinite loop.
+**Problem:** An agent crashes immediately on spawn (for example, MCP schema failure). No signal is posted. The manager sees no PID and no signal, so it respawns. The agent crashes again. Infinite loop.
 
 **Solution:** A `crash_respawns` file tracks consecutive crash cycles. When it exceeds **3**, the room is marked `failed` instead of respawning.
 
@@ -271,7 +270,7 @@ If a room stays in any non-terminal state for longer than `state_timeout_seconds
 
 ### 6. Failed-final rescue
 
-If a room hits `failed-final` but `retries < max_retries` AND there's a fail/error message in the channel, the manager rescues it back to `triage` for another attempt. This handles the case where the `failed -> decision -> failed-final` path fires prematurely.
+If a room hits `failed-final` but `retries < max_retries` AND there's a fail message in the channel, the manager rescues it back to `triage` for another attempt. This handles the case where the `failed -> decision -> failed-final` path fires prematurely.
 
 ### 7. One-shot plan approval
 
@@ -361,12 +360,12 @@ The manager is tested across **5 Pester test suites** with ~190 total test cases
 | Strict timing rejects stale and same-second signals | Find-LatestSignal - strict timing |
 | Crash-respawn counter caps at 3 then marks failed | Crash-respawn counter - guards against infinite crash loops |
 | Crash counter resets on successful transition | Crash-respawn counter - reset on successful signal transition |
-| Error signal exists on all review states | Review state error signal - evaluator crash handling |
-| Error messages use dynamic `$assignedRole`, not hardcoded `"engineer"` | Ephemeral agent error sender identity |
+| Runtime failures are manager-owned status events, not lifecycle signals | Runtime failure handling outside lifecycle signals |
+| Failed role configs use dynamic `$assignedRole`, not hardcoded `"engineer"` | Ephemeral agent failure identity |
 | Spawn lock blocks duplicate spawns within 30s grace | LEAK-9: spawn lock prevents duplicate agents |
 | State timeout re-resolves role from restart state | LEAK-6: state timeout re-resolves role |
 | Deadlock recovery skips rooms with pending signals | LEAK-7: deadlock recovery must check pending signals |
-| Failed-final rescue requires fail/error feedback | LEAK-8: failed-final rescue requires feedback |
+| Failed-final rescue requires fail feedback | LEAK-8: failed-final rescue requires feedback |
 | PLAN-REVIEW one-shot flag prevents duplicate approvals | LEAK-5: PLAN-REVIEW shortcut one-shot guard |
 | Decision state targets developing (not self-loop) | LEAK-4: decision state does not infinite-loop |
 
@@ -379,7 +378,7 @@ The manager is tested across **5 Pester test suites** with ~190 total test cases
 | **Risk 3** | Deadlock recovery increments retries -> done-count gate becomes unsatisfiable | Known exploit, tested |
 | **Risk 4** | QA deadlock recovery cascades into fixing deadlock (compound of Risk 3) | Known exploit, tested |
 | **Risk 6** | Custom lifecycle state with role != `assigned_role` spawns wrong runner | Known exploit, tested |
-| **Crash loop** | Agent dies immediately on spawn (MCP error, schema error) - infinite respawn | **Fixed** - crash-respawn counter caps at 3 |
+| **Crash loop** | Agent dies immediately on spawn - infinite respawn | **Fixed** - crash-respawn counter caps at 3 |
 | **Signal bleed** | Done from role A cascades through state owned by role B | **Fixed** - sender validation in `Find-LatestSignal` |
-| **Error identity** | `Start-EphemeralAgent.ps1` posted errors as `From "engineer"` - QA errors rejected | **Fixed** - uses `$assignedRole` |
-| **Review error signal** | Review states had no `error` signal - crashed QA agent loops forever | **Fixed** - all evaluator states now include `error -> failed` |
+| **Failure identity** | Failed role configs used stale role identity, causing manager routing to miss runtime failures | **Fixed** - failure status uses lifecycle-resolved role config |
+| **Review runtime failure** | Crashed QA agent must not be modeled as lifecycle `error` signal | **Fixed** - manager detects fresh failed role status and routes to `failed` |
