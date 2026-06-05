@@ -3,7 +3,6 @@
     Backward-compatibility tests for ostwin.ps1 changes:
       1. Cross-platform venv activation path (Scripts/ on Windows, bin/ on macOS/Linux)
       2. Role extraction from plan files — Roles: @engineer, @qa → [engineer, qa]
-      3. Bash thin-wrapper delegation (ostwin → ostwin.ps1)
 
 .DESCRIPTION
     Proves that the changes (especially deleted code) are fully backward compatible.
@@ -16,7 +15,6 @@
       - Multiple Roles: lines across EPICs are all captured
       - Backward compat: single-role lines still work
       - Existing ostwin.ps1 help, version, subcommand structure unchanged
-      - ostwin bash wrapper delegates to ostwin.ps1
 #>
 
 BeforeAll {
@@ -344,77 +342,6 @@ Describe "Role Extraction — Source Code Regression Guards" {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHANGE 3: ostwin bash thin wrapper backward compatibility
-# ─────────────────────────────────────────────────────────────────────────────
-Describe "ostwin bash — Thin Wrapper Structure" {
-    BeforeAll {
-        $script:BashContent = Get-Content $script:OstwinBash -Raw
-    }
-
-    It "Should be a shell script with bash shebang" {
-        $script:BashContent | Should -Match '^#!/usr/bin/env bash'
-    }
-
-    It "Should be significantly shorter than 200 lines (thin wrapper)" {
-        $lineCount = (Get-Content $script:OstwinBash).Count
-        $lineCount | Should -BeLessThan 200 -Because "Thin wrapper should be compact, not a full CLI"
-    }
-
-    It "Should still activate the venv" {
-        $script:BashContent | Should -Match 'source.*\.venv/bin/activate' -Because "Must set up Python in PATH"
-    }
-
-    It "Should still load .env files" {
-        $script:BashContent | Should -Match '_load_env_file' -Because "Must load environment variables"
-    }
-
-    It "Should still resolve AGENTS_DIR" {
-        $script:BashContent | Should -Match 'AGENTS_DIR' -Because "Must resolve agents directory"
-    }
-
-    It "Should export OSTWIN_HOME" {
-        $script:BashContent | Should -Match 'export OSTWIN_HOME'
-    }
-
-    It "Should export WARROOMS_DIR with default" {
-        $script:BashContent | Should -Match 'export WARROOMS_DIR'
-    }
-
-    It "Should export DASHBOARD_URL with default" {
-        $script:BashContent | Should -Match 'export DASHBOARD_URL'
-    }
-
-    It "Should delegate to ostwin.ps1 via exec pwsh" {
-        $script:BashContent | Should -Match 'exec pwsh.*ostwin\.ps1.*"\$@"' -Because "Must exec pwsh with all args"
-    }
-
-    It "Should check for pwsh availability" {
-        $script:BashContent | Should -Match 'command -v pwsh' -Because "Must check pwsh is installed"
-    }
-
-    It "Should show helpful error when pwsh is missing" {
-        $script:BashContent | Should -Match 'powershell.*not found' -Because "Must explain what to install"
-        $script:BashContent | Should -Match 'brew install powershell' -Because "Must show install command"
-    }
-
-    It "Should NOT contain command-specific case handlers (deleted code)" {
-        # These were all moved to ostwin.ps1 — bash should not duplicate them
-        $script:BashContent | Should -Not -Match '^\s*run\)' -Because "run command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*plan\)' -Because "plan command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*skills\)' -Because "skills command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*role\)' -Because "role command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*status\)' -Because "status command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*stop\)' -Because "stop command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*dashboard\)' -Because "dashboard command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*mcp\)' -Because "mcp command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '^\s*reload-env\)' -Because "reload-env command lives in ostwin.ps1"
-        $script:BashContent | Should -Not -Match '\bps_dispatch\b' -Because "ps_dispatch is no longer needed"
-        $script:BashContent | Should -Not -Match '\bshow_help\b' -Because "help is handled by ostwin.ps1"
-        $script:BashContent | Should -Not -Match '\bresolve_plan_id\b' -Because "plan resolution is in ostwin.ps1"
-    }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # BACKWARD COMPAT: ostwin.ps1 still handles all subcommands
 # ─────────────────────────────────────────────────────────────────────────────
 Describe "ostwin.ps1 — All Commands Still Present (backward compat)" {
@@ -481,38 +408,6 @@ Describe "ostwin.ps1 — Core Functions Still Present" {
     foreach ($fn in @("Import-EnvFile", "Test-DashboardReachable", "Invoke-DashboardApi", "Resolve-PlanId", "Show-OstwinHelp")) {
         It "Should still define function '$fn'" {
             $script:Content | Should -Match "function $fn"
-        }
-    }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REAL-WORLD: Test with actual plan file if available
-# ─────────────────────────────────────────────────────────────────────────────
-Describe "Role Extraction — Real Plan File Validation" {
-    BeforeAll {
-        $script:RealPlan = Join-Path $HOME ".ostwin" ".agents" "plans" "3afead262b04.md"
-    }
-
-    It "Should extract engineer, qa, architect from production plan" -Skip:(-not (Test-Path $script:RealPlan)) {
-        $content = Get-Content $script:RealPlan -Raw
-        $roles = [regex]::Matches($content, '(?m)^Roles:\s*(.+)$') |
-            ForEach-Object {
-                $line = $_.Groups[1].Value -replace '\(.*$', ''
-                ($line -split '[,\s]+') |
-                    ForEach-Object { ($_.Trim() -replace '^@', '') } |
-                    Where-Object { $_ -match '[a-zA-Z0-9]' -and $_ -notmatch '^<.*>$' }
-            } |
-            Sort-Object -Unique
-
-        $roles | Should -Contain "engineer" -Because "Production plan has @engineer"
-        $roles | Should -Contain "qa" -Because "Production plan has @qa"
-        $roles | Should -Contain "architect" -Because "Production plan has @architect"
-        $roles.Count | Should -Be 3 -Because "Plan should have exactly 3 unique roles"
-
-        # Verify NO @-prefixed or comma-suffixed entries
-        foreach ($r in $roles) {
-            $r | Should -Not -Match '^@' -Because "@ prefix must be stripped"
-            $r | Should -Not -Match ',' -Because "Commas must be stripped"
         }
     }
 }

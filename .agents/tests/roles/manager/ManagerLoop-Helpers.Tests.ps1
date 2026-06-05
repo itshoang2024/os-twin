@@ -14,7 +14,8 @@ BeforeAll {
     $utilsModule = Join-Path $script:agentsDir "lib" "Utils.psm1"
     if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 
-    $script:postMsg  = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:postMsg  = New-TestChannelWriter
     $script:readMsg  = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
 
     # --- Helper: create a standard room with lifecycle.json ---
@@ -39,10 +40,10 @@ BeforeAll {
                 states        = @{
                     developing = @{ role = "engineer"; type = "work";
                         signals = @{ done = @{ target = "review" }; error = @{ target = "failed"; actions = @("increment_retries") } }
-                    }
-                    review = @{ role = "qa"; type = "review";
-                        signals = @{ pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
-                    }
+	                    }
+		            review = @{ role = "qa"; type = "review";
+		                signals = [ordered]@{ done = @{ target = "passed" }; pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
+		            }
                     optimize = @{ role = "engineer"; type = "work";
                         signals = @{ done = @{ target = "review" } }
                     }
@@ -375,11 +376,17 @@ Describe "Find-LatestSignal" {
         $sig | Should -BeNull
     }
 
-    It "returns 'pass' for review state from QA" {
-        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
-        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "pass" -Ref "TASK-TEST" -Body "lgtm"
-        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
-    }
+	    It "returns 'done' for review state from QA" {
+	        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+	        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "VERDICT: DONE"
+	        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "done"
+	    }
+
+	    It "still returns legacy 'pass' for review state from QA" {
+	        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+	        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "pass" -Ref "TASK-TEST" -Body "lgtm"
+	        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
+	    }
 
     It "returns 'fail' for review state from QA" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
@@ -422,29 +429,11 @@ Describe "Invoke-SignalActions" {
         [int](Get-Content (Join-Path $script:rd "retries") -Raw).Trim() | Should -Be 3
     }
 
-    It "post_fix: posts fix message using fail body" {
+    It "post_fix: does not synthesize PowerShell channel messages" {
         & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "fail" -Ref "TASK-TEST" -Body "fix this bug"
-        Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer"
-        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
-        $msgs[-1].body | Should -Be "fix this bug"
-        # CRITICAL: fix message must be addressed to the BaseRole passed in (the TARGET role)
-        $msgs[-1].to | Should -Be "engineer"
-    }
-
-    It "post_fix: routes fix to the role provided as BaseRole — not the sender of the fail" {
-        # Simulates review.fail → optimize: post_fix must go to 'game-engineer' (optimize role),
-        # NOT 'game-qa' (the current review role that posted the fail).
-        & $script:postMsg -RoomDir $script:rd -From "game-qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "login tests fail"
-        Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "EPIC-001" -BaseRole "game-engineer"
-        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
-        $msgs[-1].to   | Should -Be "game-engineer" -Because "post_fix must address the TARGET role (fixer), not game-qa (the reviewer)"
-        $msgs[-1].body | Should -Be "login tests fail"
-    }
-
-    It "post_fix: does nothing when no fail/escalate/error messages" {
         { Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer" } | Should -Not -Throw
+        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
+        $msgs.Count | Should -Be 0
     }
 
     It "revise_brief: appends triage context to brief.md" {
@@ -471,7 +460,7 @@ Describe "Invoke-SignalActions" {
         Invoke-SignalActions -RoomDir $script:rd -Actions @('increment_retries','post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer"
         [int](Get-Content (Join-Path $script:rd "retries") -Raw).Trim() | Should -Be 1
         $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
+        $msgs.Count | Should -Be 0
     }
 }
 

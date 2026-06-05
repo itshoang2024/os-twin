@@ -94,7 +94,7 @@ You communicate via JSONL channels. Use these message types:
 - Send `plan-update` to notify engineer of brief.md revision
 - Send `release` when drafting final release notes
 - Receive `done` from engineers (work complete)
-- Receive `pass` from QA (approved)
+- Receive `done` from QA (approved)
 - Receive `fail` from QA (rejected, with feedback)
 - Receive `escalate` from QA (design/scope issue, not an implementation bug)
 - Receive `design-guidance` from architect (recommendation: FIX, REDESIGN, or REPLAN)

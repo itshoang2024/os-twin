@@ -104,7 +104,7 @@ Create `<war-room>/qa-report.md`:
 
 > Reviewer: qa
 > Date: <YYYY-MM-DD>
-> Verdict: PASS / FAIL / ESCALATE
+> Verdict: DONE / FAIL / ESCALATE
 
 ## TASKS.md Verification
 - Total sub-tasks: <N>
@@ -141,13 +141,13 @@ Create `<war-room>/qa-report.md`:
    - Actual: <what happens>
    - Suggested fix: <hint>
 
-## Recommendations (if PASS)
+## Recommendations (if DONE)
 - <non-blocking suggestions for improvement>
 ```
 
 ### 8. Post the Verdict
 
-- **PASS** → `post_message(type="pass", body=<qa-report summary>)`
+- **DONE** → `post_message(type="done", body=<qa-report summary>)`
 - **FAIL** → `post_message(type="fail", body=<numbered issues list>)`
 - **ESCALATE** → `post_message(type="escalate", body=<classification + reasoning>)`
 

@@ -141,12 +141,11 @@ jobs:
           fail-on-error: true
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Job 3: Existing Pester test suite (all 3 platforms)
-  # Runs the 50+ existing Pester tests from .agents/tests/.
-  # Plan tests are isolated to prevent cross-test module pollution.
+  # Job 3: Agent PowerShell unit tests (all 3 platforms)
+  # Runs all tracked .agents Pester unit tests outside installer-specific tests.
   # ─────────────────────────────────────────────────────────────────────────
   pester-core-tests:
-    name: "Pester Core Tests (${{ matrix.os }})"
+    name: "Agent PowerShell Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -168,91 +167,28 @@ jobs:
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Pester -MinimumVersion 5.7.0 -Force -Scope CurrentUser
 
-      - name: Install Python dependencies
+      - name: Install lightweight test dependencies
         shell: bash
-        run: pip install httpx || pip3 install httpx || true
-
-      - name: Run plan tests (isolated)
-        shell: pwsh
         run: |
-          $config = New-PesterConfiguration
-          $config.Run.Path = '.agents/tests/plan/'
-          $config.Run.Exit = $true
-          $config.Output.Verbosity = 'Detailed'
-          $config.TestResult.Enabled = $true
-          $config.TestResult.OutputFormat = 'JUnitXml'
-          $config.TestResult.OutputPath = 'test-results/pester-plan-results.xml'
-          New-Item -ItemType Directory -Path 'test-results' -Force | Out-Null
-          Invoke-Pester -Configuration $config
+          python -m pip install --upgrade pip
+          python -m pip install httpx
 
-      - name: Run all other Pester tests
+      - name: Run .agents PowerShell unit tests
         shell: pwsh
         run: |
           $config = New-PesterConfiguration
           $config.Run.Path = @(
-            '.agents/tests/channel/',
-            '.agents/tests/dynamic_roles/',
-            '.agents/tests/lib/',
-            '.agents/tests/lifecycle/',
-            '.agents/tests/roles/',
-            '.agents/tests/war-rooms/'
+            '.agents/tests/',
+            '.agents/bin/tests/'
           )
+          $config.Filter.ExcludeTag = @('Integration', 'Slow')
           $config.Run.Exit = $true
-          $config.Output.Verbosity = 'Detailed'
+          $config.Output.Verbosity = 'Normal'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputFormat = 'JUnitXml'
-          $config.TestResult.OutputPath = 'test-results/pester-core-results.xml'
+          $config.TestResult.OutputPath = 'test-results/pester-agents-results.xml'
+          New-Item -ItemType Directory -Path 'test-results' -Force | Out-Null
           Invoke-Pester -Configuration $config
-
-      - name: Run standalone Pester tests
-        continue-on-error: true   # These tests have pre-existing path/assertion issues
-        shell: pwsh
-        run: |
-          $rootTests = Get-ChildItem -Path '.agents/tests/' -Filter '*.Tests.ps1' -File
-          if ($rootTests.Count -gt 0) {
-            $config = New-PesterConfiguration
-            $config.Run.Path = $rootTests.FullName
-            $config.Run.Exit = $true
-            $config.Output.Verbosity = 'Detailed'
-            $config.TestResult.Enabled = $true
-            $config.TestResult.OutputFormat = 'JUnitXml'
-            $config.TestResult.OutputPath = 'test-results/pester-standalone-results.xml'
-            Invoke-Pester -Configuration $config
-          } else {
-            Write-Host "No standalone test files found — skipping"
-          }
-
-      - name: Run MCP tests
-        shell: pwsh
-        run: |
-          if (Test-Path '.agents/tests/mcp/') {
-            $config = New-PesterConfiguration
-            $config.Run.Path = '.agents/tests/mcp/'
-            $config.Run.Exit = $true
-            $config.Output.Verbosity = 'Detailed'
-            $config.TestResult.Enabled = $true
-            $config.TestResult.OutputFormat = 'JUnitXml'
-            $config.TestResult.OutputPath = 'test-results/pester-mcp-results.xml'
-            Invoke-Pester -Configuration $config
-          } else {
-            Write-Host "No MCP test directory found — skipping"
-          }
-
-      - name: Run observe tests
-        shell: pwsh
-        run: |
-          if (Test-Path '.agents/tests/observe/') {
-            $config = New-PesterConfiguration
-            $config.Run.Path = '.agents/tests/observe/'
-            $config.Run.Exit = $true
-            $config.Output.Verbosity = 'Detailed'
-            $config.TestResult.Enabled = $true
-            $config.TestResult.OutputFormat = 'JUnitXml'
-            $config.TestResult.OutputPath = 'test-results/pester-observe-results.xml'
-            Invoke-Pester -Configuration $config
-          } else {
-            Write-Host "No observe test directory found — skipping"
-          }
 
       - name: Upload Pester core test results
         if: always()
@@ -272,62 +208,128 @@ jobs:
           fail-on-error: true
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Job 4a: Memory system unit + integration tests (Linux only)
-  # Validates MemoryNote, AgenticMemorySystem, MCP server, and time decay.
-  # Uses deterministic mocks — no API keys or ML models required.
+  # Job 4a: Dashboard Python unit tests (Linux only)
+  # Runs dashboard pytest tests with slow/manual external-service coverage excluded.
   # ─────────────────────────────────────────────────────────────────────────
-  memory-tests:
-    name: "Memory System Tests"
+  dashboard-python-tests:
+    name: "Dashboard Python Unit Tests"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: dashboard/uv.lock
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install memory system dependencies
-        shell: bash
+      - name: Install dashboard Python dependencies
+        working-directory: dashboard
         run: |
-          cd .agents/memory
-          pip install -e ".[test]" 2>/dev/null || pip install -r requirements.txt 2>/dev/null || true
-          # Ensure core deps available for unit tests (no ML needed)
-          pip install litellm mcp httpx zvec 2>/dev/null || true
+          uv sync --extra dev --frozen
 
-      - name: Run memory unit tests
-        shell: bash
+      - name: Run dashboard Python unit tests
+        working-directory: dashboard
+        env:
+          OSTWIN_DEV_MODE: '1'
+          OSTWIN_API_KEY: test-key
+          OSTWIN_AUTH_KEY: test-key
+          OSTWIN_RUN_SUBPROCESS_MCP_TEST: '0'
+          RUN_HUGGINGFACE_INTEGRATION: '0'
         run: |
-          cd .agents/memory
-          python -m unittest \
-            tests.unit.test_memory_note \
-            tests.unit.test_mcp_server \
-            tests.unit.test_time_decay \
-            tests.unit.test_merge \
-            tests.unit.test_import_docs \
-          -v
-          # -- Integration (deterministic only) ──────────────────────────
-          python -m unittest \
-            tests.unit.test_time_decay \
-            tests.unit.test_merge \
-            tests.unit.test_import_docs
+          mkdir -p ../test-results
+          uv run pytest -q -m "not slow" \
+            --ignore=tests/manual_gate_test.py \
+            --ignore=tests/manual_mcp_test.py \
+            --ignore-glob='tests/*integration*.py' \
+            --ignore-glob='tests/**/*integration*.py' \
+            --ignore-glob='tests/*e2e*.py' \
+            --ignore-glob='tests/**/*e2e*.py' \
+            --ignore-glob='tests/*functional*.py' \
+            --ignore-glob='tests/**/*functional*.py' \
+            --ignore-glob='tests/*stress*.py' \
+            --ignore-glob='tests/**/*stress*.py' \
+            --junitxml=../test-results/dashboard-python-results.xml
 
-      - name: Run memory integration tests (mock-only, no ML)
-        shell: bash
-        run: |
-          cd .agents/memory
-          python -m unittest \
-            tests.integration.test_memory_system.TestAgenticMemorySystemIntegration.test_memory_lifecycle_with_deterministic_dependencies \
-            tests.integration.test_memory_system.TestAgenticMemorySystemIntegration.test_persistence_round_trip_rebuilds_backlinks \
-            tests.integration.test_memory_system.TestAgenticMemorySystemIntegration.test_sync_from_disk_detects_added_updated_and_removed_notes \
-            tests.integration.test_memory_system.TestAgenticMemorySystemIntegration.test_process_memory_applies_evolution_actions \
-            -v
+      - name: Upload dashboard Python test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-python-test-results
+          path: test-results/dashboard-python-results.xml
+          retention-days: 30
+
+      - name: Publish dashboard Python test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Dashboard Python Unit Tests
+          path: test-results/dashboard-python-results.xml
+          reporter: java-junit
+          fail-on-error: true
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Job 4b: Bot tests (Linux only)
+  # Job 4b: Dashboard frontend unit tests (Linux only)
+  # Runs Vitest for dashboard/fe.
+  # ─────────────────────────────────────────────────────────────────────────
+  dashboard-frontend-tests:
+    name: "Dashboard Frontend Unit Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: dashboard/fe/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: dashboard/fe
+        run: pnpm install --frozen-lockfile
+
+      - name: Run dashboard frontend unit tests
+        working-directory: dashboard/fe
+        run: |
+          mkdir -p ../test-results
+          pnpm exec vitest run --reporter=default --reporter=junit --outputFile=../test-results/dashboard-fe-vitest-results.xml
+
+      - name: Upload dashboard frontend test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-frontend-test-results
+          path: dashboard/test-results/dashboard-fe-vitest-results.xml
+          retention-days: 30
+
+      - name: Publish dashboard frontend test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Dashboard Frontend Unit Tests
+          path: dashboard/test-results/dashboard-fe-vitest-results.xml
+          reporter: java-junit
+          fail-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 4c: Bot tests (Linux only)
   # Validates the Discord/Telegram bot — agent-bridge, commands, sessions,
   # connectors, and asset staging.
   # ─────────────────────────────────────────────────────────────────────────
@@ -384,12 +386,13 @@ jobs:
       - name: Run install.sh --yes --skip-optional (smoke test)
         shell: bash
         run: |
-          export SOURCE_DIR="$(pwd)"
+          SOURCE_DIR="$(pwd)"
+          export SOURCE_DIR
           .agents/install.sh --yes --skip-optional 2>&1 | tee install-output.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [[ $EXIT_CODE -ne 0 ]]; then
             echo "::error::install.sh exited with code $EXIT_CODE"
-            exit $EXIT_CODE
+            exit "$EXIT_CODE"
           fi
           echo "::notice::install.sh completed successfully"
 
@@ -398,7 +401,7 @@ jobs:
         run: |
           VENV_PYTHON="$HOME/.ostwin/.venv/bin/python"
           if [[ -f "$VENV_PYTHON" ]]; then
-            REPO_DIR="$(pwd)" $VENV_PYTHON -c "
+            REPO_DIR="$(pwd)" "$VENV_PYTHON" -c "
           import sys, os
           repo = os.environ.get('REPO_DIR', '.')
           sys.path.insert(0, repo)
@@ -484,7 +487,8 @@ jobs:
       - bats-installer-tests
       - pester-installer-tests
       - pester-core-tests
-      - memory-tests
+      - dashboard-python-tests
+      - dashboard-frontend-tests
       - bot-tests
       - smoke-test-bash
       - smoke-test-powershell
@@ -496,7 +500,8 @@ jobs:
           echo "  bats-installer-tests:    ${{ needs.bats-installer-tests.result }}"
           echo "  pester-installer-tests:  ${{ needs.pester-installer-tests.result }}"
           echo "  pester-core-tests:       ${{ needs.pester-core-tests.result }}"
-          echo "  memory-tests:            ${{ needs.memory-tests.result }}"
+          echo "  dashboard-python-tests:  ${{ needs.dashboard-python-tests.result }}"
+          echo "  dashboard-frontend-tests: ${{ needs.dashboard-frontend-tests.result }}"
           echo "  bot-tests:               ${{ needs.bot-tests.result }}"
           echo "  smoke-test-bash:         ${{ needs.smoke-test-bash.result }}"
           echo "  smoke-test-powershell:   ${{ needs.smoke-test-powershell.result }}"
@@ -505,11 +510,12 @@ jobs:
             "${{ needs.bats-installer-tests.result }}" \
             "${{ needs.pester-installer-tests.result }}" \
             "${{ needs.pester-core-tests.result }}" \
-            "${{ needs.memory-tests.result }}" \
+            "${{ needs.dashboard-python-tests.result }}" \
+            "${{ needs.dashboard-frontend-tests.result }}" \
             "${{ needs.bot-tests.result }}" \
             "${{ needs.smoke-test-bash.result }}" \
             "${{ needs.smoke-test-powershell.result }}"; do
-            if [[ "$result" == "failure" ]]; then
+            if [[ "$result" != "success" ]]; then
               FAILED=true
             fi
           done

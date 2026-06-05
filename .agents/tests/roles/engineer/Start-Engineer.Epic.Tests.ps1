@@ -13,7 +13,8 @@ BeforeAll {
     $script:StartEngineer = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/engineer").Path "Start-Engineer.ps1"
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
     $script:StartQA = Join-Path $script:agentsDir "roles" "qa" "Start-QA.ps1"
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
 
     # ── Sample Sky Fighter EPIC content (from real plan) ──
@@ -603,9 +604,9 @@ Describe "Fix Cycle — TASKS.md Persistence and Re-injection" {
     }
 
     Context "[GAP] Engineer fix prompt should include existing TASKS.md" {
-        It "existing TASKS.md can be read and injected into fix prompt" {
-            # This tests the recommended fix: inject existing TASKS.md into
-            # the Engineer's fix-cycle prompt so it knows what was already completed
+        It "existing TASKS.md can be appended after fix context" {
+            # The runner appends TASKS.md after the latest effort / fix context
+            # so the engineer sees what happened first, then returns to the checklist.
 
             $taskRef = (Get-Content (Join-Path $script:roomDir "task-ref") -Raw).Trim()
             $isEpic = $taskRef -match '^EPIC-'
@@ -621,12 +622,8 @@ Describe "Fix Cycle — TASKS.md Persistence and Re-injection" {
             $existingTasksContent | Should -Match "\[x\] TASK-001"
             $existingTasksContent | Should -Match "\[ \] TASK-004"
 
-            # Build a fix prompt that includes existing TASKS.md
+            # Build a fix prompt with TASKS.md placed at the end.
             $fixPrompt = @"
-## Existing TASKS.md (from previous attempt)
-
-$existingTasksContent
-
 ## QA Feedback
 
 TASK-004 input manager does not prevent default scroll on mobile.
@@ -635,10 +632,15 @@ TASK-005 player aircraft does not bank on X-axis movement.
 ## Instructions
 
 Fix the specific issues above. Update TASKS.md if new sub-tasks are needed.
+
+## Sub-Tasks (TASKS.md)
+
+$existingTasksContent
 "@
-            $fixPrompt | Should -Match "Existing TASKS.md"
             $fixPrompt | Should -Match "QA Feedback"
+            $fixPrompt | Should -Match "Sub-Tasks \(TASKS\.md\)"
             $fixPrompt | Should -Match "\[x\] TASK-001"
+            $fixPrompt.IndexOf("QA Feedback") | Should -BeLessThan $fixPrompt.IndexOf("## Sub-Tasks (TASKS.md)")
         }
     }
 

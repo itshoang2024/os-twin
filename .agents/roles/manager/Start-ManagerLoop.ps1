@@ -39,7 +39,6 @@ $channelDir = Join-Path $agentsDir "channel"
 $releaseDir = Join-Path $agentsDir "release"
 $managerPidFile = Join-Path $agentsDir "manager.pid"
 
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import modules ---
@@ -136,7 +135,6 @@ if (Get-Command Set-ManagerLoopContext -ErrorAction SilentlyContinue) {
         config           = $config
         stateTimeout     = $stateTimeout
         maxRetries       = $maxRetries
-        postMessage      = $postMessage
         readMessages     = $readMessages
         dashboardBaseUrl = $dashboardBaseUrl
     }
@@ -469,7 +467,6 @@ while (-not $script:shuttingDown) {
                             Stop-RoomProcesses $roomDir
                             if ($retries -lt $v2MaxRetries) {
                                 ($retries + 1).ToString() | Out-File -FilePath (Join-Path $roomDir "retries") -Encoding utf8 -NoNewline
-                                & $postMessage -RoomDir $roomDir -From "manager" -To $baseRole -Type "fix" -Ref $taskRef -Body "State '$status' timed out. Please try again."
                                 $restartState = if ($lifecycle.initial_state) { $lifecycle.initial_state } else { 'developing' }
                                 Write-RoomStatus $roomDir $restartState
                                 # LEAK-6 fix: re-resolve role from the restart state, not the timed-out state
@@ -529,7 +526,7 @@ while (-not $script:shuttingDown) {
                                 Write-Log "DEBUG" "[$taskRef] Approved via pass/plan-approve signal"
                             } elseif ($doneCount -gt 0) {
                                 $doneBody = Get-LatestBody $roomDir "done"
-                                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*PASS') {
+                                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*(DONE|PASS)') {
                                     $approved = $true
                                     Write-Log "DEBUG" "[$taskRef] Approved via done body keyword match"
                                 } else {
@@ -554,14 +551,10 @@ while (-not $script:shuttingDown) {
                             if ($failCount -gt 0) {
                                 $rejectBody = Get-LatestBody $roomDir "fail"
                                 Write-Log "WARN" "[$taskRef] Plan REJECTED by architect."
-                                & $postMessage -RoomDir $roomDir -From "manager" -To "architect" `
-                                               -Type "plan-reject" -Ref $taskRef -Body $rejectBody
                             } elseif ($doneCount -gt 0) {
                                 $rejectBody = Get-LatestBody $roomDir "done"
                                 if ($rejectBody -match 'VERDICT:\s*REJECT') {
                                     Write-Log "WARN" "[$taskRef] Plan REJECTED by architect."
-                                    & $postMessage -RoomDir $roomDir -From "manager" -To "architect" `
-                                                   -Type "plan-reject" -Ref $taskRef -Body $rejectBody
                                 }
                             }
                         }
@@ -758,7 +751,6 @@ while (-not $script:shuttingDown) {
                     $dlRestartRole = if ($restartStateDef -and $restartStateDef.role) { ($restartStateDef.role -replace ':.*$', '') } else { $dlRole }
 
                     Write-Log "WARN" "[$lt] Deadlock recovery ($($dlCount+1)/3): restarting $dlRestartRole via $restartState."
-                    & $postMessage -RoomDir $rd -From "manager" -To $dlRestartRole -Type "fix" -Ref $lt -Body "Deadlock recovery: restarting $dlRestartRole."
                     Write-RoomStatus $rd $restartState
 
                     # Risk 2 fix: Spawn worker immediately (don't rely on next iteration's respawn branch)

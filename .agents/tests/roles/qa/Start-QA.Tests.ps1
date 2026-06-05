@@ -3,6 +3,7 @@
 BeforeAll {
     $script:StartQA = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/qa").Path "Start-QA.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/qa").Path ".." "..")).Path
+    Import-Module (Join-Path $script:agentsDir "roles" "_base" "LifecycleSignal.psm1") -Force
 }
 
 Describe "Start-QA" {
@@ -79,75 +80,46 @@ $TestDrive
     }
 
     Context "Verdict parsing" {
-        It "parses VERDICT: PASS from strict format" {
-            $output = "Review complete.`nVERDICT: PASS`nAll tests pass."
-            if ($output -match '(?m)^VERDICT:\s*(PASS|FAIL)') {
-                $Matches[1] | Should -Be "PASS"
-            }
+        It "parses VERDICT: DONE from strict format" {
+            $output = "Review complete.`nVERDICT: DONE`nAll tests pass."
+            Get-AgentVerdict -Output $output | Should -Be "DONE"
         }
 
         It "parses VERDICT: FAIL from strict format" {
             $output = "Found issues.`nVERDICT: FAIL`nMissing tests."
-            if ($output -match '(?m)^VERDICT:\s*(PASS|FAIL)') {
-                $Matches[1] | Should -Be "FAIL"
-            }
+            Get-AgentVerdict -Output $output | Should -Be "FAIL"
         }
 
-        It "parses VERDICT: PASS from inline format" {
-            $output = "The result is VERDICT: PASS because..."
-            if ($output -match 'VERDICT:\s*(PASS|FAIL)') {
-                $Matches[1] | Should -Be "PASS"
-            }
+        It "parses VERDICT: DONE from inline format" {
+            $output = "The result is VERDICT: DONE because..."
+            Get-AgentVerdict -Output $output | Should -Be "DONE"
         }
 
-        It "falls back to standalone keyword detection" {
-            $output = "All looks good. PASS"
-            $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
-            if ($first20 -match '\b(PASS|FAIL)\b') {
-                $Matches[1] | Should -Be "PASS"
-            }
+        It "accepts legacy VERDICT: PASS and maps it to the selected success signal" {
+            $output = "Review complete.`nVERDICT: PASS`nAll tests pass."
+            $verdict = Get-AgentVerdict -Output $output
+            $verdict | Should -Be "PASS"
+            Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal "done" | Should -Be "done"
         }
 
-        It "detects FAIL as standalone keyword" {
-            $output = "Major bugs found. FAIL"
-            $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
-            if ($first20 -match '\b(PASS|FAIL)\b') {
-                $Matches[1] | Should -Be "FAIL"
-            }
+        It "maps legacy VERDICT: PASS to pass when the lifecycle only accepts pass" {
+            $verdict = Get-AgentVerdict -Output "VERDICT: PASS"
+            Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal "pass" | Should -Be "pass"
         }
 
         It "returns empty for no verdict" {
             $output = "Indeterminate review result."
-            $verdict = ""
-            if ($output -match '(?m)^VERDICT:\s*(PASS|FAIL)') { $verdict = $Matches[1] }
-            if (-not $verdict -and $output -match 'VERDICT:\s*(PASS|FAIL)') { $verdict = $Matches[1] }
-            if (-not $verdict) {
-                $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
-                if ($first20 -match '\b(PASS|FAIL)\b') { $verdict = $Matches[1] }
-            }
-            $verdict | Should -Be ""
+            Get-AgentVerdict -Output $output | Should -Be ""
         }
 
         It "parses VERDICT: ESCALATE from strict format" {
             $output = "This is a design problem.`nVERDICT: ESCALATE`nArchitecture needs rethinking."
-            if ($output -match '(?m)^VERDICT:\s*(PASS|FAIL|ESCALATE)') {
-                $Matches[1] | Should -Be "ESCALATE"
-            }
+            Get-AgentVerdict -Output $output | Should -Be "ESCALATE"
         }
 
         It "parses VERDICT: ESCALATE from inline format" {
             $output = "The result is VERDICT: ESCALATE because the requirements are wrong."
-            if ($output -match 'VERDICT:\s*(PASS|FAIL|ESCALATE)') {
-                $Matches[1] | Should -Be "ESCALATE"
-            }
-        }
-
-        It "detects ESCALATE as standalone keyword" {
-            $output = "Requirements are fundamentally wrong. ESCALATE"
-            $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
-            if ($first20 -match '\b(PASS|FAIL|ESCALATE)\b') {
-                $Matches[1] | Should -Be "ESCALATE"
-            }
+            Get-AgentVerdict -Output $output | Should -Be "ESCALATE"
         }
     }
 

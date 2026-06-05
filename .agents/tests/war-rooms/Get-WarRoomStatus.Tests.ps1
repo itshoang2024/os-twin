@@ -3,7 +3,9 @@
 BeforeAll {
     $script:NewWarRoom = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "New-WarRoom.ps1"
     $script:GetStatus = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "Get-WarRoomStatus.ps1"
-    $script:PostMessage = Join-Path (Split-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path) "channel" "Post-Message.ps1"
+    $script:agentsDir = Split-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
 }
 
 Describe "Get-WarRoomStatus" {
@@ -67,7 +69,7 @@ Describe "Get-WarRoomStatus" {
             $result = & $script:GetStatus -WarRoomsDir $script:warRoomsDir -JsonOutput
             $data = $result | ConvertFrom-Json
             $room1 = $data.rooms | Where-Object { $_.room_id -eq "room-001" }
-            $room1.messages | Should -BeGreaterThan 1
+            $room1.messages | Should -Be 1
         }
     }
 

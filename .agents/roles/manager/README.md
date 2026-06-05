@@ -299,9 +299,9 @@ Deadlock recovery increments retries, which raises the `expected` done-count for
 When `task-ref` is `PLAN-REVIEW`, the manager runs special shortcut logic **before** the normal signal detection:
 
 1. **Approval detection:**
-   - `pass` signal -> approved
    - `plan-approve` signal -> approved
-   - `done` with body matching `APPROVED|VERDICT: PASS|plan-approve|signoff` -> approved
+   - `done` with body matching `APPROVED|VERDICT: DONE|plan-approve|signoff` -> approved
+   - legacy `pass` signal or legacy `VERDICT: PASS` body -> approved
 2. **Rejection detection:**
    - `fail` signal -> posts `plan-reject` message
    - `done` with body matching `VERDICT: REJECT` -> posts `plan-reject` message
