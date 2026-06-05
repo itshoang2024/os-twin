@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import shlex
 import sys
 from typing import Any, Dict, List, Tuple
 from pathlib import Path
@@ -15,6 +16,30 @@ except ImportError:
 
 # Regex to match ${vault:server/key}
 VAULT_REF_PATTERN = re.compile(r"\$\{vault:([^/]+)/([^}]+)\}")
+
+
+def _split_command_text(command: str) -> List[str]:
+    """Split a shell-style command string into argv parts."""
+    stripped = command.strip()
+    if not stripped:
+        return []
+    try:
+        return shlex.split(stripped)
+    except ValueError:
+        return stripped.split()
+
+
+def _normalize_local_command(command: Any) -> Any:
+    """Normalize local MCP command values to argv-style arrays."""
+    if isinstance(command, str):
+        return _split_command_text(command)
+    if (
+        isinstance(command, list)
+        and len(command) == 1
+        and isinstance(command[0], str)
+    ):
+        return _split_command_text(command[0])
+    return command
 
 
 class ConfigResolver:
@@ -247,6 +272,15 @@ class ConfigResolver:
 
         for name, server_cfg in compiled_config["mcp"].items():
             compiled_config["mcp"][name] = _compile_recursive(server_cfg, name)
+
+        for name, server_cfg in compiled_config["mcp"].items():
+            is_local = server_cfg.get("type") == "local" or (
+                "command" in server_cfg and server_cfg.get("type") != "remote"
+            )
+            if is_local and "command" in server_cfg:
+                server_cfg["command"] = _normalize_local_command(
+                    server_cfg["command"]
+                )
 
         # Resolve bare "python"/"python3" in command[0] to the ostwin venv path
         ostwin_python = known_vars.get("OSTWIN_PYTHON", "")

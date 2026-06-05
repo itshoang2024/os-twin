@@ -330,13 +330,13 @@ Set up health checks, Swagger docs, global error handling, and Docker-based loca
             & $script:NewWarRoom -RoomId "room-tasks-06" -TaskRef "EPIC-001" `
                 -TaskDescription $script:epicWithTasks `
                 -WarRoomsDir $script:warRoomsDir `
-                -DefinitionOfDone @("All ADRs documented", "Arch diagram exists") `
-                -AcceptanceCriteria @("ADR follows template", "Team approved")
+                -DefinitionOfDone @("All ADRs are documented and reviewed", "Architecture diagram exists") `
+                -AcceptanceCriteria @("Each ADR follows the template", "Team has reviewed and approved")
 
             $brief = Get-Content (Join-Path $script:warRoomsDir "room-tasks-06" "brief.md") -Raw
-            $brief | Should -Match "## Definition of Done"
-            $brief | Should -Match "## Acceptance Criteria"
-            $brief | Should -Match "All ADRs documented"
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Definition of Done\s*$')).Count | Should -Be 1
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Acceptance Criteria\s*$')).Count | Should -Be 1
+            $brief | Should -Match "All ADRs are documented and reviewed"
             $brief | Should -Not -Match "### Tasks"
         }
 
@@ -395,9 +395,55 @@ Set up health checks, Swagger docs, global error handling, and Docker-based loca
                 -DefinitionOfDone @("100% documents classified")
 
             $brief = Get-Content (Join-Path $script:warRoomsDir "room-tasks-11" "brief.md") -Raw
-            $brief | Should -Match "## Definition of Done"
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Definition of Done\s*$')).Count | Should -Be 1
             $brief | Should -Match "100% documents classified"
             $brief | Should -Not -Match "#### Tasks"
+        }
+
+        It "brief.md keeps EPIC sections once when structured DoD/AC are also provided" {
+            $epic = @"
+Foundation Workstream FW-1
+
+Roles: @principal-engineer, @engineer, @qa-automation-engineer
+
+### Context
+
+Lift reusable primitives into a lens-agnostic model.
+
+### Definition of Done
+- [ ] Workbench shell exists.
+- [ ] EnterpriseMapPanel renders through the shell.
+
+### Acceptance Criteria
+- [ ] Layout engine is a pure function.
+- [ ] GraphCanvas supports both render modes.
+
+### Tasks
+- [ ] Define model/workbenchModel.ts.
+- [ ] Extract shared components.
+
+### Other aspects
+- Keep public props stable.
+
+depends_on: [EPIC-001, EPIC-003]
+"@
+            & $script:NewWarRoom -RoomId "room-tasks-12" -TaskRef "EPIC-007" `
+                -TaskDescription $epic `
+                -WarRoomsDir $script:warRoomsDir `
+                -DefinitionOfDone @("Workbench shell exists.", "EnterpriseMapPanel renders through the shell.") `
+                -AcceptanceCriteria @("Layout engine is a pure function.", "GraphCanvas supports both render modes.")
+
+            $brief = Get-Content (Join-Path $script:warRoomsDir "room-tasks-12" "brief.md") -Raw
+            $tasks = Get-Content (Join-Path $script:warRoomsDir "room-tasks-12" "TASKS.md") -Raw
+
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Context\s*$')).Count | Should -Be 1
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Definition of Done\s*$')).Count | Should -Be 1
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Acceptance Criteria\s*$')).Count | Should -Be 1
+            ([regex]::Matches($brief, '(?m)^#{2,6}\s+Other aspects\s*$')).Count | Should -Be 1
+            ([regex]::Matches($brief, '(?m)^depends_on:\s*\[EPIC-001,\s*EPIC-003\]\s*$')).Count | Should -Be 1
+            $brief | Should -Not -Match '(?m)^#{2,6}\s+Tasks\s*$'
+            $tasks | Should -Match "Define model/workbenchModel.ts"
+            $tasks | Should -Match "Extract shared components"
         }
     }
 
