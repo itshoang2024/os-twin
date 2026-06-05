@@ -139,6 +139,25 @@ $TestDrive
         }
     }
 
+    Context "Wrapper failure handling" {
+        It "marks role config failed without posting channel error when agent exits non-zero" {
+            $failingAgent = Join-Path $TestDrive "architect-fails.ps1"
+            "Write-Output 'architect failed'; exit 7" | Out-File $failingAgent -Encoding ascii
+            $escapedFailingAgent = $failingAgent -replace "'", "'\''"
+            $env:ARCHITECT_CMD = "pwsh -NoProfile -File '$escapedFailingAgent'"
+
+            & pwsh -NoProfile -File $script:StartArchitect -RoomDir $script:roomDir -TimeoutSeconds 10 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 7
+
+            $roleConfig = Get-Content (Join-Path $script:roomDir "architect_001.json") -Raw | ConvertFrom-Json
+            $roleConfig.status | Should -Be "failed"
+            $roleConfig.status_updated_epoch | Should -Not -BeNullOrEmpty
+
+            $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
+            $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
+        }
+    }
+
     Context "PLAN-REVIEW prompt assembly" {
         It "includes latest manager review or plan-update body in prompt.txt" {
             "PLAN-REVIEW" | Out-File (Join-Path $script:roomDir "task-ref") -Encoding utf8 -NoNewline

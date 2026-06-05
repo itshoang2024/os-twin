@@ -8,6 +8,7 @@
 BeforeAll {
     $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." ".." "..")).Path
     $AgentsDir = Join-Path $ProjectRoot ".agents"
+    . (Join-Path $AgentsDir "tests" "TestChannelHelpers.ps1")
 }
 
 # ─── Parse validation: every .ps1 file must parse without errors ─────────────
@@ -223,8 +224,6 @@ Describe "logs.ps1" {
         $roomDir = Join-Path $tmpWarrooms "room-001"
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
 
-        # Seed channel messages through the MCP channel implementation instead of
-        # writing channel.jsonl directly.
         $config = @{
             assignment = @{
                 assigned_role = "engineer"
@@ -232,17 +231,10 @@ Describe "logs.ps1" {
             }
         }
         $config | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $roomDir "config.json") -Encoding utf8
-        $channelServer = Join-Path $AgentsDir "mcp/channel-server.py"
-        $seedScript = @"
-import importlib.util
-spec = importlib.util.spec_from_file_location('channel_server', r'$channelServer')
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-room = r'$roomDir'
-module.post_message(room, 'manager', 'engineer', 'task', 'TASK-001', 'Do the thing')
-module.post_message(room, 'engineer', 'qa', 'done', 'TASK-001', 'Done!')
-"@
-        $seedScript | python3
+        Write-TestChannelMessage -RoomDir $roomDir -From "manager" -To "engineer" `
+            -Type "task" -Ref "TASK-001" -Body "Do the thing" | Out-Null
+        Write-TestChannelMessage -RoomDir $roomDir -From "engineer" -To "qa" `
+            -Type "done" -Ref "TASK-001" -Body "Done!" | Out-Null
     }
 
     AfterAll {

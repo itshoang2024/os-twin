@@ -126,27 +126,23 @@ Describe "Message Protocol" {
         }
     }
 
-    Context "Error messages" {
-        It "engineer→manager error has correct protocol" {
+    Context "Runtime failure state" {
+        It "engineer runtime failure is represented by failed room status" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-06" -TaskRef "TASK-106"
 
-            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
-                                  -Type "error" -Ref "TASK-106" -Body "Timeout after 600s"
-
-            $errMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "error" -AsObject)
-            $errMsgs.Count | Should -Be 1
-            $errMsgs[0].from | Should -Be "engineer"
+            "failed" | Out-File -FilePath (Join-Path $roomDir "status") -Encoding utf8 -NoNewline
+            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
         }
 
-        It "qa→manager error has correct protocol" {
+        It "QA implementation rejection uses fail feedback, not error" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-07" -TaskRef "TASK-107"
 
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "error" -Ref "TASK-107" -Body "Could not parse verdict"
+                                  -Type "fail" -Ref "TASK-107" -Body "Could not parse verdict"
 
-            $errMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "error" -AsObject)
-            $errMsgs.Count | Should -Be 1
-            $errMsgs[0].from | Should -Be "qa"
+            $failMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -AsObject)
+            $failMsgs.Count | Should -Be 1
+            $failMsgs[0].from | Should -Be "qa"
         }
     }
 }

@@ -60,6 +60,11 @@ Describe "LifecycleSignal protocol compatibility" {
         Get-AgentVerdict -Output "VERDICT: PASS" | Should -Be "PASS"
     }
 
+    It "maps VERDICT ERROR to no lifecycle signal" {
+        Get-AgentVerdict -Output "VERDICT: ERROR" | Should -Be "ERROR"
+        Convert-VerdictToLifecycleSignal -Verdict "ERROR" -DefaultSuccessSignal "done" | Should -Be ""
+    }
+
     It "detects fresh lifecycle signals and ignores stale ones" {
         $oldEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 60
         $futureEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 60
@@ -71,5 +76,19 @@ Describe "LifecycleSignal protocol compatibility" {
 
         $futureEpoch.ToString() | Out-File (Join-Path $script:roomDir "state_changed_at") -Encoding utf8 -NoNewline
         Test-FreshLifecycleSignal -RoomDir $script:roomDir -FromRole "qa" -Type "done" -Ref "TASK-1" | Should -BeFalse
+    }
+
+    It "stamps role config status for manager-owned failure detection" {
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "active"
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:roomDir "qa_001.json") -Encoding utf8
+
+        Set-LifecycleRoleStatus -RoomDir $script:roomDir -RoleName "qa" -Status "failed" | Should -Not -BeNullOrEmpty
+        $cfg = Get-Content (Join-Path $script:roomDir "qa_001.json") -Raw | ConvertFrom-Json
+        $cfg.status | Should -Be "failed"
+        $cfg.status_updated_epoch | Should -Not -BeNullOrEmpty
+        $cfg.status_updated_at | Should -Not -BeNullOrEmpty
     }
 }

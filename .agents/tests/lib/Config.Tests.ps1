@@ -149,6 +149,17 @@ Describe "Get-OstwinManagerRuntimeSettings" {
         $runtime.dynamic_pipelines | Should -BeTrue
     }
 
+    It "returns configured war-room retry and timeout settings" {
+        $config = $script:ValidConfig | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $config.manager.max_engineer_retries = 8
+        $config.manager.state_timeout_seconds = 1800
+
+        $runtime = Get-OstwinManagerRuntimeSettings -Config $config
+
+        $runtime.max_engineer_retries | Should -Be 8
+        $runtime.state_timeout_seconds | Should -Be 1800
+    }
+
     It "falls back to runtime namespace values and safe defaults" {
         $config = [PSCustomObject]@{
             version = "0.1.0"

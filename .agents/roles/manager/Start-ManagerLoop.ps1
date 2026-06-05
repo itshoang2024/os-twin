@@ -9,11 +9,11 @@
 
     Replaces: roles/manager/loop.sh
 
-    V2 signal-based state-machine per room (lifecycle.json):
-        pending → developing → review → passed
-                  ↓ error        ↓ fail
-                failed → triage → developing (retry)
-                (retries exhausted → failed-final)
+	    V2 signal-based state-machine per room (lifecycle.json):
+	        pending → developing → review → passed
+	                                 ↓ fail
+	                failed → developing (retry)
+	                (retries exhausted → failed-final)
 
 .PARAMETER ConfigPath
     Path to config.json. Default: AGENT_OS_CONFIG env var or .agents/config.json.
@@ -396,7 +396,6 @@ while (-not $script:shuttingDown) {
                         } elseif ($status -eq 'failed-final') {
                             if ($retries -lt $v2MaxRetries) {
                                 $failFeedback = Get-LatestBody $roomDir "fail"
-                                if (-not $failFeedback) { $failFeedback = Get-LatestBody $roomDir "error" }
                                 if ($failFeedback) {
                                     Write-Log "WARN" "[$taskRef] failed-final with retries=$retries < max=$v2MaxRetries. Rescuing to triage."
                                     Write-RoomStatus $roomDir "triage"
@@ -493,9 +492,8 @@ while (-not $script:shuttingDown) {
                             $approveCount = Get-MsgCount $roomDir "plan-approve"
                             $doneCount    = Get-MsgCount $roomDir "done"
                             $failCount    = Get-MsgCount $roomDir "fail"
-                            $errorCount   = Get-MsgCount $roomDir "error"
 
-                            Write-Log "DEBUG" "[$taskRef] PLAN-REVIEW shortcut: pass=$passCount approve=$approveCount done=$doneCount fail=$failCount error=$errorCount"
+                            Write-Log "DEBUG" "[$taskRef] PLAN-REVIEW shortcut: pass=$passCount approve=$approveCount done=$doneCount fail=$failCount"
 
                             # Log latest message bodies for debugging
                             if ($passCount -gt 0) {
@@ -513,12 +511,6 @@ while (-not $script:shuttingDown) {
                                 $donePreview = if ($doneBody.Length -gt 200) { $doneBody.Substring(0, 200) + '...' } else { $doneBody }
                                 Write-Log "DEBUG" "[$taskRef] Latest done body: $donePreview"
                             }
-                            if ($errorCount -gt 0) {
-                                $errBody = Get-LatestBody $roomDir "error"
-                                $errPreview = if ($errBody.Length -gt 200) { $errBody.Substring(0, 200) + '...' } else { $errBody }
-                                Write-Log "DEBUG" "[$taskRef] Latest error body: $errPreview"
-                            }
-
                             # Check for approval: pass signal, plan-approve signal, or done with approval keyword
                             $approved = $false
                             if ($passCount -gt 0 -or $approveCount -gt 0) {
@@ -631,6 +623,16 @@ while (-not $script:shuttingDown) {
                                 $pidAlive = Test-PidAlive $statePidFile
                                 $spawnLocked = Test-SpawnLock -RoomDir $roomDir -Role $stateBaseRole
                                 Write-Log "INFO" "[$taskRef] No signal matched. role='$stateBaseRole' pidAlive=$pidAlive spawnLocked=$spawnLocked status='$status'"
+
+                                $failedRoleRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role $stateBaseRole
+                                if ($failedRoleRun) {
+                                    Write-Log "ERROR" "[$taskRef] Role '$stateBaseRole' reported failed in '$status'. Marking room as failed for manager decision handling."
+                                    Stop-RoomProcesses $roomDir
+                                    Remove-Item (Join-Path $roomDir "crash_respawns") -Force -ErrorAction SilentlyContinue
+                                    Write-RoomStatus $roomDir "failed"
+                                    continue
+                                }
+
                                 if (-not $pidAlive -and -not $spawnLocked) {
                                     # Guard: check if a signal is pending but hasn't been processed yet.
                                     $pendingSignalCheck = Find-LatestSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName $status

@@ -126,7 +126,29 @@ if (-not (Test-Path $ProjectDir -PathType Container)) {
 }
 
 # --- Resolve config ---
-$config = Get-OstwinConfig
+$configPath = if (Get-Command Resolve-OstwinConfigPath -ErrorAction SilentlyContinue) {
+    Resolve-OstwinConfigPath
+} elseif ($env:AGENT_OS_CONFIG) {
+    $env:AGENT_OS_CONFIG
+} else {
+    Join-Path $agentsDir "config.json"
+}
+$config = Get-OstwinConfig -ConfigPath $configPath
+
+$managerRuntime = if (Get-Command Get-OstwinManagerRuntimeSettings -ErrorAction SilentlyContinue) {
+    Get-OstwinManagerRuntimeSettings -Config $config
+} else {
+    [PSCustomObject]@{
+        max_concurrent_rooms  = if ($config.manager.max_concurrent_rooms) { $config.manager.max_concurrent_rooms } else { 10 }
+        poll_interval_seconds = if ($config.manager.poll_interval_seconds) { $config.manager.poll_interval_seconds } else { 5 }
+        max_engineer_retries  = if ($null -ne $config.manager.max_engineer_retries) { $config.manager.max_engineer_retries } else { 3 }
+        state_timeout_seconds = if ($config.manager.state_timeout_seconds) { $config.manager.state_timeout_seconds } else { 900 }
+        auto_approve_tools    = if ($null -ne $config.manager.auto_approve_tools) { [bool]$config.manager.auto_approve_tools } else { $false }
+        dynamic_pipelines     = if ($null -ne $config.manager.dynamic_pipelines) { [bool]$config.manager.dynamic_pipelines } else { $true }
+    }
+}
+$defaultRoomMaxRetries = [int]$managerRuntime.max_engineer_retries
+$defaultRoomTimeoutSeconds = [int]$managerRuntime.state_timeout_seconds
 
 if ($config.manager -and $config.manager.unified_plan_negotiation -eq $true) {
     $Unified = $true
@@ -161,7 +183,7 @@ The project plan at '$PlanFile' requires review and potential refinement.
 5. If you cannot proceed without more context, post 'plan-reject' with your feedback.
 "@
 if (-not $DryRun -and -not (Test-Path $room000Dir)) {
-    & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") | Out-Null
+    & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") -MaxRetries $defaultRoomMaxRetries -TimeoutSeconds $defaultRoomTimeoutSeconds | Out-Null
 } elseif (-not $DryRun -and (Test-Path $room000Dir)) {
     # --- Update room-000 if the plan file has changed ---
     $room000Config = Join-Path $room000Dir "config.json"
@@ -617,7 +639,7 @@ if ($DryRun) {
 
 # --- Room Creation Logic ---
 function New-PlanWarRooms {
-    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId)
+    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $maxRetries, $timeoutSeconds)
     
     # --- Re-parse plan in case it changed during negotiation (uses PlanParser module) ---
     $planContent = Get-Content $PlanFile -Raw
@@ -773,6 +795,8 @@ function New-PlanWarRooms {
             PlanId           = $planId
             AssignedRole     = $primaryRole
             CandidateRoles   = $candidateRoles
+            MaxRetries       = $maxRetries
+            TimeoutSeconds   = $timeoutSeconds
         }
 
         if ($entry.DoD -and $entry.DoD.Count -gt 0) {
@@ -816,7 +840,7 @@ function New-PlanWarRooms {
 # Always called — even in Resume mode. New-PlanWarRooms skips existing rooms
 # internally (reconcile only) but MUST rebuild DAG.json so the manager loop
 # sees all rooms, not just room-000.
-New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId
+New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
 
 # ===========================================================================
 # Phase B: Dependency review (reads actual brief.md from each war-room)
@@ -842,7 +866,7 @@ if (-not $Resume -and -not $DryRun -and (Test-Path $reviewDeps)) {
 if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
     Write-Host "[UNIFIED] Handing off plan negotiation to Manager Loop." -ForegroundColor Cyan
     $env:PLAN_FILE = $PlanFile
-    & $managerLoop -WarRoomsDir $warRoomsDir -Review -PlanFile $PlanFile
+    & $managerLoop -ConfigPath $configPath -WarRoomsDir $warRoomsDir -Review -PlanFile $PlanFile
     exit 0
 }
 
@@ -906,7 +930,7 @@ while ($shouldNegotiate) {
 if (-not $SkipLoop) {
     Write-Host ""
     Write-Host "[STARTING] Manager loop..." -ForegroundColor Green
-    & $managerLoop -WarRoomsDir $warRoomsDir
+    & $managerLoop -ConfigPath $configPath -WarRoomsDir $warRoomsDir
 } else {
     Write-Host "[SKIPPED] Manager loop (SkipLoop requested)." -ForegroundColor Yellow
 }
