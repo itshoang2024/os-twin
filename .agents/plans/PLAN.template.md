@@ -5,14 +5,15 @@
 
 working_dir: /path/to/your/project/...
 
-Roles: @<role1>, @<role2>, ...    (dynamically chosen agents for this epic's workflow)
 <available_roles>
 {{AVAILABLE_ROLES}}
 </available_roles>
-working_dir: <path>              (scope agents to a specific subdirectory)
 
 
 ## EPIC-001: ...
+Roles: @<role1>, @<role2>, ...    (dynamically chosen agents for this epic's workflow)
+working_dir: <path>              (optional; scope this epic to a specific subdirectory)
+
 ...
 
 ### Definition of Done
@@ -30,4 +31,7 @@ working_dir: <path>              (scope agents to a specific subdirectory)
 depends_on: [EPIC-..., EPIC-...]
 
 ## EPIC-002: ...
+Roles: @<role1>, @<role2>, ...    (dynamically chosen agents for this epic's workflow)
+working_dir: <path>              (optional; scope this epic to a specific subdirectory)
+
 ...
