@@ -4,7 +4,8 @@ BeforeAll {
     $script:ExportSqlite = Join-Path (Resolve-Path "$PSScriptRoot/../../../observe/exporters").Path "Export-ToSqlite.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../observe/exporters").Path ".." "..")).Path
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
 
     # Check if python3 is available
     $script:hasPython = $false

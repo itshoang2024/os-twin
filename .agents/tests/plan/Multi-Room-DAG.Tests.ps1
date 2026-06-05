@@ -42,7 +42,6 @@ Describe "Multi-Room DAG Launch" {
         "param(`$Nodes, [switch]`$Validate) if (`$Validate) { return `$Nodes | ForEach-Object { [PSCustomObject]@{ Id = `$_.Id } } } else { Write-Host 'Dummy BuildDag' }" | Out-File (Join-Path $agentsDir "plan/Build-DependencyGraph.ps1") -Encoding utf8
         "param(`$RoomId, `$TaskRef, `$WarRoomsDir, `$TaskDescription, `$WorkingDir, `$PlanId, `$AssignedRole, `$DefinitionOfDone, `$AcceptanceCriteria, `$DependsOn) New-Item -ItemType Directory -Path (Join-Path `$WarRoomsDir `$RoomId) -Force | Out-Null; Write-Host `"Created `$RoomId for `$TaskRef`"" | Out-File (Join-Path $agentsDir "war-rooms/New-WarRoom.ps1") -Encoding utf8 -Force
         "param([switch]`$Review, `$WarRoomsDir, `$PlanFile) Write-Host 'Dummy ManagerLoop'" | Out-File (Join-Path $agentsDir "roles/manager/Start-ManagerLoop.ps1") -Encoding utf8 -Force
-        "Write-Host 'Dummy PostMessage'" | Out-File (Join-Path $agentsDir "channel/Post-Message.ps1") -Encoding utf8
         "Write-Host 'Dummy WaitForMessage'" | Out-File (Join-Path $agentsDir "channel/Wait-ForMessage.ps1") -Encoding utf8
         "Write-Host 'Dummy ReadMessages'" | Out-File (Join-Path $agentsDir "channel/Read-Messages.ps1") -Encoding utf8
         "Write-Host 'Dummy ExpandPlan'" | Out-File (Join-Path $agentsDir "plan/Expand-Plan.ps1") -Encoding utf8

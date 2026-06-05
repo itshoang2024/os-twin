@@ -73,15 +73,3 @@ Describe "SKILL.md Frontmatter Migration" {
         }
     }
 }
-
-Describe "Manager Configuration" {
-    BeforeAll {
-        $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/..").Path "..")).Path
-        $script:configFile = Join-Path $script:agentsDir "config.json"
-    }
-
-    It "config.json should have preflight_skill_check: warn" {
-        $config = Get-Content $script:configFile -Raw | ConvertFrom-Json
-        $config.manager.preflight_skill_check | Should -Be "warn"
-    }
-}

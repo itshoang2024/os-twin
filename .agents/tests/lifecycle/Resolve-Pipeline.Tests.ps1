@@ -29,13 +29,15 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Position [1] is first evaluator → "review"
         $lc.states.review.role | Should -Be "game-engineer"
         $lc.states.review.type | Should -Be "review"
-        $lc.states.review.signals.pass.target | Should -Be "review-2"
+        $lc.states.review.signals.done.target | Should -Be "review-2"
+        $lc.states.review.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
+        @($lc.states.review.signals.Keys)[0] | Should -Be "done"
 
         # Position [2] is second evaluator → "review-2" (final gate)
         $lc.states."review-2".role | Should -Be "game-qa"
         $lc.states."review-2".type | Should -Be "review"
-        $lc.states."review-2".signals.pass.target | Should -Be "passed"
         $lc.states."review-2".signals.done.target | Should -Be "passed"
+        $lc.states."review-2".signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
 
         # Error signal on evaluator states (crash-loop guard)
         $lc.states."review-2".signals.error | Should -Not -BeNullOrEmpty
@@ -72,7 +74,9 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Injected QA review state
         $lc.states.review.role | Should -Be "qa"
         $lc.states.review.type | Should -Be "review"
-        $lc.states.review.signals.pass.target | Should -Be "passed"
+        $lc.states.review.signals.done.target | Should -Be "passed"
+        $lc.states.review.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+        @($lc.states.review.signals.Keys)[0] | Should -Be "done"
     }
 
     It "Single candidate via -Roles string array also works" {
@@ -87,8 +91,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Single candidate → QA review injected
         $lc.states.review.role | Should -Be "qa"
         $lc.states.review.signals.fail.target | Should -Be "optimize"
-        $lc.states.review.signals.pass.target | Should -Be "passed"
         $lc.states.review.signals.done.target | Should -Be "passed"
+        $lc.states.review.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
 
         # Error signal present on injected review
         $lc.states.review.signals.error | Should -Not -BeNullOrEmpty

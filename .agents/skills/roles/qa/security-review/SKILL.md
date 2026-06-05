@@ -115,7 +115,7 @@ Add a security section to `qa-report.md`:
 - Status: ✅ CLEAN / ❌ FINDINGS
 - <details if findings>
 
-### Overall Security Verdict: PASS / FAIL
+### Overall Security Verdict: DONE / FAIL
 ```
 
 Any **CRITICAL** security finding automatically makes the overall verdict **FAIL**.

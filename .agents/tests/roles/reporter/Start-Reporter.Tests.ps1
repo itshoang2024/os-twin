@@ -3,7 +3,8 @@
 BeforeAll {
     $script:StartReporter = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/reporter").Path "Start-Reporter.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/reporter").Path ".." "..")).Path
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
 }
 

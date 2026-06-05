@@ -13,7 +13,7 @@
 
     The parser handles:
     - Main flow line: splits on arrow characters to get ordered stages
-    - Fork pattern (─┬─►): detects the branch where pass goes forward, fail loops back
+    - Fork pattern (─┬─►): detects the branch where done/pass goes forward, fail loops back
     - Review vs worker classification via name heuristics
     - Fail/fixing loop wiring from secondary lines
     - Terminal states: passed, signoff
@@ -59,7 +59,7 @@ function ConvertFrom-AsciiLifecycle {
     $mainLine = $lines[0]
 
     # Detect if there's a fork (─┬─► or ┬) — the stage before the fork is a reviewer
-    # It decides pass (forward) or fail (loop back to fixing)
+    # It decides done/pass (forward) or fail (loop back to fixing)
     $hasFork = $mainLine -match '[┬]'
 
     # Find which segment sits immediately before the fork character
@@ -142,7 +142,7 @@ function ConvertFrom-AsciiLifecycle {
     }
 
     # If we detected a fork (┬) but no explicit fail annotation,
-    # the fork itself implies: pass → forward, fail → back to fixing
+    # the fork itself implies: done/pass → forward, fail → back to fixing
     if ($hasFork -and -not $failTarget) {
         $failTarget = 'fixing'
     }
@@ -165,12 +165,14 @@ function ConvertFrom-AsciiLifecycle {
 
         $transitions = [ordered]@{}
         if ($stage.Type -eq 'review') {
-            # Review stages: pass goes forward, fail goes to manager-triage
+            # Review stages: done goes forward, fail goes to manager-triage.
+            # pass remains accepted for legacy generated lifecycles.
+            $transitions['done'] = $nextState
             $transitions['pass'] = $nextState
             $transitions['fail'] = 'manager-triage'
             $transitions['escalate'] = 'manager-triage'
         } else {
-            # Worker stages: done/pass goes to next
+            # Worker stages: done goes to next; pass remains legacy-compatible.
             $transitions['done'] = $nextState
             $transitions['pass'] = $nextState
         }

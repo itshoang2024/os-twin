@@ -108,14 +108,36 @@ Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedProm
 "@ | Out-File $script:capturePromptMock -Encoding utf8
         }
 
-        It "compiles prompt.txt from brief.md and TASKS.md" {
+        It "uses -Prompt even when brief.md and TASKS.md exist" {
             "# EPIC-123`n`nBuild the auth module." |
                 Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
             "# Tasks for EPIC-123`n`n- [ ] TASK-001 - Implement login." |
                 Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
-                -RoleName "engineer" -Prompt "LEGACY PROMPT SHOULD NOT APPEAR" `
+                -RoleName "engineer" -Prompt "authoritative caller prompt" `
+                -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 0
+            Test-Path $script:capturedPrompt | Should -BeTrue
+
+            $prompt = Get-Content $script:capturedPrompt -Raw
+            $prompt | Should -Match "authoritative caller prompt"
+            $prompt | Should -Match "## Sub-Tasks \(TASKS\.md\)"
+            $prompt | Should -Match "TASK-001"
+            $prompt | Should -Not -Match "Build the auth module"
+
+            $prompt.IndexOf("authoritative caller prompt") | Should -BeLessThan $prompt.IndexOf("## Sub-Tasks (TASKS.md)")
+        }
+
+        It "falls back to brief.md, then TASKS.md when -Prompt is blank" {
+            "# EPIC-123`n`nBuild the auth module." |
+                Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
+            "# Tasks for EPIC-123`n`n- [ ] TASK-001 - Implement login." |
+                Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "" `
                 -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
 
             $result.ExitCode | Should -Be 0
@@ -123,11 +145,13 @@ Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedProm
 
             $prompt = Get-Content $script:capturedPrompt -Raw
             $prompt | Should -Match "Build the auth module"
+            $prompt | Should -Match "## Sub-Tasks \(TASKS\.md\)"
             $prompt | Should -Match "TASK-001"
-            $prompt | Should -Not -Match "LEGACY PROMPT SHOULD NOT APPEAR"
+
+            $prompt.IndexOf("Build the auth module") | Should -BeLessThan $prompt.IndexOf("## Sub-Tasks (TASKS.md)")
         }
 
-        It "falls back to -Prompt when room prompt files are absent" {
+        It "uses -Prompt when room prompt files are absent" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "fallback prompt body" `
                 -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
@@ -135,6 +159,36 @@ Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedProm
             $result.ExitCode | Should -Be 0
             $prompt = Get-Content $script:capturedPrompt -Raw
             $prompt | Should -Be "fallback prompt body"
+        }
+
+
+        It "appends only the current channel.jsonl last item to prompt.txt" {
+            @(
+                '{"type":"done","from":"engineer","body":"OLD current channel body"}',
+                '',
+                '{"type":"fail","from":"qa","body":"LATEST current channel body"}'
+            ) | Set-Content (Join-Path $script:roomDir "channel.jsonl") -Encoding utf8
+            "# Tasks for EPIC-123`n`n- [ ] TASK-009 - Keep focus after last effort." |
+                Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "qa" -Prompt "review this work" `
+                -AgentCmd (Get-PwshAgentCmd $script:capturePromptMock) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 0
+            $prompt = Get-Content $script:capturedPrompt -Raw
+            $prompt | Should -Match "review this work"
+            $prompt | Should -Match "## Last Effort"
+            $prompt | Should -Match "LATEST current channel body"
+            $prompt | Should -Match "## Sub-Tasks \(TASKS\.md\)"
+            $prompt | Should -Match "TASK-009"
+            $prompt | Should -Not -Match "OLD current channel body"
+            $prompt | Should -Not -Match "channel\.jsonl last item"
+            $prompt | Should -Not -Match '"type":"fail"'
+            $prompt | Should -Not -Match '"body":"LATEST current channel body"'
+
+            $prompt.IndexOf("review this work") | Should -BeLessThan $prompt.IndexOf("## Last Effort")
+            $prompt.IndexOf("## Last Effort") | Should -BeLessThan $prompt.IndexOf("## Sub-Tasks (TASKS.md)")
         }
     }
 

@@ -29,7 +29,6 @@ if (-not $TaskRef) {
 }
 
 $cloneScript = Join-Path $agentsDir "roles" "manager" "Clone-RoleToProject.ps1"
-$postMessage = Join-Path $agentsDir "channel" "Post-Message.ps1"
 $validateScript = Join-Path $agentsDir "bin" "validate-subcommands.sh"
 
 Write-Host "[REDESIGN] Starting redesign for $RoleName/$SubcommandName in $RoomDir"
@@ -101,20 +100,8 @@ if (Test-Path $subcommandsJsonPath) {
 
 # 4. Re-execute the original war-room task
 Write-Host "[REDESIGN] Re-executing task with override..."
-# Original task info would normally be read from room state
-# For now, we signal we're ready to retry
-& $postMessage -RoomDir $RoomDir -From "manager" -To "manager" -Type "redesign-done" -Ref $TaskRef -Body "Subcommand $SubcommandName redesigned in $overrideRoleDir. Ready for retry."
-& $postMessage -RoomDir $RoomDir -From "manager" -To "manager" -Type "subcommand-redesigned" -Ref $TaskRef -Body "Subcommand $SubcommandName redesigned in $overrideRoleDir. Status: success"
-
-# 5. Post event to channel.jsonl
-$event = @{
-    type = "subcommand-redesigned"
-    role = $RoleName
-    subcommand = $SubcommandName
-    override_path = $overrideRoleDir
-    status = "success"
-}
-$event | ConvertTo-Json -Compress | Out-File (Join-Path $RoomDir "channel.jsonl") -Append -Encoding utf8
-
-Write-Host "[REDESIGN] Done."
+# Direct channel writes from wrappers are disabled. If this redesign needs to be
+# visible in the channel, the responsible agent must post via the ostwin-channel
+# MCP post_message tool from inside its session.
+Write-Host "[REDESIGN] Done. Channel event suppressed; use MCP post_message from the agent if a channel record is required."
 

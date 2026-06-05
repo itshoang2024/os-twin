@@ -126,8 +126,8 @@ function Build-LifecycleV2 {
             role    = $evalRole
             type    = 'review'
             signals = [ordered]@{
-                pass     = [ordered]@{ target = $nextTarget }
-                done     = [ordered]@{ target = 'passed' }
+                done     = [ordered]@{ target = $nextTarget }
+                pass     = [ordered]@{ target = $nextTarget } # legacy success signal
                 fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
                 escalate = [ordered]@{ target = 'triage' }
                 error    = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
@@ -141,8 +141,8 @@ function Build-LifecycleV2 {
             role    = 'qa'
             type    = 'review'
             signals = [ordered]@{
-                pass     = [ordered]@{ target = 'passed' }
                 done     = [ordered]@{ target = 'passed' }
+                pass     = [ordered]@{ target = 'passed' } # legacy success signal
                 fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
                 escalate = [ordered]@{ target = 'triage' }
                 error    = [ordered]@{ target = 'failed'; actions = @('increment_retries') }

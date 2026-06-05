@@ -33,12 +33,42 @@ $scriptDir = $PSScriptRoot
 $agentsDir = (Resolve-Path (Join-Path $scriptDir ".." "..")).Path
 $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import logging ---
 $logModule = Join-Path $agentsDir "lib" "Log.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
+$lifecycleSignalModule = Join-Path $agentsDir "roles" "_base" "LifecycleSignal.psm1"
+if (Test-Path $lifecycleSignalModule) { Import-Module $lifecycleSignalModule -Force }
+
+function Get-LastChannelItemBody {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (-not (Test-Path $channelPath)) { return $null }
+
+    $lastLine = $null
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $lastLine = $line.TrimEnd()
+            }
+        }
+    }
+    catch { return $null }
+
+    if (-not $lastLine) { return $null }
+
+    try {
+        $lastItem = $lastLine | ConvertFrom-Json
+        if ($lastItem.PSObject.Properties.Name -contains 'body') {
+            return [string]$lastItem.body
+        }
+    }
+    catch { }
+
+    return $null
+}
 
 # --- Load config ---
 $configPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
@@ -130,14 +160,9 @@ $isEpic = $taskRef -match '^EPIC-'
 # --- Read latest task or fix message ---
 $latestBody = ""
 try {
-    $msgs = & $readMessages -RoomDir $RoomDir -Last 1 -AsObject
-    if ($msgs) {
-        foreach ($m in ($msgs | Sort-Object { $_.ts } -Descending)) {
-            if ($m.type -in @('task', 'fix')) {
-                $latestBody = $m.body
-                break
-            }
-        }
+    $msgs = & $readMessages -RoomDir $RoomDir -FilterType @('task', 'fix') -Last 1 -AsObject
+    if ($msgs -and $msgs.Count -gt 0) {
+        $latestBody = $msgs[-1].body
     }
 }
 catch { }
@@ -169,7 +194,8 @@ elseif ($briefContent -match '## Working Directory\s*\n(.+)') {
 $roomName = Split-Path $RoomDir -Leaf
 
 # --- Build role-specific workflow instructions ---
-# Note: brief.md, TASKS.md, goals, and QA feedback are injected by Build-SystemPrompt.ps1.
+# Note: brief.md and role context are injected by Build-SystemPrompt.ps1.
+# Invoke-Agent.ps1 appends the latest channel effort and TASKS.md after this prompt.
 # Here we only provide workflow instructions specific to Epic vs Task.
 $existingTasksFile = Join-Path $RoomDir "TASKS.md"
 $hasExistingTasks = Test-Path $existingTasksFile
@@ -178,9 +204,9 @@ if ($isEpic) {
     if ($hasExistingTasks) {
         # Fix cycle: TASKS.md already exists from a previous attempt
         $instructions = @"
-You are continuing work on an EPIC — TASKS.md already exists (see Sub-Tasks section above).
+You are continuing work on an EPIC — TASKS.md already exists and is included at the end of this prompt.
 
-1. Review the TASKS.md above — checked tasks ([x]) were completed previously
+1. Review the TASKS.md section at the end of this prompt — checked tasks ([x]) were completed previously
 2. Focus on unchecked tasks ([ ]) and any issues raised in the QA feedback / fix message
 3. Update TASKS.md if fixes require new sub-tasks
 4. After completing each sub-task, check it off: - [x] TASK-001 — Description
@@ -237,18 +263,15 @@ if (Test-Path $dagFile) {
     if ($myNode -and $myNode.depends_on -and $myNode.depends_on.Count -gt 0) {
         $sections = @()
         foreach ($depRef in $myNode.depends_on) {
+            if ($depRef -eq 'PLAN-REVIEW') { continue }
             $depNode = $dag.nodes.$depRef
             if (-not $depNode) { continue }
             $depRoomDir = Join-Path (Split-Path $RoomDir) $depNode.room_id
-            try {
-                $doneMsgs = & $readMessages -RoomDir $depRoomDir -FilterType "done" -Last 1 -AsObject
-                if ($doneMsgs -and $doneMsgs.Count -gt 0) {
-                    $body = $doneMsgs[-1].body
-                    # Truncate to 10KB per predecessor
-                    if ($body.Length -gt 10240) { $body = $body.Substring(0, 10240) + "`n[TRUNCATED]" }
-                    $sections += "### $depRef`n$body"
-                }
-            } catch { }
+            $lastBody = Get-LastChannelItemBody -RoomDir $depRoomDir
+            if ($lastBody) {
+                if ($lastBody.Length -gt 10240) { $lastBody = $lastBody.Substring(0, 10240) + "`n[TRUNCATED]" }
+                $sections += "### $depRef`n$lastBody"
+            }
         }
         if ($sections.Count -gt 0) {
             $predecessorSection = "`n`n## Predecessor Outputs`n`n$($sections -join "`n`n")"
@@ -265,9 +288,16 @@ if (Test-Path $triageFile) {
 
 # --- Assemble final prompt using Build-SystemPrompt.ps1 ---
 $buildPrompt = Join-Path $agentsDir "roles" "_base" "Build-SystemPrompt.ps1"
+$extraContext = $instructions
+if ($predecessorSection) {
+    $extraContext += $predecessorSection
+}
+if ($triageContext) {
+    $extraContext += "`n`n## Triage Context`n`n$triageContext"
+}
 $prompt = & $buildPrompt -RoleName "engineer" -RolePath $scriptDir `
                          -RoomDir $RoomDir -TaskRef $taskRef -TaskBody $latestBody `
-                         -ExtraContext $instructions
+                         -ExtraContext $extraContext
 
 # --- Log start ---
 if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
@@ -282,28 +312,39 @@ $result = & $invokeAgent -RoomDir $RoomDir -RoleName "engineer" `
                          -InstanceId $InstanceId `
                          -WorkingDir $instanceWorkingDir `
                          -Prompt $prompt -TimeoutSeconds $TimeoutSeconds
+$outputArtifact = if ($result.PSObject.Properties.Name -contains "OutputFile" -and $result.OutputFile) {
+    "artifacts/$(Split-Path $result.OutputFile -Leaf)"
+} else {
+    "agent output"
+}
 
-# --- Post result to channel ---
+# --- Handle agent result ---
 if ($result.ExitCode -eq 0) {
-    & $postMessage -RoomDir $RoomDir -From "engineer" -To "manager" `
-                   -Type "done" -Ref $taskRef -Body $result.Output
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level INFO -Message "Completed $taskRef successfully."
     }
+    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
+        $successSignal = if (Get-Command Get-PreferredLifecycleSuccessSignal -ErrorAction SilentlyContinue) {
+            Get-PreferredLifecycleSuccessSignal -RoomDir $RoomDir -DefaultSignal "done"
+        } else { "done" }
+        $body = "VERDICT: DONE`n`nEngineer completed $taskRef successfully with lifecycle signal '$successSignal'. Full output: $outputArtifact"
+        Write-LifecycleSignal -RoomDir $RoomDir -FromRole "engineer" -Type $successSignal -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
+    }
 }
 elseif ($result.TimedOut) {
-    & $postMessage -RoomDir $RoomDir -From "engineer" -To "manager" `
-                   -Type "error" -Ref $taskRef -Body "Engineer timed out after ${TimeoutSeconds}s"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
+    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
+        Write-LifecycleSignal -RoomDir $RoomDir -FromRole "engineer" -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`nEngineer timed out after ${TimeoutSeconds}s." -SkipIfFresh | Out-Null
+    }
 }
 else {
-    & $postMessage -RoomDir $RoomDir -From "engineer" -To "manager" `
-                   -Type "error" -Ref $taskRef `
-                   -Body "Engineer exited with code $($result.ExitCode): $($result.Output)"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Failed on $taskRef with exit code $($result.ExitCode)."
+    }
+    if (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue) {
+        Write-LifecycleSignal -RoomDir $RoomDir -FromRole "engineer" -Type "error" -Ref $taskRef -Body "VERDICT: ERROR`n`nEngineer failed with exit code $($result.ExitCode)." -SkipIfFresh | Out-Null
     }
 }
 
@@ -320,4 +361,3 @@ if ($engineerConfigs) {
 # and re-spawns before processing the channel signal.
 
 exit $result.ExitCode
-

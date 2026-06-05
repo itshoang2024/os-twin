@@ -223,12 +223,26 @@ Describe "logs.ps1" {
         $roomDir = Join-Path $tmpWarrooms "room-001"
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
 
-        # Create test channel.jsonl
-        $messages = @(
-            @{ v = 1; ts = "2026-04-11T10:00:00Z"; from = "manager"; to = "engineer"; type = "task"; ref = "TASK-001"; body = "Do the thing" }
-            @{ v = 1; ts = "2026-04-11T10:01:00Z"; from = "engineer"; to = "qa"; type = "done"; ref = "TASK-001"; body = "Done!" }
-        )
-        $messages | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -Path (Join-Path $roomDir "channel.jsonl")
+        # Seed channel messages through the MCP channel implementation instead of
+        # writing channel.jsonl directly.
+        $config = @{
+            assignment = @{
+                assigned_role = "engineer"
+                candidate_roles = @("engineer", "qa")
+            }
+        }
+        $config | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $roomDir "config.json") -Encoding utf8
+        $channelServer = Join-Path $AgentsDir "mcp/channel-server.py"
+        $seedScript = @"
+import importlib.util
+spec = importlib.util.spec_from_file_location('channel_server', r'$channelServer')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+room = r'$roomDir'
+module.post_message(room, 'manager', 'engineer', 'task', 'TASK-001', 'Do the thing')
+module.post_message(room, 'engineer', 'qa', 'done', 'TASK-001', 'Done!')
+"@
+        $seedScript | python3
     }
 
     AfterAll {

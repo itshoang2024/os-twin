@@ -1,7 +1,8 @@
 # Agent OS — Read-Messages Pester Tests
 
 BeforeAll {
-    $script:PostMessage = Join-Path (Resolve-Path "$PSScriptRoot/../../channel").Path "Post-Message.ps1"
+    . (Join-Path (Resolve-Path "$PSScriptRoot/..").Path "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path (Resolve-Path "$PSScriptRoot/../../channel").Path "Read-Messages.ps1"
 
     # --- Helper: post test messages to a room ---

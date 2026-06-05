@@ -117,9 +117,10 @@ if ($Assets -and $Assets.Count -gt 0) {
     $assetManifest += "`n"
 }
 
-# --- Initialize channel ---
-# NOTE: All subsequent writes to channel.jsonl MUST go through Write-ChannelLine
-# (from Utils.psm1) which uses Invoke-WithFileLock to prevent concurrent-append corruption.
+# --- Initialize channel file only ---
+# Channel data is authored exclusively through the ostwin-channel MCP
+# post_message tool. PowerShell wrappers may create the empty file but must not
+# append, truncate, or synthesize messages.
 New-Item -ItemType File -Path (Join-Path $roomDir "channel.jsonl") -Force | Out-Null
 
 # --- Detect Epic vs Task ---
@@ -492,12 +493,9 @@ if ($Lifecycle) {
 # --- Store task ref for quick lookup ---
 $TaskRef | Out-File -FilePath (Join-Path $roomDir "task-ref") -Encoding utf8 -NoNewline
 
-# --- Post initial task message to channel ---
-$PostMessage = Join-Path $PSScriptRoot ".." "channel" "Post-Message.ps1"
-if (Test-Path $PostMessage) {
-    & $PostMessage -RoomDir $roomDir -From "manager" -To $baseRole `
-                   -Type "task" -Ref $TaskRef -Body $TaskDescription
-}
+# Initial task channel messages are no longer synthesized by this wrapper.
+# The manager/epic member must post them from its agent session via MCP
+# post_message so channel.jsonl reflects actual agent behavior.
 
 # --- Output ---
 Write-Output ""

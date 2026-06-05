@@ -9,7 +9,8 @@
 # ---------------------------------------------------------------------------
 BeforeAll {
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/manager").Path ".." "..")).Path
-    $script:PostMessage      = Join-Path $script:agentsDir "channel"   "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage      = New-TestChannelWriter
     $script:ReadMessages     = Join-Path $script:agentsDir "channel"   "Read-Messages.ps1"
     $script:NewWarRoom       = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
     $script:StartDynamicRole = Join-Path $script:agentsDir "roles"     "_base" "Start-DynamicRole.ps1"
@@ -41,13 +42,13 @@ BeforeAll {
                         error = @{ target = "failed"; actions = @("increment_retries") }
                     }
                 }
-                review       = @{
-                    role    = "game-qa"
-                    type    = "review"
-                    signals = @{
-                        pass     = @{ target = "passed" }
-                        done     = @{ target = "passed" }
-                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
+	                review       = @{
+	                    role    = "game-qa"
+	                    type    = "review"
+	                    signals = @{
+	                        done     = @{ target = "passed" }
+	                        pass     = @{ target = "passed" }
+	                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
                         escalate = @{ target = "triage" }
                         error    = @{ target = "failed"; actions = @("increment_retries") }
                     }
@@ -270,11 +271,6 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             "review"    | Out-File (Join-Path $script:roomDir "status")    -Encoding utf8 -NoNewline
             "Build grid"| Out-File (Join-Path $script:roomDir "brief.md")  -Encoding utf8 -NoNewline
 
-            # --- Mock: PostMessage records the From field ---
-            $script:mockPost = Join-Path $TestDrive "Mock-Post-$(Get-Random).ps1"
-            Set-Content  -Path $script:mockPost -Encoding utf8 `
-                -Value 'param($RoomDir,$From,$To,$Type,$Ref,$Body); $From | Out-File (Join-Path $RoomDir "mock_from.txt") -Encoding utf8 -NoNewline'
-
             # --- Mock: BuildSystemPrompt returns a fixed string ---
             $script:mockPrompt = Join-Path $TestDrive "Mock-Prompt-$(Get-Random).ps1"
             Set-Content  -Path $script:mockPrompt -Encoding utf8 `
@@ -292,7 +288,6 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
 
             $script:overrides = @{
                 OverrideInvokeAgent       = $script:mockInvoke
-                OverridePostMessage       = $script:mockPost
                 OverrideBuildSystemPrompt = $script:mockPrompt
                 OverrideGetRoleDef        = $script:mockGetRole
             }
@@ -321,15 +316,22 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $runPs1 | Should -Not -Match "AGENT_OS_ROLE.*=.*'game-engineer'"
         }
 
-        It "posts channel message as game-qa (not game-engineer) when -RoleName game-qa passed" {
+        It "maps legacy evaluator VERDICT: PASS to done when lifecycle accepts done" {
+            Write-GameLifecycle -RoomDir $script:roomDir
+
             & $script:StartDynamicRole -RoomDir $script:roomDir `
                                        -RoleName "game-qa" `
                                        -AgentsDir $script:agentsDir `
                                        -TimeoutSeconds 10 `
                                        @script:overrides
 
-            $from = (Get-Content (Join-Path $script:roomDir "mock_from.txt") -Raw).Trim()
-            $from | Should -Be "game-qa"
+            $doneMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "done" -Last 1 -AsObject
+            $passMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "pass" -Last 1 -AsObject
+
+            $doneMsgs.Count | Should -Be 1
+            $doneMsgs[-1].from | Should -Be "game-qa"
+            $doneMsgs[-1].body | Should -Match "VERDICT: DONE"
+            $passMsgs.Count | Should -Be 0
         }
 
         It "falls back to game-engineer from config.json when -RoleName is not passed" {
