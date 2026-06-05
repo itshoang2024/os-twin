@@ -14,7 +14,8 @@
 .PARAMETER RoleName
     Role identifier (engineer, qa, architect, etc.). Passed as --agent.
 .PARAMETER Prompt
-    Full prompt text. Passed as a positional argument to opencode run.
+    Fallback prompt text. When brief.md or TASKS.md exist in RoomDir, prompt.txt
+    is compiled from those room files instead.
 .PARAMETER Model
     Model to use (provider/model format). Passed as --model / -m.
 .PARAMETER TimeoutSeconds
@@ -401,19 +402,49 @@ $exitCode = 0
 $stdinNull = if ($IsLinux -or $IsMacOS) { "/dev/null" }
 else { "NUL" }
 
-# Write prompt to a file to avoid shell escaping issues
+function Get-CompiledPromptText {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RoomDir,
+
+        [Parameter(Mandatory)]
+        [string]$FallbackPrompt
+    )
+
+    $promptParts = [System.Collections.Generic.List[string]]::new()
+    foreach ($fileName in @("brief.md", "TASKS.md")) {
+        $path = Join-Path $RoomDir $fileName
+        if (Test-Path $path) {
+            $content = Get-Content $path -Raw -ErrorAction SilentlyContinue
+            if ($content) {
+                $promptParts.Add($content.TrimEnd())
+            }
+        }
+    }
+
+    if ($promptParts.Count -gt 0) {
+        return ($promptParts -join "`n`n")
+    }
+
+    return $FallbackPrompt
+}
+
+# Write prompt to a file to avoid shell escaping issues. The attached prompt is
+# the room payload: brief.md followed by TASKS.md, falling back to -Prompt for
+# direct/test invocations that do not have room files.
+$compiledPrompt = Get-CompiledPromptText -RoomDir $absRoomDir -FallbackPrompt $Prompt
 $promptFile = Join-Path $artifactsDir "prompt.txt"
-$Prompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force
+$compiledPrompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force
 # Resolve to absolute path for -f flag
 $promptFileAbsolute = (Resolve-Path $promptFile).Path
 
 # --- Debug: write a human-readable copy of the compiled prompt ---
 $debugPromptFile = Join-Path $artifactsDir "$RoleName-prompt-debug.md"
-$Prompt | Out-File -FilePath $debugPromptFile -Encoding utf8 -Force
+$compiledPrompt | Out-File -FilePath $debugPromptFile -Encoding utf8 -Force
 
 # Build non-prompt CLI args safely (opencode run flags)
-# Prompt is passed as --file <path> to avoid ARG_MAX limits with large prompts.
-# A short positional message is required by opencode run — the full prompt is in the file.
+# Compiled prompt is passed as --file <path> to avoid ARG_MAX limits.
+# A short positional message is required by opencode run — the room prompt is in the file.
 $extraCliArgs = @("...")
 if ($Model) { $extraCliArgs += "--model"; $extraCliArgs += $Model }
 if ($RoleName) { $extraCliArgs += "--agent"; $extraCliArgs += $RoleName }

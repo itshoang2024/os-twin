@@ -361,6 +361,47 @@ Some freeform notes here.
         $result[0].Sections[2].Heading | Should -Be 'Implementation Notes'
     }
 
+    It 'keeps three-hash sections out of DescBody while preserving them as Sections' {
+        $md = @"
+## EPIC-007: Foundation Workstream FW-1
+
+Roles: @principal-engineer, @engineer, @qa-automation-engineer
+
+### Context
+
+Lift reusable primitives into a lens-agnostic model.
+
+### Definition of Done
+- [ ] Workbench shell exists.
+- [ ] EnterpriseMapPanel renders through the shell.
+
+### Acceptance Criteria
+- [ ] Layout engine is a pure function.
+- [ ] GraphCanvas supports both render modes.
+
+### Tasks
+- [ ] Define model/workbenchModel.ts.
+- [ ] Extract shared components.
+
+### Other aspects
+- Keep public props stable.
+
+depends_on: [EPIC-001, EPIC-003]
+"@
+        $result = ConvertFrom-PlanMarkdown -Content $md
+
+        $result[0].DescBody | Should -Be "Roles: @principal-engineer, @engineer, @qa-automation-engineer"
+        $result[0].DescBody | Should -Not -Match "### Context"
+        $result[0].Sections.Count | Should -Be 5
+        $result[0].Sections[0].Heading | Should -Be 'Context'
+        $result[0].Sections[1].Heading | Should -Be 'Definition of Done'
+        $result[0].Sections[2].Heading | Should -Be 'Acceptance Criteria'
+        $result[0].DoD.Count | Should -Be 2
+        $result[0].AC.Count | Should -Be 2
+        $result[0].DependsOn | Should -Contain 'EPIC-001'
+        $result[0].DependsOn | Should -Contain 'EPIC-003'
+    }
+
     It 'classifies section types correctly' {
         $md = @"
 ## EPIC-001 - Type Classification

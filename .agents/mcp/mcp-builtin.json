@@ -54,6 +54,16 @@
       "headers": {
         "Authorization": "Bearer {env:OSTWIN_API_KEY}"
       }
+    },
+    "codegraph": {
+      "type": "local",
+      "command": [
+        "npx",
+        "codegraph",
+        "serve",
+        "--mcp"
+      ],
+      "enabled": true
     }
   }
 }

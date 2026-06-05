@@ -240,17 +240,27 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
+        $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $globalWorkingDir -Force | Out-Null
+            try {
+                Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+                New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
+                $workingDirWarningShown = $true
+            }
         }
-        $ProjectDir = (Resolve-Path $globalWorkingDir).Path
-        Write-Host "  Project: $ProjectDir" -ForegroundColor DarkGray
-        # Re-resolve war-rooms dir to follow the plan's working_dir (unless explicitly set via env)
-        if (-not $warRoomsDirFromEnv) {
-            $warRoomsDir = Join-Path $ProjectDir ".war-rooms"
-            $env:WARROOMS_DIR = $warRoomsDir
-            $room000Dir = Join-Path $warRoomsDir "room-000"
+        if (Test-Path $globalWorkingDir) {
+            $ProjectDir = (Resolve-Path $globalWorkingDir).Path
+            Write-Host "  Project: $ProjectDir" -ForegroundColor DarkGray
+            # Re-resolve war-rooms dir to follow the plan's working_dir (unless explicitly set via env)
+            if (-not $warRoomsDirFromEnv) {
+                $warRoomsDir = Join-Path $ProjectDir ".war-rooms"
+                $env:WARROOMS_DIR = $warRoomsDir
+                $room000Dir = Join-Path $warRoomsDir "room-000"
+            }
+        } elseif (-not $workingDirWarningShown) {
+            Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
         }
     }
 }
@@ -747,6 +757,8 @@ function New-PlanWarRooms {
             foreach ($sec in $entry.Sections) {
                 # Skip the EPIC/TASK title section re-captured by the parser
                 if ($sec.Heading -match "^(EPIC|TASK)-\d+") { continue }
+                $escapedHeading = [regex]::Escape($sec.Heading)
+                if ([regex]::IsMatch($fullDesc, "(?im)^#{3,4}\s+$escapedHeading\s*$")) { continue }
                 $hashes = '#' * $sec.HeadingLevel
                 $fullDesc = "$fullDesc`n`n$hashes $($sec.Heading)`n`n$($sec.Content)"
             }
