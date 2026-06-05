@@ -96,11 +96,43 @@ const DEFAULTS: MemorySettings = {
   pool_sync_interval_s: 60,
 };
 
+const SETTINGS_SECTION_CLASS =
+  'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[0_12px_36px_rgba(15,23,42,0.07)] md:p-6';
+
+interface MemoryPoolHealth {
+  active_slots: number;
+  ml_ready: boolean;
+}
+
+interface ReindexPlanStatus {
+  plan_id: string;
+  plan_name: string;
+  status: string;
+  note_count: number;
+}
+
+interface ReindexStatus {
+  current_model?: string;
+  proposed_model?: string;
+  plans?: ReindexPlanStatus[];
+  estimated_seconds?: number;
+  total_reindex_notes?: number;
+}
+
+interface ReindexProgress {
+  status?: string;
+  current_plan?: string;
+  current_progress?: string;
+  plans_completed: number;
+  plans_total: number;
+  elapsed_seconds: number;
+}
+
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: MemoryPanelProps) {
+export function MemoryPanel({ memory, onUpdate, allModels }: MemoryPanelProps) {
   const addToast = useNotificationStore((s) => s.addToast);
-  const [poolHealth, setPoolHealth] = useState<any>(null);
+  const [poolHealth, setPoolHealth] = useState<MemoryPoolHealth | null>(null);
 
   const effective = { ...DEFAULTS, ...memory };
 
@@ -120,7 +152,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
     const fetchInfo = async () => {
       try {
         const res = await fetch('/api/memory-pool/health');
-        if (res.ok) setPoolHealth(await res.json());
+        if (res.ok) setPoolHealth(await res.json() as MemoryPoolHealth);
       } catch { /* ignore */ }
     };
     fetchInfo();
@@ -239,9 +271,9 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
   const [embeddingCompatibleKey, setEmbeddingCompatibleKey] = useState(draft.embedding_compatible_key ?? '');
 
   // ── Reindex state (Plan 028)
-  const [reindexStatus, setReindexStatus] = useState<any>(null);
+  const [reindexStatus, setReindexStatus] = useState<ReindexStatus | null>(null);
   const [showReindexDialog, setShowReindexDialog] = useState(false);
-  const [reindexProgress, setReindexProgress] = useState<any>(null);
+  const [reindexProgress, setReindexProgress] = useState<ReindexProgress | null>(null);
   const [isReindexing, setIsReindexing] = useState(false);
 
   // ── Ollama state ─────────────────────────────────────────────────────
@@ -513,7 +545,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
   return (
     <div className="space-y-8">
       {/* ── Header ──────────────────────────────────────────── */}
-      <div>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-mono text-primary bg-primary-container px-2 py-0.5 rounded">
             MEMORY_PLATFORM
@@ -530,10 +562,10 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
         </p>
 
         {renderOllamaBanner()}
-      </div>
+      </section>
 
       {/* ── Section 1: AI Gateway Status ───────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-blue-600 text-lg">hub</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">AI Gateway</h3>
@@ -573,7 +605,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 2: Processing Model (LLM) ──────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-blue-600 text-lg">psychology</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Processing Model</h3>
@@ -750,7 +782,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 3: Embedding ───────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-purple-600 text-lg">layers</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Embedding</h3>
@@ -927,7 +959,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 4: Vector Storage ───────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-emerald-600 text-lg">database</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Vector Storage</h3>
@@ -962,7 +994,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 5: Search Tuning ───────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-violet-600 text-lg">tune</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Search Tuning</h3>
@@ -1006,7 +1038,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 6: Evolution ───────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-amber-600 text-lg">psychology</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Evolution</h3>
@@ -1052,7 +1084,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 7: Sync ────────────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-cyan-600 text-lg">sync</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Sync</h3>
@@ -1102,7 +1134,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
       </section>
 
       {/* ── Section 8: Pool ─────────────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-orange-600 text-lg">memory</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Pool (HTTP Transport)</h3>
@@ -1188,7 +1220,7 @@ export function MemoryPanel({ memory, provenance = {}, onUpdate, allModels }: Me
               re-indexing memory for the following plans:
             </p>
             <div className="max-h-48 overflow-y-auto mb-4 border border-slate-200 rounded-lg">
-              {reindexStatus.plans?.map((p: any) => (
+              {reindexStatus.plans?.map((p) => (
                 <div key={p.plan_id} className="flex items-center justify-between px-3 py-2 border-b border-slate-100 last:border-b-0">
                   <div className="flex items-center gap-2">
                     <span className={p.status === 'match' ? 'text-green-500' : 'text-amber-500'}>{p.status === 'match' ? '✓' : '✗'}</span>

@@ -2,7 +2,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 import { SettingsSidebar } from '../components/settings/SettingsSidebar';
-import type { SettingsNamespace } from '../types/settings';
 
 describe('SettingsSidebar', () => {
   const mockOnNamespaceChange = vi.fn();
@@ -36,7 +35,7 @@ describe('SettingsSidebar', () => {
 
       const providersButtons = screen.getAllByText('Provider Config');
       const desktopButton = providersButtons.find((el) =>
-        el.closest('button')?.classList.contains('text-blue-600')
+        el.closest('button')?.classList.contains('bg-[var(--color-text-main)]')
       );
       expect(desktopButton).toBeDefined();
     });
@@ -64,7 +63,7 @@ describe('SettingsSidebar', () => {
 
       let knowledgeButtons = screen.getAllByText('Knowledge');
       let desktopKnowledge = knowledgeButtons.find((el) =>
-        el.closest('button')?.classList.contains('text-blue-600')
+        el.closest('button')?.classList.contains('bg-[var(--color-text-main)]')
       );
       expect(desktopKnowledge).toBeUndefined();
 
@@ -77,7 +76,7 @@ describe('SettingsSidebar', () => {
 
       knowledgeButtons = screen.getAllByText('Knowledge');
       desktopKnowledge = knowledgeButtons.find((el) =>
-        el.closest('button')?.classList.contains('text-blue-600')
+        el.closest('button')?.classList.contains('bg-[var(--color-text-main)]')
       );
       expect(desktopKnowledge).toBeDefined();
     });

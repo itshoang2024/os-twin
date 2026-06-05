@@ -17,7 +17,7 @@ import { MemoryPanel } from '@/components/settings/MemoryPanel';
 import { KnowledgePanel } from '@/components/settings/KnowledgePanel';
 import { ChannelsPanel } from '@/components/settings/ChannelsPanel';
 import { AgentCostsPanel } from '@/components/settings/AgentCostsPanel';
-import type { SettingsNamespace, ProviderSettings, ModelInfo } from '@/types/settings';
+import type { SettingsNamespace, ProviderSettings, ModelInfo, RuntimeSettings } from '@/types/settings';
 import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client';
 
 // Providers that have dedicated cards at the top of the settings page.
@@ -36,6 +36,104 @@ const PROVIDER_REGISTRY_KEY: Record<string, string> = {
   openai:    'GPT',
   byteplus:  'BytePlus',
 };
+
+type SettingsMetricTone = 'blue' | 'green' | 'amber' | 'rose';
+
+const SETTINGS_NAMESPACE_META: Record<SettingsNamespace, { eyebrow: string; title: string; description: string; icon: string }> = {
+  providers: {
+    eyebrow: 'model provisioning',
+    title: 'Global Model Provisioning',
+    description: 'Configure model endpoints, credentials, and provider availability for every agent surface.',
+    icon: 'memory',
+  },
+  runtime: {
+    eyebrow: 'runtime',
+    title: 'Runtime Configuration',
+    description: 'Tune manager cadence, room limits, retry budgets, and defaults used when new war-rooms launch.',
+    icon: 'settings',
+  },
+  memory: {
+    eyebrow: 'memory',
+    title: 'Memory Configuration',
+    description: 'Shape retrieval, embedding, and pool behavior for long-lived agent memory.',
+    icon: 'storage',
+  },
+  knowledge: {
+    eyebrow: 'knowledge',
+    title: 'Knowledge Configuration',
+    description: 'Set the models and embedding defaults used by knowledge ingestion and graph work.',
+    icon: 'school',
+  },
+  channels: {
+    eyebrow: 'channels',
+    title: 'Channel Configuration',
+    description: 'Connect notification and communication surfaces for plan and war-room events.',
+    icon: 'hub',
+  },
+  'ai-monitor': {
+    eyebrow: 'ai monitor',
+    title: 'AI Cost Monitor',
+    description: 'Inspect model usage and runtime spend across agent work.',
+    icon: 'monitoring',
+  },
+};
+
+const settingsMetricTones: Record<SettingsMetricTone, { background: string; color: string }> = {
+  blue: {
+    background: 'oklch(0.94 0.035 250)',
+    color: 'oklch(0.38 0.16 252)',
+  },
+  green: {
+    background: 'oklch(0.94 0.045 158)',
+    color: 'oklch(0.42 0.13 158)',
+  },
+  amber: {
+    background: 'oklch(0.95 0.052 82)',
+    color: 'oklch(0.47 0.12 70)',
+  },
+  rose: {
+    background: 'oklch(0.94 0.035 18)',
+    color: 'oklch(0.44 0.14 18)',
+  },
+};
+
+function formatRuntimeSeconds(value?: number) {
+  const seconds = value ?? 0;
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
+function SettingsMetricCard({
+  icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  detail: string;
+  tone: SettingsMetricTone;
+}) {
+  const colors = settingsMetricTones[tone];
+
+  return (
+    <article className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[0_12px_36px_rgba(15,23,42,0.07)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_48px_rgba(15,23,42,0.1)]">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-[var(--color-text-muted)]">{label}</p>
+          <p className="mt-3 text-3xl font-black text-[var(--color-text-main)]">{value}</p>
+        </div>
+        <span className="material-symbols-outlined rounded-full p-2 text-[18px]" style={{ background: colors.background, color: colors.color }}>
+          {icon}
+        </span>
+      </div>
+      <p className="mt-5 max-w-[32ch] text-sm leading-6 text-[var(--color-text-muted)]">{detail}</p>
+    </article>
+  );
+}
 
 export default function SettingsPage() {
   return (
@@ -69,7 +167,7 @@ function SettingsPageContent() {
   // Sync ?tab= query param to activeNamespace
   useEffect(() => {
     const tab = searchParams.get('tab');
-    const validTabs: SettingsNamespace[] = ['providers', 'runtime', 'memory', 'knowledge', 'channels'];
+    const validTabs: SettingsNamespace[] = ['providers', 'runtime', 'memory', 'knowledge', 'channels', 'ai-monitor'];
     if (tab && validTabs.includes(tab as SettingsNamespace)) {
       setActiveNamespace(tab as SettingsNamespace);
     }
@@ -215,6 +313,54 @@ function SettingsPageContent() {
     (pid) => !LEGACY_PRIMARY_PROVIDERS.has(pid) && !(providers as Record<string, ProviderSettings>)[pid]?.dismissed,
   );
 
+  const runtime: RuntimeSettings = {
+    poll_interval_seconds: 5,
+    max_concurrent_rooms: 10,
+    max_engineer_retries: 3,
+    state_timeout_seconds: 900,
+    auto_approve_tools: false,
+    dynamic_pipelines: true,
+    master_agent_model: '',
+    ...(settings?.runtime ?? {}),
+  };
+  const enabledProviderCount = (Object.values(providers) as Array<ProviderSettings | null | undefined>)
+    .filter((provider) => provider?.enabled && !provider.dismissed).length;
+  const activeMeta = SETTINGS_NAMESPACE_META[activeNamespace];
+  const settingsMetrics = [
+    {
+      id: 'providers',
+      icon: 'api',
+      label: 'Enabled providers',
+      value: String(enabledProviderCount),
+      detail: `${Object.keys(configuredProviders).length} providers discovered, ${allModels.length} models available.`,
+      tone: 'blue' as const,
+    },
+    {
+      id: 'timeout',
+      icon: 'timer',
+      label: 'State timeout',
+      value: formatRuntimeSeconds(runtime.state_timeout_seconds),
+      detail: 'Default timeout for each new war-room lifecycle state.',
+      tone: 'rose' as const,
+    },
+    {
+      id: 'retries',
+      icon: 'restart_alt',
+      label: 'Room retries',
+      value: String(runtime.max_engineer_retries),
+      detail: 'Retry budget copied into newly created war-room lifecycles.',
+      tone: 'amber' as const,
+    },
+    {
+      id: 'rooms',
+      icon: 'meeting_room',
+      label: 'Concurrent rooms',
+      value: String(runtime.max_concurrent_rooms),
+      detail: `Manager loop polls every ${formatRuntimeSeconds(runtime.poll_interval_seconds)}.`,
+      tone: 'green' as const,
+    },
+  ];
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -265,15 +411,25 @@ function SettingsPageContent() {
     switch (activeNamespace) {
       case 'providers':
         return (
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-mono text-primary bg-primary-container px-2 py-0.5 rounded">SYSTEM_ADMIN</span>
-              <span className="text-xs text-on-surface-variant">/ configuration / model-provisioning</span>
-            </div>
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-2xl font-extrabold tracking-tight text-on-surface">
-                Global Model Provisioning
-              </h2>
+          <div className="space-y-8">
+            <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[0_12px_36px_rgba(15,23,42,0.07)] md:p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-[var(--color-text-muted)]">Provider portfolio</p>
+                  <h2 className="mt-2 text-xl font-black text-[var(--color-text-main)]">Provider Portfolio</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)]">
+                    Configure and manage LLM endpoints and provider credentials.
+                  </p>
+                  {configured && (
+                    <p className="mt-3 text-xs font-bold text-[var(--color-text-faint)]">
+                      {Object.keys(configuredProviders).length} providers configured
+                      {' / '}
+                      {allModels.length} models available
+                      {' / '}
+                      Source: models.dev
+                    </p>
+                  )}
+                </div>
               <button
                 onClick={async () => {
                   setIsReloading(true);
@@ -284,7 +440,7 @@ function SettingsPageContent() {
                   }
                 }}
                 disabled={isReloading}
-                className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-bold uppercase bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-2 text-xs font-bold uppercase text-[var(--color-text-main)] transition hover:-translate-y-0.5 disabled:opacity-50"
                 title="Re-fetch models from models.dev"
               >
                 <span className={`material-symbols-outlined text-sm ${isReloading ? 'animate-spin' : ''}`}>
@@ -292,19 +448,8 @@ function SettingsPageContent() {
                 </span>
                 {isReloading ? 'Reloading...' : 'Reload Models'}
               </button>
-            </div>
-            <p className="text-sm text-on-surface-variant mb-2">
-              Configure and manage LLM endpoints and provider credentials.
-            </p>
-            {configured && (
-              <p className="text-[10px] text-slate-400 mb-6">
-                {Object.keys(configuredProviders).length} providers configured
-                {' \u00b7 '}
-                {allModels.length} models available
-                {' \u00b7 '}
-                Source: models.dev
-              </p>
-            )}
+              </div>
+            </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               {/* ── Row 1: Google (8) + Anthropic/OpenAI stack (4) ──── */}
@@ -420,20 +565,8 @@ function SettingsPageContent() {
       case 'runtime':
         return (
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-mono text-primary bg-primary-container px-2 py-0.5 rounded">
-                SYSTEM_ADMIN
-              </span>
-              <span className="text-xs text-on-surface-variant">/ configuration / runtime</span>
-            </div>
-            <h2 className="text-2xl font-extrabold tracking-tight text-on-surface mb-1">
-              Runtime Configuration
-            </h2>
-            <p className="text-sm text-on-surface-variant mb-6">
-              Configure the master agent model and operational parameters.
-            </p>
             <RuntimePanel
-              runtime={settings.runtime}
+              runtime={runtime}
               allModels={allModels}
               onUpdate={async (value) => {
                 // If master_agent_model changed, also update the master agent singleton
@@ -446,7 +579,7 @@ function SettingsPageContent() {
                     console.error('Failed to update master model:', e);
                   }
                 }
-                updateNamespace('runtime', { ...settings.runtime, ...value });
+                updateNamespace('runtime', { ...runtime, ...value });
               }}
             />
           </div>
@@ -487,23 +620,71 @@ function SettingsPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-container-low font-body text-on-surface">
-      <div className="flex h-screen overflow-hidden">
-        <SettingsSidebar
-          activeNamespace={activeNamespace}
-          onNamespaceChange={setActiveNamespace}
-        />
+    <div className="min-h-[calc(100dvh-56px)] overflow-auto bg-[var(--color-background)] px-5 py-6 font-body text-[var(--color-text-main)] md:px-8 lg:px-10">
+      <section className="mx-auto flex w-full max-w-7xl flex-col gap-8">
+        <header className="grid gap-6 border-b border-[var(--color-border)] pb-6 md:pb-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-surface)] px-3 py-1.5 text-xs font-bold uppercase text-[var(--color-text-muted)]">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Settings control room
+            </div>
+            <h1 className="mt-5 max-w-4xl text-3xl font-black leading-tight text-[var(--color-text-main)] md:text-4xl">
+              {activeMeta.title}
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-[var(--color-text-muted)] md:text-lg">
+              {activeMeta.description}
+            </p>
+          </div>
 
-        <main className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-end mb-6">
+          <div className="flex flex-col justify-between gap-5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase text-[var(--color-text-faint)]">Configuration plane</p>
+                <p className="mt-3 text-2xl font-black text-[var(--color-text-main)]">
+                  {activeMeta.eyebrow}
+                </p>
+              </div>
+              <span className="material-symbols-outlined rounded-full bg-[var(--color-primary-muted)] p-2 text-[20px] text-[var(--color-primary)]">
+                {activeMeta.icon}
+              </span>
+            </div>
+            <div className="grid gap-2 text-sm text-[var(--color-text-muted)]">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-[var(--color-primary)]">verified</span>
+                Runtime changes are saved through the dashboard settings API.
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-[var(--color-primary)]">sync_alt</span>
+                New launches read manager defaults from the canonical config.
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-[var(--color-primary)]">history</span>
+                Existing war-rooms keep their current lifecycle values.
+              </div>
+            </div>
+            <div>
               <LiveStatusBadge />
             </div>
-
-            {renderActivePanel()}
           </div>
-        </main>
-      </div>
+        </header>
+
+        <div className="grid gap-5 lg:grid-cols-4">
+          {settingsMetrics.map((metric) => (
+            <SettingsMetricCard key={metric.id} {...metric} />
+          ))}
+        </div>
+
+        <div className="grid gap-8 lg:grid-cols-[18rem_1fr]">
+          <SettingsSidebar
+            activeNamespace={activeNamespace}
+            onNamespaceChange={setActiveNamespace}
+          />
+
+          <main className="min-w-0">
+            {renderActivePanel()}
+          </main>
+        </div>
+      </section>
 
       <VaultSecretModal
         isOpen={vaultModalOpen}

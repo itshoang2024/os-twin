@@ -66,6 +66,9 @@ const DEFAULTS: KnowledgeSettings = {
   knowledge_embedding_dimension: 768,
 };
 
+const SETTINGS_SECTION_CLASS =
+  'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[0_12px_36px_rgba(15,23,42,0.07)] md:p-6';
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePanelProps) {
@@ -390,7 +393,7 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
   return (
     <div className="space-y-8">
       {/* ── Header ──────────────────────────────────────────── */}
-      <div>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-mono text-primary bg-primary-container px-2 py-0.5 rounded">
             SYSTEM_ADMIN
@@ -408,10 +411,10 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
         </p>
 
         {renderOllamaBanner()}
-      </div>
+      </section>
 
       {/* ── Section 1: LLM Backend ───────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-blue-600 text-lg">psychology</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Processing Model</h3>
@@ -581,7 +584,7 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
       </section>
 
       {/* ── Section 2: Embedding ───────────────────────────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-purple-600 text-lg">layers</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Embedding</h3>
@@ -756,7 +759,7 @@ export function KnowledgePanel({ knowledge, onUpdate, allModels }: KnowledgePane
       </section>
 
       {/* ── Section 3: Embedding Dimension (read-only) ──────── */}
-      <section>
+      <section className={SETTINGS_SECTION_CLASS}>
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-emerald-600 text-lg">straighten</span>
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">
