@@ -31,11 +31,19 @@ export default function SkillChipInput({ selectedSkillRefs, onChange }: SkillChi
   const [searchTerm, setSearchTerm] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const selectedSkills = allSkills.filter(s => selectedSkillRefs.includes(s.name));
-  const availableSkills = allSkills.filter(s => 
-    !selectedSkillRefs.includes(s.name) && 
-    (s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-     s.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  const selectedSkills = useMemo(
+    () => allSkills.filter(s => selectedSkillRefs.includes(s.name)),
+    [allSkills, selectedSkillRefs],
+  );
+  const selectedSkillNames = new Set(selectedSkills.map(s => s.name));
+  const missingSelectedSkillRefs = selectedSkillRefs.filter(ref => !selectedSkillNames.has(ref));
+  const availableSkills = useMemo(
+    () => allSkills.filter(s =>
+      !selectedSkillRefs.includes(s.name) &&
+      (s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       s.description.toLowerCase().includes(searchTerm.toLowerCase()))
+    ),
+    [allSkills, searchTerm, selectedSkillRefs],
   );
 
   // Group available skills by category
@@ -91,6 +99,21 @@ export default function SkillChipInput({ selectedSkillRefs, onChange }: SkillChi
             <button 
               type="button" 
               onClick={(e) => { e.stopPropagation(); toggleSkill(skill.name); }}
+              className="hover:opacity-70"
+            >
+              <span className="material-symbols-outlined text-[10px] leading-none">close</span>
+            </button>
+          </span>
+        ))}
+        {missingSelectedSkillRefs.map(ref => (
+          <span
+            key={ref}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-slate-100 text-slate-500"
+          >
+            {ref}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggleSkill(ref); }}
               className="hover:opacity-70"
             >
               <span className="material-symbols-outlined text-[10px] leading-none">close</span>

@@ -10,7 +10,7 @@ import type { ModelInfo } from '@/types/settings';
 import SkillChipInput from './SkillChipInput';
 import McpSelector from './McpSelector';
 import TestConnectionButton from './TestConnectionButton';
-import { useModelRegistry, useRoleDependencies } from '@/hooks/use-roles';
+import { useModelRegistry, useRole, useRoleDependencies } from '@/hooks/use-roles';
 
 
 interface RoleEditorPanelProps {
@@ -20,12 +20,21 @@ interface RoleEditorPanelProps {
   existingRoles: Role[];
 }
 
+const GOOGLE_PREFIXES = ['google-vertex', 'google-vertex-anthropic'] as const;
+
+const PROVIDER_ID_TO_ROLE: Record<string, Role['provider']> = {
+  google: 'gemini',
+  anthropic: 'claude',
+  openai: 'gpt',
+};
+
 export default function RoleEditorPanel({ role, isOpen, onClose, existingRoles }: RoleEditorPanelProps) {
   const { mutate } = useSWRConfig();
   const { registry, allModels, providers: registryProviders } = useModelRegistry();
   const { data: apiKeysStatus, isLoading: isLoadingKeys } = useSWR<Record<string, boolean>>('/providers/api-keys');
+  const { role: detailedRole } = useRole(isOpen && role?.id ? role.id : '');
   const { dependencies } = useRoleDependencies(role?.id || '');
-  const [activeTab, setActiveTab] = useState<'config' | 'dependencies'>('config');
+  const [activeTab] = useState<'config' | 'dependencies'>('config');
   const [formData, setFormData] = useState<Partial<Role>>({
     name: '',
     provider: undefined,
@@ -45,16 +54,7 @@ export default function RoleEditorPanel({ role, isOpen, onClose, existingRoles }
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
-  // Google custom model prefix state
-  const GOOGLE_PREFIXES = ['google-vertex', 'google-vertex-anthropic'] as const;
   const [googleCustomPrefix, setGoogleCustomPrefix] = useState<string>(GOOGLE_PREFIXES[0]);
-
-  // Map dynamic provider_ids to Role provider values
-  const PROVIDER_ID_TO_ROLE: Record<string, Role['provider']> = {
-    google: 'gemini',
-    anthropic: 'claude',
-    openai: 'gpt',
-  };
 
   // Whether the current version is a known catalog model
   const isKnownModel = useMemo(
@@ -116,8 +116,22 @@ export default function RoleEditorPanel({ role, isOpen, onClose, existingRoles }
   }, [apiKeysStatus]);
 
   useEffect(() => {
-    if (role) {
-      setFormData({ ...role, provider: (role.provider?.toLowerCase() as Role['provider']) || defaultProvider });
+    const selectedRole = detailedRole || role;
+    if (selectedRole) {
+      setFormData({
+        ...selectedRole,
+        provider: (selectedRole.provider?.toLowerCase() as Role['provider']) || defaultProvider,
+        temperature: selectedRole.temperature ?? 0.3,
+        budget_tokens_max: selectedRole.budget_tokens_max ?? 500000,
+        max_retries: selectedRole.max_retries ?? 3,
+        timeout_seconds: selectedRole.timeout_seconds ?? 900,
+        skill_refs: selectedRole.skill_refs ?? [],
+        mcp_refs: selectedRole.mcp_refs ?? [],
+        description: selectedRole.description ?? '',
+        instructions: selectedRole.instructions ?? '',
+        instance_type: selectedRole.instance_type || 'worker',
+        system_prompt_override: selectedRole.system_prompt_override ?? '',
+      });
     } else if (!isLoadingKeys) {
       setFormData({
         name: '',
@@ -136,7 +150,7 @@ export default function RoleEditorPanel({ role, isOpen, onClose, existingRoles }
       });
     }
     setErrors({});
-  }, [role, isOpen, normalizedRegistry, defaultProvider, isLoadingKeys]);
+  }, [detailedRole, role, isOpen, normalizedRegistry, defaultProvider, isLoadingKeys]);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
