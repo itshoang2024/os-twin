@@ -555,6 +555,96 @@ Build a real-time chat application with WebSocket support.
         }
     }
 
+    Context "War-room description assembly" {
+        It "passes three-hash EPIC sections to New-WarRoom once" {
+            $capturePath = Join-Path $script:projectDir "new-warroom-calls.jsonl"
+            $mockNewWarRoom = @'
+param(
+    [string]$RoomId,
+    [string]$TaskRef,
+    [string]$TaskDescription,
+    [string]$WorkingDir,
+    [string]$WarRoomsDir,
+    [string]$PlanId,
+    [string]$AssignedRole,
+    [string[]]$CandidateRoles = @(),
+    [string[]]$DefinitionOfDone = @(),
+    [string[]]$AcceptanceCriteria = @(),
+    [string[]]$DependsOn = @(),
+    [string]$Pipeline,
+    [string[]]$RequiredCapabilities = @(),
+    [string]$Lifecycle,
+    [object[]]$Assets = @()
+)
+$call = [PSCustomObject]@{
+    RoomId = $RoomId
+    TaskRef = $TaskRef
+    TaskDescription = $TaskDescription
+    DefinitionOfDone = @($DefinitionOfDone)
+    AcceptanceCriteria = @($AcceptanceCriteria)
+    DependsOn = @($DependsOn)
+}
+$call | ConvertTo-Json -Compress -Depth 8 | Add-Content -Path '__CAPTURE_PATH__'
+if (-not (Test-Path $WarRoomsDir)) {
+    New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
+}
+$roomDir = Join-Path $WarRoomsDir $RoomId
+New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+@{ assignment = @{ assigned_role = $AssignedRole } } | ConvertTo-Json -Depth 4 |
+    Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
+'@ -replace '__CAPTURE_PATH__', ($capturePath -replace "'", "''")
+            $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+            $plan = Join-Path $TestDrive "sectioned-epic-plan.md"
+            @"
+# Plan: Sectioned Epic
+working_dir: $script:projectDir
+
+## EPIC-007: Foundation Workstream FW-1
+
+Roles: @principal-engineer, @engineer, @qa-automation-engineer
+
+### Context
+
+Lift reusable primitives into a lens-agnostic model.
+
+### Definition of Done
+- [ ] Workbench shell exists.
+- [ ] EnterpriseMapPanel renders through the shell.
+
+### Acceptance Criteria
+- [ ] Layout engine is a pure function.
+- [ ] GraphCanvas supports both render modes.
+
+### Tasks
+- [ ] Define model/workbenchModel.ts.
+- [ ] Extract shared components.
+
+### Other aspects
+- Keep public props stable.
+
+depends_on: [EPIC-001, EPIC-003]
+"@ | Out-File $plan -Encoding utf8
+
+            & $script:StartPlan -PlanFile $plan -ProjectDir $script:projectDir -SkipLoop *>&1 | Out-Null
+
+            $calls = Get-Content $capturePath | ForEach-Object { $_ | ConvertFrom-Json }
+            $epicCall = $calls | Where-Object { $_.TaskRef -eq "EPIC-007" } | Select-Object -First 1
+
+            $epicCall | Should -Not -BeNullOrEmpty
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Context\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Definition of Done\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Acceptance Criteria\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Tasks\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Other aspects\s*$')).Count | Should -Be 1
+            $epicCall.DefinitionOfDone.Count | Should -Be 2
+            $epicCall.AcceptanceCriteria.Count | Should -Be 2
+            $epicCall.DependsOn | Should -Contain "PLAN-REVIEW"
+            $epicCall.DependsOn | Should -Contain "EPIC-001"
+            $epicCall.DependsOn | Should -Contain "EPIC-003"
+        }
+    }
+
     Context "Mixed epic and task plan" {
         BeforeEach {
             $script:mixedPlan = Join-Path $TestDrive "mixed-plan.md"
