@@ -17,6 +17,7 @@ setup_env() {
   if [[ -f "$env_file" ]]; then
     ok ".env already exists at $env_file"
     _ensure_vault_key "$env_file"
+    _ensure_ngrok_enabled "$env_file"
     _create_env_sh_hook
     # Sync the install shell with .env so OSTWIN_API_KEY (and friends) match
     # the file even if the parent shell exported a stale value from a prior
@@ -34,6 +35,10 @@ setup_env() {
   generated_api_key="ostwin_$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)"
   local generated_vault_key
   generated_vault_key="$(openssl rand -base64 32 | tr -d '\n')"
+  local ngrok_enabled_default="true"
+  if [[ "${NGROK_ENABLED:-prompt}" == "false" ]]; then
+    ngrok_enabled_default="false"
+  fi
 
   cat > "$env_file" << ENVEOF
 # Ostwin — Environment Variables
@@ -62,6 +67,7 @@ OSTWIN_API_KEY=${generated_api_key}
 OSTWIN_VAULT_KEY=${generated_vault_key}
 
 # ── ngrok Tunnel (auto-starts when NGROK_AUTHTOKEN is set) ─────────────────
+OSTWIN_NGROK_ENABLED=${ngrok_enabled_default}
 # NGROK_AUTHTOKEN=
 # NGROK_DOMAIN=              # Optional: custom/static domain (paid ngrok plans)
 
@@ -80,12 +86,13 @@ ENVEOF
 
   # Migrate any existing exported key from the current shell environment
   _migrate_env_keys "$env_file"
+  _ensure_ngrok_enabled "$env_file"
 
   # Detect available AI auth and configure memory provider
   _configure_memory_provider
 
   # Prompt for ngrok tunnel token (optional)
-  if ! ${AUTO_YES:-false} && [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
+  if [[ "${NGROK_ENABLED:-prompt}" != "false" ]] && ! ${AUTO_YES:-false} && [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
     echo ""
     echo -en "    ${CYAN}→${NC} Enter NGROK_AUTHTOKEN for dashboard port-forwarding (or press Enter to skip): "
     read -r ngrok_token
@@ -135,6 +142,37 @@ _ensure_vault_key() {
   } >> "$env_file"
   chmod 600 "$env_file"
   ok "Added OSTWIN_VAULT_KEY to $env_file"
+}
+
+_ensure_ngrok_enabled() {
+  local env_file="$1"
+  local desired=""
+  case "${NGROK_ENABLED:-prompt}" in
+    true) desired="true" ;;
+    false) desired="false" ;;
+  esac
+
+  if grep -qE '^[[:space:]]*OSTWIN_NGROK_ENABLED=' "$env_file" 2>/dev/null; then
+    if [[ -n "$desired" ]]; then
+      if [[ "$OS" == "macos" ]]; then
+        sed -i '' "s|^[[:space:]]*OSTWIN_NGROK_ENABLED=.*|OSTWIN_NGROK_ENABLED=${desired}|" "$env_file"
+      else
+        sed -i "s|^[[:space:]]*OSTWIN_NGROK_ENABLED=.*|OSTWIN_NGROK_ENABLED=${desired}|" "$env_file"
+      fi
+    fi
+    return
+  fi
+
+  if [[ -z "$desired" ]]; then
+    desired="true"
+  fi
+  {
+    echo ""
+    echo "# Enable dashboard ngrok auto-start when NGROK_AUTHTOKEN is set."
+    echo "OSTWIN_NGROK_ENABLED=${desired}"
+  } >> "$env_file"
+  chmod 600 "$env_file"
+  ok "Added OSTWIN_NGROK_ENABLED=${desired} to $env_file"
 }
 
 _configure_memory_provider() {
@@ -267,6 +305,9 @@ _migrate_env_keys() {
   local env_file="$1"
   local migrated=false
   for key in GOOGLE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY AZURE_OPENAI_API_KEY BASETEN_API_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY NGROK_AUTHTOKEN; do
+    if [[ "$key" == "NGROK_AUTHTOKEN" && "${NGROK_ENABLED:-prompt}" == "false" ]]; then
+      continue
+    fi
     if [[ -n "${!key:-}" ]]; then
       # Uncomment and fill the matching line
       if [[ "$OS" == "macos" ]]; then

@@ -90,6 +90,10 @@ param(
 
 # --- Resolve paths ---
 $agentsDir = (Resolve-Path (Join-Path $PSScriptRoot ".." "..") -ErrorAction SilentlyContinue).Path
+$eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+if (Test-Path $eventsModule) {
+    Import-Module (Resolve-Path $eventsModule).Path -Force
+}
 
 # Resolve OSTWIN_HOME: env var → ~/.ostwin
 $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
@@ -106,10 +110,29 @@ else { Join-Path $agentsDir "config.json" }
 # --- Load plan-specific roles config from room's config.json → plan_id ---
 $planRolesConfig = $null
 $roomConfigFile = Join-Path $absRoomDir "config.json"
+$roomCfg = $null
+$roomPlanId = $env:OSTWIN_PLAN_ID
+$roomRunId = $env:OSTWIN_RUN_ID
+$roomEventsPath = $env:OSTWIN_EVENTS_PATH
+$roomId = Split-Path $absRoomDir -Leaf
+$epicRef = ''
+$lifecycleState = 'unknown'
+$statusFile = Join-Path $absRoomDir 'status'
+if (Test-Path $statusFile) {
+    try {
+        $statusValue = (Get-Content $statusFile -Raw -ErrorAction Stop).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($statusValue)) { $lifecycleState = $statusValue }
+    } catch { }
+}
 if (Test-Path $roomConfigFile) {
     try {
         $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
-        $roomPlanId = $roomCfg.plan_id
+        if ($roomCfg.plan_id) { $roomPlanId = $roomCfg.plan_id }
+        if ($roomCfg.run_id) { $roomRunId = $roomCfg.run_id }
+        if ($roomCfg.events_path) { $roomEventsPath = $roomCfg.events_path }
+        if ($roomCfg.room_id) { $roomId = $roomCfg.room_id }
+        if ($roomCfg.task_ref) { $epicRef = $roomCfg.task_ref }
+        if ($lifecycleState -eq 'unknown' -and $roomCfg.status -and $roomCfg.status.current) { $lifecycleState = $roomCfg.status.current }
         if ($roomPlanId) {
             $planRolesFile = Join-Path $OstwinHome ".agents" "plans" "$roomPlanId.roles.json"
             if (Test-Path $planRolesFile) {
@@ -118,6 +141,72 @@ if (Test-Path $roomConfigFile) {
         }
     }
     catch { }
+}
+
+function Get-CurrentRoomStatus {
+    if (-not (Test-Path $statusFile)) { return '' }
+    try { return (Get-Content $statusFile -Raw -ErrorAction Stop).Trim() } catch { return '' }
+}
+
+function Test-AgentAdvancedRoomState {
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [AllowEmptyString()][string]$OutputText
+    )
+
+    if ($ExitCode -eq 0 -or $ExitCode -eq 124) { return $false }
+    $currentStatus = Get-CurrentRoomStatus
+    if ([string]::IsNullOrWhiteSpace($currentStatus)) { return $false }
+    if ($currentStatus -eq $lifecycleState) { return $false }
+
+    # If the worker already advanced the room, a later wrapper/CLI kill should
+    # not create a contradictory runtime-failure event for a successful handoff.
+    if ($OutputText -match 'warroom_update_status|warroom_report_progress|channel_post_message') {
+        Write-Warning "[Invoke-Agent] Suppressing agent.run.failed for '$RoleName': exitCode=$ExitCode but room advanced from '$lifecycleState' to '$currentStatus'."
+        return $true
+    }
+
+    return $false
+}
+
+function Write-AgentRuntimeFailureEvent {
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [Parameter(Mandatory)][bool]$TimedOut,
+        [AllowEmptyString()][string]$OutputFile,
+        [AllowEmptyString()][string]$OutputText
+    )
+
+    if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return }
+    if ([string]::IsNullOrWhiteSpace($roomPlanId)) { return }
+    if ([string]::IsNullOrWhiteSpace($roomId) -or [string]::IsNullOrWhiteSpace($epicRef)) { return }
+
+    $eventType = if ($TimedOut) { 'agent.run.timed_out' } else { 'agent.run.failed' }
+    $summary = if ($TimedOut) {
+        "$RoleName timed out after ${TimeoutSeconds}s."
+    } else {
+        "$RoleName exited with code $ExitCode."
+    }
+    $preview = if ($OutputText -and $OutputText.Length -gt 500) { $OutputText.Substring(0, 500) } else { $OutputText }
+    $event = [ordered]@{
+        event_type = $eventType
+        plan_id    = $roomPlanId
+        run_id     = if ($roomRunId) { $roomRunId } else { 'run_legacy' }
+        room_id    = $roomId
+        epic_ref   = $epicRef
+        role       = $RoleName
+        state      = $lifecycleState
+        severity   = 'error'
+        summary    = $summary
+        payload    = [ordered]@{
+            exit_code       = $ExitCode
+            timed_out       = $TimedOut
+            output_file     = $OutputFile
+            output_artifact = if ($OutputFile) { "artifacts/$(Split-Path $OutputFile -Leaf)" } else { '' }
+            output_preview  = $preview
+        }
+    }
+    Write-OrchestrationEvent -EventsPath $roomEventsPath -Event $event | Out-Null
 }
 
 # --- Plan roles resolution (highest priority after explicit -Model) ---
@@ -856,6 +945,12 @@ $output = if (Test-Path $outputFile) {
     Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
 }
 else { "No output captured" }
+
+if ($exitCode -ne 0) {
+    if (-not (Test-AgentAdvancedRoomState -ExitCode $exitCode -OutputText $output)) {
+        Write-AgentRuntimeFailureEvent -ExitCode $exitCode -TimedOut:($exitCode -eq 124) -OutputFile $outputFile -OutputText $output
+    }
+}
 
 # --- Clean up temp files (OPT-003: prevent accumulation on retries) ---
 Remove-Item $wrapperScript -Force -ErrorAction SilentlyContinue

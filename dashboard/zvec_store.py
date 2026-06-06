@@ -29,6 +29,17 @@ import uuid_utils
 
 logger = logging.getLogger("zvec_store")
 
+
+def plan_backfill_enabled() -> bool:
+    """Return whether disk plans should be backfilled into zvec.
+
+    Disabled by default because plan listing already reads markdown from disk,
+    while opportunistic plan backfill can create unexpected writes and stale
+    plan records during dashboard startup/list operations. Set
+    OSTWIN_PLAN_BACKFILL_ENABLED=true to opt back in for one-off migrations.
+    """
+    return os.environ.get("OSTWIN_PLAN_BACKFILL_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+
 # Embedding dimension — single source of truth from OSTWIN_EMBEDDING_DIM env var.
 # Fixed at startup; cannot be changed dynamically to avoid dimension conflicts
 # across memory, knowledge, and zvec collections.
@@ -189,17 +200,23 @@ class OSTwinStore:
                 has_time_id = any(f.name == "time_id" for f in schema.fields)
                 has_enabled = any(f.name == "enabled" for f in schema.fields)
                 has_instance_type = any(f.name == "instance_type" for f in schema.fields)
+                has_embedding_field = any(f.name == "embedding" for f in schema.fields)
 
                 # Check vector dimension mismatch (Harrier migration).
                 # zvec exposes `schema.vectors` as either a list of VectorSchema
                 # or a single VectorSchema object depending on version. Handle
                 # both shapes and capture the current dim for later logging.
                 dim_mismatch = False
+                missing_embedding_vector = True
                 current_dim: Optional[int] = None
                 vectors = schema.vectors
-                if isinstance(vectors, list) and len(vectors) > 0:
-                    current_dim = vectors[0].dimension
-                elif hasattr(vectors, "dimension"):
+                vector_schemas = vectors if isinstance(vectors, list) else [vectors]
+                for vector_schema in vector_schemas:
+                    if getattr(vector_schema, "name", None) == "embedding":
+                        missing_embedding_vector = False
+                        current_dim = getattr(vector_schema, "dimension", None)
+                        break
+                if current_dim is None and hasattr(vectors, "dimension"):
                     current_dim = vectors.dimension
                 if current_dim is not None and current_dim != EMBEDDING_DIM:
                     dim_mismatch = True
@@ -210,10 +227,21 @@ class OSTwinStore:
 
                 needs_enabled = name == SKILLS_COLLECTION and not has_enabled
                 needs_instance_type = name == ROLES_COLLECTION and not has_instance_type
-                if not has_time_id or dim_mismatch or needs_enabled or needs_instance_type:
+                if (
+                    not has_time_id
+                    or dim_mismatch
+                    or has_embedding_field
+                    or missing_embedding_vector
+                    or needs_enabled
+                    or needs_instance_type
+                ):
                     reasons = []
                     if dim_mismatch:
                         reasons.append(f"dim {current_dim} → {EMBEDDING_DIM}")
+                    if has_embedding_field:
+                        reasons.append("embedding stored as field")
+                    if missing_embedding_vector:
+                        reasons.append("missing embedding vector")
                     if not has_time_id:
                         reasons.append("missing time_id")
                     if needs_enabled:
@@ -2295,8 +2323,13 @@ class OSTwinStore:
                 },
             )
 
-        # Sync plans from disk
-        plans_synced = self._sync_plans_from_disk()
+        # Sync plans from disk only when explicitly enabled. Plan list endpoints
+        # can render from markdown directly; automatic backfill is intentionally
+        # disabled to avoid startup/list requests mutating the plans collection.
+        should_backfill_plans = plan_backfill_enabled()
+        plans_synced = self._sync_plans_from_disk() if should_backfill_plans else 0
+        if not should_backfill_plans:
+            logger.info("zvec plan backfill disabled (set OSTWIN_PLAN_BACKFILL_ENABLED=true to enable)")
 
         if self._messages:
             self._messages.flush()

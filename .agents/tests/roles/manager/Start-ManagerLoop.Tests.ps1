@@ -1833,6 +1833,20 @@ Context "PLAN-REVIEW Verdict Logic" {
     # ========================================================================
     # Deadlock recovery risk fixes (Risk 2, 3, 4, 6)
     # ========================================================================
+    Context "Runtime config resolution (Static Analysis)" {
+        It "Start-ManagerLoop.ps1 uses the shared config resolver for dashboard-written global config" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+
+            $content | Should -Match 'Resolve-OstwinConfigPath' `
+                -Because "manager runtime defaults must see ~/.ostwin/.agents/config.json when the dashboard writes it"
+            $content | Should -Match 'OSTWIN_CONFIG_PATH' `
+                -Because "dashboard-compatible explicit config overrides must be honored"
+            $content | Should -Match 'OSTWIN_PROJECT_DIR' `
+                -Because "project-scoped dashboard runs must still be able to select project config"
+        }
+    }
+
     Context "Deadlock recovery fixes (Static Analysis)" {
         It "Deadlock recovery calls Stop-RoomProcesses to clean stale PIDs (Risk 2)" {
             $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"

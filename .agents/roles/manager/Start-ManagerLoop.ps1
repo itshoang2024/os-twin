@@ -16,7 +16,9 @@
 	                (retries exhausted → failed-final)
 
 .PARAMETER ConfigPath
-    Path to config.json. Default: AGENT_OS_CONFIG env var or .agents/config.json.
+    Path to config.json. Defaults through Resolve-OstwinConfigPath:
+    AGENT_OS_CONFIG, OSTWIN_CONFIG_PATH, OSTWIN_PROJECT_DIR, AGENTS_DIR,
+    then ~/.ostwin/.agents/config.json before project-local .agents/config.json.
 .PARAMETER WarRoomsDir
     Directory containing war-room directories. Default: WARROOMS_DIR env var.
 
@@ -46,17 +48,34 @@ $logModule = Join-Path $agentsDir "lib" "Log.psm1"
 $configModule = Join-Path $agentsDir "lib" "Config.psm1"
 $utilsModule = Join-Path $agentsDir "lib" "Utils.psm1"
 $helpersModule = Join-Path $scriptDir "ManagerLoop-Helpers.psm1"
+$eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
 if (Test-Path $configModule) { Import-Module $configModule -Force }
 if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
+if (Test-Path $eventsModule) { Import-Module $eventsModule -Force }
 if (Test-Path $helpersModule) { Import-Module $helpersModule -Force }
 
 # --- Helper functions ---
 
 # --- Resolve config ---
 if (-not $ConfigPath) {
-    $ConfigPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
-                  else { Join-Path $agentsDir "config.json" }
+    $ConfigPath = if (Get-Command Resolve-OstwinConfigPath -ErrorAction SilentlyContinue) {
+        Resolve-OstwinConfigPath
+    }
+    else {
+        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE }
+                   elseif ($env:HOME) { $env:HOME }
+                   else { $HOME }
+        $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $homeDir ".ostwin" }
+        $globalConfig = Join-Path (Join-Path $ostwinHome ".agents") "config.json"
+
+        if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
+        elseif ($env:OSTWIN_CONFIG_PATH) { $env:OSTWIN_CONFIG_PATH }
+        elseif ($env:OSTWIN_PROJECT_DIR) { Join-Path (Join-Path $env:OSTWIN_PROJECT_DIR ".agents") "config.json" }
+        elseif ($env:AGENTS_DIR) { Join-Path $env:AGENTS_DIR "config.json" }
+        elseif (Test-Path $globalConfig) { $globalConfig }
+        else { Join-Path $agentsDir "config.json" }
+    }
 }
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 
@@ -144,6 +163,7 @@ if (Get-Command Set-ManagerLoopContext -ErrorAction SilentlyContinue) {
 # === MAIN LOOP ===
 $iteration = 0
 $stallCycles = 0
+$script:planFailed = $false
 
 try {
 while (-not $script:shuttingDown) {
@@ -405,6 +425,9 @@ while (-not $script:shuttingDown) {
                                 }
                             } else {
                                 $allPassed = $false; $failedCount++
+                                Write-Log "ERROR" "[$taskRef] Terminal failed-final is unrecoverable. Failing plan run."
+                                $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'room_failed_final' -Role $baseRole -State $status -Summary "$taskRef reached failed-final."
+                                $script:shuttingDown = $true
                             }
                             Set-BlockedDescendants $taskRef
                         } else {
@@ -440,8 +463,11 @@ while (-not $script:shuttingDown) {
                             }
                         } else {
                             Write-Log "ERROR" "[$taskRef] Decision: retries exhausted ($retries/$v2MaxRetries). Failing."
+                            Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'lifecycle.retry.exhausted' -Summary "$taskRef exhausted lifecycle retries." -Payload @{ retries = $retries; max_retries = $v2MaxRetries; reason = 'decision_retries_exhausted' } -Role $baseRole -State $status -Severity 'error' | Out-Null
                             Write-RoomStatus $roomDir $v2StateDef.signals.exhaust.target
                             Set-BlockedDescendants $taskRef
+                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'retry_exhausted' -Role $baseRole -State $status -Summary "$taskRef exhausted retries ($retries/$v2MaxRetries)."
+                            $script:shuttingDown = $true
                         }
                     }
                     { $_ -in @('work', 'review', 'triage') } {
@@ -458,7 +484,7 @@ while (-not $script:shuttingDown) {
                                 if (Test-SpawnLock -RoomDir $roomDir -Role $_.BaseName) { $anySpawnLock = $true }
                             }
                         }
-                        if (-not $anyPidAlive -and -not $anySpawnLock) { $activeWithNoPid++ }
+                        if ($v2StateDef.type -ne 'triage' -and -not $anyPidAlive -and -not $anySpawnLock) { $activeWithNoPid++ }
 
                         # State timeout
                         if (Test-StateTimedOut $roomDir) {
@@ -480,8 +506,11 @@ while (-not $script:shuttingDown) {
                                     Start-WorkerJob -RoomDir $roomDir -Role $restartBaseRole -Script $workerScript -TaskRef $taskRef -TimeoutSeconds $restartTimeout -SkipLockCheck
                                 }
                             } else {
+                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.timed_out' -Summary "$baseRole timed out in $status after manager state timeout." -Payload @{ reason = 'state_timeout_exhausted'; timeout_seconds = $stateTimeout; retries = $retries; max_retries = $v2MaxRetries } -Role $baseRole -State $status -Severity 'error' | Out-Null
                                 Write-RoomStatus $roomDir 'failed-final'
                                 Set-BlockedDescendants $taskRef
+                                $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'state_timeout_exhausted' -Role $baseRole -State $status -Summary "$taskRef exhausted timeout retries in $status."
+                                $script:shuttingDown = $true
                             }
                             continue
                         }
@@ -551,6 +580,18 @@ while (-not $script:shuttingDown) {
                             }
                         }
 
+                        # Triage mediation — ESCALATE means the epic roles need
+                        # a short manager-mediated clarification loop. Convert
+                        # the latest reviewer escalation into a manager 'fix'
+                        # signal so the counterpart role can respond, then the
+                        # normal lifecycle routes optimize.done back to review.
+                        if ($v2StateDef.type -eq 'triage') {
+                            $mediation = Invoke-TriageMediation -RoomDir $roomDir -Lifecycle $lifecycle -TaskRef $taskRef
+                            if ($mediation -and -not $mediation.AlreadyPresent) {
+                                Write-Log "INFO" "[$taskRef] Triage mediation requested '$($mediation.TargetRole)' to respond to escalation from '$($mediation.RaisedBy)'."
+                            }
+                        }
+
                         # Signal detection — lifecycle-driven (derives signals + sender from lifecycle.json)
                         $matchedSignal = Find-LatestSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName $status
 
@@ -567,7 +608,11 @@ while (-not $script:shuttingDown) {
                             if ($actions -contains 'increment_retries' -and $retries -ge ($v2MaxRetries - 1)) {
                                 Write-Log "WARN" "[$taskRef] Signal '$matchedSignal' would exceed max retries ($($retries+1)/$v2MaxRetries). Redirecting to failed."
                                 Invoke-SignalActions -RoomDir $roomDir -Actions $actions -TaskRef $taskRef -BaseRole $baseRole
-                                Write-RoomStatus $roomDir "failed"
+                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'lifecycle.retry.exhausted' -Summary "$taskRef exhausted lifecycle retries after '$matchedSignal'." -Payload @{ signal = $matchedSignal; retries = ($retries + 1); max_retries = $v2MaxRetries; reason = 'semantic_retry_exhausted' } -Role $baseRole -State $status -Severity 'error' | Out-Null
+                                Write-RoomStatus $roomDir "failed-final"
+                                Set-BlockedDescendants $taskRef
+                                $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'retry_exhausted' -Role $baseRole -State $status -Summary "$taskRef exhausted retries after '$matchedSignal'."
+                                $script:shuttingDown = $true
                                 continue
                             }
 
@@ -580,6 +625,10 @@ while (-not $script:shuttingDown) {
                             } else { $baseRole }
                             Invoke-SignalActions -RoomDir $roomDir -Actions $actions -TaskRef $taskRef -BaseRole $targetRoleForActions
                             Write-RoomStatus $roomDir $targetState
+
+                            if ($matchedSignal -eq 'fail' -and $actions -contains 'increment_retries') {
+                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'epic.retrying' -Summary "$taskRef semantic QA fail routed to retry/optimize." -Payload @{ signal = $matchedSignal; retries = ($retries + 1); max_retries = $v2MaxRetries; target_state = $targetState } -Role $baseRole -State $status -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $roomDir -Role $baseRole) | Out-Null
+                            }
 
                             # Reset crash-respawn counter on successful transition
                             $crashFile = Join-Path $roomDir "crash_respawns"
@@ -627,9 +676,9 @@ while (-not $script:shuttingDown) {
                                 $failedRoleRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role $stateBaseRole
                                 if ($failedRoleRun) {
                                     Write-Log "ERROR" "[$taskRef] Role '$stateBaseRole' reported failed in '$status'. Marking room as failed for manager decision handling."
-                                    Stop-RoomProcesses $roomDir
                                     Remove-Item (Join-Path $roomDir "crash_respawns") -Force -ErrorAction SilentlyContinue
-                                    Write-RoomStatus $roomDir "failed"
+                                    $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'role_run_failed' -Role $stateBaseRole -State $status -Summary "$taskRef role '$stateBaseRole' failed in '$status'."
+                                    $script:shuttingDown = $true
                                     continue
                                 }
 
@@ -648,7 +697,9 @@ while (-not $script:shuttingDown) {
                                         $maxCrashRespawns = 3
                                         if ($crashCount -gt $maxCrashRespawns) {
                                             Write-Log "ERROR" "[$taskRef] Agent '$stateRole' crashed $crashCount times in '$status' without producing a signal. Marking as failed."
-                                            Write-RoomStatus $roomDir "failed"
+                                            Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.failed' -Summary "$stateBaseRole exhausted crash respawns in $status." -Payload @{ reason = 'crash_respawn_exhausted'; crash_count = $crashCount; max_crash_respawns = $maxCrashRespawns } -Role $stateBaseRole -State $status -Severity 'error' | Out-Null
+                                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'crash_respawn_exhausted' -Role $stateBaseRole -State $status -Summary "$taskRef exhausted crash respawns in '$status'."
+                                            $script:shuttingDown = $true
                                             # Reset the crash counter for the next lifecycle attempt
                                             Remove-Item $crashFile -Force -ErrorAction SilentlyContinue
                                         } else {
@@ -726,7 +777,7 @@ while (-not $script:shuttingDown) {
                     }
                 }
 
-                if ($dlStateDef -and $dlStateDef.type -in @('work', 'review', 'triage')) {
+                if ($dlStateDef -and $dlStateDef.type -in @('work', 'review')) {
                     $restartState = if ($dlLifecycle.initial_state) { $dlLifecycle.initial_state } else { 'developing' }
 
                     # LEAK-7 fix: check for pending signals before deadlock reset
@@ -804,6 +855,13 @@ while (-not $script:shuttingDown) {
             Write-Log "INFO" "RELEASE COMPLETE! Release notes: $agentsDir/RELEASE.md"
             Write-Host "  Release notes: $agentsDir/RELEASE.md"
             Write-Host "============================================"
+            $firstRoomDir = (Get-ChildItem -Path $WarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1).FullName
+            $completionRoomDir = Join-Path $WarRoomsDir ("room-{0:D3}" -f [int]$roomCount)
+            if (-not (Test-Path $completionRoomDir)) { $completionRoomDir = $firstRoomDir }
+            $completionLastMessage = if ($completionRoomDir) { Get-LatestChannelMessage -RoomDir $completionRoomDir -Role 'manager' } else { $null }
+            if ($completionRoomDir) {
+                Write-ManagerOrchestrationEvent -RoomDir $completionRoomDir -EventType 'plan.run.completed' -Summary "Plan run completed successfully." -Payload @{ room_count = $roomCount; role = 'manager'; agent_name = 'manager' } -Role 'manager' -Severity 'info' -LastMessage $completionLastMessage | Out-Null
+            }
             Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
             break
         }
@@ -895,4 +953,8 @@ finally {
     # Clean up manager PID file
     Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
     Write-Log "INFO" "Shutdown complete."
+}
+
+if ($script:planFailed) {
+    exit 1
 }

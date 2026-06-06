@@ -6,7 +6,10 @@ function Write-TestChannelMessage {
         [Parameter(Mandatory)][string]$To,
         [Parameter(Mandatory)][string]$Type,
         [Parameter(Mandatory)][string]$Ref,
-        [AllowEmptyString()][string]$Body = ''
+        [AllowEmptyString()][string]$Body = '',
+        [string]$PlanId = '',
+        [string]$RoomId = '',
+        [string]$EventId = ''
     )
 
     if (-not (Test-Path $RoomDir)) {
@@ -15,15 +18,19 @@ function Write-TestChannelMessage {
 
     $channelFile = Join-Path $RoomDir "channel.jsonl"
     $msgId = "$From-$Type-$([guid]::NewGuid().ToString('N'))"
+    if (-not $RoomId) { $RoomId = Split-Path $RoomDir -Leaf }
     $msg = [ordered]@{
-        v    = 1
-        id   = $msgId
-        ts   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        from = $From
-        to   = $To
-        type = $Type
-        ref  = $Ref
-        body = $Body
+        v        = 1
+        id       = $msgId
+        event_id = $EventId
+        ts       = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        plan_id  = $PlanId
+        room_id  = $RoomId
+        from     = $From
+        to       = $To
+        type     = $Type
+        ref      = $Ref
+        body     = $Body
     }
 
     ($msg | ConvertTo-Json -Compress -Depth 8) |
@@ -40,8 +47,11 @@ function New-TestChannelWriter {
             [string]$To,
             [string]$Type,
             [string]$Ref,
-            [AllowEmptyString()][string]$Body = ''
+            [AllowEmptyString()][string]$Body = '',
+            [string]$PlanId = '',
+            [string]$RoomId = '',
+            [string]$EventId = ''
         )
-        Write-TestChannelMessage -RoomDir $RoomDir -From $From -To $To -Type $Type -Ref $Ref -Body $Body
+        Write-TestChannelMessage -RoomDir $RoomDir -From $From -To $To -Type $Type -Ref $Ref -Body $Body -PlanId $PlanId -RoomId $RoomId -EventId $EventId
     }
 }

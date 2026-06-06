@@ -14,12 +14,26 @@ from dashboard.api_utils import (
 )
 import dashboard.global_state as global_state
 from dashboard.epic_manager import EpicSkillsManager
+from dashboard.orchestration_events import EventTailer
 # Heavy imports moved to background thread to prevent startup blocking
 
 # Telegram command handling is now in the Node.js bot (bot/src/telegram.ts).
 # Outbound notifications use notify.py (formerly telegram_bot.py).
 
 logger = logging.getLogger(__name__)
+
+# Lazily resolved so tests can patch dashboard.tasks.OSTwinStore without making
+# dashboard import pay the vector-store/model cost.
+OSTwinStore = None
+
+
+def _get_ostwin_store_cls():
+    global OSTwinStore
+    if OSTwinStore is None:
+        from dashboard.zvec_store import OSTwinStore as _OSTwinStore
+
+        OSTwinStore = _OSTwinStore
+    return OSTwinStore
 
 
 async def poll_war_rooms():
@@ -89,11 +103,19 @@ async def poll_war_rooms():
                 continue
         return None
 
+    def _attach_plan_context(room: dict, warroom_dir: Path) -> dict:
+        """Return room metadata with plan_id included for bot-scoped routing."""
+        enriched = dict(room)
+        plan_id = _find_plan_id_for_warroom_dir(warroom_dir)
+        if plan_id:
+            enriched["plan_id"] = plan_id
+        return enriched
+
     # Initialize snapshot
     for warroom_dir in _discover_warroom_dirs():
         for room_dir in sorted(warroom_dir.glob("room-*")):
             if room_dir.is_dir():
-                room = read_room(room_dir)
+                room = _attach_plan_context(read_room(room_dir), warroom_dir)
                 last_snapshot[room["room_id"]] = room
 
     # Release file
@@ -115,7 +137,7 @@ async def poll_war_rooms():
             for warroom_dir in _discover_warroom_dirs():
                 for room_dir in sorted(warroom_dir.glob("room-*")):
                     if room_dir.is_dir():
-                        room = read_room(room_dir)
+                        room = _attach_plan_context(read_room(room_dir), warroom_dir)
                         current[room["room_id"]] = room
 
             # Detect changes: new rooms, status changes, new messages
@@ -221,17 +243,8 @@ async def poll_war_rooms():
                     and room_id not in current
                 ):
                     await global_state.broadcaster.broadcast(
-                        "room_removed", {"room_id": room_id}
+                        "room_removed", {"room_id": room_id, "plan_id": last_snapshot.get(room_id, {}).get("plan_id")}
                     )
-
-            # Check release
-            if release_file.exists():
-                curr_mtime = release_file.stat().st_mtime
-                if curr_mtime != last_snapshot.get("__release__", {}).get("mtime", 0):
-                    await global_state.broadcaster.broadcast(
-                        "release", {"content": release_file.read_text()}
-                    )
-                    current["__release__"] = {"mtime": curr_mtime}
 
             # Check plans
             plans_changed = False
@@ -265,6 +278,12 @@ async def poll_war_rooms():
 async def startup_all():
     """Initialize state."""
     asyncio.create_task(poll_war_rooms())
+    asyncio.create_task(
+        EventTailer(
+            global_state.broadcaster,
+            store_getter=lambda: global_state.store,
+        ).run()
+    )
 
     # ── Push Deployment Notification to Lark ──────────────────────────
     # Only trigger at runtime on Cloud Run (excludes Docker build phase)
@@ -327,6 +346,9 @@ async def startup_all():
         # Initialize store in the background thread to prevent slow imports
         # from blocking the main loop.
 
+        store_cls = _get_ostwin_store_cls()
+        global_state.store = store_cls(WARROOMS_DIR, agents_dir=AGENTS_DIR)
+
         # Force re-index if requested via CLI flag
         if os.environ.get("OSTWIN_REINDEX") == "true":
             logger.info("Forcing full re-index as requested")
@@ -337,6 +359,7 @@ async def startup_all():
                 global_state.store.zvec_dir.mkdir(parents=True, exist_ok=True)
 
         global_state.store.ensure_collections()
+        global_state.store.sync_from_disk()
 
         def _background_sync():
             from dashboard.routes import skills as skills_routes
@@ -349,11 +372,6 @@ async def startup_all():
                 import time
 
                 time.sleep(5)
-
-                # Lazy import of heavy vector store
-                from dashboard.zvec_store import OSTwinStore
-
-                global_state.store = OSTwinStore(WARROOMS_DIR, agents_dir=AGENTS_DIR)
 
                 # ── Load model catalog from models.dev ────────────────────────────
                 try:
@@ -422,9 +440,10 @@ async def startup_all():
     except Exception as e:
         logger.error("Bot manager init failed: %s", e)
 
-    # Auto-start ngrok tunnel if NGROK_AUTHTOKEN is set
+    # Auto-start ngrok tunnel only when enabled and NGROK_AUTHTOKEN is set.
+    ngrok_enabled = os.environ.get("OSTWIN_NGROK_ENABLED", "true").strip().lower()
     auth_token = os.environ.get("NGROK_AUTHTOKEN")
-    if auth_token:
+    if auth_token and ngrok_enabled not in {"0", "false", "no", "off"}:
         try:
             from dashboard.tunnel import start_tunnel
 

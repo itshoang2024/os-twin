@@ -6,3 +6,5 @@ export function draftConversationId(platform: string, userId: string): string {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   return `${connectorConversationId(platform, userId)}:draft:${suffix}`;
 }
+
+export { telegramConversationId, slackConversationId } from './conversation-bindings';

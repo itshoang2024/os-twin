@@ -21,6 +21,7 @@ _channel_ci_mode() {
 
 _select_channel_pm() {
   command -v bun &>/dev/null && { echo "bun"; return 0; }
+  command -v npm &>/dev/null && { echo "npm"; return 0; }
   return 1
 }
 
@@ -45,6 +46,23 @@ _install_channel_deps() {
         return 1
       fi
       bun install
+      ;;
+    npm)
+      if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+        if output="$(npm ci 2>&1)"; then
+          [[ -n "$output" ]] && printf '%s\n' "$output"
+          return 0
+        fi
+        if ! _channel_ci_mode; then
+          warn "npm lockfile install failed; retrying with npm install"
+          [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+          npm install
+          return $?
+        fi
+        [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+        return 1
+      fi
+      npm install
       ;;
     *)
       warn "Unsupported JavaScript package manager for channels: $pm"
@@ -83,18 +101,14 @@ install_channels() {
     warn "Node.js not found — cannot install channel connectors"
     info "Install Node.js and re-run"
     return
-  elif ! check_bun; then
-    warn "Bun not found — cannot install channel connectors"
-    info "Install Bun and re-run"
-    return
   fi
 
   for CHAN_DIR in "${bot_dirs[@]}"; do
     local channel_pm=""
     channel_pm="$(_select_channel_pm || true)"
     if [[ -z "$channel_pm" ]]; then
-      warn "No Bun runtime found — cannot install channel connectors in $CHAN_DIR"
-      info "Install Bun and re-run"
+      warn "No JavaScript package manager found — cannot install channel connectors in $CHAN_DIR"
+      info "Install Bun or npm and re-run"
       continue
     fi
 
@@ -114,6 +128,10 @@ install_channels() {
     fi
   done
 
+  if [[ -f "$INSTALL_DIR/bot/package.json" ]]; then
+    CHAN_DIR="$INSTALL_DIR/bot"
+  fi
+
   ok "Channel connector ready"
   info "Start with: ostwin channel connect <platform>"
 }
@@ -123,11 +141,18 @@ install_channels() {
 
 start_channels() {
   if [[ -z "${CHAN_DIR:-}" ]]; then
-    return
+    if [[ -f "$INSTALL_DIR/bot/package.json" ]]; then
+      CHAN_DIR="$INSTALL_DIR/bot"
+    else
+      warn "channel connector dir (bot/) not found — skipping startup"
+      return
+    fi
   fi
 
-  if ! command -v bun &>/dev/null; then
-    warn "Bun not found — cannot start channels"
+  local channel_pm=""
+  channel_pm="$(_select_channel_pm || true)"
+  if [[ -z "$channel_pm" ]]; then
+    warn "No JavaScript package manager found — cannot start channels"
     return
   fi
 
@@ -138,6 +163,8 @@ start_channels() {
   [[ -f "$env_file" ]] && { set -a; source "$env_file"; set +a; }
   # shellcheck disable=SC1090
   [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
+  export DASHBOARD_PORT="${DASHBOARD_PORT:-3366}"
+  export DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:${DASHBOARD_PORT}}"
 
   local chan_pid_file="$INSTALL_DIR/.agents/channel.pid"
   if [[ -f "$chan_pid_file" ]]; then
@@ -162,7 +189,9 @@ start_channels() {
     cd "$CHAN_DIR" || exit
     # shellcheck disable=SC1090
     [[ -f "$project_root_env" ]] && { set -a; source "$project_root_env"; set +a; }
-    nohup bun run start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
+    export DASHBOARD_PORT="${DASHBOARD_PORT:-3366}"
+    export DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:${DASHBOARD_PORT}}"
+    nohup "$channel_pm" run start > "$INSTALL_DIR/logs/channel.log" 2>&1 &
     echo $! > "$chan_pid_file"
     echo "$!"
   ) | { read -r chan_pid; ok "Channels started (PID $chan_pid) — log: $INSTALL_DIR/logs/channel.log"; }

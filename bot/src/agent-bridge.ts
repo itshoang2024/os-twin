@@ -18,12 +18,14 @@ import api from './api';
 import { connectorConversationId, draftConversationId } from './conversation-ids';
 import { getSession, setMode, setPlan, clearActivePlan, getStagedImages } from './sessions';
 import { type AttachmentMeta } from './connectors/base';
+import { bindConversation, telegramConversationId } from './conversation-bindings';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
 export interface AgentContext {
   userId: string;
   platform: string;
+  conversationId?: string;
   referencedMessageContent?: string;
   attachments?: AttachmentMeta[];
 }
@@ -48,6 +50,16 @@ function planCreatedDestination(actions?: Array<{ type: string; plan_id?: string
     }
   }
   return null;
+}
+
+function bindAgentPlan(agentCtx: AgentContext, planId: string): void {
+  const conversationId = agentCtx.conversationId || (agentCtx.platform === 'telegram' ? telegramConversationId(agentCtx.userId) : null);
+  if (!conversationId || (agentCtx.platform !== 'telegram' && agentCtx.platform !== 'slack')) return;
+  try {
+    bindConversation({ conversation_id: conversationId, platform: agentCtx.platform as 'telegram' | 'slack', plan_id: planId });
+  } catch (err: any) {
+    console.warn(`[BINDINGS] Failed to bind agent conversation to ${planId}: ${err.message}`);
+  }
 }
 
 // ── Trivial message fast-path ───────────────────────────────────────────
@@ -115,6 +127,7 @@ export async function askAgent(
       const destination = planCreatedDestination(result.actions);
       if (destination) {
         setPlan(agentCtx.userId, agentCtx.platform, destination.planId);
+        bindAgentPlan(agentCtx, destination.planId);
       }
 
       return {
@@ -180,6 +193,7 @@ export async function askAgent(
     const destination = planCreatedDestination(result.actions);
     if (destination) {
       setPlan(agentCtx.userId, agentCtx.platform, destination.planId);
+      bindAgentPlan(agentCtx, destination.planId);
     }
 
     return {

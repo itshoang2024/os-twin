@@ -140,4 +140,18 @@ docs/plan
 docs/plan/
 docs/plan/**
 
+!.agents/events/
+!.agents/events/**
+!.agents/channel/
+!.agents/channel/Write-LifecycleSignal.ps1
+!.agents/tests/
+!.agents/tests/events/
+!.agents/tests/events/**
+!.agents/tests/channel/
+!.agents/tests/channel/Write-LifecycleSignal.Tests.ps1
+
+# Ostwin generated
+.opencode/opencode.json
+.war-rooms/
+.agents/*
 .memory
