@@ -97,6 +97,10 @@ function channelItemLabel(item: ChannelItem): string {
   return item.title || item.conversation_id || item.channel_id || item.user_id || item.id;
 }
 
+function channelItemEventCount(item: ChannelItem): number {
+  return supportedNotificationEvents(item.registered_events || item.notification_events).length;
+}
+
 export function ChannelsPanel() {
   const { channels = [], isLoading, connect, disconnect, test, regeneratePairing, updateSettings } = useChannels();
 
@@ -405,18 +409,24 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
       registered_events: supportedNotificationEvents(item.registered_events || item.notification_events || fallbackEvents),
     }));
   });
+  const [expandedChannelItems, setExpandedChannelItems] = useState<string[]>(() => {
+    const items = getChannelItems(config);
+    return items[0]?.id ? [items[0].id] : [];
+  });
 
   const toggleEvent = (event: string) => {
     setEvents(prev => prev.includes(event) ? prev.filter(e => e !== event) : [...prev, event]);
   };
 
   const toggleChannelItem = (itemId: string) => {
+    if (!notificationsEnabled) return;
     setChannelItems(prev => prev.map(item => (
       item.id === itemId ? { ...item, enabled: !(item.enabled ?? true) } : item
     )));
   };
 
   const toggleChannelItemEvent = (itemId: string, event: string) => {
+    if (!notificationsEnabled) return;
     setChannelItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
       const registeredEvents = item.registered_events || [];
@@ -427,6 +437,12 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
           : [...registeredEvents, event],
       };
     }));
+  };
+
+  const toggleChannelItemExpanded = (itemId: string) => {
+    setExpandedChannelItems(prev => (
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    ));
   };
 
   const handleSave = () => {
@@ -477,35 +493,55 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
           {channelItems.length > 0 ? (
             <div className="space-y-3">
               {channelItems.map(item => (
-                <div key={item.id} className="p-3 bg-background border border-border-light rounded-lg space-y-3">
-                  <label className="flex items-center justify-between gap-3 cursor-pointer">
-                    <span className="min-w-0">
-                      <span className="block text-[11px] font-bold text-text-main truncate">{channelItemLabel(item)}</span>
-                      <span className="block text-[10px] font-mono text-text-faint truncate">{item.conversation_id || item.id}</span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={item.enabled ?? true}
-                      onChange={() => toggleChannelItem(item.id)}
-                      className="w-4 h-4 accent-primary"
-                    />
-                  </label>
-                  <div className="grid grid-cols-1 gap-1.5">
-                    {NOTIFICATION_EVENTS.map(event => (
-                      <label key={event.id} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-slate-50 cursor-pointer">
-                        <span className="min-w-0">
-                          <span className="text-[10px] font-bold text-text-main">{event.title}</span>
-                          <span className="ml-2 text-[9px] font-mono text-text-faint">{event.description}</span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={(item.registered_events || []).includes(event.id)}
-                          onChange={() => toggleChannelItemEvent(item.id, event.id)}
-                          className="w-4 h-4 accent-primary"
-                        />
-                      </label>
-                    ))}
+                <div key={item.id} className={`bg-background border border-border-light rounded-lg overflow-hidden ${notificationsEnabled ? '' : 'opacity-60'}`}>
+                  <div className="flex items-center gap-3 p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleChannelItemExpanded(item.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      aria-expanded={expandedChannelItems.includes(item.id)}
+                    >
+                      <span className="material-symbols-outlined text-lg text-text-muted transition-transform">
+                        {expandedChannelItems.includes(item.id) ? 'expand_less' : 'expand_more'}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-bold text-text-main truncate">{channelItemLabel(item)}</span>
+                        <span className="block text-[10px] font-mono text-text-faint truncate">{item.conversation_id || item.id}</span>
+                      </span>
+                      <span className="shrink-0 rounded-full border border-border-light bg-slate-50 px-2 py-0.5 text-[9px] font-bold text-text-faint">
+                        {channelItemEventCount(item)} events
+                      </span>
+                    </button>
+                    <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold text-text-faint cursor-pointer">
+                      On
+                      <input
+                        type="checkbox"
+                        checked={notificationsEnabled && (item.enabled ?? true)}
+                        disabled={!notificationsEnabled}
+                        onChange={() => toggleChannelItem(item.id)}
+                        className="w-4 h-4 accent-primary"
+                      />
+                    </label>
                   </div>
+                  {expandedChannelItems.includes(item.id) && (
+                    <div className="grid grid-cols-1 gap-1.5 border-t border-border-light p-3 pt-2">
+                      {NOTIFICATION_EVENTS.map(event => (
+                        <label key={event.id} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-slate-50 cursor-pointer">
+                          <span className="min-w-0">
+                            <span className="text-[10px] font-bold text-text-main">{event.title}</span>
+                            <span className="ml-2 text-[9px] font-mono text-text-faint">{event.description}</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={(item.registered_events || []).includes(event.id)}
+                            disabled={!notificationsEnabled || item.enabled === false}
+                            onChange={() => toggleChannelItemEvent(item.id, event.id)}
+                            className="w-4 h-4 accent-primary"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -543,26 +579,6 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
               </div>
             </div>
 
-            <div className="p-3 bg-background border border-border-light rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-text-muted">Authorized Users</span>
-                <span className="text-[10px] text-text-faint font-bold">{config.authorized_users?.length || 0} Paired</span>
-              </div>
-              <div className="space-y-1 max-h-[120px] overflow-y-auto pr-1">
-                {config.authorized_users && config.authorized_users.length > 0 ? (
-                  config.authorized_users.map(userId => (
-                    <div key={userId} className="flex items-center gap-2 p-1.5 bg-slate-50 rounded border border-slate-100/50">
-                      <span className="material-symbols-outlined text-sm text-text-muted">person</span>
-                      <span className="text-[10px] font-mono text-text-main truncate flex-1">{userId}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-2 text-[10px] text-text-faint italic bg-slate-50/50 rounded border border-dashed border-border-light">
-                    No users authorized yet.
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       </div>
