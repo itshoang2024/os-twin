@@ -4,7 +4,7 @@
 #
 # Provides: install_brew, install_uv, install_python, install_pwsh,
 #           install_node, install_bun, install_opencode, install_agent_browser,
-#           install_chrome_devtools, install_pester
+#           install_chrome_devtools, install_pester, install_websocket_module
 #
 # Requires: lib.sh, versions.conf, detect-os.sh (OS, ARCH, PKG_MGR),
 #           check-deps.sh (check_uv, check_brew, check_opencode,
@@ -526,6 +526,25 @@ install_pester() {
       Write-Host "    [OK] Pester $ver installed"
     }
   ' 2>/dev/null || warn "Pester installation failed (non-critical)"
+}
+
+install_websocket_module() {
+  if ! command -v pwsh &>/dev/null; then
+    warn "Skipping WebSocket PowerShell module — PowerShell not available"
+    return
+  fi
+
+  step "Installing WebSocket PowerShell module..."
+  pwsh -NoProfile -Command '
+    $installed = Get-Module -ListAvailable WebSocket | Select-Object -First 1
+    if ($installed) {
+      Write-Host "    [OK] WebSocket $($installed.Version) already installed"
+    } else {
+      Install-Module -Name WebSocket -Force -Scope CurrentUser -SkipPublisherCheck -AllowClobber
+      $ver = (Get-Module -ListAvailable WebSocket | Select-Object -First 1).Version
+      Write-Host "    [OK] WebSocket $ver installed"
+    }
+  ' 2>/dev/null || warn "WebSocket PowerShell module installation failed (non-critical; .NET ClientWebSocket fallback remains available)"
 }
 
 # ─── Ollama (local LLM host CLI) ─────────────────────────────────────────────

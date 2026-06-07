@@ -55,6 +55,10 @@ param(
 
     [string]$PlanId = '',
 
+    [string]$RunId = '',
+
+    [string]$EventsPath = '',
+
     [string[]]$DependsOn = @(),
 
     [string]$WarRoomsDir = '',
@@ -83,6 +87,7 @@ if (-not $WarRoomsDir) {
 }
 
 $roomDir = Join-Path $WarRoomsDir $RoomId
+$agentsDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 # --- Prevent overwriting existing room ---
 if (Test-Path $roomDir) {
@@ -95,6 +100,19 @@ New-Item -ItemType Directory -Path (Join-Path $roomDir "pids") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $roomDir "artifacts") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $roomDir "contexts") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $roomDir "assets") -Force | Out-Null
+
+# --- Derive values needed by both source events and projections ---
+$assignmentType = if ($TaskRef -match '^EPIC-') { 'epic' } else { 'task' }
+$ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+$resolvedWorkingDir = if ([System.IO.Path]::IsPathRooted($WorkingDir)) {
+    $WorkingDir
+} else {
+    $resolved = (Resolve-Path $WorkingDir -ErrorAction SilentlyContinue).Path
+    if ($resolved) { $resolved } else { $WorkingDir }
+}
+$effectiveCandidateRoles = if ($CandidateRoles.Count -gt 0) { $CandidateRoles } else { @($AssignedRole) }
+if (-not $RunId -and $env:OSTWIN_RUN_ID) { $RunId = $env:OSTWIN_RUN_ID }
+if (-not $RunId -and $PlanId) { $RunId = 'run_legacy' }
 
 # --- Inject Assets ---
 $assetManifest = ""
@@ -117,32 +135,55 @@ if ($Assets -and $Assets.Count -gt 0) {
     $assetManifest += "`n"
 }
 
+# --- Publish source event before room/status/role projections ---
+if ($PlanId) {
+    $eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+    if (-not (Test-Path $eventsModule)) {
+        throw "PlanId was provided, but orchestration event module was not found: $eventsModule"
+    }
+    Import-Module (Resolve-Path $eventsModule).Path -Force
+    if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) {
+        throw "PlanId was provided, but Write-OrchestrationEvent is unavailable."
+    }
+
+    $roomCreatedEvent = [ordered]@{
+        event_type = 'room.created'
+        plan_id    = $PlanId
+        run_id     = $RunId
+        room_id    = $RoomId
+        epic_ref   = $TaskRef
+        summary    = "War-room $RoomId created for $TaskRef."
+        payload    = [ordered]@{
+            task_ref        = $TaskRef
+            assigned_role   = $AssignedRole
+            candidate_roles = $effectiveCandidateRoles
+            working_dir     = $resolvedWorkingDir
+        }
+    }
+    Write-OrchestrationEvent -EventsPath $EventsPath -Event $roomCreatedEvent | Out-Null
+}
+
 # --- Initialize channel file only ---
 # Channel data is authored exclusively through the ostwin-channel MCP
 # post_message tool. PowerShell wrappers may create the empty file but must not
 # append, truncate, or synthesize messages.
 New-Item -ItemType File -Path (Join-Path $roomDir "channel.jsonl") -Force | Out-Null
 
-# --- Detect Epic vs Task ---
-$assignmentType = if ($TaskRef -match '^EPIC-') { 'epic' } else { 'task' }
-
 # --- Write config.json (Goal Contract) ---
-$ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-
 $config = [ordered]@{
     room_id    = $RoomId
     task_ref   = $TaskRef
     plan_id    = $PlanId
+    run_id     = $RunId
     depends_on = @($DependsOn)
     created_at = $ts
-    working_dir = if ([System.IO.Path]::IsPathRooted($WorkingDir)) { $WorkingDir }
-                  else { (Resolve-Path $WorkingDir -ErrorAction SilentlyContinue).Path }
+    working_dir = $resolvedWorkingDir
 
     assignment = [ordered]@{
         title           = ($TaskDescription -split "`n")[0].Trim()
         description     = $TaskDescription
         assigned_role   = $AssignedRole
-        candidate_roles = if ($CandidateRoles.Count -gt 0) { $CandidateRoles } else { @($AssignedRole) }
+        candidate_roles = $effectiveCandidateRoles
         type            = $assignmentType
     }
 
@@ -170,10 +211,11 @@ $config = [ordered]@{
     }
 }
 
+if ($EventsPath) { $config['events_path'] = $EventsPath }
+
 $config | ConvertTo-Json -Depth 10 | Out-File -FilePath (Join-Path $roomDir "config.json") -Encoding utf8
 
 # --- Write per-role config file ({role}_{id}.json) ---
-$agentsDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configPath = Join-Path $agentsDir "config.json"
 $globalConfig = $null
 if (Test-Path $configPath) {

@@ -42,7 +42,7 @@ This skill defines the standard communication protocol for all agents working wi
 |------|------|------------------|
 | `pass` | All acceptance criteria met | Confirmation, test results, suggestions |
 | `fail` | Issues found | Numbered issues with severity, expected vs actual |
-| `escalate` | Design/scope problem | Classification (DESIGN/SCOPE/REQUIREMENTS), reasoning |
+| `escalate` | Reviewer cannot proceed without counterpart input, manager mediation, or design/scope decision | Classification (CLARIFICATION/DESIGN/SCOPE/REQUIREMENTS/BLOCKED), exact question, evidence, requested counterpart |
 
 **Example `fail` message:**
 ```json
@@ -130,10 +130,52 @@ Manager  task  Engineer  done  Manager  review  QA  pass  Manager  release
 QA  fail  Manager (triage)  fix  Engineer  done  Manager  review  QA
 ```
 
-### Escalation Path
+### Design Escalation Path
 ```
 QA  escalate  Manager (triage)  design-review  Architect  design-guidance  Manager  fix  Engineer
 ```
+
+### Role Debate / Clarification Path
+```
+Reviewer  escalate  Manager (triage)  fix  Counterpart  done  Manager  review  Reviewer
+```
+
+Use this path when the reviewer is blocked by an ambiguity that the counterpart
+role must answer before review can continue. Examples: QA automation needs the
+engineer to confirm runtime target, fixtures, baseline-noise classification, or
+whether a planned scenario matches the delivered implementation.
+
+#### Debate Protocol
+
+1. **Raising role posts `escalate`** — include:
+   - `VERDICT: ESCALATE`
+   - classification: `CLARIFICATION`, `DESIGN`, `SCOPE`, `REQUIREMENTS`, or `BLOCKED`
+   - the exact question(s) to resolve
+   - evidence paths and commands already run
+   - requested counterpart role, if known
+   - what work is paused until the answer arrives
+2. **Manager enters `triage`** — manager mediates, notifies the counterpart via
+   a `fix` message, and records triage context. In lifecycle terms this is:
+   `review.escalate -> triage.fix -> optimize`.
+3. **Counterpart responds with `done`** — the response must answer each question
+   directly. It may make only low-risk unblocker fixes; otherwise it should
+   provide clarification and evidence. Do not restart the entire epic unless the
+   manager specifically requests redesign/replan.
+4. **Reviewer resumes in `review`** — after `optimize.done -> review`, the
+   original reviewer reads the counterpart response from the channel and either
+   continues automation/review, posts `pass`, posts `fail`, or escalates again
+   with a narrower unresolved question.
+
+#### Debate Anti-Patterns
+
+- Do not use `fail` for a missing answer or unresolved assumption; use
+  `escalate` so manager mediation can preserve context.
+- Do not post vague escalations such as "needs review"; include the exact
+  questions and evidence.
+- Do not let the counterpart perform broad unrelated rework during debate; the
+  default action is clarification plus minimal unblocker fixes.
+- Do not communicate outside the channel; the next lifecycle role only receives
+  durable context from channel messages and artifacts.
 
 ## Protocol Rules
 
@@ -143,6 +185,9 @@ QA  escalate  Manager (triage)  design-review  Architect  design-guidance  Manag
 4. **Post to the channel** -- don't communicate out-of-band
 5. **Use correct message types** -- the manager parses these programmatically
 6. **Progress updates are not done messages** -- only `done` signals completion
+7. **Escalation is a mediated debate request** -- `escalate` pauses the current
+   reviewer, asks the counterpart to answer through manager triage, then returns
+   to review with the answer in channel context
 
 ## Verification
 

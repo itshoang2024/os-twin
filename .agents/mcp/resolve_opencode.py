@@ -249,7 +249,7 @@ def _permission_key(server_name):
 # These are required for inter-agent communication (channel) and room state
 # management (warroom). Without these, agents cannot post signals or update
 # status, breaking the lifecycle state machine.
-INFRA_MCP_SERVERS = {"channel", "warroom", "memory", "knowledge"}
+INFRA_MCP_SERVERS = {"channel", "warroom", "memory", "knowledge", "codeindex"}
 
 
 def build_agent_permissions(roles, mcp_server_names):

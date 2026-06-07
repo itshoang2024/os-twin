@@ -14,8 +14,11 @@ function Resolve-OstwinConfigPath {
         Canonical config-file resolution logic. Checks, in order:
           1. Explicit $ConfigPath parameter
           2. AGENT_OS_CONFIG environment variable
-          3. AGENTS_DIR environment variable + /config.json
-          4. Relative to this module's parent directory
+          3. OSTWIN_CONFIG_PATH environment variable
+          4. OSTWIN_PROJECT_DIR + /.agents/config.json
+          5. AGENTS_DIR environment variable + /config.json
+          6. OSTWIN_HOME/.agents/config.json (or ~/.ostwin/.agents/config.json)
+          7. Relative to this module's parent directory
         Throws if the resolved path does not exist.
         This function is the SINGLE SOURCE OF TRUTH for config path resolution.
         Utils.psm1:Read-OstwinConfig should delegate here in a future refactor.
@@ -31,8 +34,17 @@ function Resolve-OstwinConfigPath {
     )
 
     if (-not $ConfigPath) {
+        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE }
+                   elseif ($env:HOME) { $env:HOME }
+                   else { $HOME }
+        $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $homeDir ".ostwin" }
+        $globalConfig = Join-Path (Join-Path $ostwinHome ".agents") "config.json"
+
         $ConfigPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
+                      elseif ($env:OSTWIN_CONFIG_PATH) { $env:OSTWIN_CONFIG_PATH }
+                      elseif ($env:OSTWIN_PROJECT_DIR) { Join-Path (Join-Path $env:OSTWIN_PROJECT_DIR ".agents") "config.json" }
                       elseif ($env:AGENTS_DIR) { Join-Path $env:AGENTS_DIR "config.json" }
+                      elseif (Test-Path $globalConfig) { $globalConfig }
                       else {
                           $agentsDir = (Resolve-Path (Join-Path $PSScriptRoot "..") -ErrorAction SilentlyContinue).Path
                           Join-Path $agentsDir "config.json"

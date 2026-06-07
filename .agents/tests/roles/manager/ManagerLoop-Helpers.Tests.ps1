@@ -203,6 +203,41 @@ Describe "Write-RoomStatus" {
         # qa.pid should NOT be removed (it's the new state's role)
         Test-Path (Join-Path $pids "qa.pid") | Should -BeTrue
     }
+
+    It "emits room.status.changed orchestration event when status changes" {
+        $rd = New-TestRoom -Base $TestDrive -Status "developing"
+        $configPath = Join-Path $rd "config.json"
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        $config | Add-Member -NotePropertyName plan_id -NotePropertyValue "plan-test" -Force
+        $config | Add-Member -NotePropertyName run_id -NotePropertyValue "run-test" -Force
+        $config | ConvertTo-Json -Depth 10 | Out-File -FilePath $configPath -Encoding utf8
+
+        $script:capturedStatusEvent = $null
+        function global:Write-OrchestrationEvent {
+            param([string]$EventsPath, [object]$Event)
+            $script:capturedStatusEvent = [pscustomobject]@{ EventsPath = $EventsPath; Event = $Event }
+            return $Event
+        }
+        try {
+            Write-RoomStatus -RoomDir $rd -NewStatus "review"
+        } finally {
+            Remove-Item function:\Write-OrchestrationEvent -Force -ErrorAction SilentlyContinue
+        }
+
+        $script:capturedStatusEvent | Should -Not -BeNullOrEmpty
+        $script:capturedStatusEvent.EventsPath | Should -Be ''
+        $script:capturedStatusEvent.Event.event_type | Should -Be "room.status.changed"
+        $script:capturedStatusEvent.Event.plan_id | Should -Be "plan-test"
+        $script:capturedStatusEvent.Event.run_id | Should -Be "run-test"
+        $script:capturedStatusEvent.Event.room_id | Should -Be (Split-Path $rd -Leaf)
+        $script:capturedStatusEvent.Event.epic_ref | Should -Be "TASK-TEST"
+        $script:capturedStatusEvent.Event.role | Should -Be "manager"
+        $script:capturedStatusEvent.Event.state | Should -Be "review"
+        $script:capturedStatusEvent.Event.payload.role | Should -Be "manager"
+        $script:capturedStatusEvent.Event.payload.agent_name | Should -Be "manager"
+        $script:capturedStatusEvent.Event.payload.previous_status | Should -Be "developing"
+        $script:capturedStatusEvent.Event.payload.status | Should -Be "review"
+    }
 }
 
 # ===========================================================================
@@ -413,6 +448,142 @@ Describe "Find-LatestSignal" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
         & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "please fix"
         Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "triage" | Should -Be "fix"
+    }
+
+    It "does not let a newer wrong-role signal mask an earlier valid dynamic-role signal" {
+        $script:lc.states.review.role = "qa-automation-engineer"
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "qa automation done"
+        & $script:postMsg -RoomDir $script:rd -From "engineer" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "engineer done should not mask qa automation"
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "done"
+    }
+
+    It "accepts canonical qa channel messages for qa-family dynamic evaluator roles" {
+        $script:lc.states.review.role = "qa-automation-engineer"
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+
+        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "pass" -Ref "TASK-TEST" -Body "qa automation direct MCP pass"
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
+    }
+
+    It "scopes output override to the latest wrapper segment so stale MCP calls do not override current channel signal" {
+        $script:lc.states.review.role = "qa-automation-engineer"
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "current wrapper verdict done"
+
+        $artifactDir = Join-Path $script:rd "artifacts"
+        New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+        @(
+            '⚙ channel_post_message {"msg_type":"pass","ref":"TASK-TEST"}',
+            '[wrapper] PID=123, CMD=opencode run, CWD=/tmp',
+            'VERDICT: DONE',
+            'Current invocation reused prior QA context but did not post a fresh MCP pass.'
+        ) | Out-File -FilePath (Join-Path $artifactDir "qa-automation-engineer-output.txt") -Encoding utf8
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "done"
+    }
+
+    It "still lets a current-wrapper MCP channel intent override the wrapper success signal" {
+        $script:lc.states.review.role = "qa-automation-engineer"
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "wrapper parsed verdict done"
+
+        $artifactDir = Join-Path $script:rd "artifacts"
+        New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+        @(
+            '[wrapper] PID=456, CMD=opencode run, CWD=/tmp',
+            '⚙ channel_post_message {"msg_type":"pass","ref":"TASK-TEST"}',
+            'VERDICT: DONE'
+        ) | Out-File -FilePath (Join-Path $artifactDir "qa-automation-engineer-output.txt") -Encoding utf8
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
+    }
+}
+
+# ===========================================================================
+# Invoke-TriageMediation
+# ===========================================================================
+Describe "Invoke-TriageMediation" {
+    BeforeEach {
+        $script:PriorEventWsDisabled = $env:OSTWIN_EVENT_WS_DISABLED
+        $script:PriorEventFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+        $env:OSTWIN_EVENT_WS_DISABLED = '1'
+        $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+        $script:wd = Join-Path $TestDrive "itm-$(Get-Random)"
+        New-Item -ItemType Directory -Path $script:wd -Force | Out-Null
+        Set-TestContext -RoomsDir $script:wd
+        $script:rd = New-TestRoom -Base $script:wd -Status "triage"
+        $script:eventsPath = Join-Path $script:wd 'events.jsonl'
+        $script:lc = Get-Content (Join-Path $script:rd "lifecycle.json") -Raw | ConvertFrom-Json
+        $script:lc.states.review.role = "qa-automation-engineer"
+        $script:lc | ConvertTo-Json -Depth 10 | Out-File -FilePath (Join-Path $script:rd "lifecycle.json") -Encoding utf8
+
+        $cfg = Get-Content (Join-Path $script:rd "config.json") -Raw | ConvertFrom-Json
+        $cfg | Add-Member -NotePropertyName "plan_id" -NotePropertyValue "plan-itm" -Force
+        $cfg | Add-Member -NotePropertyName "run_id" -NotePropertyValue "run-itm" -Force
+        $cfg | Add-Member -NotePropertyName "room_id" -NotePropertyValue (Split-Path $script:rd -Leaf) -Force
+        $cfg | Add-Member -NotePropertyName "events_path" -NotePropertyValue $script:eventsPath -Force
+        $cfg.assignment.assigned_role = "manager"
+        $cfg.assignment | Add-Member -NotePropertyName "candidate_roles" -NotePropertyValue @("engineer", "qa-automation-engineer") -Force
+        $cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath (Join-Path $script:rd "config.json") -Encoding utf8
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+    }
+
+    AfterEach {
+        $env:OSTWIN_EVENT_WS_DISABLED = $script:PriorEventWsDisabled
+        $env:OSTWIN_EVENT_FILE_ENABLED = $script:PriorEventFileEnabled
+    }
+
+    It "turns a QA automation escalation into a manager fix request for the counterpart role" {
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE`nNeed engineer to confirm baseUrl."
+
+        $result = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
+
+        $result.Signal | Should -Be "fix"
+        $result.TargetRole | Should -Be "engineer"
+        $result.RaisedBy | Should -Be "qa-automation-engineer"
+        Test-Path (Join-Path $script:rd "artifacts/triage-context.md") | Should -BeTrue
+
+        $fixMsgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -Last 1 -AsObject
+        $fixMsgs[-1].from | Should -Be "manager"
+        $fixMsgs[-1].to | Should -Be "engineer"
+        $fixMsgs[-1].event_id | Should -Match '^evt_'
+        $fixMsgs[-1].plan_id | Should -Be "plan-itm"
+        $fixMsgs[-1].run_id | Should -Be "run-itm"
+        $fixMsgs[-1].room_id | Should -Be (Split-Path $script:rd -Leaf)
+        $fixMsgs[-1].body | Should -Match "Manager triage mediation"
+        $fixMsgs[-1].body | Should -Match "Need engineer to confirm baseUrl"
+
+        Test-Path $script:eventsPath | Should -BeTrue
+        $event = Get-Content $script:eventsPath -Raw | ConvertFrom-Json
+        $event.event_type | Should -Be "lifecycle.signal.posted"
+        $event.event_id | Should -Be $fixMsgs[-1].event_id
+        $event.plan_id | Should -Be "plan-itm"
+        $event.run_id | Should -Be "run-itm"
+        $event.room_id | Should -Be (Split-Path $script:rd -Leaf)
+        $event.epic_ref | Should -Be "TASK-TEST"
+        $event.role | Should -Be "manager"
+        $event.state | Should -Be "triage"
+        $event.payload.from | Should -Be "manager"
+        $event.payload.to | Should -Be "engineer"
+        $event.payload.type | Should -Be "fix"
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "triage" | Should -Be "fix"
+    }
+
+    It "is idempotent when a manager triage signal is already present" {
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE"
+        Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST" | Out-Null
+        $firstCount = (& $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject).Count
+
+        $second = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
+        $second.AlreadyPresent | Should -BeTrue
+        $second.Signal | Should -Be "fix"
+        $secondCount = (& $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject).Count
+        $secondCount | Should -Be $firstCount
     }
 }
 

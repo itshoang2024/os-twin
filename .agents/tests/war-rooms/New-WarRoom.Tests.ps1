@@ -2,6 +2,14 @@
 
 BeforeAll {
     $script:NewWarRoom = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "New-WarRoom.ps1"
+    $script:PriorEventWsDisabled = $env:OSTWIN_EVENT_WS_DISABLED
+    $script:PriorEventFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+    $env:OSTWIN_EVENT_WS_DISABLED = '1'
+}
+
+AfterAll {
+    $env:OSTWIN_EVENT_WS_DISABLED = $script:PriorEventWsDisabled
+    $env:OSTWIN_EVENT_FILE_ENABLED = $script:PriorEventFileEnabled
 }
 
 Describe "New-WarRoom" {
@@ -71,6 +79,92 @@ Describe "New-WarRoom" {
             $config.room_id | Should -Be "room-010"
             $config.task_ref | Should -Be "EPIC-001"
             $config.created_at.ToString("o") | Should -Match "\d{4}-\d{2}-\d{2}T"
+        }
+
+        It "stores orchestration event context in config.json" {
+            $eventsPath = Join-Path $script:warRoomsDir 'events.jsonl'
+            & $script:NewWarRoom -RoomId "room-010b" -TaskRef "EPIC-010" `
+                                 -TaskDescription "Event context" `
+                                  -WarRoomsDir $script:warRoomsDir `
+                                  -PlanId "pt-test" `
+                                  -RunId "run-test" `
+                                  -EventsPath $eventsPath
+
+            $config = Get-Content (Join-Path $script:warRoomsDir "room-010b" "config.json") -Raw | ConvertFrom-Json
+            $config.plan_id | Should -Be "pt-test"
+            $config.run_id | Should -Be "run-test"
+            $config.events_path | Should -Be $eventsPath
+        }
+
+        It "stores plan and run context without events_path by default" {
+            & $script:NewWarRoom -RoomId "room-010b-live" -TaskRef "EPIC-010" `
+                                 -TaskDescription "Live event context" `
+                                  -WarRoomsDir $script:warRoomsDir `
+                                  -PlanId "pt-test" `
+                                  -RunId "run-test"
+
+            $config = Get-Content (Join-Path $script:warRoomsDir "room-010b-live" "config.json") -Raw | ConvertFrom-Json
+            $config.plan_id | Should -Be "pt-test"
+            $config.run_id | Should -Be "run-test"
+            $config.PSObject.Properties.Name | Should -Not -Contain 'events_path'
+            Test-Path (Join-Path $script:warRoomsDir 'events.jsonl') | Should -BeFalse
+        }
+
+        It "appends room.created before creating projection files when event context is provided" {
+            $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+            $eventsPath = Join-Path $script:warRoomsDir 'events.jsonl'
+            try {
+                & $script:NewWarRoom -RoomId "room-010c" -TaskRef "EPIC-011" `
+                                     -TaskDescription "Event-first room" `
+                                       -WarRoomsDir $script:warRoomsDir `
+                                       -PlanId "pt-event-first" `
+                                       -RunId "run-event-first" `
+                                       -EventsPath $eventsPath `
+                                      -AssignedRole "engineer:fe" `
+                                      -CandidateRoles @("engineer:fe", "qa")
+            } finally {
+                $env:OSTWIN_EVENT_FILE_ENABLED = $script:PriorEventFileEnabled
+            }
+
+            $roomDir = Join-Path $script:warRoomsDir "room-010c"
+            Test-Path $eventsPath | Should -BeTrue
+            $events = Get-Content $eventsPath | ForEach-Object { $_ | ConvertFrom-Json }
+            @($events).Count | Should -Be 1
+            $events[0].event_type | Should -Be 'room.created'
+            $events[0].plan_id | Should -Be 'pt-event-first'
+            $events[0].run_id | Should -Be 'run-event-first'
+            $events[0].room_id | Should -Be 'room-010c'
+            $events[0].epic_ref | Should -Be 'EPIC-011'
+            $events[0].payload.assigned_role | Should -Be 'engineer:fe'
+
+            Test-Path (Join-Path $roomDir 'config.json') | Should -BeTrue
+            Test-Path (Join-Path $roomDir 'engineer_001.json') | Should -BeTrue
+            (Get-Content (Join-Path $roomDir 'status') -Raw).Trim() | Should -Be 'pending'
+        }
+
+        It "does not create room/status/role projections when room.created append fails" {
+            $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+            $blockedParent = Join-Path $script:warRoomsDir 'blocked-parent'
+            'not a directory' | Out-File $blockedParent -Encoding utf8
+            $invalidEventsPath = Join-Path $blockedParent 'events.jsonl'
+
+            try {
+                { & $script:NewWarRoom -RoomId "room-010d" -TaskRef "EPIC-012" `
+                                     -TaskDescription "Event append should fail" `
+                                       -WarRoomsDir $script:warRoomsDir `
+                                       -PlanId "pt-event-fail" `
+                                       -RunId "run-event-fail" `
+                                       -EventsPath $invalidEventsPath } | Should -Throw
+            } finally {
+                $env:OSTWIN_EVENT_FILE_ENABLED = $script:PriorEventFileEnabled
+            }
+
+            $roomDir = Join-Path $script:warRoomsDir "room-010d"
+            Test-Path $roomDir | Should -BeTrue
+            Test-Path (Join-Path $roomDir 'config.json') | Should -BeFalse
+            Test-Path (Join-Path $roomDir 'engineer_001.json') | Should -BeFalse
+            Test-Path (Join-Path $roomDir 'status') | Should -BeFalse
+            Test-Path (Join-Path $roomDir 'channel.jsonl') | Should -BeFalse
         }
 
         It "stores assignment metadata" {

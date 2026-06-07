@@ -10,6 +10,7 @@ os.environ["OSTWIN_API_KEY"] = "test-key"
 import tempfile
 tmp_dir = tempfile.mkdtemp()
 os.environ["OSTWIN_PROJECT_DIR"] = tmp_dir
+os.environ["OSTWIN_HOME"] = str(Path(tmp_dir) / ".ostwin")
 
 from dashboard.api import app
 
@@ -83,19 +84,21 @@ def test_role_name_uniqueness():
     assert "already exists" in response.json()["detail"]
 
 def test_role_dependencies(tmp_path):
-    # Setup a war-room that uses a role
-    role_name = "active-role"
+    # Setup a synthetic war-room role. Keep this distinct from seeded roles so
+    # the test does not imply that "active-role" is an available built-in.
+    role_name = "dependency-test-role"
     role_data = {
         "name": role_name,
         "provider": "Gemini",
         "version": "google-vertex/gemini-1.5-pro",
     }
     res = client.post("/api/roles", json=role_data, headers=headers)
+    assert res.status_code == 201
     role_id = res.json()["id"]
     
     # Create a mock war-room in our project dir
     warrooms_dir = Path(tmp_dir) / ".war-rooms"
-    room_dir = warrooms_dir / "room-active"
+    room_dir = warrooms_dir / "room-dependency-test"
     room_dir.mkdir(parents=True)
     
     config = {
@@ -114,7 +117,7 @@ def test_role_dependencies(tmp_path):
     assert response.status_code == 200
     deps = response.json()
     assert len(deps["active_warrooms"]) == 1
-    assert deps["active_warrooms"][0]["id"] == "room-active"
+    assert deps["active_warrooms"][0]["id"] == "room-dependency-test"
     
     # Try to delete - should fail
     response = client.delete(f"/api/roles/{role_id}", headers=headers)
