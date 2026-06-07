@@ -1492,13 +1492,30 @@ function Invoke-TriageMediation {
     if (-not $escalations -or $escalations.Count -eq 0) { return $null }
 
     $latestEscalation = $null
+    $latestAnyEscalation = $null
     foreach ($msg in $escalations) {
         $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $msg.ts
+        if (-not $latestAnyEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestAnyEscalation.ts)) {
+            $latestAnyEscalation = $msg
+        }
         if ($msgTs -ge $changedAt -and (-not $latestEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestEscalation.ts))) {
             $latestEscalation = $msg
         }
     }
-    if (-not $latestEscalation) { return $null }
+    if (-not $latestEscalation -and $latestAnyEscalation) {
+        # The escalation that caused review -> triage is usually timestamped just
+        # BEFORE triage's state_changed_at. Filtering strictly against the new
+        # triage timestamp drops the causal message and leaves triage idle with
+        # no manager-output.txt. Fall back to the latest escalation when no
+        # post-triage escalation exists; Find-LatestSignal already validated the
+        # review escalation before the state transition.
+        Write-Log "DEBUG" "[$TaskRef] Triage using latest pre-triage escalation as causal context."
+        $latestEscalation = $latestAnyEscalation
+    }
+    if (-not $latestEscalation) {
+        Write-Log "WARN" "[$TaskRef] Triage has no escalation message to compile for manager."
+        return $null
+    }
 
     $raiser = if ($latestEscalation.from) { [string]$latestEscalation.from } else { '' }
     $raiserBase = $raiser -replace ':.*$', ''

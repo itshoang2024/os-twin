@@ -565,6 +565,19 @@ Describe "Invoke-TriageMediation" {
         $prompt | Should -Match "Post your decision to the war-room channel as"
     }
 
+    It "uses the causal pre-triage escalation when triage state_changed_at is newer" {
+        & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE`nCausal message before triage timestamp."
+        ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 10).ToString() |
+            Out-File -FilePath (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+
+        $result = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
+
+        $result.Signal | Should -Be "manager-triage"
+        Test-Path $result.PromptPath | Should -BeTrue
+        $prompt = Get-Content $result.PromptPath -Raw
+        $prompt | Should -Match "Causal message before triage timestamp"
+    }
+
     It "is idempotent when a manager triage signal is already present" {
         & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE"
         & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "Manager decision already present."
