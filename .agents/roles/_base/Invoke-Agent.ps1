@@ -698,7 +698,7 @@ export OSTWIN_PYTHON='$venvPythonUnix'
             # This avoids nested pwsh invocations with broken argument passing.
             if ($exe -match '\.ps1$') {
                 # exe is already the .ps1 file — cmdArgs are its parameters
-                $allArgs = $cmdArgs + $extraCliArgs
+                $allArgs = $cmdArgs + $attemptArgs
             } elseif ($exe -eq 'pwsh' -or $exe -eq 'powershell') {
                 # Look for -File flag and extract the script path
                 $fileIdx = [Array]::FindIndex($cmdArgs, [Predicate[object]]{ param($a) $a -eq '-File' })
@@ -712,12 +712,12 @@ export OSTWIN_PYTHON='$venvPythonUnix'
                             ($i -gt 0 -and $cmdArgs[$i - 1] -eq '-ExecutionPolicy')) { continue }
                         $remaining += $cmdArgs[$i]
                     }
-                    $allArgs = $remaining + $extraCliArgs
+                    $allArgs = $remaining + $attemptArgs
                 } else {
-                    $allArgs = $cmdArgs + $extraCliArgs
+                    $allArgs = $cmdArgs + $attemptArgs
                 }
             } else {
-                $allArgs = $cmdArgs + $extraCliArgs
+                $allArgs = $cmdArgs + $attemptArgs
             }
 
             # Serialize args array into the wrapper script as a PowerShell array literal
@@ -755,6 +755,8 @@ if (Test-Path `$envSh) { . `$envSh }
 
 # Execute using call operator with array
 & '$exe' @cmdArgs 2>&1 | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
+`$agentExitCode = if (`$null -ne `$global:LASTEXITCODE) { [int]`$global:LASTEXITCODE } else { 0 }
+exit `$agentExitCode
 "@
             $psScriptContent | Out-File -FilePath $psWrapperScript -Encoding utf8 -Force
 

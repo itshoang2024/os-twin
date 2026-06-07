@@ -287,7 +287,7 @@ if (-not $IgnorePlanWorkingDir -and $planContent -match '(?m)^working_dir:\s*(.+
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            if ($WorkspaceIsolation -eq 'shared') {
+            if ($WorkspaceIsolation -eq 'shared' -and -not $DryRun) {
                 try {
                     Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
                     New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null

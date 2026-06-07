@@ -39,11 +39,12 @@ Describe "Venv Activation — Cross-Platform Path Resolution" {
     }
 
     It "Should use bin/Activate.ps1 on macOS/Linux (non-Windows)" {
-        # On this machine (macOS), $IsWindows should be $false
-        # The venv path should resolve to bin/Activate.ps1
+        # This test may run on Windows CI, so simulate the non-Windows branch
+        # instead of relying on the host platform's $IsWindows value.
         $result = & pwsh -NoProfile -Command @"
             `$OstwinHome = '$script:TempDir'
-            `$venvActivate = if (`$IsWindows) {
+            `$runningOnWindows = `$false
+            `$venvActivate = if (`$runningOnWindows) {
                 Join-Path `$OstwinHome '.venv' 'Scripts' 'Activate.ps1'
             } else {
                 Join-Path `$OstwinHome '.venv' 'bin' 'Activate.ps1'
