@@ -126,6 +126,12 @@ vi.mock('@/hooks/use-knowledge-import', () => ({
   useKnowledgeImport: vi.fn(() => ({
     startImport: vi.fn(),
   })),
+  useKnowledgeTextImport: vi.fn(() => ({
+    startImportText: vi.fn(),
+    isLoading: false,
+    error: null,
+    result: null,
+  })),
   useKnowledgeImportMonitor: vi.fn(() => ({
     jobs: [],
     graphCounts: { entities: 0, chunks: 0, relations: 0 },

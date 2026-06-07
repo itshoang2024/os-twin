@@ -11,6 +11,7 @@ def mock_get_current_user():
 app.dependency_overrides[get_current_user] = mock_get_current_user
 
 client = TestClient(app)
+HEADERS = {"X-API-Key": "test-key"}
 
 @pytest.fixture
 def plan_setup(tmp_path, monkeypatch):
@@ -36,7 +37,7 @@ def test_upload_and_bind(plan_setup):
     files = [("files", ("test.txt", b"hello world", "text/plain"))]
     data = {"epic_ref": "EPIC-001", "asset_type": "reference-doc", "tags": "test,initial"}
     
-    response = client.post(f"/api/plans/{plan_id}/assets", files=files, data=data)
+    response = client.post(f"/api/plans/{plan_id}/assets", files=files, data=data, headers=HEADERS)
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["count"] == 1
@@ -48,12 +49,12 @@ def test_upload_and_bind(plan_setup):
     filename = asset["filename"]
     
     # 2. Bind existing asset to another epic
-    response = client.post(f"/api/plans/{plan_id}/assets/{filename}/bind", json={"epic_ref": "EPIC-002"})
+    response = client.post(f"/api/plans/{plan_id}/assets/{filename}/bind", json={"epic_ref": "EPIC-002"}, headers=HEADERS)
     assert response.status_code == 200
     assert "EPIC-002" in response.json()["asset"]["bound_epics"]
     
     # 3. List assets for EPIC-001
-    response = client.get(f"/api/plans/{plan_id}/epics/EPIC-001/assets")
+    response = client.get(f"/api/plans/{plan_id}/epics/EPIC-001/assets", headers=HEADERS)
     assert response.status_code == 200
     res_data = response.json()
     found = any(a["filename"] == filename for a in res_data["assets"])
@@ -63,19 +64,19 @@ def test_upload_and_bind(plan_setup):
     response = client.patch(f"/api/plans/{plan_id}/assets/{filename}", json={
         "asset_type": "api-spec",
         "description": "New description"
-    })
+    }, headers=HEADERS)
     assert response.status_code == 200
     assert response.json()["asset"]["asset_type"] == "api-spec"
     assert response.json()["asset"]["description"] == "New description"
 
     # 5. Path traversal protection
     # Test plan_id invalid chars (should match route but fail validation)
-    response = client.get(f"/api/plans/invalid!id/assets")
+    response = client.get(f"/api/plans/invalid!id/assets", headers=HEADERS)
     assert response.status_code == 400
     assert "Invalid plan_id" in response.json()["detail"]
 
     # Test filename invalid chars
-    response = client.get(f"/api/plans/{plan_id}/assets/invalid!file/download")
+    response = client.get(f"/api/plans/{plan_id}/assets/invalid!file/download", headers=HEADERS)
     assert response.status_code == 400
     assert "Invalid filename" in response.json()["detail"]
 
@@ -83,20 +84,20 @@ def test_unbind(plan_setup):
     plan_id, tmp_path, assets_dir = plan_setup
     files = [("files", ("test.txt", b"hello world", "text/plain"))]
     data = {"epic_ref": "EPIC-001"}
-    response = client.post(f"/api/plans/{plan_id}/assets", files=files, data=data)
+    response = client.post(f"/api/plans/{plan_id}/assets", files=files, data=data, headers=HEADERS)
     filename = response.json()["assets"][0]["filename"]
     
-    response = client.delete(f"/api/plans/{plan_id}/assets/{filename}/bind/EPIC-001")
+    response = client.delete(f"/api/plans/{plan_id}/assets/{filename}/bind/EPIC-001", headers=HEADERS)
     assert response.status_code == 200
     assert "EPIC-001" not in response.json()["asset"]["bound_epics"]
 
 def test_list_epic_combined(plan_setup):
     plan_id, tmp_path, assets_dir = plan_setup
-    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("plan.txt", b"plan", "text/plain"))])
-    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("epic.txt", b"epic", "text/plain"))], data={"epic_ref": "EPIC-001"})
-    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("other.txt", b"other", "text/plain"))], data={"epic_ref": "EPIC-002"})
+    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("plan.txt", b"plan", "text/plain"))], headers=HEADERS)
+    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("epic.txt", b"epic", "text/plain"))], data={"epic_ref": "EPIC-001"}, headers=HEADERS)
+    client.post(f"/api/plans/{plan_id}/assets", files=[("files", ("other.txt", b"other", "text/plain"))], data={"epic_ref": "EPIC-002"}, headers=HEADERS)
                 
-    response = client.get(f"/api/plans/{plan_id}/epics/EPIC-001/assets")
+    response = client.get(f"/api/plans/{plan_id}/epics/EPIC-001/assets", headers=HEADERS)
     assert response.status_code == 200
     assets = response.json()["assets"]
     filenames = [a["original_name"] for a in assets]

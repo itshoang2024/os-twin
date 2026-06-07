@@ -1,0 +1,143 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation "Main Navigation" [ref=e3]:
+      - generic [ref=e4]:
+        - img [ref=e5]
+        - generic [ref=e6]:
+          - generic [ref=e7]: OsTwin
+          - generic [ref=e8]: Command Center
+      - navigation [ref=e9]:
+        - link "Home" [ref=e10] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e12]: home
+          - generic [ref=e13]: Home
+        - link "Plans" [ref=e14] [cursor=pointer]:
+          - /url: /plans
+          - generic [ref=e15]: folder
+          - generic [ref=e16]: Plans
+        - link "Knowledge" [ref=e17] [cursor=pointer]:
+          - /url: /knowledge
+          - generic [ref=e18]: auto_stories
+          - generic [ref=e19]: Knowledge
+        - link "Roles" [ref=e20] [cursor=pointer]:
+          - /url: /roles
+          - generic [ref=e21]: person
+          - generic [ref=e22]: Roles
+        - link "Skills" [ref=e23] [cursor=pointer]:
+          - /url: /skills
+          - generic [ref=e24]: extension
+          - generic [ref=e25]: Skills
+        - link "MCP" [ref=e26] [cursor=pointer]:
+          - /url: /mcp
+          - generic [ref=e27]: terminal
+          - generic [ref=e28]: MCP
+        - link "Settings" [ref=e29] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e30]: settings
+          - generic [ref=e31]: Settings
+        - generic [ref=e33]:
+          - generic [ref=e34]: lightbulb
+          - generic [ref=e35]: Recent Ideas
+      - button "Collapse sidebar" [ref=e41]:
+        - generic [ref=e42]: chevron_left
+        - generic [ref=e43]: Collapse
+    - navigation "Top Bar" [ref=e44]:
+      - search "Search plans, EPICs, tasks (Cmd+K)" [ref=e46]:
+        - generic [ref=e47]: search
+        - generic [ref=e48]: Search plans, EPICs, tasks...
+        - generic [ref=e49]: ⌘K
+      - generic [ref=e50]:
+        - generic [ref=e55]: "off"
+        - button "Switch to dark mode" [ref=e56]:
+          - generic [ref=e57]: dark_mode
+        - button "0 unread notifications" [ref=e59]:
+          - generic [ref=e60]: notifications
+        - button "PA expand_more" [ref=e62]:
+          - generic [ref=e63]: PA
+          - generic [ref=e64]: expand_more
+    - main [ref=e65]:
+      - generic [ref=e66]:
+        - generic [ref=e67]:
+          - img [ref=e69]
+          - generic [ref=e72]: Ostwin Pro
+          - generic [ref=e73]: expand_more
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - img [ref=e77]
+            - heading "What do you want to build?" [level=1] [ref=e80]
+          - generic [ref=e81]:
+            - generic [ref=e82]:
+              - button "Add image" [ref=e83]:
+                - generic [ref=e84]: add_photo_alternate
+              - textbox "Prompt" [ref=e85]:
+                - /placeholder: What do you want to build?
+              - button "Send prompt (Ctrl or Cmd + Enter)" [disabled] [ref=e87]:
+                - generic [ref=e88]: arrow_upward
+            - generic [ref=e89]: Press Ctrl/⌘+Enterto send · Enter for new line
+          - generic [ref=e90]:
+            - tablist "Plan template categories" [ref=e91]:
+              - tab "engineering Engineering" [selected] [ref=e92]:
+                - generic [ref=e93]: engineering
+                - generic [ref=e94]: Engineering
+              - tab "campaign Marketing" [ref=e95]:
+                - generic [ref=e96]: campaign
+                - generic [ref=e97]: Marketing
+              - tab "handshake Sales" [ref=e98]:
+                - generic [ref=e99]: handshake
+                - generic [ref=e100]: Sales
+              - tab "support_agent Support" [ref=e101]:
+                - generic [ref=e102]: support_agent
+                - generic [ref=e103]: Support
+              - tab "settings Operations" [ref=e104]:
+                - generic [ref=e105]: settings
+                - generic [ref=e106]: Operations
+              - tab "science Research" [ref=e107]:
+                - generic [ref=e108]: science
+                - generic [ref=e109]: Research
+              - tab "verified Compliance" [ref=e110]:
+                - generic [ref=e111]: verified
+                - generic [ref=e112]: Compliance
+              - tab "palette Creative" [ref=e113]:
+                - generic [ref=e114]: palette
+                - generic [ref=e115]: Creative
+            - tabpanel "engineering Engineering" [ref=e116]:
+              - button "Landing page or marketing site Single page with hero, features, and call to action 7 fields arrow_forward" [ref=e117]:
+                - generic [ref=e118]:
+                  - generic [ref=e119]: Landing page or marketing site
+                  - generic [ref=e120]: Single page with hero, features, and call to action
+                - generic [ref=e121]:
+                  - generic [ref=e122]: 7 fields
+                  - generic [ref=e123]: arrow_forward
+              - button "Web app with login + database Multi-user app with auth, persistence, and a dashboard 8 fields arrow_forward" [ref=e124]:
+                - generic [ref=e125]:
+                  - generic [ref=e126]: Web app with login + database
+                  - generic [ref=e127]: Multi-user app with auth, persistence, and a dashboard
+                - generic [ref=e128]:
+                  - generic [ref=e129]: 8 fields
+                  - generic [ref=e130]: arrow_forward
+              - button "Internal tool or admin dashboard CRUD interface over your data, for you or your team 8 fields arrow_forward" [ref=e131]:
+                - generic [ref=e132]:
+                  - generic [ref=e133]: Internal tool or admin dashboard
+                  - generic [ref=e134]: CRUD interface over your data, for you or your team
+                - generic [ref=e135]:
+                  - generic [ref=e136]: 8 fields
+                  - generic [ref=e137]: arrow_forward
+              - button "Browser extension or integration Add behavior to web pages or connect two services 6 fields arrow_forward" [ref=e138]:
+                - generic [ref=e139]:
+                  - generic [ref=e140]: Browser extension or integration
+                  - generic [ref=e141]: Add behavior to web pages or connect two services
+                - generic [ref=e142]:
+                  - generic [ref=e143]: 6 fields
+                  - generic [ref=e144]: arrow_forward
+          - generic [ref=e146]:
+            - generic [ref=e148]:
+              - heading "Your recent Plans" [level=2] [ref=e149]
+              - link "View All arrow_forward" [ref=e150] [cursor=pointer]:
+                - /url: /plans
+                - text: View All
+                - generic [ref=e151]: arrow_forward
+            - generic [ref=e159]:
+              - heading "Recent Ideas" [level=3] [ref=e160]
+              - link "View all" [ref=e161] [cursor=pointer]:
+                - /url: /ideas
+  - alert [ref=e175]

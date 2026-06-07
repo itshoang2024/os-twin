@@ -161,7 +161,7 @@ describe('SlackConnector', () => {
         if (!userId || !text) return;
         if (text.startsWith('/')) return;
         
-        // Mock isAuthorized
+        (connector as any).authorizedUsers = new Set(['u1']);
         if (!(connector as any).isAuthorized(userId)) return;
         
         // Mock getSession

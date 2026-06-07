@@ -296,7 +296,7 @@ describe('ProviderCard', () => {
       expect(inactiveElements.length).toBeGreaterThan(0);
     });
 
-    it('renders GEMINI and VERTEX AI mode buttons', () => {
+    it('renders GOOGLE and VERTEX AI mode buttons', () => {
       render(
         <ProviderCard
           name="google"
@@ -311,7 +311,7 @@ describe('ProviderCard', () => {
         />
       );
 
-      expect(screen.getByText('GEMINI')).toBeInTheDocument();
+      expect(screen.getByText('GOOGLE')).toBeInTheDocument();
       expect(screen.getByText('VERTEX AI')).toBeInTheDocument();
     });
 
@@ -330,7 +330,7 @@ describe('ProviderCard', () => {
         />
       );
 
-      const geminiButton = screen.getByText('GEMINI').closest('button');
+      const geminiButton = screen.getByText('GOOGLE').closest('button');
       expect(geminiButton).toHaveClass('border-blue-600');
     });
 
@@ -368,7 +368,7 @@ describe('ProviderCard', () => {
         />
       );
 
-      fireEvent.click(screen.getByText('GEMINI'));
+      fireEvent.click(screen.getByText('GOOGLE'));
       expect(mockOnSettingsChange).toHaveBeenCalledWith({ deployment_mode: 'gemini', default_model: undefined });
     });
 
@@ -387,7 +387,7 @@ describe('ProviderCard', () => {
         />
       );
 
-      expect(screen.getByText('API Access Key')).toBeInTheDocument();
+      expect(screen.getByText('GOOGLE_API_KEY')).toBeInTheDocument();
     });
 
     it('shows Vertex AI configuration fields in Vertex mode', () => {
@@ -442,7 +442,7 @@ describe('ProviderCard', () => {
         />
       );
 
-      expect(screen.getByText('MODE: GEMINI')).toBeInTheDocument();
+      expect(screen.getByText((_content, node) => node?.textContent === 'MODE: GOOGLE')).toBeInTheDocument();
     });
 
     it('does not render test button (feature removed)', () => {

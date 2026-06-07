@@ -20,6 +20,7 @@
 #   ./install.sh --no-opencode-config  # Skip patching the managed OpenCode config
 #   ./install.sh --no-start       # Install only; do not start OpenCode/dashboard services
 #   ./install.sh --no-channel     # Install bot dependencies but do not start channel connectors
+#   ./install.sh --no-ollama      # Skip Ollama local LLM host installation
 #   ./install.sh --help        # Show this help
 #
 # What gets installed:
@@ -51,7 +52,7 @@ INSTALL_DIR="${HOME}/.ostwin"
 # shellcheck disable=SC2034  # consumed by sourced modules
 SOURCE_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")"
 # shellcheck disable=SC2034
-AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false
+AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false; SKIP_OLLAMA=false
 START_CHANNEL=false; INSTALL_SEARCH_ENGINE=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
 SYNC_SKILLS=false
 INSTALL_HOST_DAEMON=prompt; REGISTER_AUTOSTART=true; NGROK_ENABLED=prompt
@@ -69,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --source-dir)     SOURCE_DIR="$2"; shift 2 ;;
     --port)           DASHBOARD_PORT="$2"; shift 2 ;;
     --skip-optional)  SKIP_OPTIONAL=true; shift ;;
+    --no-ollama|--skip-ollama) SKIP_OLLAMA=true; shift ;;
     --dashboard-only) DASHBOARD_ONLY=true; AUTO_YES=true; shift ;;
     --channel|--with-channel) START_CHANNEL=true; shift ;;
     --no-channel|--without-channel) START_CHANNEL=false; shift ;;

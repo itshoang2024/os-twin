@@ -83,7 +83,7 @@ _master_config = MasterAgentConfig()
 # these slips through (e.g. from a stale persisted runtime setting), we
 # re-infer the OpenCode-style ID from the model name. ``google-vertex`` is a
 # real OpenCode provider for Vertex AI and must be preserved when selected.
-_LEGACY_PROVIDER_IDS: frozenset[str] = frozenset({"google-genai", "google_gemini"})
+_LEGACY_PROVIDER_IDS: frozenset[str] = frozenset({"google-genai", "google_gemini", "google-vertex"})
 
 
 def _infer_provider_for_model(model: str) -> str | None:

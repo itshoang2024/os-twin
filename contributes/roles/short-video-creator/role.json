@@ -1,25 +1,25 @@
 {
-    "name": "short-video-creator",
-    "description": "Short Video Creator — generates short-form video content optimized for social media platforms (TikTok, Reels, Shorts), including video editing, scripting, and captioning.",
-    "capabilities": [
-        "video-editing",
-        "script-writing",
-        "storyboarding",
-        "social-media-optimization",
-        "caption-generation"
-    ],
-    "prompt_file": "ROLE.md",
-    "quality_gates": [
-        "platform-compliant",
-        "engaging-hook",
-        "audio-video-sync"
-    ],
-    "cli": "agent",
-    "model": "google-vertex/gemini-3-flash-preview",
-    "timeout": 900,
-    "skill_refs": [
-        "generate-script",
-        "edit-video"
-    ],
-    "instance_type": "worker"
+  "name": "short-video-creator",
+  "description": "Short Video Creator — generates short-form video content optimized for social media platforms (TikTok, Reels, Shorts), including video editing, scripting, and captioning.",
+  "capabilities": [
+    "video-editing",
+    "script-writing",
+    "storyboarding",
+    "social-media-optimization",
+    "caption-generation"
+  ],
+  "prompt_file": "ROLE.md",
+  "quality_gates": [
+    "platform-compliant",
+    "engaging-hook",
+    "audio-video-sync"
+  ],
+  "cli": "agent",
+  "model": "opencode/big-pickle",
+  "timeout": 900,
+  "skill_refs": [
+    "generate-script",
+    "edit-video"
+  ],
+  "instance_type": "worker"
 }

@@ -1,5 +1,6 @@
 {
   "instance_type": "evaluator",
   "skill_refs": [],
-  "name": "evaluator-role"
+  "name": "evaluator-role",
+  "model": "opencode/big-pickle"
 }

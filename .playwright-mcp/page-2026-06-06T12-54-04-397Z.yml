@@ -1,0 +1,81 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation "Main Navigation" [ref=e3]:
+      - img [ref=e5]
+      - navigation [ref=e6]:
+        - link "Home" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e8]: home
+        - link "Plans" [ref=e9] [cursor=pointer]:
+          - /url: /plans
+          - generic [ref=e11]: folder
+        - link "Knowledge" [ref=e12] [cursor=pointer]:
+          - /url: /knowledge
+          - generic [ref=e13]: auto_stories
+        - link "Roles" [ref=e14] [cursor=pointer]:
+          - /url: /roles
+          - generic [ref=e15]: person
+        - link "Skills" [ref=e16] [cursor=pointer]:
+          - /url: /skills
+          - generic [ref=e17]: extension
+        - link "MCP" [ref=e18] [cursor=pointer]:
+          - /url: /mcp
+          - generic [ref=e19]: terminal
+        - link "Settings" [ref=e20] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e21]: settings
+      - button "Expand sidebar" [ref=e23]:
+        - generic [ref=e24]: chevron_right
+    - navigation "Top Bar" [ref=e25]:
+      - search "Search plans, EPICs, tasks (Cmd+K)" [ref=e27]:
+        - generic [ref=e28]: search
+        - generic [ref=e29]: Search plans, EPICs, tasks...
+        - generic [ref=e30]: ⌘K
+      - generic [ref=e31]:
+        - generic [ref=e36]: "off"
+        - button "Switch to dark mode" [ref=e37]:
+          - generic [ref=e38]: dark_mode
+        - button "0 unread notifications" [ref=e40]:
+          - generic [ref=e41]: notifications
+        - button "PA expand_more" [ref=e43]:
+          - generic [ref=e44]: PA
+          - generic [ref=e45]: expand_more
+    - main [ref=e46]:
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - heading "Plans" [level=1] [ref=e50]
+            - paragraph [ref=e51]: Browse and manage all plans
+          - link "add New Plan" [ref=e52] [cursor=pointer]:
+            - /url: /plans/new
+            - button "add New Plan" [ref=e53]:
+              - generic [ref=e54]: add
+              - text: New Plan
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - generic [ref=e58]:
+              - generic [ref=e59]: search
+              - textbox "Search plans..." [ref=e60]
+            - button "filter_list Status expand_more" [ref=e62]:
+              - generic [ref=e63]: filter_list
+              - text: Status
+              - generic [ref=e64]: expand_more
+            - button "category Domain expand_more" [ref=e66]:
+              - generic [ref=e67]: category
+              - text: Domain
+              - generic [ref=e68]: expand_more
+          - generic [ref=e69]:
+            - generic [ref=e70]:
+              - generic [ref=e71]: "Sort:"
+              - combobox [ref=e72] [cursor=pointer]:
+                - option "Newest" [selected]
+                - option "Oldest"
+                - option "Highest Progress"
+                - option "Lowest Progress"
+                - option "A-Z"
+            - generic [ref=e74]:
+              - button "grid_view" [ref=e75]:
+                - generic [ref=e76]: grid_view
+              - button "view_list" [ref=e77]:
+                - generic [ref=e78]: view_list
+  - alert [ref=e182]

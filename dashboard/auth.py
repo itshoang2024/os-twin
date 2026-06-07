@@ -31,6 +31,16 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 def _get_api_key() -> str:
     return os.environ.get("OSTWIN_API_KEY", "")
 
+
+def get_configured_username() -> str:
+    """Return the locally configured dashboard username.
+
+    The dashboard is single-user today, so identity is still proven by the
+    OSTWIN API key.  This display name is captured during first-run setup and
+    used only for personalized UI/logging labels.
+    """
+    return os.environ.get("OSTWIN_USERNAME", "").strip() or "api-key-user"
+
 # Cookie name used by the frontend
 AUTH_COOKIE_NAME = "ostwin_auth_key"
 DEFAULT_DEV_FRONTEND_PORT = "3000"
@@ -194,5 +204,6 @@ async def get_current_user(request: Request) -> dict:
             detail="Invalid API key",
         )
 
-    # SECURITY: Do not trust X-User header for identity — derive from API key only
-    return {"username": "api-key-user"}
+    # SECURITY: Do not trust X-User header for identity — derive from API key only.
+    # The configured username is a local display name tied to that key.
+    return {"username": get_configured_username()}

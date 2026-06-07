@@ -10,5 +10,5 @@
   "description": "Document gameplay instructions and verify final project state",
   "name": "technical-writer",
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview"
+  "model": "opencode/big-pickle"
 }

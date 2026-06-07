@@ -28,8 +28,8 @@ describe('SlackConnector Integration', () => {
     sandbox.restore();
   });
 
-  it('isAuthorized returns true if no users configured', () => {
-    expect((connector as any).isAuthorized('u1')).to.be.true;
+  it('isAuthorized returns false if no users are explicitly paired', () => {
+    expect((connector as any).isAuthorized('u1')).to.be.false;
   });
 
   it('isAuthorized returns true if user is in authorized list', () => {

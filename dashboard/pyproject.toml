@@ -3,7 +3,7 @@ name = "ostwin-dashboard"
 version = "0.1.0"
 description = "OS Twin Dashboard — API server, knowledge graph, and management UI"
 requires-python = ">=3.11,<3.13"
-readme = "docs/README.md"
+readme = "README.md"
 
 dependencies = [
     # ── Core API ──────────────────────────────────────────────

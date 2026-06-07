@@ -152,25 +152,26 @@ describe('sessions', () => {
   });
 
   describe('session timeout', () => {
-    it('resets session after 30 min of inactivity', () => {
+    it('does not reset after 31 minutes of inactivity', () => {
       const s = getSession('u1', 'telegram');
       s.mode = 'editing';
       s.activePlanId = 'plan-old';
-      // Simulate 31 minutes ago
       s.lastActivity = Date.now() - (31 * 60 * 1000);
+
+      const same = getSession('u1', 'telegram');
+      expect(same.mode).to.equal('editing');
+      expect(same.activePlanId).to.equal('plan-old');
+    });
+
+    it('resets session after 7 days of inactivity', () => {
+      const s = getSession('u1', 'telegram');
+      s.mode = 'editing';
+      s.activePlanId = 'plan-old';
+      s.lastActivity = Date.now() - (8 * 24 * 60 * 60 * 1000);
 
       const fresh = getSession('u1', 'telegram');
       expect(fresh.mode).to.equal('idle');
       expect(fresh.activePlanId).to.be.null;
-    });
-
-    it('does not reset if within 30 min', () => {
-      const s = getSession('u1', 'telegram');
-      s.mode = 'editing';
-      s.lastActivity = Date.now() - (29 * 60 * 1000);
-
-      const same = getSession('u1', 'telegram');
-      expect(same.mode).to.equal('editing');
     });
   });
 

@@ -203,6 +203,12 @@ export function getSession(userId: string | number, platform = 'telegram'): Sess
   let session = sessions.get(key);
 
   if (session) {
+    if (Date.now() - session.lastActivity > SESSION_TIMEOUT_MS) {
+      session = _newSession(userId, platform);
+      sessions.set(key, session);
+      _schedulePersist();
+      return session;
+    }
     session.lastActivity = Date.now();
   } else {
     session = _newSession(userId, platform);

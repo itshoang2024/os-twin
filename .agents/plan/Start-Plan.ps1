@@ -53,6 +53,8 @@ param(
 
     [switch]$NonInteractive,
 
+    [switch]$EnablePlanning,
+
     [ValidateSet('room-worktree','shared')]
     [string]$WorkspaceIsolation = 'shared',
 
@@ -192,6 +194,7 @@ $warRoomsDir = if ($env:WARROOMS_DIR) { $env:WARROOMS_DIR }
                else { Join-Path $ProjectDir ".war-rooms" }
 $env:WARROOMS_DIR = $warRoomsDir
 $warRoomsDirFromEnv = [bool]$env:WARROOMS_DIR -and -not ($env:WARROOMS_DIR -eq (Join-Path $ProjectDir ".war-rooms"))
+$skipPlanReview = $env:OSTWIN_SKIP_PLAN_REVIEW -and ($env:OSTWIN_SKIP_PLAN_REVIEW -match '^(1|true|yes)$')
 
 # --- Bootstrap room-000 for plan negotiation ---
 $room000Dir = Join-Path $warRoomsDir "room-000"
@@ -207,7 +210,12 @@ The project plan at '$PlanFile' requires review and potential refinement.
 4. Once the plan is ready for implementation, post a 'plan-approve' message to the channel.
 5. If you cannot proceed without more context, post 'plan-reject' with your feedback.
 "@
-if (-not $DryRun -and -not (Test-Path $room000Dir)) {
+if ($skipPlanReview) {
+    Write-Host "[PLAN] Skipping synthetic PLAN-REVIEW room (OSTWIN_SKIP_PLAN_REVIEW=true)." -ForegroundColor Yellow
+    if (-not $DryRun -and (Test-Path $room000Dir)) {
+        Remove-Item -Path $room000Dir -Recurse -Force
+    }
+} elseif (-not $DryRun -and -not (Test-Path $room000Dir)) {
     & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") -MaxRetries $defaultRoomMaxRetries -TimeoutSeconds $defaultRoomTimeoutSeconds | Out-Null
 } elseif (-not $DryRun -and (Test-Path $room000Dir)) {
     # --- Update room-000 if the plan file has changed ---
@@ -287,7 +295,7 @@ if (-not $IgnorePlanWorkingDir -and $planContent -match '(?m)^working_dir:\s*(.+
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            if ($WorkspaceIsolation -eq 'shared') {
+            if ($WorkspaceIsolation -eq 'shared' -and -not $DryRun) {
                 try {
                     Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
                     New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
@@ -436,9 +444,11 @@ depends_on: []
 }
 
 # --- Auto-inject PLAN-REVIEW as a dependency (Requirement 2) ---
-foreach ($item in $parsed) {
-    if ($item.DependsOn -notcontains "PLAN-REVIEW") {
-        $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+if (-not $skipPlanReview) {
+    foreach ($item in $parsed) {
+        if ($item.DependsOn -notcontains "PLAN-REVIEW") {
+            $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+        }
     }
 }
 
@@ -446,10 +456,14 @@ foreach ($item in $parsed) {
 $planDir = Split-Path $PlanFile
 if (-not $planDir) { $planDir = "." }
 $planningDagFile = Join-Path $planDir ".planning-DAG.json"
-if (-not $DryRun -and (Test-Path $buildPlanningDag)) {
+if ($EnablePlanning -and -not $DryRun -and (Test-Path $buildPlanningDag)) {
     if (-not (Test-Path $planningDagFile) -or $Expand) {
         Write-Host "[PLANNING-DAG] Generating advisory DAG from plan content..." -ForegroundColor Cyan
-        & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        if ($env:OSTWIN_AGENT_CMD) {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile -AgentCmd $env:OSTWIN_AGENT_CMD
+        } else {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        }
     }
     # Merge planning-DAG roles AND dependencies into parsed entries (advisory)
     if (Test-Path $planningDagFile) {
@@ -740,10 +754,13 @@ if ($Resume) {
         & $updateProgressScript -WarRoomsDir $warRoomsDir
     }
 } else {
-    Write-Host "  War-rooms to create: $($parsed.Count + 1)" # +1 for room-000
+    $syntheticRoomCount = if ($skipPlanReview) { 0 } else { 1 }
+    Write-Host "  War-rooms to create: $($parsed.Count + $syntheticRoomCount)"
 }
 Write-Host ""
-Write-Host "  room-000 → PLAN-REVIEW — Unified Plan Negotiation (Roles: architect)" -ForegroundColor White
+if (-not $skipPlanReview) {
+    Write-Host "  room-000 → PLAN-REVIEW — Unified Plan Negotiation (Roles: architect)" -ForegroundColor White
+}
 
     foreach ($entry in $parsed) {
         $dodCount = if ($entry.DoD) { $entry.DoD.Count } else { 0 }
@@ -759,7 +776,10 @@ Write-Host ""
 
 if ($DryRun) {
     # --- Show DAG structure in DryRun ---
-    $nodes = @(@{ Id = "PLAN-REVIEW"; DependsOn = @() })
+    $nodes = @()
+    if (-not $skipPlanReview) {
+        $nodes += @{ Id = "PLAN-REVIEW"; DependsOn = @() }
+    }
     foreach ($entry in $parsed) {
         $nodes += @{ Id = $entry.TaskRef; DependsOn = $entry.DependsOn }
     }
@@ -827,9 +847,11 @@ function New-PlanWarRooms {
     }
 
     # Auto-inject PLAN-REVIEW dependency (orchestration logic, not parsing)
-    foreach ($item in $parsed) {
-        if ($item.DependsOn -notcontains "PLAN-REVIEW") {
-            $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+    if (-not $skipPlanReview) {
+        foreach ($item in $parsed) {
+            if ($item.DependsOn -notcontains "PLAN-REVIEW") {
+                $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+            }
         }
     }
 
@@ -1035,7 +1057,7 @@ if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
 }
 
 # --- Auto-Pass room-000 if no review/expand needed ---
-if ($Unified -and -not ($Review -or $Expand) -and -not $Resume) {
+if ($Unified -and -not ($Review -or $Expand) -and -not $Resume -and -not $skipPlanReview) {
     "done" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
 }
 
