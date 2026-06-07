@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -387,13 +387,9 @@ class TestBuildGraphIndexWithLLMModel:
         svc._ingestor = None
         svc._ingestor_override = None
         svc._job_manager = None
-        svc._candidate_store = MagicMock()
-        svc._evidence_store = MagicMock()
-        svc._fact_store = MagicMock()
 
         with patch("dashboard.knowledge.service.KnowledgeService.get_kuzu_graph", return_value=MagicMock()), \
              patch("dashboard.knowledge.service.KnowledgeService.get_vector_store", return_value=MagicMock()), \
-             patch("dashboard.knowledge.service.KnowledgeService.get_ontology_profile", return_value=None), \
              patch("dashboard.knowledge.service.KnowledgeService._get_embedder", return_value=MagicMock()), \
              patch("dashboard.knowledge.service.KnowledgeService._get_llm", return_value=MagicMock()), \
              patch("dashboard.knowledge.llm.KnowledgeLLM") as MockKnowledgeLLM, \
@@ -420,14 +416,10 @@ class TestBuildGraphIndexWithLLMModel:
         svc._ingestor = None
         svc._ingestor_override = None
         svc._job_manager = None
-        svc._candidate_store = MagicMock()
-        svc._evidence_store = MagicMock()
-        svc._fact_store = MagicMock()
 
         mock_service_llm = MagicMock()
         with patch("dashboard.knowledge.service.KnowledgeService.get_kuzu_graph", return_value=MagicMock()), \
              patch("dashboard.knowledge.service.KnowledgeService.get_vector_store", return_value=MagicMock()), \
-             patch("dashboard.knowledge.service.KnowledgeService.get_ontology_profile", return_value=None), \
              patch("dashboard.knowledge.service.KnowledgeService._get_embedder", return_value=MagicMock()), \
              patch("dashboard.knowledge.service.KnowledgeService._get_llm", return_value=mock_service_llm), \
              patch("dashboard.knowledge.graph.core.graph_rag_store.GraphRAGStore", return_value=MagicMock()), \
@@ -470,8 +462,7 @@ class TestMarkitdownReaderGetMarkitdown:
                  patch("markitdown.MarkItDown") as MockMD:
                 MockMD.return_value = MagicMock()
                 result = reader._get_markitdown()
-                mock_create.assert_called_once()
-                assert mock_create.call_args.kwargs["model"] == "gemini-2.0-flash"
+                mock_create.assert_called_once_with(model="gemini-2.0-flash", api_key=ANY)
                 MockMD.assert_called_once_with(llm_client=mock_sync, llm_model="gemini-2.0-flash")
 
     def test_no_api_key_returns_plain_markitdown(self):

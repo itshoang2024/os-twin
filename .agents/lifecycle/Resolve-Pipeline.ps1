@@ -43,9 +43,12 @@ $defaultLifecyclePath = Join-Path $AgentsDir "lifecycle" "default.json"
 # V2 LIFECYCLE BUILDER — signal-based, role-per-state state machine
 #
 # Position-based role assignment:
-#   Roles[0]    = worker     → "developing" + "optimize" + "fixing" states
-#   Roles[1..N] = evaluators → "review", "review-2", … states
-#   No evaluators? → inject default QA review as "review" state
+#   Roles[0]    = worker     -> "developing" + "optimize"
+#   Roles[1]    = evaluator  -> "review"
+#   No evaluator? -> inject default QA review as "review"
+#
+# Lifecycle state names are intentionally small and canonical. Extra candidate
+# roles can remain in room metadata, but they no longer expand the state graph.
 # ------------------------------------------------------------------
 function Build-LifecycleV2 {
     param(
@@ -68,80 +71,33 @@ function Build-LifecycleV2 {
         $evaluatorRoles = @($Roles[1..($Roles.Count - 1)])
     }
 
-    # Compute evaluator state names: review, review-2, review-3, ...
-    $evaluatorStateNames = @()
-    for ($i = 0; $i -lt $evaluatorRoles.Count; $i++) {
-        if ($i -eq 0) {
-            $evaluatorStateNames += "review"
-        } else {
-            $evaluatorStateNames += "review-$($i + 1)"
-        }
-    }
+    $reviewRole = if ($evaluatorRoles.Count -gt 0) { $evaluatorRoles[0] } else { 'qa' }
 
-    # First evaluator target (or injected QA "review" when no evaluators)
-    $hasExplicitEvaluators = $evaluatorRoles.Count -gt 0
-    $firstEvalTarget = if ($hasExplicitEvaluators) {
-        $evaluatorStateNames[0]
-    } else {
-        'review'
-    }
-
-    # --- Worker states: developing + optimize + fixing ---
+    # --- Worker states: developing + optimize ---
     $states['developing'] = [ordered]@{
         role    = $workerRole
         type    = 'work'
         signals = [ordered]@{
-            done = [ordered]@{ target = $firstEvalTarget }
+            done = [ordered]@{ target = 'review' }
         }
     }
     $states['optimize'] = [ordered]@{
         role    = $workerRole
         type    = 'work'
         signals = [ordered]@{
-            done = [ordered]@{ target = $firstEvalTarget }
+            done = [ordered]@{ target = 'review' }
         }
     }
-    $states['fixing'] = [ordered]@{
-        role    = $workerRole
-        type    = 'work'
+
+    # --- Single canonical review state ---
+    $states['review'] = [ordered]@{
+        role    = $reviewRole
+        type    = 'review'
         signals = [ordered]@{
-            done = [ordered]@{ target = $firstEvalTarget }
-        }
-    }
-
-    # --- Evaluator states: review, review-2, ... ---
-    for ($i = 0; $i -lt $evaluatorRoles.Count; $i++) {
-        $evalRole = $evaluatorRoles[$i]
-        $stateName = $evaluatorStateNames[$i]
-        $nextTarget = if ($i -lt ($evaluatorRoles.Count - 1)) {
-            $evaluatorStateNames[$i + 1]
-        } else {
-            'passed'
-        }
-
-        $states[$stateName] = [ordered]@{
-            role    = $evalRole
-            type    = 'review'
-            signals = [ordered]@{
-                done     = [ordered]@{ target = $nextTarget }
-                pass     = [ordered]@{ target = $nextTarget } # legacy success signal
-                fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
-                escalate = [ordered]@{ target = 'triage' }
-            }
-        }
-    }
-
-    # --- Injected QA review (when no evaluators in candidate list) ---
-    if (-not $hasExplicitEvaluators) {
-        $states['review'] = [ordered]@{
-            role    = 'qa'
-            type    = 'review'
-            signals = [ordered]@{
-                done     = [ordered]@{ target = 'passed' }
-                pass     = [ordered]@{ target = 'passed' } # legacy success signal
-                fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
-                escalate = [ordered]@{ target = 'triage' }
-            }
+            done     = [ordered]@{ target = 'done' }
+            pass     = [ordered]@{ target = 'done' } # legacy success signal
+            fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
+            escalate = [ordered]@{ target = 'triage' }
         }
     }
 
@@ -152,24 +108,13 @@ function Build-LifecycleV2 {
         signals = [ordered]@{
             fix      = [ordered]@{ target = 'optimize'; actions = @('increment_retries') }
             redesign = [ordered]@{ target = 'developing'; actions = @('increment_retries', 'revise_brief') }
-            reject   = [ordered]@{ target = 'failed-final' }
-        }
-    }
-
-    # --- failed: auto-decision node ---
-    $states['failed'] = [ordered]@{
-        role            = 'manager'
-        type            = 'decision'
-        auto_transition = $true
-        signals         = [ordered]@{
-            retry   = [ordered]@{ target = 'developing'; guard = 'retries < max_retries' }
-            exhaust = [ordered]@{ target = 'failed-final'; guard = 'retries >= max_retries' }
+            reject   = [ordered]@{ target = 'failed' }
         }
     }
 
     # --- terminal states ---
-    $states['passed']       = [ordered]@{ type = 'terminal' }
-    $states['failed-final'] = [ordered]@{ type = 'terminal' }
+    $states['done']   = [ordered]@{ type = 'terminal' }
+    $states['failed'] = [ordered]@{ type = 'terminal' }
 
     return [ordered]@{
         version       = 2

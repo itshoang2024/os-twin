@@ -41,8 +41,8 @@ BeforeAll {
 	                    role = "qa"
 	                    type = "review"
 	                    signals = [ordered]@{
-	                        done     = @{ target = "passed" }
-		                        pass     = @{ target = "passed" }
+	                        done     = @{ target = "done" }
+		                        pass     = @{ target = "done" }
 		                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
 	                        escalate = @{ target = "triage" }
 	                    }
@@ -53,19 +53,11 @@ BeforeAll {
                     signals = @{
                         fix      = @{ target = "optimize"; actions = @("increment_retries") }
                         redesign = @{ target = "developing"; actions = @("increment_retries", "revise_brief") }
-                        reject   = @{ target = "failed-final" }
+                        reject   = @{ target = "failed" }
                     }
                 }
-                failed = @{
-                    role = "manager"
-                    type = "decision"
-                    signals = @{
-                        retry   = @{ target = "developing"; guard = "retries < max_retries" }
-                        exhaust = @{ target = "failed-final"; guard = "retries >= max_retries" }
-                    }
-                }
-                passed         = @{ type = "terminal" }
-                "failed-final" = @{ type = "terminal" }
+                done   = @{ type = "terminal" }
+                failed = @{ type = "terminal" }
             }
         }
         if ($Override) {
@@ -156,15 +148,15 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             $status | Should -Be "review"
         }
 
-        It "review → passed (done signal)" {
+        It "review → done (done signal)" {
             & $script:NewWarRoom -RoomId "room-012" -TaskRef "TASK-012" `
                                  -TaskDescription "Test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-012"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "done"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "passed"
+            $status | Should -Be "done"
         }
 
         It "review → developing (fail signal with retries)" {
@@ -178,14 +170,14 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             $status | Should -Be "developing"
         }
 
-        It "developing → failed-final (retries exhausted)" {
+        It "developing → failed (retries exhausted)" {
             & $script:NewWarRoom -RoomId "room-014" -TaskRef "TASK-014" `
                                  -TaskDescription "Test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-014"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "failed-final"
+            $status | Should -Be "failed"
         }
 
         It "review → triage (escalate signal)" {
@@ -277,10 +269,10 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "done"
             $auditLines = Get-Content (Join-Path $roomDir "audit.log")
             $auditLines.Count | Should -Be 5
-            $auditLines[-1] | Should -Match "review -> passed"
+            $auditLines[-1] | Should -Match "review -> done"
         }
 
         It "records pipeline lifecycle with optimize state" {
@@ -291,7 +283,7 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "optimize"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "done"
             $auditLines = Get-Content (Join-Path $roomDir "audit.log")
             $auditLines.Count | Should -Be 5
             $auditLines[2] | Should -Match "review -> optimize"
@@ -343,14 +335,14 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             $audit | Should -Match "triage -> optimize"
         }
 
-        It "triage → failed-final (reject classification)" {
+        It "triage → failed (reject classification)" {
             & $script:NewWarRoom -RoomId "room-072" -TaskRef "TASK-072" `
                                  -TaskDescription "Triage reject" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-072"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "triage"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "failed-final"
+            $status | Should -Be "failed"
         }
     }
 
@@ -472,8 +464,8 @@ Classified as implementation bug. Engineer should fix.
             $roomDir = Join-Path $script:warRoomsDir "room-132"
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.review.signals.done.target     | Should -Be "passed"
-            $lc.states.review.signals.pass.target     | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+            $lc.states.review.signals.done.target     | Should -Be "done"
+            $lc.states.review.signals.pass.target     | Should -Be "done" -Because "pass remains a legacy accepted success signal"
 	            # review.fail → optimize (incremental fix cycle, NOT full developing restart)
 	            $lc.states.review.signals.fail.target     | Should -Be "optimize"
 	            $lc.states.review.signals.escalate.target | Should -Be "triage"
@@ -491,20 +483,19 @@ Classified as implementation bug. Engineer should fix.
             $actions | Should -Contain "post_fix"
         }
 
-        It "decision state has retry and exhaust signals" {
+        It "failed is terminal, not a worktree or retry decision state" {
             & $script:NewWarRoom -RoomId "room-134" -TaskRef "TASK-134" `
                                  -TaskDescription "Decision state" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-134"
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.failed.type | Should -Be "decision"
-            $lc.states.failed.signals.retry.target | Should -Be "developing"
-            $lc.states.failed.signals.exhaust.target | Should -Be "failed-final"
+            $lc.states.failed.type | Should -Be "terminal"
+            $lc.states.failed.PSObject.Properties.Name | Should -Not -Contain "signals"
         }
     }
 
-    Context "External status bypass rescue (QA-bypass scenario)" {
-        It "failed-final with retries remaining and fail message rescues to triage" {
+    Context "External status bypass handling (QA-bypass scenario)" {
+        It "failed with retries remaining and fail message stays terminal" {
             & $script:NewWarRoom -RoomId "room-120" -TaskRef "EPIC-120" `
                                  -TaskDescription "QA bypass test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-120"
@@ -513,7 +504,9 @@ Classified as implementation bug. Engineer should fix.
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
                                   -Type "fail" -Ref "EPIC-120" `
                                   -Body "VERDICT: FAIL`nBuild integrity issues found."
-            "failed-final" | Out-File -FilePath (Join-Path $roomDir "status") -NoNewline
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
+            $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
+            $status | Should -Be "failed"
             $retries = [int](Get-Content (Join-Path $roomDir "retries") -Raw).Trim()
             $retries | Should -Be 0
             $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -AsObject
@@ -522,36 +515,41 @@ Classified as implementation bug. Engineer should fix.
             ($retries -lt $maxRetries) | Should -BeTrue
         }
 
-        It "failed-final with retries exhausted stays terminal" {
+        It "failed with retries exhausted stays terminal" {
             & $script:NewWarRoom -RoomId "room-121" -TaskRef "TASK-121" `
                                  -TaskDescription "Exhausted retries" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-121"
             "3" | Out-File -FilePath (Join-Path $roomDir "retries") -NoNewline
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "failed-final"
+            $status | Should -Be "failed"
             $retries = [int](Get-Content (Join-Path $roomDir "retries") -Raw).Trim()
             $maxRetries = 3
             ($retries -ge $maxRetries) | Should -BeTrue
         }
 
-	        It "failed-final with no fail feedback stays terminal" {
+	        It "failed with no fail feedback stays terminal" {
             & $script:NewWarRoom -RoomId "room-122" -TaskRef "TASK-122" `
                                  -TaskDescription "No feedback" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-122"
-            "failed-final" | Out-File -FilePath (Join-Path $roomDir "status") -NoNewline
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
+            $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
+            $status | Should -Be "failed"
             $failMsgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -AsObject
 	            $failMsgs.Count | Should -Be 0
         }
     }
 
-    Context "warroom-server MCP status restriction" {
-        It "warroom-server.py rejects terminal statuses from StatusType" {
+    Context "warroom-server MCP status contract" {
+        It "warroom-server.py rejects legacy terminal aliases from StatusType" {
             $serverPy = Join-Path $script:agentsDir "mcp" "warroom-server.py"
             $content = Get-Content $serverPy -Raw
             $content | Should -Match 'StatusType\s*=\s*Literal\['
             # Extract just the StatusType block (from Literal[ to ])
             $statusBlock = [regex]::Match($content, 'StatusType\s*=\s*Literal\[(.*?)\]', 'Singleline').Groups[1].Value
+            $statusBlock | Should -Match '"done"'
+            $statusBlock | Should -Match '"failed"'
+            $statusBlock | Should -Not -Match '"fixing"'
             $statusBlock | Should -Not -Match '"passed"'
             $statusBlock | Should -Not -Match '"failed-final"'
         }
@@ -566,9 +564,10 @@ Classified as implementation bug. Engineer should fix.
         It "warroom-server.py validates against lifecycle.json states" {
             $serverPy = Join-Path $script:agentsDir "mcp" "warroom-server.py"
             $content = Get-Content $serverPy -Raw
-            # Must reference terminal states and lifecycle
-            $content | Should -Match 'terminal'
+            # Must validate against lifecycle states and expose canonical terminal statuses.
             $content | Should -Match 'lifecycle'
+            $content | Should -Match '"done"'
+            $content | Should -Match '"failed"'
         }
 
         It "StatusType includes review and developing" {
@@ -648,7 +647,7 @@ Classified as implementation bug. Engineer should fix.
     }
 
     Context "Leak fix — Complete-PlanApproval one-shot flag" {
-        It "creates .plan_approved flag file on first PLAN-REVIEW passed" {
+        It "creates .plan_approved flag file on first PLAN-REVIEW done" {
             & $script:NewWarRoom -RoomId "room-210" -TaskRef "PLAN-REVIEW" `
                                  -TaskDescription "Approval gate" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-210"
@@ -781,13 +780,11 @@ Classified as implementation bug. Engineer should fix.
             Write-V2Lifecycle -RoomDir $roomDir
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
 
-            # Read lifecycle to verify decision state transitions OUT (not self-loop)
+            # Read lifecycle to verify failed is terminal, not a retry decision node.
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
             $failedState = $lc.states.failed
-            $failedState.type | Should -Be "decision"
-            $failedState.signals.retry.target | Should -Be "developing"
-            $failedState.signals.retry.target | Should -Not -Be "failed"
-            $failedState.signals.exhaust.target | Should -Be "failed-final"
+            $failedState.type | Should -Be "terminal"
+            $failedState.PSObject.Properties.Name | Should -Not -Contain "signals"
         }
 
         It "retries file must be incremented to prevent infinite decision cycles" {
@@ -824,7 +821,7 @@ Classified as implementation bug. Engineer should fix.
             }
             $shortcutFired | Should -BeTrue
 
-            # Simulate terminal handler path (next iteration, room now in 'passed')
+            # Simulate terminal handler path (next iteration, room now in 'done')
             $terminalFired = $false
             if (-not (Test-Path $flagFile)) {
                 $terminalFired = $true
@@ -950,35 +947,35 @@ Context "PLAN-REVIEW Verdict Logic" {
         }
     }
 
-    Context "Exploit — LEAK-8: failed-final rescue requires feedback message" {
-	        It "rescue to triage only fires when fail feedback exists" {
+    Context "Exploit — LEAK-8: failed status remains terminal" {
+	        It "failed status stays terminal when no fail feedback exists" {
             & $script:NewWarRoom -RoomId "room-330" -TaskRef "TASK-330" `
                                  -TaskDescription "Rescue guard" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-330"
             Write-V2Lifecycle -RoomDir $roomDir
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
             "1" | Out-File -FilePath (Join-Path $roomDir "retries") -NoNewline
 
-	            # No fail message — rescue should NOT fire
+	            # No fail message — terminal status should not be rescued
 	            $failMsg = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -Last 1 -AsObject
 	            $failMsg.Count | Should -Be 0
-	            # Room should stay in failed-final (no rescue)
+	            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
         }
 
-        It "rescue to triage fires when fail message exists" {
+        It "failed status stays terminal even when fail feedback exists" {
             & $script:NewWarRoom -RoomId "room-331" -TaskRef "TASK-331" `
-                                 -TaskDescription "Rescue fires" -WarRoomsDir $script:warRoomsDir
+                                 -TaskDescription "Terminal failed" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-331"
             Write-V2Lifecycle -RoomDir $roomDir
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
             "1" | Out-File -FilePath (Join-Path $roomDir "retries") -NoNewline
 
-            # Post fail message — rescue SHOULD fire
+            # Post fail message — status remains manager-owned terminal failure
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
                                   -Type "fail" -Ref "TASK-331" -Body "Tests failed"
             $failMsg = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -Last 1 -AsObject
             $failMsg.Count | Should -Be 1
-            # Rescue condition met
+            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
         }
     }
 
@@ -1223,14 +1220,14 @@ Context "PLAN-REVIEW Verdict Logic" {
                                  -TaskDescription "Sender reject test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-501"
 
-            # Multi-stage lifecycle: developing→designer→review→passed
+            # Multi-stage lifecycle: developing→designer→review→done
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
 	                    developing     = @{ role = "engineer";  type = "work"; signals = @{ done = @{ target = "designer" } } }
 	                    'designer' = @{ role = "designer"; type = "work"; signals = @{ done = @{ target = "review" } } }
-                    review         = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; fail = @{ target = "developing" } } }
-                    passed         = @{ type = "terminal" }
+                    review         = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "done" }; fail = @{ target = "developing" } } }
+                    done           = @{ type = "terminal" }
                     failed         = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1263,14 +1260,14 @@ Context "PLAN-REVIEW Verdict Logic" {
                                  -TaskDescription "Signal bleed test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-510"
 
-            # Room-003 lifecycle: developing → designer → review → passed
+            # Room-003 lifecycle: developing → designer → review → done
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
 	                    developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
 	                    'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; done = @{ target = "passed" }; fail = @{ target = "developing" } } }
-                    passed          = @{ type = "terminal" }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "done" }; done = @{ target = "done" }; fail = @{ target = "developing" } } }
+                    done            = @{ type = "terminal" }
                     failed          = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1311,7 +1308,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             $designerRole | Should -Be "designer"
 
             # If the manager used the old logic (no sender check), it would
-            # transition designer → review → passed in seconds.
+            # transition designer → review → done in seconds.
             # With sender validation, room stays in designer waiting for
             # actual designer agent to post its own done signal.
             $currentStatus = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
@@ -1328,8 +1325,8 @@ Context "PLAN-REVIEW Verdict Logic" {
                 states = @{
                     developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
                     'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" } } }
-                    passed          = @{ type = "terminal" }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "done" } } }
+                    done            = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
 
@@ -1370,8 +1367,8 @@ Context "PLAN-REVIEW Verdict Logic" {
                 states = @{
                     developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
                     'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "qa";        type = "review"; signals = @{ done = @{ target = "passed" } } }
-                    passed          = @{ type = "terminal" }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ done = @{ target = "done" } } }
+                    done            = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
 
@@ -1400,8 +1397,8 @@ Context "PLAN-REVIEW Verdict Logic" {
         }
     }
 
-    Context "Full architect lifecycle: review → passed" {
-        It "architect done signal transitions room to passed via Find-LatestSignal" {
+    Context "Full architect lifecycle: review → done" {
+        It "architect done signal transitions room to done via Find-LatestSignal" {
             & $script:NewWarRoom -RoomId "room-420" -TaskRef "TASK-420" `
                                  -TaskDescription "Full done lifecycle" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-420"
@@ -1413,12 +1410,12 @@ Context "PLAN-REVIEW Verdict Logic" {
                     review = @{
                         role = "architect"; type = "review"
                         signals = @{
-	                            done = @{ target = "passed" }
-	                            pass = @{ target = "passed" }
+	                            done = @{ target = "done" }
+	                            pass = @{ target = "done" }
                             fail = @{ target = "failed"; actions = @("increment_retries") }
                         }
                     }
-                    passed = @{ type = "terminal" }
+                    done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1464,10 +1461,10 @@ Context "PLAN-REVIEW Verdict Logic" {
 
             # Apply transition
             $targetState = $lc.states.review.signals.$matchedSignal.target
-            $targetState | Should -Be "passed"
+            $targetState | Should -Be "done"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus $targetState
             $finalStatus = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $finalStatus | Should -Be "passed"
+            $finalStatus | Should -Be "done"
         }
     }
 
@@ -1483,11 +1480,11 @@ Context "PLAN-REVIEW Verdict Logic" {
                     review = @{
                         role = "architect"; type = "review"
                         signals = @{
-                            pass = @{ target = "passed" }
+                            pass = @{ target = "done" }
                             fail = @{ target = "failed"; actions = @("increment_retries") }
                         }
                     }
-                    passed = @{ type = "terminal" }
+                    done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1548,11 +1545,11 @@ Context "PLAN-REVIEW Verdict Logic" {
                     review = @{
                         role = "architect"; type = "review"
                         signals = @{
-                            pass = @{ target = "passed" }
+                            pass = @{ target = "done" }
                             fail = @{ target = "failed" }
                         }
                     }
-                    passed = @{ type = "terminal" }
+                    done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1612,11 +1609,11 @@ Context "PLAN-REVIEW Verdict Logic" {
                     review = @{
                         role = "architect"; type = "review"
                         signals = @{
-                            pass = @{ target = "passed" }
+                            pass = @{ target = "done" }
                             fail = @{ target = "failed" }
                         }
                     }
-                    passed = @{ type = "terminal" }
+                    done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1749,7 +1746,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             Test-Path $crashFile | Should -BeFalse -Because "crash counter must reset on successful transition"
         }
 
-        It "crash counter from review does not carry into passed state" {
+        It "crash counter from review does not carry into done state" {
             & $script:NewWarRoom -RoomId "room-crr-02" -TaskRef "TASK-CRR02" `
                                  -TaskDescription "Crash no carry" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-crr-02"
@@ -1758,12 +1755,12 @@ Context "PLAN-REVIEW Verdict Logic" {
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
             "1" | Out-File -FilePath $crashFile -Encoding utf8 -NoNewline
 
-            # Transition to passed (terminal) — crash counter should be cleaned
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
+            # Transition to done (terminal) — crash counter should be cleaned
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "done"
             Remove-Item $crashFile -Force -ErrorAction SilentlyContinue
 
             Test-Path $crashFile | Should -BeFalse
-            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "passed"
+            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "done"
         }
     }
 
@@ -2664,7 +2661,7 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "Write-RoomStatus transitions review→passed and removes ALL PIDs" {
+    It "Write-RoomStatus transitions review->done and removes ALL PIDs" {
         $rd   = Copy-SampleRoom "wrs-terminal"
         Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
 
@@ -2674,8 +2671,8 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
         "22222" | Out-File (Join-Path $pidDir "qa.pid")          -Encoding utf8 -NoNewline
         "$(Get-Date -UFormat %s)" | Out-File (Join-Path $pidDir "qa.spawned_at") -Encoding utf8 -NoNewline
 
-        Write-RoomStatus -RoomDir $rd -NewStatus "passed"
-        (Get-Content (Join-Path $rd "status") -Raw).Trim() | Should -Be "passed"
+        Write-RoomStatus -RoomDir $rd -NewStatus "done"
+        (Get-Content (Join-Path $rd "status") -Raw).Trim() | Should -Be "done"
         Get-ChildItem $pidDir -Filter "*.pid" -ErrorAction SilentlyContinue |
             Measure-Object | Select-Object -ExpandProperty Count | Should -Be 0
     }
@@ -2696,7 +2693,7 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "Get-ActiveCount does not count sample room when status=passed" {
+    It "Get-ActiveCount does not count sample room when status=done" {
         $parent = Join-Path $TestDrive "gac-term-$(Get-Random)"
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
         $rd = Join-Path $parent "room-001"
@@ -2705,7 +2702,7 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
         if (-not (Test-Path $audit)) { "" | Out-File $audit -Encoding utf8 }
         Set-SampleContext -RoomsParent $parent
 
-        "passed" | Out-File (Join-Path $rd "status") -Encoding utf8 -NoNewline
+        "done" | Out-File (Join-Path $rd "status") -Encoding utf8 -NoNewline
         Get-ActiveCount | Should -Be 0
     }
 
@@ -2745,17 +2742,17 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "review.done routes to passed (terminal) per sample lifecycle" {
+    It "review.done routes to done (terminal) per sample lifecycle" {
         $rd = Copy-SampleRoom "lifecycle-review-done-routing"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
-        $lc.states.review.signals.done.target | Should -Be "passed"
+        $lc.states.review.signals.done.target | Should -Be "done"
     }
 
     # -----------------------------------------------------------------------
     It "review.pass remains accepted as legacy success signal per sample lifecycle" {
         $rd = Copy-SampleRoom "lifecycle-pass-routing"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
-        $lc.states.review.signals.pass.target | Should -Be "passed"
+        $lc.states.review.signals.pass.target | Should -Be "done"
     }
 
     # -----------------------------------------------------------------------

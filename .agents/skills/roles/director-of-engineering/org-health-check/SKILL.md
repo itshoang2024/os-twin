@@ -87,4 +87,4 @@ Healthy teams build great products. Unhealthy teams burn out, lose talent, and s
 - Only measuring velocity → fast teams shipping the wrong thing aren't healthy
 - Measuring health once per quarter → monthly is minimum; some indicators need weekly
 - Ignoring leading indicators → attrition is a lagging indicator; by the time people leave, it's too late
-- Using health metrics punitively → teams will game metrics if they're punished for honest reporting
+- Using health metrics punitively → teams will manipulate metrics if they're punished for honest reporting

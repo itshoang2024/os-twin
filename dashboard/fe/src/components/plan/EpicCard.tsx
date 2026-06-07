@@ -15,7 +15,8 @@ export const stateColors: Record<string, string> = {
   review: '#a855f7',          // final QA gate — distinct purple
   optimize: '#f59e0b',
   triage: '#ef4444',
-  failed: '#f97316',          // auto-retry decision node — orange
+  done: '#10b981',
+  failed: '#ef4444',
   passed: '#10b981',
   'failed-final': '#ef4444',
   // Legacy aliases for backward compat
@@ -42,8 +43,9 @@ const warRoomStatusIcons: Record<string, { icon: string; color: string; label: s
   review: { icon: 'verified', color: '#a855f7', label: 'QA Gate' },
   optimize: { icon: 'build', color: '#f59e0b', label: 'Optimizing' },
   triage: { icon: 'warning', color: '#ef4444', label: 'Triage' },
-  failed: { icon: 'replay', color: '#f97316', label: 'Auto-Retry' },
-  passed: { icon: 'check_circle', color: '#10b981', label: 'Passed' },
+  done: { icon: 'check_circle', color: '#10b981', label: 'Done' },
+  failed: { icon: 'cancel', color: '#ef4444', label: 'Failed' },
+  passed: { icon: 'check_circle', color: '#10b981', label: 'Done' },
   'failed-final': { icon: 'cancel', color: '#ef4444', label: 'Failed' },
   // Progress-based statuses
   active: { icon: 'play_circle', color: '#3b82f6', label: 'Active' },
@@ -54,6 +56,14 @@ interface EpicCardProps {
   epic: Epic;
   onCriticalPath?: boolean;
   warRoomStatus?: string;
+}
+
+function normalizeLifecycleStatus(status = 'pending') {
+  if (status === 'passed') return 'done';
+  if (status === 'failed-final') return 'failed';
+  if (status === 'fixing') return 'optimize';
+  if (status === 'signoff') return 'done';
+  return status;
 }
 
 export default function EpicCard({ epic, onCriticalPath, warRoomStatus }: EpicCardProps) {
@@ -97,13 +107,14 @@ export default function EpicCard({ epic, onCriticalPath, warRoomStatus }: EpicCa
   const isSelected = selectedEpicRef === epic.epic_ref;
 
   // Determine state color, prioritizing the current room status if available
-  const activeState = warRoomStatus || epic.lifecycle_state || 'pending';
+  const lifecycleState = normalizeLifecycleStatus(epic.lifecycle_state || 'pending');
+  const activeState = normalizeLifecycleStatus(warRoomStatus || lifecycleState);
   const stateColor = stateColors[activeState] ||
     (activeState.startsWith('wave-') ? stateColors[activeState] : stateColors.pending) ||
     stateColors.pending;
 
   const roleColor = getRoleColor(epic.role || '');
-  const wrStatus = warRoomStatus ? warRoomStatusIcons[warRoomStatus] : null;
+  const wrStatus = warRoomStatus ? warRoomStatusIcons[activeState] : null;
 
   const handleClick = () => {
     setSelectedEpicRef(epic.epic_ref);
@@ -199,8 +210,8 @@ export default function EpicCard({ epic, onCriticalPath, warRoomStatus }: EpicCa
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase"
             style={{ background: `${stateColor}15`, color: stateColor }}
           >
-            <span className={`w-1 h-1 rounded-full ${(epic.lifecycle_state || 'pending') !== 'passed' && (epic.lifecycle_state || 'pending') !== 'signoff' ? 'animate-pulse' : ''}`} style={{ background: stateColor }} />
-            {(epic.lifecycle_state || 'pending').replace('-', ' ')}
+            <span className={`w-1 h-1 rounded-full ${!['done', 'failed'].includes(lifecycleState) ? 'animate-pulse' : ''}`} style={{ background: stateColor }} />
+            {lifecycleState.replace('-', ' ')}
           </div>
         </div>
       </div>

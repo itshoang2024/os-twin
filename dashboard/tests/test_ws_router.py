@@ -2,7 +2,7 @@
 
 import os
 
-os.environ["OSTWIN_API_KEY"] = "test-key"
+os.environ["OSTWIN_API_KEY"] = "DEBUG"
 
 import json
 import time

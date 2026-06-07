@@ -22,7 +22,8 @@ from dashboard.api_utils import (
     AGENTS_DIR, PROJECT_ROOT, PLANS_DIR, GLOBAL_PLANS_DIR,
     get_plan_roles_config, build_roles_list,
     resolve_runtime_plan_warrooms_dir,
-    process_notification
+    process_notification,
+    canonical_room_status,
 )
 import dashboard.global_state as global_state
 from dashboard.auth import get_current_user
@@ -1589,7 +1590,7 @@ async def list_plans(
                 try:
                     prog = json.loads(prog_file.read_text())
                     p["epic_count"] = prog.get("total", p.get("epic_count", 0))
-                    p["completed_epics"] = prog.get("passed", 0)
+                    p["completed_epics"] = prog.get("done", prog.get("passed", 0))
                     p["active_epics"] = prog.get("active", 0)
                     p["pct_complete"] = prog.get("pct_complete", 0)
                     p["escalations"] = sum(
@@ -1676,7 +1677,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
     }
     active_epics = 0
     total_epics = 0
-    passed_epics = 0
+    done_epics = 0
     escalations = 0
 
     seen_progress_files = set()
@@ -1710,7 +1711,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             prog = json.loads(Path(pf_path).read_text())
             active_epics += prog.get("active", 0)
             total_epics += prog.get("total", 0)
-            passed_epics += prog.get("passed", 0)
+            done_epics += prog.get("done", prog.get("passed", 0))
             for room in prog.get("rooms", []):
                 if room.get("status") == "manager-triage":
                     escalations += 1
@@ -1718,7 +1719,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             pass
 
     # Weighted average completion rate
-    completion_rate = (passed_epics / total_epics * 100) if total_epics > 0 else 0
+    completion_rate = (done_epics / total_epics * 100) if total_epics > 0 else 0
 
     current_stats = {
         "total_plans": total_plans,
@@ -3211,13 +3212,13 @@ async def get_plan_progress(plan_id: str, user: dict = Depends(get_current_user)
     warrooms_dir = resolve_runtime_plan_warrooms_dir(plan_id)
     if not warrooms_dir:
         return {
-            "total": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
+            "total": 0, "done": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
             "pct_complete": 0, "rooms": []
         }
     prog_file = warrooms_dir / "progress.json"
     if not prog_file.exists():
         return {
-            "total": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
+            "total": 0, "done": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
             "pct_complete": 0, "rooms": []
         }
     try:
@@ -3238,15 +3239,15 @@ async def update_epic_state(plan_id: str, epic_ref: str, body: dict, user: dict 
     Writes the new status to ``room-xxx/status`` and recalculates
     ``progress.json`` by scanning every room in the plan's warrooms dir.
 
-    Accepted body: ``{ "status": "passed" | "developing" | "pending" | ... }``
+    Accepted body: ``{ "status": "done" | "developing" | "pending" | ... }``
     """
     from dashboard.api_utils import resolve_plan_warrooms_dir
 
-    new_status = body.get("status") or body.get("lifecycle_state")
+    new_status = canonical_room_status(body.get("status") or body.get("lifecycle_state"))
     if not new_status:
         raise HTTPException(status_code=422, detail="Missing 'status' in request body")
 
-    ALLOWED_STATUSES = {"passed", "developing", "pending", "blocked", "failed-final", "signoff"}
+    ALLOWED_STATUSES = {"done", "developing", "optimize", "review", "triage", "pending", "blocked", "failed", "signoff"}
     if new_status not in ALLOWED_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status '{new_status}'. Allowed: {sorted(ALLOWED_STATUSES)}")
 
@@ -3290,7 +3291,7 @@ def _recalculate_progress(warrooms_dir: Path):
     """
     from datetime import datetime, timezone
 
-    total = passed = failed = blocked = active = pending = 0
+    total = done = failed = blocked = active = pending = 0
     rooms = []
 
     for room_dir in sorted(warrooms_dir.glob("room-*")):
@@ -3299,14 +3300,15 @@ def _recalculate_progress(warrooms_dir: Path):
         total += 1
 
         status_file = room_dir / "status"
-        status = status_file.read_text().strip() if status_file.exists() else "pending"
+        raw_status = status_file.read_text().strip() if status_file.exists() else "pending"
+        status = canonical_room_status(raw_status)
 
         tr_file = room_dir / "task-ref"
         task_ref = tr_file.read_text().strip() if tr_file.exists() else "?"
 
-        if status == "passed":
-            passed += 1
-        elif status == "failed-final":
+        if status == "done":
+            done += 1
+        elif status == "failed":
             failed += 1
         elif status == "blocked":
             blocked += 1
@@ -3315,9 +3317,9 @@ def _recalculate_progress(warrooms_dir: Path):
         else:
             active += 1
 
-        rooms.append({"room_id": room_dir.name, "task_ref": task_ref, "status": status})
+        rooms.append({"room_id": room_dir.name, "task_ref": task_ref, "status": status, "raw_status": raw_status})
 
-    pct_complete = round((passed / total) * 100, 1) if total > 0 else 0
+    pct_complete = round((done / total) * 100, 1) if total > 0 else 0
 
     # Critical path progress from DAG.json
     critical_path_str = ""
@@ -3333,7 +3335,7 @@ def _recalculate_progress(warrooms_dir: Path):
                     cp_room_id = cp_node.get("room_id")
                     if cp_room_id:
                         cp_status_file = warrooms_dir / cp_room_id / "status"
-                        if cp_status_file.exists() and cp_status_file.read_text().strip() == "passed":
+                        if cp_status_file.exists() and canonical_room_status(cp_status_file.read_text().strip()) == "done":
                             cp_passed += 1
                 critical_path_str = f"{cp_passed}/{len(cp)}"
         except (json.JSONDecodeError, OSError):
@@ -3342,7 +3344,8 @@ def _recalculate_progress(warrooms_dir: Path):
     progress_data = {
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total": total,
-        "passed": passed,
+        "done": done,
+        "passed": done,
         "failed": failed,
         "blocked": blocked,
         "active": active,
@@ -3559,7 +3562,7 @@ async def plan_room_action(
 
     status_file = room_dir / "status"
     if action == "stop":
-        status_file.write_text("failed-final")
+        status_file.write_text("failed")
     elif action == "pause":
         status_file.write_text("paused")
     elif action in ("resume", "start"):

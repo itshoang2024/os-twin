@@ -38,7 +38,7 @@ knowledge_web_research(
 
 Research pixel art techniques:
 ```
-knowledge_web_research(query="pixel art animation techniques 2024", namespace="gamedev")
+knowledge_web_research(query="pixel art animation techniques 2024", namespace="pixel-art")
 ```
 
 Research with specific engines:

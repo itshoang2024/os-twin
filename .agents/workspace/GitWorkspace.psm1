@@ -218,36 +218,91 @@ function Get-PlanWorkspaceManifest {
     return (Get-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir))
 }
 
-function Write-WorkspaceEvent {
+function Get-WorkspaceRoomsTable {
+    param($Manifest)
+
+    if (-not $Manifest -or -not ($Manifest.PSObject.Properties.Name -contains 'rooms') -or -not $Manifest.rooms) {
+        return [ordered]@{}
+    }
+    return (ConvertTo-WorkspaceHashtable -InputObject $Manifest.rooms)
+}
+
+function Get-RoomWorkspaceRecord {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$EventType,
-        [Parameter(Mandatory)][string]$PlanId,
-        [Parameter(Mandatory)][string]$RunId,
-        [Parameter(Mandatory)][string]$Summary,
-        [hashtable]$Payload = @{},
-        [string]$EventsPath = '',
-        [string]$RoomId = '',
-        [string]$EpicRef = '',
-        [string]$Severity = 'info'
+        [Parameter(Mandatory)][string]$WarRoomsDir,
+        [Parameter(Mandatory)][string]$RoomId
     )
 
-    if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return $null }
-    if ([string]::IsNullOrWhiteSpace($PlanId)) { return $null }
-    if ([string]::IsNullOrWhiteSpace($RunId)) { return $null }
+    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
+    if (-not $manifest) { return $null }
+    $rooms = Get-WorkspaceRoomsTable -Manifest $manifest
+    if (-not $rooms.Contains($RoomId)) { return $null }
+    return [pscustomobject](ConvertTo-WorkspaceHashtable -InputObject $rooms[$RoomId])
+}
 
-    $event = [ordered]@{
-        event_type = $EventType
-        plan_id    = $PlanId
-        run_id     = $RunId
-        severity   = $Severity
-        summary    = $Summary
-        payload    = [ordered]@{}
+function Set-RoomWorkspaceRecord {
+    [CmdletBinding()]
+    param(
+        [string]$RoomId = '',
+        [string]$TaskRef = '',
+        [Parameter(Mandatory)][string]$WarRoomsDir,
+        [Parameter(Mandatory)][string]$Status,
+        [hashtable]$Fields = @{}
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RoomId)) { throw 'RoomId is required to update workspace manifest room state.' }
+
+    $manifestPath = Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir
+    $manifest = Get-WorkspaceJson -Path $manifestPath
+    if (-not $manifest) { return $null }
+
+    $rooms = Get-WorkspaceRoomsTable -Manifest $manifest
+    $record = if ($rooms.Contains($RoomId)) {
+        ConvertTo-WorkspaceHashtable -InputObject $rooms[$RoomId]
+    } else {
+        [ordered]@{}
     }
-    foreach ($key in $Payload.Keys) { $event.payload[$key] = $Payload[$key] }
-    if ($RoomId) { $event['room_id'] = $RoomId }
-    if ($EpicRef) { $event['epic_ref'] = $EpicRef }
 
-    return (Write-OrchestrationEvent -EventsPath $EventsPath -Event $event)
+    $record['room_id'] = $RoomId
+    if ($TaskRef) { $record['task_ref'] = $TaskRef }
+    $record['status'] = $Status
+    $record['updated_at'] = (Get-Date).ToUniversalTime().ToString('o')
+    foreach ($key in $Fields.Keys) { $record[$key] = $Fields[$key] }
+
+    $rooms[$RoomId] = $record
+    if ($manifest.PSObject.Properties.Name -contains 'rooms') {
+        $manifest.rooms = $rooms
+    } else {
+        $manifest | Add-Member -NotePropertyName rooms -NotePropertyValue $rooms
+    }
+    if ($manifest.PSObject.Properties.Name -contains 'updated_at') {
+        $manifest.updated_at = (Get-Date).ToUniversalTime().ToString('o')
+    } else {
+        $manifest | Add-Member -NotePropertyName updated_at -NotePropertyValue (Get-Date).ToUniversalTime().ToString('o')
+    }
+    Write-WorkspaceJson -Path $manifestPath -Value $manifest
+    return [pscustomobject]$record
+}
+
+function Remove-RoomConfigWorkspaceState {
+    param([Parameter(Mandatory)]$Config)
+
+    if ($Config.PSObject.Properties.Name -contains 'workspace') {
+        $Config.PSObject.Properties.Remove('workspace')
+    }
+    return $Config
+}
+
+function ConvertTo-WorkspaceCanonicalRoomStatus {
+    param([AllowEmptyString()][string]$Status)
+
+    switch ($Status) {
+        'passed'       { return 'done' }
+        'failed-final' { return 'failed' }
+        'fixing'       { return 'optimize' }
+        default        { return $Status }
+    }
 }
 
 function Initialize-PlanIntegrationWorkspace {
@@ -273,6 +328,7 @@ function Initialize-PlanIntegrationWorkspace {
             run_id             = $RunId
             source_working_dir = (Resolve-Path $SourceWorkingDir).Path
             status             = 'not_applicable'
+            rooms              = [ordered]@{}
             created_at         = (Get-Date).ToUniversalTime().ToString('o')
         }
         Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
@@ -281,16 +337,8 @@ function Initialize-PlanIntegrationWorkspace {
 
     $ready = Test-GitReady -WorkingDir $SourceWorkingDir -AllowRuntimeState
     if (-not $ready.Ready) {
-        Write-WorkspaceEvent -EventType 'workspace.git.preflight.failed' -PlanId $PlanId -RunId $RunId -Summary "Git preflight failed for $PlanId." -Payload @{ reason = $ready.Reason; message = $ready.Message; working_dir = $SourceWorkingDir } -Severity 'error' | Out-Null
         throw $ready.Message
     }
-
-    Write-WorkspaceEvent -EventType 'workspace.git.preflight.passed' -PlanId $PlanId -RunId $RunId -Summary "Git preflight passed for $PlanId." -Payload @{
-        source_git_root    = $ready.SourceGitRoot
-        source_working_dir = $ready.WorkingDir
-        base_ref           = $ready.BaseRef
-        base_branch        = $ready.BaseBranch
-    } | Out-Null
 
     if ([string]::IsNullOrWhiteSpace($WorktreeRoot)) {
         $WorktreeRoot = Get-DefaultWorktreeRoot -SourceGitRoot $ready.SourceGitRoot -PlanId $PlanId -RunId $RunId
@@ -320,15 +368,9 @@ function Initialize-PlanIntegrationWorkspace {
         integration_head         = $integrationHead
         worktree_root            = $WorktreeRoot
         status                   = 'ready'
+        rooms                    = [ordered]@{}
         created_at               = (Get-Date).ToUniversalTime().ToString('o')
     }
-
-    Write-WorkspaceEvent -EventType 'workspace.integration.ready' -PlanId $PlanId -RunId $RunId -Summary "Integration workspace ready for $PlanId." -Payload @{
-        integration_branch       = $integrationBranch
-        integration_worktree_dir = $integrationWorktree
-        integration_head         = $integrationHead
-        worktree_root            = $WorktreeRoot
-    } | Out-Null
 
     Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
     return [pscustomobject]$manifest
@@ -362,22 +404,13 @@ function Set-RoomWorkspaceStatus {
     $cfgPath = Join-Path $RoomDir 'config.json'
     if (-not (Test-Path $cfgPath)) { return $null }
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
-    $workspace = if ($cfg.PSObject.Properties.Name -contains 'workspace' -and $cfg.workspace) {
-        ConvertTo-WorkspaceHashtable -InputObject $cfg.workspace
-    } else {
-        [ordered]@{}
-    }
-    $workspace['status'] = $Status
-    $workspace['updated_at'] = (Get-Date).ToUniversalTime().ToString('o')
-    foreach ($key in $Fields.Keys) { $workspace[$key] = $Fields[$key] }
-
-    if ($cfg.PSObject.Properties.Name -contains 'workspace') {
-        $cfg.workspace = $workspace
-    } else {
-        $cfg | Add-Member -NotePropertyName workspace -NotePropertyValue $workspace
-    }
+    $warRoomsDir = Split-Path $RoomDir -Parent
+    $roomId = if ($cfg.room_id) { "$($cfg.room_id)" } else { Split-Path $RoomDir -Leaf }
+    $taskRef = if ($cfg.task_ref) { "$($cfg.task_ref)" } else { '' }
+    $record = Set-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId $roomId -TaskRef $taskRef -Status $Status -Fields $Fields
+    $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
     Write-WorkspaceJson -Path $cfgPath -Value $cfg
-    return $cfg
+    return $record
 }
 
 function Get-WorkspaceDependencyState {
@@ -409,17 +442,20 @@ function Get-WorkspaceDependencyState {
         $depStatusPath = Join-Path $depRoom 'status'
         $depStatus = if (Test-Path $depStatusPath) { (Get-Content $depStatusPath -Raw).Trim() } else { '' }
         $depCfg = Get-Content $depCfgPath -Raw | ConvertFrom-Json
-        $workspaceStatus = if ($depCfg.PSObject.Properties.Name -contains 'workspace' -and $depCfg.workspace -and ($depCfg.workspace.PSObject.Properties.Name -contains 'status')) { "$($depCfg.workspace.status)" } else { '' }
-        if ($depStatus -ne 'passed') {
-            $blocked += "${dep}:not-passed"
-        } elseif ($workspaceStatus -notin @('integrated', 'not_applicable')) {
-            $blocked += "${dep}:not-integrated"
+        $depRoomId = if ($depCfg.room_id) { "$($depCfg.room_id)" } else { Split-Path $depRoom -Leaf }
+        $workspaceRecord = Get-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $depRoomId
+        $workspaceStatus = if ($workspaceRecord -and ($workspaceRecord.PSObject.Properties.Name -contains 'status')) { "$($workspaceRecord.status)" } else { '' }
+        $depCanonical = ConvertTo-WorkspaceCanonicalRoomStatus -Status $depStatus
+        if ($depCanonical -ne 'done') {
+            $blocked += "${dep}:not-done"
+        } elseif ($workspaceStatus -notin @('merged', 'not_applicable')) {
+            $blocked += "${dep}:not-merged"
         }
     }
 
     return [pscustomobject]@{
         Ready     = ($blocked.Count -eq 0)
-        Reason    = if ($blocked.Count -eq 0) { 'ready' } else { 'dependencies_not_integrated' }
+        Reason    = if ($blocked.Count -eq 0) { 'ready' } else { 'dependencies_not_merged' }
         BlockedBy = $blocked
     }
 }
@@ -478,17 +514,22 @@ function Ensure-RoomWorktree {
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
     $roomId = "$($cfg.room_id)"
     $taskRef = "$($cfg.task_ref)"
-    $eventsPath = if ($cfg.PSObject.Properties.Name -contains 'events_path') { "$($cfg.events_path)" } else { '' }
 
     if ($taskRef -eq 'PLAN-REVIEW') {
         Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+        $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
+        Write-WorkspaceJson -Path $cfgPath -Value $cfg
         return [pscustomobject]@{ Ready = $true; Mode = 'plan-review'; WorkingDir = "$($cfg.working_dir)" }
     }
 
-    if ($cfg.PSObject.Properties.Name -contains 'workspace' -and $cfg.workspace) {
-        $existingStatus = if ($cfg.workspace.PSObject.Properties.Name -contains 'status') { "$($cfg.workspace.status)" } else { '' }
-        $existingDir = if ($cfg.workspace.PSObject.Properties.Name -contains 'working_dir') { "$($cfg.workspace.working_dir)" } else { '' }
-        if ($existingStatus -in @('ready', 'integrated') -and $existingDir -and (Test-Path $existingDir -PathType Container)) {
+    $existingRecord = Get-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId
+    if ($existingRecord) {
+        $existingStatus = if ($existingRecord.PSObject.Properties.Name -contains 'status') { "$($existingRecord.status)" } else { '' }
+        $existingDir = if ($existingRecord.PSObject.Properties.Name -contains 'working_dir') { "$($existingRecord.working_dir)" } else { '' }
+        if ($existingStatus -in @('ready', 'merged') -and $existingDir -and (Test-Path $existingDir -PathType Container)) {
+            $cfg.working_dir = $existingDir
+            $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
+            Write-WorkspaceJson -Path $cfgPath -Value $cfg
             return [pscustomobject]@{ Ready = $true; Mode = 'room-worktree'; WorkingDir = $existingDir; Reused = $true }
         }
     }
@@ -497,13 +538,10 @@ function Ensure-RoomWorktree {
     $roomWorktreeRoot = Join-Path $manifest.worktree_root $roomSlug
     $branch = "ostwin/$((Get-WorkspaceSafeSlug -Value $manifest.plan_id -MaxLength 48))/$((Get-WorkspaceSafeSlug -Value $manifest.run_id -MaxLength 48))/$roomSlug"
     $baseRef = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('rev-parse', 'HEAD')).Output.Trim()
-
-    Write-WorkspaceEvent -EventType 'workspace.worktree.requested' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Worktree requested for $taskRef." -Payload @{
-        room_id   = $roomId
-        task_ref  = $taskRef
-        branch    = $branch
-        base_ref  = $baseRef
-        worktree  = $roomWorktreeRoot
+    Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'creating' -Fields @{
+        branch       = $branch
+        base_ref     = $baseRef
+        worktree_dir = $roomWorktreeRoot
     } | Out-Null
 
     try {
@@ -512,47 +550,33 @@ function Ensure-RoomWorktree {
         }
         Sync-AgentRuntimeOverlay -SourceGitRoot $manifest.source_git_root -RoomWorktreeRoot $roomWorktreeRoot -AgentsDir $AgentsDir
         $relativeDir = ''
-        if ($cfg.PSObject.Properties.Name -contains 'workspace' -and $cfg.workspace -and ($cfg.workspace.PSObject.Properties.Name -contains 'source_relative_dir') -and "$($cfg.workspace.source_relative_dir)" -ne '.') {
-            $relativeDir = "$($cfg.workspace.source_relative_dir)"
-        } elseif ($manifest.PSObject.Properties.Name -contains 'source_relative_dir' -and "$($manifest.source_relative_dir)" -ne '.') {
+        if ($manifest.PSObject.Properties.Name -contains 'source_git_root' -and $manifest.source_git_root -and $cfg.working_dir) {
+            try {
+                $candidateRelative = [System.IO.Path]::GetRelativePath("$($manifest.source_git_root)", "$($cfg.working_dir)") -replace '\\', '/'
+                if ($candidateRelative -and $candidateRelative -ne '.') { $relativeDir = $candidateRelative }
+            } catch { }
+        }
+        if (-not $relativeDir -and $manifest.PSObject.Properties.Name -contains 'source_relative_dir' -and "$($manifest.source_relative_dir)" -ne '.') {
             $relativeDir = "$($manifest.source_relative_dir)"
         }
         $roomWorkingDir = if ($relativeDir) { Join-Path $roomWorktreeRoot $relativeDir } else { $roomWorktreeRoot }
         if (-not (Test-Path $roomWorkingDir)) { New-Item -ItemType Directory -Path $roomWorkingDir -Force | Out-Null }
 
-        $workspace = [ordered]@{
-            mode          = 'git-worktree'
-            status        = 'ready'
-            branch        = $branch
-            base_ref      = $baseRef
-            worktree_dir  = $roomWorktreeRoot
-            working_dir   = $roomWorkingDir
-            requested_at  = (Get-Date).ToUniversalTime().ToString('o')
-            ready_at      = (Get-Date).ToUniversalTime().ToString('o')
-        }
         $cfg.working_dir = $roomWorkingDir
-        if ($cfg.PSObject.Properties.Name -contains 'workspace') {
-            $cfg.workspace = $workspace
-        } else {
-            $cfg | Add-Member -NotePropertyName workspace -NotePropertyValue $workspace
-        }
-        Write-WorkspaceEvent -EventType 'workspace.worktree.ready' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Worktree ready for $taskRef." -Payload @{
-            room_id     = $roomId
-            task_ref    = $taskRef
-            branch      = $branch
-            base_ref    = $baseRef
-            worktree    = $roomWorktreeRoot
-            working_dir = $roomWorkingDir
-        } | Out-Null
+        $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
         Write-WorkspaceJson -Path $cfgPath -Value $cfg
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'ready' -Fields @{
+            mode                = 'git-worktree'
+            branch              = $branch
+            base_ref            = $baseRef
+            worktree_dir        = $roomWorktreeRoot
+            working_dir         = $roomWorkingDir
+            source_relative_dir = if ($relativeDir) { $relativeDir } else { '.' }
+            ready_at            = (Get-Date).ToUniversalTime().ToString('o')
+        } | Out-Null
         return [pscustomobject]@{ Ready = $true; Mode = 'room-worktree'; WorkingDir = $roomWorkingDir; BaseRef = $baseRef; Branch = $branch }
     } catch {
-        Write-WorkspaceEvent -EventType 'workspace.worktree.failed' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Worktree failed for $taskRef." -Severity 'error' -Payload @{
-            room_id = $roomId
-            task_ref = $taskRef
-            error = $_.Exception.Message
-        } | Out-Null
-        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'failed' -Fields @{ error = $_.Exception.Message } | Out-Null
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'failed' -Fields @{ error = $_.Exception.Message } | Out-Null
         throw
     }
 }
@@ -566,8 +590,16 @@ function Update-PlanWorkspaceIntegrationHead {
     $manifestPath = Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir
     $manifest = Get-WorkspaceJson -Path $manifestPath
     if (-not $manifest) { return }
-    $manifest.integration_head = $IntegrationHead
-    $manifest.updated_at = (Get-Date).ToUniversalTime().ToString('o')
+    if ($manifest.PSObject.Properties.Name -contains 'integration_head') {
+        $manifest.integration_head = $IntegrationHead
+    } else {
+        $manifest | Add-Member -NotePropertyName integration_head -NotePropertyValue $IntegrationHead
+    }
+    if ($manifest.PSObject.Properties.Name -contains 'updated_at') {
+        $manifest.updated_at = (Get-Date).ToUniversalTime().ToString('o')
+    } else {
+        $manifest | Add-Member -NotePropertyName updated_at -NotePropertyValue (Get-Date).ToUniversalTime().ToString('o')
+    }
     Write-WorkspaceJson -Path $manifestPath -Value $manifest
 }
 
@@ -588,28 +620,31 @@ function Complete-RoomWorkspaceMerge {
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
     $roomId = "$($cfg.room_id)"
     $taskRef = "$($cfg.task_ref)"
-    $eventsPath = if ($cfg.PSObject.Properties.Name -contains 'events_path') { "$($cfg.events_path)" } else { '' }
 
     if ($taskRef -eq 'PLAN-REVIEW') {
         Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+        $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
+        Write-WorkspaceJson -Path $cfgPath -Value $cfg
         return [pscustomobject]@{ Integrated = $true; Status = 'not_applicable' }
     }
 
-    if ($cfg.PSObject.Properties.Name -contains 'workspace' -and $cfg.workspace -and $cfg.workspace.PSObject.Properties.Name -contains 'status' -and "$($cfg.workspace.status)" -eq 'integrated') {
-        return [pscustomobject]@{ Integrated = $true; Status = 'integrated'; Reused = $true }
+    $workspaceRecord = Get-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId
+    if ($workspaceRecord -and ($workspaceRecord.PSObject.Properties.Name -contains 'status') -and "$($workspaceRecord.status)" -eq 'merged') {
+        return [pscustomobject]@{ Integrated = $true; Status = 'merged'; Reused = $true }
     }
-    if ($cfg.PSObject.Properties.Name -contains 'workspace' -and $cfg.workspace -and $cfg.workspace.PSObject.Properties.Name -contains 'status' -and "$($cfg.workspace.status)" -eq 'merge-conflicted') {
-        return [pscustomobject]@{ Integrated = $false; Status = 'merge-conflicted' }
+    if ($workspaceRecord -and ($workspaceRecord.PSObject.Properties.Name -contains 'status') -and "$($workspaceRecord.status)" -eq 'conflicted') {
+        return [pscustomobject]@{ Integrated = $false; Status = 'conflicted' }
     }
-    if (-not ($cfg.PSObject.Properties.Name -contains 'workspace') -or -not $cfg.workspace) {
+    if (-not $workspaceRecord) {
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'failed' -Fields @{ error = 'Workspace record missing from manifest.' } | Out-Null
         return [pscustomobject]@{ Integrated = $false; Status = 'workspace_missing' }
     }
 
-    $workspace = ConvertTo-WorkspaceHashtable -InputObject $cfg.workspace
+    $workspace = ConvertTo-WorkspaceHashtable -InputObject $workspaceRecord
     $roomWorktree = "$($workspace['worktree_dir'])"
     $branch = "$($workspace['branch'])"
     if (-not (Test-Path $roomWorktree -PathType Container)) {
-        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'failed' -Fields @{ error = "Room worktree missing: $roomWorktree" } | Out-Null
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'failed' -Fields @{ error = "Room worktree missing: $roomWorktree" } | Out-Null
         return [pscustomobject]@{ Integrated = $false; Status = 'worktree_missing' }
     }
 
@@ -646,9 +681,7 @@ function Complete-RoomWorkspaceMerge {
                 Invoke-GitWorkspaceCommand -Cwd $roomWorktree -Arguments @('-c', 'user.name=ostwin', '-c', 'user.email=ostwin@local', 'commit', '-m', $message) | Out-Null
                 $commitCreated = $true
                 $commitRef = (Invoke-GitWorkspaceCommand -Cwd $roomWorktree -Arguments @('rev-parse', 'HEAD')).Output.Trim()
-                Write-WorkspaceEvent -EventType 'workspace.room.committed' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Room $taskRef committed." -Payload @{
-                    room_id = $roomId
-                    task_ref = $taskRef
+                Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'committed' -Fields @{
                     branch = $branch
                     commit = $commitRef
                 } | Out-Null
@@ -658,27 +691,17 @@ function Complete-RoomWorkspaceMerge {
         $roomHead = (Invoke-GitWorkspaceCommand -Cwd $roomWorktree -Arguments @('rev-parse', 'HEAD')).Output.Trim()
         $baseRef = if ($workspace.Contains('base_ref')) { "$($workspace['base_ref'])" } else { '' }
         if (-not $commitCreated -and $baseRef -and $roomHead -eq $baseRef) {
-            Write-WorkspaceEvent -EventType 'workspace.merge.completed' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "No workspace changes to merge for $taskRef." -Payload @{
-                room_id = $roomId
-                task_ref = $taskRef
-                branch = $branch
+            Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merged' -Fields @{
+                branch             = $branch
                 integration_branch = $manifest.integration_branch
-                no_changes = $true
+                merged_at          = (Get-Date).ToUniversalTime().ToString('o')
+                no_changes         = $true
             } | Out-Null
-            Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'integrated' -Fields @{ integrated_at = (Get-Date).ToUniversalTime().ToString('o'); no_changes = $true } | Out-Null
-            return [pscustomobject]@{ Integrated = $true; Status = 'integrated'; NoChanges = $true }
+            return [pscustomobject]@{ Integrated = $true; Status = 'merged'; NoChanges = $true }
         }
 
-        Write-WorkspaceEvent -EventType 'workspace.merge.requested' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Merge requested for $taskRef." -Payload @{
-            room_id = $roomId
-            task_ref = $taskRef
-            branch = $branch
-            integration_branch = $manifest.integration_branch
-        } | Out-Null
-        Write-WorkspaceEvent -EventType 'workspace.merge.started' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Merge started for $taskRef." -Payload @{
-            room_id = $roomId
-            task_ref = $taskRef
-            branch = $branch
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merging' -Fields @{
+            branch             = $branch
             integration_branch = $manifest.integration_branch
         } | Out-Null
 
@@ -686,32 +709,43 @@ function Complete-RoomWorkspaceMerge {
         if ($merge.ExitCode -ne 0) {
             $conflicts = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('diff', '--name-only', '--diff-filter=U') -AllowFailure).Output
             $conflictFiles = @($conflicts -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            Write-WorkspaceEvent -EventType 'workspace.merge.conflicted' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Severity 'error' -Summary "Merge conflicted for $taskRef." -Payload @{
+            $conflictDetails = [ordered]@{
                 room_id = $roomId
                 task_ref = $taskRef
                 branch = $branch
                 integration_branch = $manifest.integration_branch
                 conflict_files = $conflictFiles
                 error = $merge.Output
+                conflicted_at = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            $artifactsDir = Join-Path $RoomDir 'artifacts'
+            if (-not (Test-Path $artifactsDir)) { New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null }
+            Write-WorkspaceJson -Path (Join-Path $artifactsDir 'workspace-merge-conflict.json') -Value $conflictDetails
+            Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('merge', '--abort') -AllowFailure | Out-Null
+            Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'conflicted' -Fields @{
+                branch             = $branch
+                integration_branch = $manifest.integration_branch
+                conflict_files     = $conflictFiles
+                error              = $merge.Output
+                artifact           = 'artifacts/workspace-merge-conflict.json'
             } | Out-Null
-            Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'merge-conflicted' -Fields @{ conflict_files = $conflictFiles; error = $merge.Output } | Out-Null
-            return [pscustomobject]@{ Integrated = $false; Status = 'merge-conflicted'; ConflictFiles = $conflictFiles }
+            return [pscustomobject]@{ Integrated = $false; Status = 'conflicted'; ConflictFiles = $conflictFiles; Artifact = 'artifacts/workspace-merge-conflict.json' }
         }
 
         $integrationHead = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('rev-parse', 'HEAD')).Output.Trim()
-        Write-WorkspaceEvent -EventType 'workspace.merge.completed' -PlanId $manifest.plan_id -RunId $manifest.run_id -RoomId $roomId -EpicRef $taskRef -EventsPath $eventsPath -Summary "Merge completed for $taskRef." -Payload @{
-            room_id = $roomId
-            task_ref = $taskRef
-            branch = $branch
-            integration_branch = $manifest.integration_branch
-            integration_head = $integrationHead
-        } | Out-Null
         Update-PlanWorkspaceIntegrationHead -WarRoomsDir $WarRoomsDir -IntegrationHead $integrationHead
-        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'integrated' -Fields @{ integrated_at = (Get-Date).ToUniversalTime().ToString('o'); integration_head = $integrationHead } | Out-Null
-        return [pscustomobject]@{ Integrated = $true; Status = 'integrated'; IntegrationHead = $integrationHead }
+        Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merged' -Fields @{
+            branch             = $branch
+            integration_branch = $manifest.integration_branch
+            integration_head   = $integrationHead
+            merged_at          = (Get-Date).ToUniversalTime().ToString('o')
+        } | Out-Null
+        $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
+        Write-WorkspaceJson -Path $cfgPath -Value $cfg
+        return [pscustomobject]@{ Integrated = $true; Status = 'merged'; IntegrationHead = $integrationHead }
     } finally {
         if ($lockStream) { $lockStream.Dispose() }
     }
 }
 
-Export-ModuleMember -Function Test-GitReady, Initialize-PlanIntegrationWorkspace, Ensure-RoomWorktree, Sync-AgentRuntimeOverlay, Get-WorkspaceDependencyState, Get-PlanWorkspaceManifest, Set-RoomWorkspaceStatus, Complete-RoomWorkspaceMerge
+Export-ModuleMember -Function Test-GitReady, Initialize-PlanIntegrationWorkspace, Ensure-RoomWorktree, Sync-AgentRuntimeOverlay, Get-WorkspaceDependencyState, Get-PlanWorkspaceManifest, Get-RoomWorkspaceRecord, Set-RoomWorkspaceRecord, Set-RoomWorkspaceStatus, Complete-RoomWorkspaceMerge

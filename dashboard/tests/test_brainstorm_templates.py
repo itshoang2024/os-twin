@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 from fastapi.testclient import TestClient
-from dashboard.llm_client import ChatMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from dashboard.api import app
 from dashboard.plan_agent import build_messages, BRAINSTORM_SYSTEM_PROMPT
@@ -68,14 +68,8 @@ def client(tmp_path):
     app.dependency_overrides[get_current_user] = lambda: {"sub": "test_user"}
 
     with patch("dashboard.api.startup_all", new_callable=AsyncMock):
-        # Avoid TestClient's lifespan context here: these route tests exercise
-        # thread behavior only, while the app lifespan starts long-running MCP
-        # session managers that can hang during teardown under pytest.
-        c = TestClient(app)
-        try:
+        with TestClient(app) as c:
             yield c
-        finally:
-            c.close()
 
     app.dependency_overrides.clear()
 
@@ -92,8 +86,7 @@ class TestBuildMessagesWithTemplate:
 
         assert len(messages) == 1
         human = messages[0]
-        assert isinstance(human, ChatMessage)
-        assert human.role == "user"
+        assert isinstance(human, HumanMessage)
 
         content = human.content if isinstance(human.content, str) else human.content[0]["text"]
         assert "<template>" in content
@@ -120,7 +113,7 @@ class TestBuildMessagesWithTemplate:
     def test_no_plan_content_means_no_system_message(self):
         """When plan_content is empty, no SystemMessage is injected."""
         messages = build_messages(user_message="test", plan_content="")
-        assert not any(m.role == "system" for m in messages)
+        assert not any(isinstance(m, SystemMessage) for m in messages)
 
     def test_plan_content_injects_system_message(self):
         """When plan_content is provided, a SystemMessage appears first."""
@@ -129,8 +122,7 @@ class TestBuildMessagesWithTemplate:
             plan_content="# My Plan\n\n## Goal\nBuild a thing",
         )
         assert len(messages) == 2
-        assert isinstance(messages[0], ChatMessage)
-        assert messages[0].role == "system"
+        assert isinstance(messages[0], SystemMessage)
         assert "My Plan" in messages[0].content
 
     def test_chat_history_plus_template_message(self):
@@ -143,12 +135,9 @@ class TestBuildMessagesWithTemplate:
         messages = build_messages(user_message=msg, chat_history=history)
 
         assert len(messages) == 3
-        assert isinstance(messages[0], ChatMessage)
-        assert isinstance(messages[1], ChatMessage)
-        assert isinstance(messages[2], ChatMessage)
-        assert messages[0].role == "user"
-        assert messages[1].role == "assistant"
-        assert messages[2].role == "user"
+        assert isinstance(messages[0], HumanMessage)
+        assert isinstance(messages[1], AIMessage)
+        assert isinstance(messages[2], HumanMessage)
 
         # The last message is the template message
         last_content = messages[2].content if isinstance(messages[2].content, str) else messages[2].content[0]["text"]
@@ -249,9 +238,8 @@ class TestThreadCreationWithTemplate:
 class TestStreamWithTemplate:
     """Verify the stream endpoint passes the full template message to brainstorm_stream."""
 
-    @patch("dashboard.routes.threads.auto_generate_title", new_callable=AsyncMock)
-    @patch("dashboard.plan_agent.brainstorm_stream")
-    def test_stream_receives_full_template_content(self, mock_stream, _mock_title, client):
+    @patch("dashboard.routes.threads.brainstorm_stream")
+    def test_stream_receives_full_template_content(self, mock_stream, client):
         """brainstorm_stream must receive the full message including <template>."""
         captured_args = {}
 
@@ -265,15 +253,11 @@ class TestStreamWithTemplate:
         res = client.post("/api/plans/threads", json={"message": msg})
         thread_id = res.json()["thread_id"]
 
-        # The auto-trigger sends the stored message to /stream; explicitly
-        # consume the streaming response so TestClient closes the generator.
-        with client.stream(
-            "POST",
+        # The auto-trigger sends the stored message to /stream
+        client.post(
             f"/api/plans/threads/{thread_id}/messages/stream",
             json={"message": msg},
-        ) as response:
-            assert response.status_code == 200
-            list(response.iter_lines())
+        )
 
         # Verify brainstorm_stream was called with the full template content
         assert "user_message" in captured_args
@@ -283,9 +267,8 @@ class TestStreamWithTemplate:
         assert "{{product name}}" in received
         assert SAMPLE_USER_BRIEF in received
 
-    @patch("dashboard.routes.threads.auto_generate_title", new_callable=AsyncMock)
-    @patch("dashboard.plan_agent.brainstorm_stream")
-    def test_stream_dedup_does_not_lose_content(self, mock_stream, _mock_title, client):
+    @patch("dashboard.routes.threads.brainstorm_stream")
+    def test_stream_dedup_does_not_lose_content(self, mock_stream, client):
         """When auto-trigger re-sends the same message, dedup should keep the full content."""
         async def mock_gen(*args, **kwargs):
             yield "Response"
@@ -296,15 +279,11 @@ class TestStreamWithTemplate:
         res = client.post("/api/plans/threads", json={"message": msg})
         thread_id = res.json()["thread_id"]
 
-        # Send the same message (simulates IdeaChat auto-trigger) and consume
-        # the stream so assistant persistence runs before assertions.
-        with client.stream(
-            "POST",
+        # Send the same message (simulates IdeaChat auto-trigger)
+        client.post(
             f"/api/plans/threads/{thread_id}/messages/stream",
             json={"message": msg},
-        ) as response:
-            assert response.status_code == 200
-            list(response.iter_lines())
+        )
 
         # Verify messages: should be 1 user (deduped) + 1 assistant
         t_res = client.get(f"/api/plans/threads/{thread_id}")

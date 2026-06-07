@@ -1431,9 +1431,11 @@ class TestRealE2E:
         nm = NamespaceManager(base_dir=tmp_path)
         embedder = KnowledgeEmbedder()
         try:
-            embedder.embed(["availability probe"])
+            probe = embedder.embed(["availability probe"])
         except Exception as exc:
             pytest.skip(f"Real embedding provider unavailable for e2e test: {exc}")
+        if not probe or not probe[0]:
+            pytest.skip("Real embedding provider unavailable for e2e test: returned no vectors")
         # No LLM — graceful entity-extraction skip.
         no_llm_real = MagicMock()
         no_llm_real.is_available.return_value = False
@@ -1489,6 +1491,12 @@ class TestRealE2E:
 
         nm = NamespaceManager(base_dir=tmp_path)
         embedder = KnowledgeEmbedder()
+        try:
+            probe = embedder.embed(["availability probe"])
+        except Exception as exc:
+            pytest.skip(f"Real embedding provider unavailable for e2e test: {exc}")
+        if not probe or not probe[0]:
+            pytest.skip("Real embedding provider unavailable for e2e test: returned no vectors")
         no_llm_real = MagicMock()
         no_llm_real.is_available.return_value = False
         ks = KnowledgeService(

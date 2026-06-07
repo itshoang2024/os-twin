@@ -43,9 +43,8 @@ def _mock_backend() -> MagicMock:
 
 
 @pytest.fixture(autouse=True)
-def _reset(monkeypatch):
+def _reset():
     """Reset the singleton between tests."""
-    monkeypatch.setenv("OSTWIN_VAULT_KEY", "test-vault-key")
     reset_vault()
     yield
     reset_vault()
@@ -240,7 +239,7 @@ def test_encrypted_file_permissions(tmp_path):
 def test_env_backend_get():
     backend = EnvBackend()
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=False):
-        assert backend.get("providers", "anthropic") == "sk-test"
+        assert backend.get("providers", "claude") == "sk-test"
     # Google key is now under "providers/google"
     with patch.dict(os.environ, {"GOOGLE_API_KEY": "gkey"}, clear=False):
         assert backend.get("providers", "google") == "gkey"
@@ -248,14 +247,14 @@ def test_env_backend_get():
     assert backend.get("providers", "nonexistent") is None
     # Also verify None returned when env var is explicitly unset
     with patch.dict(os.environ, {}, clear=True):
-        assert backend.get("providers", "anthropic") is None
+        assert backend.get("providers", "claude") is None
 
 
 def test_env_backend_list_keys():
     backend = EnvBackend()
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test", "OPENAI_API_KEY": "sk-oa", "GOOGLE_API_KEY": "gk"}):
         keys = backend.list_keys("providers")
-    assert "anthropic" in keys
+    assert "claude" in keys
     assert "openai" in keys
     assert "google" in keys
 
@@ -382,7 +381,7 @@ def test_env_backend_set_with_mapped_key():
     """set() on a mapped key sets the env var in current process."""
     backend = EnvBackend()
     with patch.dict(os.environ, {}, clear=True):
-        backend.set("providers", "anthropic", "test-key")
+        backend.set("providers", "claude", "test-key")
         assert os.environ.get("ANTHROPIC_API_KEY") == "test-key"
 
 
@@ -395,14 +394,14 @@ def test_env_backend_set_unmapped_key_raises():
 def test_env_backend_delete_existing():
     backend = EnvBackend()
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
-        assert backend.delete("providers", "anthropic") is True
+        assert backend.delete("providers", "claude") is True
         assert "ANTHROPIC_API_KEY" not in os.environ
 
 
 def test_env_backend_delete_missing():
     backend = EnvBackend()
     with patch.dict(os.environ, {}, clear=True):
-        assert backend.delete("providers", "anthropic") is False
+        assert backend.delete("providers", "claude") is False
 
 
 def test_env_backend_delete_unmapped():

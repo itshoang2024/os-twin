@@ -80,11 +80,12 @@ export interface PlanAsset {
 export type EpicStatus =
   // V2 lifecycle states (from Resolve-Pipeline.ps1)
   | 'pending' | 'developing' | 'optimize' | 'review'
-  | 'triage' | 'failed' | 'passed' | 'failed-final'
+  | 'triage' | 'failed' | 'done'
   // Bucket for dynamic {role}-review states
   | 'in-review'
   // Legacy aliases (backward compat)
   | 'engineering' | 'review' | 'fixing'
+  | 'passed' | 'failed-final'
   | 'manager-triage' | 'signoff';
 
 // ──────────────────────────────────────────────────
@@ -283,12 +284,14 @@ export interface DAGEdge {
 export interface WarRoomRoomEntry {
   room_id: string;
   task_ref: string;
-  status: string; // 'passed' | 'failed-final' | 'active' | 'pending' | 'blocked'
+  status: string; // 'done' | 'failed' | 'active' | 'pending' | 'blocked'
+  raw_status?: string;
 }
 
 export interface WarRoomProgress {
   updated_at: string;
   total: number;
+  done?: number;
   passed: number;
   failed: number;
   blocked: number;
@@ -495,4 +498,3 @@ export interface PlanningMessage {
 // Settings (EPIC-004)
 // ──────────────────────────────────────────────────
 export * from './settings';
-

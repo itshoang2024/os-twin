@@ -158,9 +158,11 @@ if ($OstwinApiKey) {
 }
 
 # Default WARROOMS_DIR
+$warRoomsDirWasDefaulted = $false
 if (-not $env:WARROOMS_DIR) {
     $defaultWarRoomsBase = if ((Split-Path $cwd -Leaf) -eq '.agents') { Split-Path $cwd -Parent } else { $cwd }
     $env:WARROOMS_DIR = Join-Path $defaultWarRoomsBase ".war-rooms"
+    $warRoomsDirWasDefaulted = $true
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -486,6 +488,7 @@ switch ($Command) {
         $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
         $worktreeRoot = ""
         $expectingValueFor = ""
+        $explicitWorkingDir = $false
 
         foreach ($a in $Arguments) {
             if ($expectingValueFor) {
@@ -500,6 +503,17 @@ switch ($Command) {
                 continue
             }
             if ($a -in @('--workspace-isolation', '--worktree-root', '--working-dir', '--plan-file', '--max-rooms')) {
+                if ($a -eq '--working-dir') {
+                    $explicitWorkingDir = $true
+                    for ($ri = $runArgs.Count - 1; $ri -ge 0; $ri--) {
+                        if ($runArgs[$ri] -eq '--working-dir') {
+                            if (($ri + 1) -lt $runArgs.Count) {
+                                $runArgs.RemoveAt($ri + 1)
+                            }
+                            $runArgs.RemoveAt($ri)
+                        }
+                    }
+                }
                 $null = $runArgs.Add($a)
                 $expectingValueFor = $a
                 continue
@@ -638,6 +652,12 @@ switch ($Command) {
         }
 
         $effectiveWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir $resolvedWorkingDir
+        if ($warRoomsDirWasDefaulted) {
+            $env:WARROOMS_DIR = Join-Path $effectiveWorkingDir ".war-rooms"
+        }
+        if ($explicitWorkingDir) {
+            Write-Host "  Working dir override: $effectiveWorkingDir" -ForegroundColor DarkGray
+        }
         if ($workspaceIsolation -eq 'room-worktree') {
             Invoke-OstwinRunGitPreflight -WorkingDir $effectiveWorkingDir -WorkspaceIsolation $workspaceIsolation
             if (-not (Test-Path (Join-Path $effectiveWorkingDir ".opencode/opencode.json"))) {
@@ -699,6 +719,10 @@ switch ($Command) {
             $null = $runArgs.Add('--working-dir')
             $null = $runArgs.Add($effectiveWorkingDir)
         }
+        if (-not ($runArgs -contains '--workspace-isolation')) {
+            $null = $runArgs.Add('--workspace-isolation')
+            $null = $runArgs.Add($workspaceIsolation)
+        }
         # Dispatch to Start-Plan.ps1
         $startPlan = Join-Path $AgentsDir "plan/Start-Plan.ps1"
         if (Test-Path $startPlan) {
@@ -720,6 +744,9 @@ switch ($Command) {
                     '-n' { $null = $psArgs.Add('-NonInteractive'); $i++ }
                     default { $null = $psArgs.Add($runArgs[$i]); $i++ }
                 }
+            }
+            if ($explicitWorkingDir) {
+                $null = $psArgs.Add('-IgnorePlanWorkingDir')
             }
             & pwsh -NoProfile -File $startPlan @psArgs
         }
@@ -888,6 +915,10 @@ switch ($Command) {
                     if (-not ($startArgs -contains '--working-dir')) {
                         $null = $startArgs.Add('--working-dir')
                         $null = $startArgs.Add($effectiveStartWorkingDir)
+                    }
+                    if (-not ($startArgs -contains '--workspace-isolation')) {
+                        $null = $startArgs.Add('--workspace-isolation')
+                        $null = $startArgs.Add($startWorkspaceIsolation)
                     }
                     $si = 0
                     while ($si -lt $startArgs.Count) {

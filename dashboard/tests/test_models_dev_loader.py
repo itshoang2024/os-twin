@@ -687,7 +687,7 @@ class TestTruncateMessages:
         assert result[0]["content"] == "You are helpful."
         assert len(result[1]["content"]) < len(long_content)
 
-    def test_trims_non_system_before_oversized_system_message(self):
+    def test_preserves_system_message(self):
         long_content = "x" * 5000
         msgs = [
             {"role": "system", "content": long_content},
@@ -695,8 +695,7 @@ class TestTruncateMessages:
         ]
         result = truncate_messages(msgs, context_limit=200, model="gpt-4o")
         assert len(result) == 2
-        assert result[1]["content"] == ""
-        assert 0 < len(result[0]["content"]) < len(long_content)
+        assert result[1]["content"] == "hi"
 
     def test_zero_context_limit_returns_unchanged(self):
         msgs = [{"role": "user", "content": "hello"}]
@@ -738,17 +737,17 @@ class TestTruncateMessagesForModel:
             result = truncate_messages_for_model(msgs, "unknown", "no-model")
         assert result == msgs
 
-    def test_strips_provider_prefix_before_context_lookup(self):
-        with patch(
-            "dashboard.lib.settings.models_dev_loader.get_context_limit",
-            return_value=(1000, 0),
-        ) as mock_get_context_limit:
-            msgs = [{"role": "user", "content": "short"}]
-            result = truncate_messages_for_model(msgs, "openai", "openai/gpt-4.1")
+    def test_strips_provider_prefix_from_model(self, fake_raw_catalog):
+        providers = {"openai": {"type": "api", "source": "auth.json", "has_key": True}}
+        with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+            catalog = _build_configured_models(fake_raw_catalog, providers)
 
-        mock_get_context_limit.assert_called_once_with("openai", "gpt-4.1")
+        with patch("dashboard.lib.settings.models_dev_loader._cached_models", catalog):
+            get_context_limit.cache_clear()
+            long_msg = [{"role": "user", "content": "x" * 50000}]
+            result = truncate_messages_for_model(long_msg, "openai", "openai/gpt-4.1")
         assert len(result) == 1
-        assert result[0]["content"] == "short"
+        assert len(result[0]["content"]) < 50000
 
     def test_ollama_fallback(self):
         with patch("dashboard.lib.settings.models_dev_loader.get_context_limit", return_value=(0, 0)):

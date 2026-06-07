@@ -24,16 +24,22 @@ export default function AnalyticsPanel({ isOpen, onClose }: AnalyticsPanelProps)
     };
 
     epics.forEach((epic) => {
-      const { status } = epic;
+      const status = epic.status === 'passed' || epic.status === 'signoff'
+        ? 'done'
+        : epic.status === 'failed-final'
+          ? 'failed'
+          : epic.status === 'fixing'
+            ? 'optimize'
+            : epic.status;
       if (status === 'pending') {
         breakdown.pending++;
-      } else if (status === 'engineering' || status === 'fixing') {
+      } else if (status === 'engineering' || status === 'developing' || status === 'optimize') {
         breakdown.in_progress++;
-      } else if (status === 'review' || status === 'manager-triage') {
+      } else if (status === 'review' || status === 'manager-triage' || status === 'triage') {
         breakdown.review++;
-      } else if (status === 'passed' || status === 'signoff') {
+      } else if (status === 'done') {
         breakdown.done++;
-      } else if (status === 'failed-final') {
+      } else if (status === 'failed') {
         breakdown.failed++;
       }
     });

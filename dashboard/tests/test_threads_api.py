@@ -135,7 +135,7 @@ def test_promote_thread_surfaces_synth_failure(mock_synth, client):
     t_res = client.get(f"/api/plans/threads/{thread_id}")
     assert t_res.json()["thread"]["status"] != "promoted"
 
-@patch("dashboard.plan_agent.brainstorm_stream")
+@patch("dashboard.routes.threads.brainstorm_stream")
 def test_stream_thread_message(mock_stream, client):
     async def mock_async_gen(*args, **kwargs):
         yield "Thinking..."

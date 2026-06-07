@@ -27,19 +27,17 @@ The Manager treats both identically: one war-room per item, same lifecycle.
 
 Each war-room follows this lifecycle:
 ```
-pending → developing → review ─┬─► passed
+pending → developing → review ─┬─► done
               ▲                 │
-              │           ┌─────┘ (on fail/escalate)
-              │           ▼
-              │       triage
-              │        ┌──┼────────────┬──────────────┐
-              │        ▼  ▼            ▼              ▼
-              │    fixing  optimize  plan-revision  failed-final
-              │        │     │            │
-              └────────┴─────┴────────────┘ (retry → developing)
+              │                 ├─ fail → optimize
+              │                 └─ escalate → triage
+              │                             ├─ fix → optimize
+              │                             ├─ retry → developing
+              │                             └─ reject → failed
+              └────────────────────────────── optimize → review
 ```
 
-If max retries exceeded: `failed-final` (escalate to human)
+If max retries are exceeded, the manager marks the room `failed` and fail-fasts the plan.
 
 ### Subcommand-Aware Self-Healing (DELETED)
 
@@ -52,7 +50,7 @@ The manager can trigger a `subcommand-redesign` state when a role's subcommand f
 | `subcommand-missing` | command-not-found, missing-manifest | → subcommand-redesign |
 | `environment-error` | module-not-found, file-missing, permission-denied | → subcommand-redesign |
 | `input-error` | invalid-args, schema-fail | → subcommand-redesign |
-| `implementation-bug` | Default | → fixing |
+| `implementation-bug` | Default | → optimize |
 | `design-issue` | architecture, design, scope, interface | → triage (architect) |
 | `plan-gap` | specification, acceptance criteria, requirements | → triage (plan-revision) |
 
@@ -76,7 +74,7 @@ The manager can trigger a `subcommand-redesign` state when a role's subcommand f
 When QA fails or escalates, the manager classifies the failure:
 - **implementation-bug** → route to engineer with fix instructions
 - **design-issue** → route to architect for review, then to engineer with guidance
-- **plan-gap** → route to architect, then update brief.md and restart developing
+- **plan-gap** → route to architect, then update brief.md and restart developing or fail if rejected
 
 ### Classification Rules
 1. **Keyword matching**: feedback containing "architecture", "design", "scope", "interface" → `design-issue`
@@ -108,9 +106,9 @@ You communicate via JSONL channels. Use these message types:
 - Only spawn new rooms if under `max_concurrent_rooms` limit
 - Always include QA feedback verbatim when routing `fix` to engineer
 - Never skip QA review — every engineering output must be reviewed
-- On QA fail/escalate: **always** route through `manager-triage` before deciding
+- On QA fail/escalate: **always** route through `triage` or `optimize` before deciding
 - Write `triage-context.md` to room artifacts so engineer has full context
-- Draft RELEASE.md only when ALL rooms reach `passed`
+- Draft RELEASE.md only when ALL rooms reach `done`
 - Exit only when ALL required signoffs are collected
 - On SIGTERM/SIGINT, gracefully shut down all child processes
 

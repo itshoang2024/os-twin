@@ -21,7 +21,7 @@
 
 ## Overview
 
-`Start-ManagerLoop.ps1` is a **1269-line PowerShell polling loop** that runs continuously until all war-rooms reach a terminal state (`passed`, `failed-final`, or `blocked`) or the process is shut down.
+`Start-ManagerLoop.ps1` is a PowerShell polling loop that runs continuously until all war-rooms reach a terminal state (`done`, `failed`, or `blocked`) or the process is shut down. Legacy state names such as `passed`, `failed-final`, and `fixing` are normalized at runtime for compatibility, but new planning should use the canonical state names.
 
 On every iteration (default every 5 seconds), it:
 
@@ -29,7 +29,7 @@ On every iteration (default every 5 seconds), it:
 2. Reads each room's `status`, `lifecycle.json`, and channel messages
 3. Decides whether to **transition state**, **spawn an agent**, or **do nothing**
 4. Detects and recovers from deadlocks (rooms stuck with no live agents)
-5. Checks if all rooms are done and triggers the release pipeline
+5. Checks if all rooms are done, merges room worktrees when workspace isolation is enabled, and triggers the release pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -38,12 +38,12 @@ On every iteration (default every 5 seconds), it:
 │  while (not shutting down):                                 │
 │    for each room-* directory:                               │
 │      read status, lifecycle.json                            │
-│      if pending      → check deps, spawn worker            │
+│      if pending      → check DAG/workspace deps, spawn worker │
 │      if work/review  → check signals, transition or respawn │
 │      if decision     → auto-retry or exhaust                │
 │      if terminal     → handle release/rescue                │
 │    check for deadlocks (stall cycles)                       │
-│    check if all rooms passed → release                      │
+│    check if all rooms done → release                        │
 │    sleep(poll_interval_seconds)                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -78,6 +78,17 @@ Every 30 seconds, the loop calls `Get-AvailableRoles.ps1` to scan for new role d
 
 The manager tracks `activeCount` — rooms in non-terminal, non-pending states. New rooms are only activated when `activeCount < max_concurrent_rooms` (configurable, default 10).
 
+### Worktree isolation
+
+When a plan runs with `room-worktree` isolation, `Start-Plan.ps1` initializes `workspace.json` for the run and the manager lazily creates a per-room Git worktree just before the room leaves `pending`.
+
+Dependency readiness has two layers:
+
+1. `DAG.json` says the upstream room's lifecycle work is complete.
+2. `workspace.json` says the upstream room's branch has been merged into the plan integration worktree.
+
+That means a dependent room waits for `EPIC-001:done` and `EPIC-001:merged`, not just a `done` room status. Merge conflicts are recorded in `artifacts/workspace-merge-conflict.json`, the room is marked `failed`, and descendants are blocked through the DAG.
+
 ---
 
 ## V2 Lifecycle State Machine
@@ -87,11 +98,10 @@ Each room has a `lifecycle.json` that defines a **signal-driven state machine**.
 ### Default lifecycle
 
 ```
-pending → developing → review → passed
+pending → developing → review → done
                            ↓ fail
-            triage → developing (retry)
-            failed → developing (runtime retry)
-            (retries exhausted → failed-final)
+            optimize → review (retry)
+            failed is terminal
 ```
 
 ### State types
@@ -123,22 +133,22 @@ pending → developing → review → passed
       "role": "qa",
       "type": "review",
       "signals": {
-        "pass":     { "target": "passed" },
-        "fail":     { "target": "developing", "actions": ["increment_retries", "post_fix"] },
+        "done":     { "target": "done" },
+        "pass":     { "target": "done" },
+        "fail":     { "target": "optimize", "actions": ["increment_retries", "post_fix"] },
         "escalate": { "target": "triage" }
       }
     },
-    "failed": {
-      "type": "decision",
-      "auto_transition": true,
+    "optimize": {
+      "role": "engineer",
+      "type": "work",
       "signals": {
-        "retry":   { "target": "developing", "guard": "retries < max_retries" },
-        "exhaust": { "target": "failed-final", "guard": "retries >= max_retries" }
+        "done": { "target": "review" }
       }
     },
     "triage": { "type": "triage", "role": "manager", "signals": { "..." } },
-    "passed":       { "type": "terminal" },
-    "failed-final": { "type": "terminal" }
+    "done":   { "type": "terminal" },
+    "failed": { "type": "terminal" }
   }
 }
 ```
@@ -170,7 +180,7 @@ return null (no matching signal)
 
 ### Sender validation (signal bleed prevention)
 
-Each lifecycle state declares which `role` owns it. Signals from other roles are **rejected**. This prevents a critical bug where a `done` message from `engineer` in the `developing` state could bleed through to `designer` state and `review` state, causing the room to cascade to `passed` without actual work.
+Each lifecycle state declares which `role` owns it. Signals from other roles are **rejected**. This prevents a critical bug where a `done` message from `engineer` in the `developing` state could bleed through to `designer` state and `review` state, causing the room to cascade to `done` without actual work.
 
 **Example:**
 - State `designer` has `role: "designer"`
@@ -225,6 +235,14 @@ When a signal matches, the manager executes its `actions` array before transitio
 | `Get-CachedDag` | Reads `DAG.json` with mtime-based caching |
 | `Set-BlockedDescendants` | BFS from a failed task to mark all downstream dependents as `blocked` |
 
+### Workspace management
+
+| Function | Purpose |
+|---|---|
+| `Get-WorkspaceDependencyState` | Requires each dependency to be lifecycle `done` and workspace `merged` before a dependent room starts |
+| `Ensure-RoomWorktree` | Creates or reuses the room-specific Git worktree and rewrites the room working directory |
+| `Invoke-RoomWorkspaceMerge` | Queues the reviewed room branch into the integration worktree and records merge status |
+
 ### Skill resolution
 
 | Function | Purpose |
@@ -268,13 +286,13 @@ See [Signal Processing](#signal-processing--find-latestsignal). Prevents a done 
 
 If a room stays in any non-terminal state for longer than `state_timeout_seconds` (default 900s / 15 min), the manager force-restarts it from `initial_state`. Role is re-resolved from the restart state (not the timed-out state — LEAK-6 fix).
 
-### 6. Failed-final rescue
+### 6. Legacy terminal normalization
 
-If a room hits `failed-final` but `retries < max_retries` AND there's a fail message in the channel, the manager rescues it back to `triage` for another attempt. This handles the case where the `failed -> decision -> failed-final` path fires prematurely.
+Legacy `passed`, `failed-final`, and `fixing` states are normalized to `done`, `failed`, and `optimize` when old rooms are resumed.
 
 ### 7. One-shot plan approval
 
-`Handle-PlanApproval` (for `PLAN-REVIEW` rooms) is guarded by a `.plan_approved_*` flag file. This prevents the DAG rebuild from firing on every subsequent poll iteration.
+`Complete-PlanApproval` (for `PLAN-REVIEW` rooms) is guarded by a `.plan_approved_*` flag file. This prevents the DAG rebuild from firing on every subsequent poll iteration.
 
 ---
 
@@ -284,7 +302,7 @@ If **all active rooms** have no live PIDs for **12 consecutive poll cycles** (~6
 
 1. Skip rooms already in terminal states
 2. Skip rooms with pending signals (LEAK-7 fix)
-3. Cap deadlock recoveries at 3 per room (then `failed-final`)
+3. Cap deadlock recoveries at 3 per room (then `failed`)
 4. For recoverable states: increment retries, post fix, restart from `initial_state`
 
 ### Known Deadlock Bug (Risk 3)
@@ -305,13 +323,13 @@ When `task-ref` is `PLAN-REVIEW`, the manager runs special shortcut logic **befo
    - `fail` signal -> posts `plan-reject` message
    - `done` with body matching `VERDICT: REJECT` -> posts `plan-reject` message
 
-On approval the room transitions to `passed` and `Handle-PlanApproval` fires (rebuilds DAG, unblocks dependent rooms).
+On approval the room transitions to `done` and `Complete-PlanApproval` fires (rebuilds DAG, unblocks dependent rooms).
 
 ---
 
 ## Release Gate
 
-When **all rooms** reach `passed`:
+When **all rooms** reach `done`:
 
 1. Run `release/draft.sh` to generate release notes
 2. Run `release/signoff.sh` for approval collection
@@ -365,7 +383,7 @@ The manager is tested across **5 Pester test suites** with ~190 total test cases
 | Spawn lock blocks duplicate spawns within 30s grace | LEAK-9: spawn lock prevents duplicate agents |
 | State timeout re-resolves role from restart state | LEAK-6: state timeout re-resolves role |
 | Deadlock recovery skips rooms with pending signals | LEAK-7: deadlock recovery must check pending signals |
-| Failed-final rescue requires fail feedback | LEAK-8: failed-final rescue requires feedback |
+| Legacy terminal normalization preserves resumed old rooms | Add-CanonicalLifecycleAliases |
 | PLAN-REVIEW one-shot flag prevents duplicate approvals | LEAK-5: PLAN-REVIEW shortcut one-shot guard |
 | Decision state targets developing (not self-loop) | LEAK-4: decision state does not infinite-loop |
 
@@ -376,7 +394,7 @@ The manager is tested across **5 Pester test suites** with ~190 total test cases
 | Risk | Description | Status |
 |---|---|---|
 | **Risk 3** | Deadlock recovery increments retries -> done-count gate becomes unsatisfiable | Known exploit, tested |
-| **Risk 4** | QA deadlock recovery cascades into fixing deadlock (compound of Risk 3) | Known exploit, tested |
+| **Risk 4** | QA deadlock recovery cascades into retry deadlock (compound of Risk 3) | Known exploit, tested |
 | **Risk 6** | Custom lifecycle state with role != `assigned_role` spawns wrong runner | Known exploit, tested |
 | **Crash loop** | Agent dies immediately on spawn - infinite respawn | **Fixed** - crash-respawn counter caps at 3 |
 | **Signal bleed** | Done from role A cascades through state owned by role B | **Fixed** - sender validation in `Find-LatestSignal` |

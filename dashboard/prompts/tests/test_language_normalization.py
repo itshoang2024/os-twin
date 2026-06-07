@@ -1,7 +1,8 @@
 import pytest
-from prompts.registry import PromptRegistry
-from prompts.providers.base import BasePromptProvider
-from prompts.exceptions import PromptNotFoundError
+from unittest.mock import Mock
+from igotapi.prompts.registry import PromptRegistry
+from igotapi.prompts.providers.base import BasePromptProvider
+from igotapi.prompts.exceptions import PromptNotFoundError
 
 class MockProvider(BasePromptProvider):
     def __init__(self):

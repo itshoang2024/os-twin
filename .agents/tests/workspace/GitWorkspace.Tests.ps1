@@ -90,24 +90,20 @@ Describe 'GitWorkspace lazy room worktrees' {
             run_id = 'run-test'
             working_dir = $repo
             depends_on = @()
-            workspace = @{
-                mode = 'git-worktree'
-                status = 'pending'
-                source_working_dir = $repo
-                source_relative_dir = '.'
-            }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
 
         $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         $config = Get-Content (Join-Path $roomDir 'config.json') -Raw | ConvertFrom-Json
+        $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
 
         $result.Ready | Should -BeTrue
-        $config.workspace.status | Should -Be 'ready'
-        $config.workspace.base_ref | Should -Be $integrationHead
-        Test-Path (Join-Path $config.workspace.worktree_dir 'integration.txt') | Should -BeTrue
+        $config.PSObject.Properties.Name | Should -Not -Contain 'workspace'
+        $record.status | Should -Be 'ready'
+        $record.base_ref | Should -Be $integrationHead
+        Test-Path (Join-Path $record.worktree_dir 'integration.txt') | Should -BeTrue
     }
 
-    It 'does not unblock dependencies that passed but are not integrated' {
+    It 'does not unblock dependencies that are done but not merged' {
         $repo = New-TestRepo -Name 'dep-state'
         $warRoomsDir = Join-Path $TestDrive 'war-rooms-deps'
         Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-deps') | Out-Null
@@ -115,12 +111,12 @@ Describe 'GitWorkspace lazy room worktrees' {
         $depRoom = Join-Path $warRoomsDir 'room-001'
         $nextRoom = Join-Path $warRoomsDir 'room-002'
         New-Item -ItemType Directory -Path $depRoom, $nextRoom -Force | Out-Null
-        'passed' | Out-File (Join-Path $depRoom 'status') -Encoding utf8 -NoNewline
+        'done' | Out-File (Join-Path $depRoom 'status') -Encoding utf8 -NoNewline
         @{
             room_id = 'room-001'
             task_ref = 'EPIC-001'
-            workspace = @{ status = 'ready' }
         } | ConvertTo-Json -Depth 6 | Out-File (Join-Path $depRoom 'config.json') -Encoding utf8
+        Set-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001' -TaskRef 'EPIC-001' -Status 'ready' | Out-Null
         @{
             room_id = 'room-002'
             task_ref = 'EPIC-002'
@@ -130,6 +126,57 @@ Describe 'GitWorkspace lazy room worktrees' {
         $state = Get-WorkspaceDependencyState -RoomDir $nextRoom -WarRoomsDir $warRoomsDir
 
         $state.Ready | Should -BeFalse
-        $state.BlockedBy | Should -Contain 'EPIC-001:not-integrated'
+        $state.BlockedBy | Should -Contain 'EPIC-001:not-merged'
+    }
+
+    It 'unblocks dependencies when predecessor is done and manifest is merged' {
+        $repo = New-TestRepo -Name 'dep-state-merged'
+        $warRoomsDir = Join-Path $TestDrive 'war-rooms-deps-merged'
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-deps-merged') | Out-Null
+
+        $depRoom = Join-Path $warRoomsDir 'room-001'
+        $nextRoom = Join-Path $warRoomsDir 'room-002'
+        New-Item -ItemType Directory -Path $depRoom, $nextRoom -Force | Out-Null
+        'done' | Out-File (Join-Path $depRoom 'status') -Encoding utf8 -NoNewline
+        @{ room_id = 'room-001'; task_ref = 'EPIC-001' } | ConvertTo-Json -Depth 6 | Out-File (Join-Path $depRoom 'config.json') -Encoding utf8
+        Set-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001' -TaskRef 'EPIC-001' -Status 'merged' | Out-Null
+        @{ room_id = 'room-002'; task_ref = 'EPIC-002'; depends_on = @('EPIC-001') } | ConvertTo-Json -Depth 6 | Out-File (Join-Path $nextRoom 'config.json') -Encoding utf8
+
+        $state = Get-WorkspaceDependencyState -RoomDir $nextRoom -WarRoomsDir $warRoomsDir
+
+        $state.Ready | Should -BeTrue
+    }
+
+    It 'records merge conflicts in the manifest and room artifact' {
+        $repo = New-TestRepo -Name 'merge-conflict'
+        $warRoomsDir = Join-Path $TestDrive 'war-rooms-conflict'
+        $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-conflict')
+
+        $roomDir = Join-Path $warRoomsDir 'room-001'
+        New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+        @{
+            room_id = 'room-001'
+            task_ref = 'EPIC-001'
+            plan_id = 'plan-test'
+            run_id = 'run-test'
+            working_dir = $repo
+            depends_on = @()
+        } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
+
+        $ready = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+        'room change' | Out-File -FilePath (Join-Path $ready.WorkingDir 'README.md') -Encoding utf8
+
+        'integration change' | Out-File -FilePath (Join-Path $manifest.integration_worktree_dir 'README.md') -Encoding utf8
+        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('add', 'README.md') | Out-Null
+        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('commit', '-m', 'integration diverged') | Out-Null
+
+        $merge = Complete-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+        $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
+
+        $merge.Integrated | Should -BeFalse
+        $merge.Status | Should -Be 'conflicted'
+        $record.status | Should -Be 'conflicted'
+        $record.conflict_files | Should -Contain 'README.md'
+        Test-Path (Join-Path $roomDir 'artifacts/workspace-merge-conflict.json') | Should -BeTrue
     }
 }

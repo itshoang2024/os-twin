@@ -1,8 +1,8 @@
 import pytest
 import os
 import yaml
-from prompts.providers.memory_provider import MemoryPromptProvider
-from prompts.providers.file_provider import FilePromptProvider
+from igotapi.prompts.providers.memory_provider import MemoryPromptProvider
+from igotapi.prompts.providers.file_provider import FilePromptProvider
 
 def test_memory_provider():
     provider = MemoryPromptProvider()

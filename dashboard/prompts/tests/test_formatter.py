@@ -1,6 +1,6 @@
 import pytest
-from prompts.formatter import PromptFormatter
-from prompts.exceptions import PromptValidationError
+from igotapi.prompts.formatter import PromptFormatter
+from igotapi.prompts.exceptions import PromptValidationError
 
 def test_format_success():
     formatter = PromptFormatter()

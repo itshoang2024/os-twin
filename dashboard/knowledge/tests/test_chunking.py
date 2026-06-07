@@ -770,6 +770,7 @@ class TestDocxToPdfConversion:
     """Test _convert_office_to_pdf for DOCX files."""
 
     def test_docx_to_pdf_produces_valid_pdf(self):
+        pytest.importorskip("reportlab")
         docx_bytes = _create_minimal_docx()
         result = VisionSlidingWindowConverter._convert_office_to_pdf(docx_bytes, ".docx")
         assert result is not None
@@ -778,6 +779,7 @@ class TestDocxToPdfConversion:
         assert pdf_data == b"%PDF-"
 
     def test_docx_to_pdf_has_multiple_pages(self):
+        pytest.importorskip("reportlab")
         docx_bytes = _create_minimal_docx()
         result = VisionSlidingWindowConverter._convert_office_to_pdf(docx_bytes, ".docx")
         assert result is not None
@@ -827,6 +829,7 @@ class TestPptxToPdfConversion:
     """Test _convert_office_to_pdf for PPTX files."""
 
     def test_pptx_to_pdf_produces_valid_pdf(self):
+        pytest.importorskip("reportlab")
         pptx_bytes = _create_minimal_pptx()
         result = VisionSlidingWindowConverter._convert_office_to_pdf(pptx_bytes, ".pptx")
         assert result is not None
@@ -834,6 +837,7 @@ class TestPptxToPdfConversion:
         assert pdf_data == b"%PDF-"
 
     def test_pptx_to_pdf_has_slides_as_pages(self):
+        pytest.importorskip("reportlab")
         pptx_bytes = _create_minimal_pptx()
         result = VisionSlidingWindowConverter._convert_office_to_pdf(pptx_bytes, ".pptx")
         assert result is not None

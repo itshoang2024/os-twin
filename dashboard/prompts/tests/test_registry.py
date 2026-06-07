@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock
-from prompts.registry import PromptRegistry
-from prompts.exceptions import PromptNotFoundError
+from igotapi.prompts.registry import PromptRegistry
+from igotapi.prompts.exceptions import PromptNotFoundError
 
 def test_registry_get_prompt_caching():
     mock_provider = Mock()

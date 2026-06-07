@@ -162,9 +162,6 @@ if ($PlanId) {
             working_dir     = $resolvedWorkingDir
         }
     }
-    if ($Workspace) {
-        $roomCreatedEvent.payload['workspace'] = $Workspace
-    }
     Write-OrchestrationEvent -EventsPath $EventsPath -Event $roomCreatedEvent | Out-Null
 }
 
@@ -217,7 +214,6 @@ $config = [ordered]@{
 }
 
 if ($EventsPath) { $config['events_path'] = $EventsPath }
-if ($Workspace) { $config['workspace'] = $Workspace }
 
 $config | ConvertTo-Json -Depth 10 | Out-File -FilePath (Join-Path $roomDir "config.json") -Encoding utf8
 
@@ -468,7 +464,7 @@ if (-not (Test-Path $lifecyclePath)) {
             -MaxRetries $MaxRetries `
             -OutputPath $lifecyclePath
     } else {
-        # Inline v2 fallback — minimal developing → review → passed
+        # Inline v2 fallback — minimal developing -> review -> done
         $primaryRole = $AssignedRole
         $v2Lifecycle = [ordered]@{
             version       = 2
@@ -493,8 +489,9 @@ if (-not (Test-Path $lifecyclePath)) {
                     role    = 'qa'
                     type    = 'review'
                     signals = [ordered]@{
-                        pass     = [ordered]@{ target = 'passed' }
-                        fail     = [ordered]@{ target = 'developing'; actions = @('increment_retries', 'post_fix') }
+                        done     = [ordered]@{ target = 'done' }
+                        pass     = [ordered]@{ target = 'done' }
+                        fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
                         escalate = [ordered]@{ target = 'triage' }
                     }
                 }
@@ -502,22 +499,13 @@ if (-not (Test-Path $lifecyclePath)) {
                     role    = 'manager'
                     type    = 'triage'
                     signals = [ordered]@{
-                        fix      = [ordered]@{ target = 'developing'; actions = @('increment_retries') }
+                        fix      = [ordered]@{ target = 'optimize'; actions = @('increment_retries') }
                         redesign = [ordered]@{ target = 'developing'; actions = @('increment_retries', 'revise_brief') }
-                        reject   = [ordered]@{ target = 'failed-final' }
+                        reject   = [ordered]@{ target = 'failed' }
                     }
                 }
-                failed = [ordered]@{
-                    role            = 'manager'
-                    type            = 'decision'
-                    auto_transition = $true
-                    signals         = [ordered]@{
-                        retry   = [ordered]@{ target = 'developing'; guard = 'retries < max_retries' }
-                        exhaust = [ordered]@{ target = 'failed-final'; guard = 'retries >= max_retries' }
-                    }
-                }
-                passed        = [ordered]@{ type = 'terminal' }
-                'failed-final' = [ordered]@{ type = 'terminal' }
+                done   = [ordered]@{ type = 'terminal' }
+                failed = [ordered]@{ type = 'terminal' }
             }
         }
         $v2Lifecycle | ConvertTo-Json -Depth 10 | Out-File -FilePath $lifecyclePath -Encoding utf8 -Force

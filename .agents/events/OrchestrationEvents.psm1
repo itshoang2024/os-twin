@@ -8,9 +8,6 @@ $script:EventTaxonomy = @(
     'role.assigned', 'role.reassigned', 'role.resolved', 'role.spawn.requested',
     'agent.run.started', 'agent.run.completed', 'agent.run.failed', 'agent.run.timed_out', 'agent.run.respawned',
     'lifecycle.signal.posted', 'lifecycle.transition.applied', 'lifecycle.retry.exhausted', 'lifecycle.escalated',
-    'workspace.git.preflight.passed', 'workspace.git.preflight.failed', 'workspace.integration.ready',
-    'workspace.worktree.requested', 'workspace.worktree.ready', 'workspace.worktree.failed', 'workspace.room.committed',
-    'workspace.merge.requested', 'workspace.merge.started', 'workspace.merge.completed', 'workspace.merge.conflicted',
     'channel.message.posted', 'bot.notification.queued', 'bot.notification.sent', 'bot.notification.failed',
     'conversation.bound', 'conversation.unbound', 'conversation.subscription.updated',
     'user.feedback.requested', 'user.feedback.posted', 'user.plan.cancel_requested', 'user.plan.pause_requested', 'user.plan.resume_requested'
@@ -23,8 +20,6 @@ $script:RoomScopedEventTypes = @(
     'role.assigned', 'role.reassigned', 'role.resolved', 'role.spawn.requested',
     'agent.run.started', 'agent.run.completed', 'agent.run.failed', 'agent.run.timed_out', 'agent.run.respawned',
     'lifecycle.signal.posted', 'lifecycle.transition.applied', 'lifecycle.retry.exhausted', 'lifecycle.escalated',
-    'workspace.worktree.requested', 'workspace.worktree.ready', 'workspace.worktree.failed', 'workspace.room.committed',
-    'workspace.merge.requested', 'workspace.merge.started', 'workspace.merge.completed', 'workspace.merge.conflicted',
     'channel.message.posted',
     'conversation.bound', 'conversation.unbound', 'conversation.subscription.updated'
 )

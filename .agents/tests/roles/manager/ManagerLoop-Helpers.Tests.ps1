@@ -42,19 +42,16 @@ BeforeAll {
 	                        signals = @{ done = @{ target = "review" } }
 		                    }
 		            review = @{ role = "qa"; type = "review";
-		                signals = [ordered]@{ done = @{ target = "passed" }; pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
+		                signals = [ordered]@{ done = @{ target = "done" }; pass = @{ target = "done" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
 		            }
                     optimize = @{ role = "engineer"; type = "work";
                         signals = @{ done = @{ target = "review" } }
                     }
                     triage = @{ role = "manager"; type = "triage";
-                        signals = @{ fix = @{ target = "optimize"; actions = @("increment_retries") }; redesign = @{ target = "developing"; actions = @("increment_retries","revise_brief") }; reject = @{ target = "failed-final" } }
+                        signals = @{ fix = @{ target = "optimize"; actions = @("increment_retries") }; redesign = @{ target = "developing"; actions = @("increment_retries","revise_brief") }; reject = @{ target = "failed" } }
                     }
-                    failed = @{ role = "manager"; type = "decision";
-                        signals = @{ retry = @{ target = "developing"; guard = "retries < max_retries" }; exhaust = @{ target = "failed-final"; guard = "retries >= max_retries" } }
-                    }
-                    passed         = @{ type = "terminal" }
-                    "failed-final" = @{ type = "terminal" }
+                    done   = @{ type = "terminal" }
+                    failed = @{ type = "terminal" }
                 }
             }
         }
@@ -176,13 +173,19 @@ Describe "Write-RoomStatus" {
         $audit | Should -Match "developing.*review"
     }
 
-    It "removes all PIDs when transitioning to terminal state 'passed'" {
+    It "removes all PIDs when transitioning to terminal state 'done'" {
         $rd = New-TestRoom -Base $TestDrive -Status "review"
         $pids = Join-Path $rd "pids"
         New-Item -ItemType Directory -Path $pids -Force | Out-Null
         "12345" | Out-File (Join-Path $pids "qa.pid") -Encoding utf8 -NoNewline
-        Write-RoomStatus -RoomDir $rd -NewStatus "passed"
+        Write-RoomStatus -RoomDir $rd -NewStatus "done"
         Test-Path (Join-Path $pids "qa.pid") | Should -BeFalse
+    }
+
+    It "normalizes legacy terminal status 'passed' to 'done' on write" {
+        $rd = New-TestRoom -Base $TestDrive -Status "review"
+        Write-RoomStatus -RoomDir $rd -NewStatus "passed"
+        (Get-Content (Join-Path $rd "status") -Raw).Trim() | Should -Be "done"
     }
 
     It "removes old role PID when transitioning non-terminally" {
@@ -313,8 +316,8 @@ Describe "Get-ActiveCount" {
         Get-ActiveCount | Should -Be 0
     }
 
-    It "does not count passed rooms" {
-        $rd = New-TestRoom -Base $script:wd -Status "passed"
+    It "does not count done rooms" {
+        $rd = New-TestRoom -Base $script:wd -Status "done"
         Get-ActiveCount | Should -Be 0
     }
 
@@ -383,7 +386,7 @@ Describe "Find-LatestSignal" {
     }
 
     It "returns null for state with no signals defined" {
-        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "passed" | Should -BeNull
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "done" | Should -BeNull
     }
 
     It "returns signal type when message from correct role arrives after state_changed_at" {
@@ -1291,12 +1294,12 @@ Describe "Test-ValidRoomState" {
             states = @{
                 developing = @{ type = "work" }
                 review     = @{ type = "review" }
-                passed     = @{ type = "terminal" }
+                done       = @{ type = "terminal" }
             }
         } | ConvertTo-Json -Depth 5 | ConvertFrom-Json
         Test-ValidRoomState -State "developing" -Lifecycle $lc | Should -BeTrue
         Test-ValidRoomState -State "review" -Lifecycle $lc | Should -BeTrue
-        Test-ValidRoomState -State "passed" -Lifecycle $lc | Should -BeTrue
+        Test-ValidRoomState -State "done" -Lifecycle $lc | Should -BeTrue
     }
 
     It "returns false for invalid state in lifecycle" {

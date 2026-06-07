@@ -407,8 +407,8 @@ def test_refresh_namespace_skips_failed_imports(
 # ---------------------------------------------------------------------------
 
 
-def test_schema_v1_migrates_to_v2(namespace_manager: NamespaceManager, tmp_path: Path):
-    """Test that v1 manifests are migrated to v2 with retention field."""
+def test_schema_v1_migrates_to_v3(namespace_manager: NamespaceManager, tmp_path: Path):
+    """Test that v1 manifests are migrated to v3 with retention and ontology metadata."""
     ns_name = "migration-test"
     ns_dir = namespace_manager.namespace_dir(ns_name)
     ns_dir.mkdir(parents=True, exist_ok=True)

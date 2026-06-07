@@ -232,7 +232,7 @@ Add personality and joy through these methods:
 **Make waiting engaging**:
 - Interesting loading messages that rotate
 - Progress bars with personality
-- Mini-games during long loads
+- Interactive surprises during long loads
 - Fun facts or tips while waiting
 - Countdown with encouraging messages
 

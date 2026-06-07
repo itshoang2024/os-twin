@@ -3,15 +3,13 @@ from pathlib import Path
 import dashboard.api_utils as api_utils
 
 
-def test_resolve_plans_dir_uses_global_store_even_when_project_plans_exists(tmp_path):
+def test_resolve_plans_dir_prefers_project_agents_plans(tmp_path):
     project_root = tmp_path / "project"
     agents_dir = project_root / ".agents"
     plans_dir = agents_dir / "plans"
     plans_dir.mkdir(parents=True)
 
-    assert api_utils.resolve_plans_dir(project_root=project_root, agents_dir=agents_dir) == (
-        Path.home() / ".ostwin" / ".agents" / "plans"
-    )
+    assert api_utils.resolve_plans_dir(project_root=project_root, agents_dir=agents_dir) == plans_dir
 
 
 def test_resolve_plans_dir_falls_back_to_global_store_when_project_plans_missing(tmp_path):

@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from dashboard.models import Role, CreateRoleRequest
-from dashboard.api_utils import AGENTS_DIR, PLANS_DIR, GLOBAL_ROLES_DIR
+from dashboard.api_utils import AGENTS_DIR, PLANS_DIR, GLOBAL_ROLES_DIR, canonical_room_status
 from dashboard.auth import get_current_user
 import dashboard.global_state as global_state
 from dashboard.lib.roles.store import RoleRepository, stable_role_id, utc_now
@@ -493,9 +493,9 @@ async def get_role_dependencies(role_id: str, user: dict = Depends(get_current_u
                             config = json.load(f)
                             candidates = config.get("assignment", {}).get("candidate_roles", [])
                             if role.name in candidates:
-                                status = status_file.read_text().strip() if status_file.exists() else "unknown"
+                                status = canonical_room_status(status_file.read_text().strip() if status_file.exists() else "unknown")
                                 room_info = {"id": room_dir.name, "status": status}
-                                if status not in ["passed", "failed", "signoff"]:
+                                if status not in ["done", "failed", "signoff"]:
                                     active_warrooms.append(room_info)
                                 else:
                                     inactive_warrooms.append(room_info)

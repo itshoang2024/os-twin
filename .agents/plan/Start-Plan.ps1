@@ -37,6 +37,8 @@ param(
 
     [string]$ProjectDir = (Get-Location).Path,
 
+    [switch]$IgnorePlanWorkingDir,
+
     [switch]$DryRun,
 
     [switch]$Resume,
@@ -52,7 +54,7 @@ param(
     [switch]$NonInteractive,
 
     [ValidateSet('room-worktree','shared')]
-    [string]$WorkspaceIsolation = 'room-worktree',
+    [string]$WorkspaceIsolation = 'shared',
 
     [string]$WorktreeRoot = ''
 )
@@ -280,7 +282,7 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 
 # --- Parse plan: extract ALL epics and tasks (Requirement 1) ---
 # Parse global working_dir from PLAN.md
-if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
+if (-not $IgnorePlanWorkingDir -and $planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
@@ -585,15 +587,8 @@ if (-not $DryRun -and (Test-Path $room000Config)) {
         } else {
             $r0cfg | Add-Member -NotePropertyName run_id -NotePropertyValue $runId
         }
-        $room000Workspace = [ordered]@{
-            mode       = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
-            status     = 'not_applicable'
-            updated_at = (Get-Date).ToUniversalTime().ToString('o')
-        }
         if ($r0cfg.PSObject.Properties.Name -contains 'workspace') {
-            $r0cfg.workspace = $room000Workspace
-        } else {
-            $r0cfg | Add-Member -NotePropertyName workspace -NotePropertyValue $room000Workspace
+            $r0cfg.PSObject.Properties.Remove('workspace')
         }
         $r0cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath $room000Config -Encoding utf8
     } catch {
@@ -614,13 +609,6 @@ if (-not $DryRun -and (Get-Command Write-OrchestrationEvent -ErrorAction Silentl
             resume       = [bool]$Resume
             run_id       = $runId
             skip_loop    = [bool]$SkipLoop
-            workspace    = [ordered]@{
-                isolation             = $WorkspaceIsolation
-                worktree_root         = $WorktreeRoot
-                integration_branch    = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'integration_branch')) { $workspaceManifest.integration_branch } else { '' }
-                integration_worktree  = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'integration_worktree_dir')) { $workspaceManifest.integration_worktree_dir } else { '' }
-                base_ref              = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'base_ref')) { $workspaceManifest.base_ref } else { '' }
-            }
         }
     }
     Write-OrchestrationEvent -Event $startedEvent | Out-Null
@@ -680,16 +668,6 @@ if (-not $DryRun) {
         if (-not $meta["status"] -or $meta["status"] -in @("draft","stored")) { $meta["status"] = "active" }
         if ($ProjectDir) { $meta["working_dir"] = $ProjectDir }
         if ($ProjectDir) { $meta["warrooms_dir"] = (Join-Path $ProjectDir ".war-rooms") }
-        $meta["workspace_isolation"] = $WorkspaceIsolation
-        if ($workspaceManifest) {
-            $meta["workspace"] = [ordered]@{
-                isolation             = $WorkspaceIsolation
-                base_ref              = if ($workspaceManifest.PSObject.Properties.Name -contains 'base_ref') { $workspaceManifest.base_ref } else { '' }
-                integration_branch    = if ($workspaceManifest.PSObject.Properties.Name -contains 'integration_branch') { $workspaceManifest.integration_branch } else { '' }
-                integration_worktree  = if ($workspaceManifest.PSObject.Properties.Name -contains 'integration_worktree_dir') { $workspaceManifest.integration_worktree_dir } else { '' }
-                worktree_root         = if ($workspaceManifest.PSObject.Properties.Name -contains 'worktree_root') { $workspaceManifest.worktree_root } else { '' }
-            }
-        }
         $meta["launched_at"] = (Get-Date).ToUniversalTime().ToString("o")
         $meta["source_plan_file"] = $PlanFile
 
@@ -717,7 +695,7 @@ Write-Host "  Workspace isolation: $WorkspaceIsolation"
 if ($Resume) {
     Write-Host "  Mode: RESUME (using existing war-rooms)" -ForegroundColor Yellow
     
-    # --- RESET MECHANISM: Clear failed-final/blocked rooms ---
+    # --- RESUME NORMALIZATION: canonicalize legacy statuses and clear restartable blocked rooms ---
     $targetWarRoomsDir = Join-Path $ProjectDir ".war-rooms"
     if (Test-Path $targetWarRoomsDir) {
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
@@ -725,7 +703,20 @@ if ($Resume) {
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
-                if ($status -in @("failed", "failed-final", "blocked")) {
+                if ($status -eq "passed") {
+                    Write-Host "  → Normalizing $($rd.Name) from passed to done" -ForegroundColor Yellow
+                    "done" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "failed-final") {
+                    Write-Host "  → Normalizing $($rd.Name) from failed-final to failed" -ForegroundColor Yellow
+                    "failed" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "fixing") {
+                    Write-Host "  → Normalizing $($rd.Name) from fixing to optimize" -ForegroundColor Yellow
+                    "optimize" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                    
+                    # Clear old PID files
+                    $pidDir = Join-Path $rd.FullName "pids"
+                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
+                } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                     
@@ -735,13 +726,6 @@ if ($Resume) {
                     $qaRetriesFile = Join-Path $rd.FullName "qa_retries"
                     if (Test-Path $qaRetriesFile) { Remove-Item $qaRetriesFile -Force -ErrorAction SilentlyContinue }
 
-                    # Clear old PID files
-                    $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
-                } elseif ($status -eq "fixing") {
-                    Write-Host "  → Moving $($rd.Name) from fixing to developing" -ForegroundColor Yellow
-                    "developing" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                    
                     # Clear old PID files
                     $pidDir = Join-Path $rd.FullName "pids"
                     if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
@@ -895,14 +879,8 @@ function New-PlanWarRooms {
                         $existingConfig.assignment.assigned_role = $primaryRole
                         $existingConfig.assignment.candidate_roles = $candidateRoles
                     }
-                    if (-not ($existingConfig.PSObject.Properties.Name -contains 'workspace')) {
-                        $existingWorkspace = [ordered]@{
-                            mode               = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
-                            status             = if ($WorkspaceIsolation -eq 'room-worktree') { 'pending' } else { 'not_applicable' }
-                            isolation          = $WorkspaceIsolation
-                            source_working_dir = if ($existingConfig.PSObject.Properties.Name -contains 'working_dir') { $existingConfig.working_dir } else { $ProjectDir }
-                        }
-                        $existingConfig | Add-Member -NotePropertyName workspace -NotePropertyValue $existingWorkspace
+                    if ($existingConfig.PSObject.Properties.Name -contains 'workspace') {
+                        $existingConfig.PSObject.Properties.Remove('workspace')
                     }
                     $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                 } catch {
@@ -957,22 +935,6 @@ function New-PlanWarRooms {
 
 
         $candidateRoles = @(if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles } else { @("engineer", "qa") })
-        $sourceRelativeDir = ''
-        if ($WorkspaceIsolation -eq 'room-worktree' -and $workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'source_git_root') -and $workspaceManifest.source_git_root) {
-            try {
-                $sourceRelativeDir = [System.IO.Path]::GetRelativePath("$($workspaceManifest.source_git_root)", $resolvedWorkingDir) -replace '\\', '/'
-            } catch {
-                $sourceRelativeDir = if ($workspaceManifest.PSObject.Properties.Name -contains 'source_relative_dir') { "$($workspaceManifest.source_relative_dir)" } else { '.' }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($sourceRelativeDir)) { $sourceRelativeDir = '.' }
-        $workspaceIntent = [ordered]@{
-            mode                = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
-            status              = if ($WorkspaceIsolation -eq 'room-worktree') { 'pending' } else { 'not_applicable' }
-            isolation           = $WorkspaceIsolation
-            source_working_dir  = $resolvedWorkingDir
-            source_relative_dir = $sourceRelativeDir
-        }
         $roomArgs = @{
             RoomId           = $entry.RoomId
             TaskRef          = $entry.TaskRef
@@ -985,7 +947,6 @@ function New-PlanWarRooms {
             CandidateRoles   = $candidateRoles
             MaxRetries       = $maxRetries
             TimeoutSeconds   = $timeoutSeconds
-            Workspace        = $workspaceIntent
         }
 
         if ($entry.DoD -and $entry.DoD.Count -gt 0) {
@@ -1075,7 +1036,7 @@ if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
 
 # --- Auto-Pass room-000 if no review/expand needed ---
 if ($Unified -and -not ($Review -or $Expand) -and -not $Resume) {
-    "passed" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
+    "done" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
 }
 
 # --- Legacy Negotiation Loop (blocking) ---

@@ -4,7 +4,7 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-os.environ["OSTWIN_API_KEY"] = "test-key"
+os.environ["OSTWIN_API_KEY"] = "DEBUG"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +13,7 @@ from dashboard.api import app
 from dashboard.routes.command import _generate_reply, _conversations
 
 client = TestClient(app)
-HEADERS = {"X-API-Key": "test-key"}
+HEADERS = {"X-API-Key": "DEBUG"}
 
 
 @pytest.fixture(autouse=True)

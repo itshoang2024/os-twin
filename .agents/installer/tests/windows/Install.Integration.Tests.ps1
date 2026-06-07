@@ -66,6 +66,7 @@ Describe "install.ps1 module loading" {
         $params | Should -Contain "DashboardOnly"
         $params | Should -Contain "Channel"
         $params | Should -Contain "SkipOptional"
+        $params | Should -Contain "SyncSkills"
         $params | Should -Contain "Help"
     }
 }
@@ -164,7 +165,7 @@ Describe "CLI flag parity" {
 
         # Bash equivalents: --yes -> -Yes, --dir -> -Dir, --source-dir -> -SourceDir,
         # --port -> -Port, --dashboard-only -> -DashboardOnly, --channel -> -Channel,
-        # --skip-optional -> -SkipOptional, --help -> -Help
+        # --skip-optional -> -SkipOptional, --sync-skills -> -SyncSkills, --help -> -Help
         $params | Should -Contain "Yes"
         $params | Should -Contain "Dir"
         $params | Should -Contain "SourceDir"
@@ -172,6 +173,7 @@ Describe "CLI flag parity" {
         $params | Should -Contain "DashboardOnly"
         $params | Should -Contain "Channel"
         $params | Should -Contain "SkipOptional"
+        $params | Should -Contain "SyncSkills"
         $params | Should -Contain "Help"
     }
 }

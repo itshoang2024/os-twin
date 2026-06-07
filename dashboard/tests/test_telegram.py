@@ -20,11 +20,7 @@ def test_telegram_save_config():
     
     # Verify saved
     response = client.get("/api/telegram/config")
-    data = response.json()
-    assert data["bot_token"] == payload["bot_token"]
-    assert data["chat_id"] == payload["chat_id"]
-    assert "authorized_chats" in data
-    assert "pairing_code" in data
+    assert response.json() == payload
 
 def test_telegram_test_connection_fail():
     # Test POST /api/telegram/test with invalid config
@@ -32,3 +28,4 @@ def test_telegram_test_connection_fail():
     # we just check if the endpoint exists and handles failure (which it will with invalid token)
     response = client.post("/api/telegram/test")
     assert response.status_code in [200, 500] # Depends on if it actually tries to send and fails
+

@@ -33,9 +33,10 @@ StatusType = Literal[
     "pending",
     "developing",
     "review",
-    "fixing",
     "optimize",
     "triage",
+    "done",
+    "failed",
 ]
 
 
@@ -91,13 +92,11 @@ def _get_lifecycle(room_dir: str) -> dict | None:
 @mcp.tool()
 def update_status(
     room_dir: Annotated[str, Field(description="Absolute or relative path to the war-room directory")],
-    status: Annotated[str, Field(description="New status matching a non-terminal state from the room's lifecycle.json (e.g. developing, review, fixing, optimize). Terminal states (passed, failed-final) are manager-only.")],
+    status: Annotated[StatusType, Field(description="New status matching a canonical state from the room's lifecycle.json (e.g. developing, review, optimize, triage, done, failed).")],
 ) -> str:
     """Update the war-room status file.
 
     Validates status against the room's lifecycle.json if present.
-    Terminal states (passed, failed-final) are reserved for the manager —
-    agents must NOT set them directly.
     Returns a confirmation string "status:{status}".
     """
     room_dir = _resolve_room_dir(room_dir)
