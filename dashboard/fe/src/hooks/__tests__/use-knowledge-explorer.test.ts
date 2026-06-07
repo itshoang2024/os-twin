@@ -107,7 +107,7 @@ describe('useKnowledgeExplorer', () => {
     expect(result.current.edges).toEqual([]);
     expect(result.current.activeIgnitionPoints).toEqual([]);
     expect(result.current.selectedPath).toBeNull();
-    expect(result.current.activeLens).toBe('structural');
+    expect(result.current.activeLens).toBe('community');
     expect(result.current.expansionDepth).toBe(1);
     expect(result.current.nodeBrightness.size).toBe(0);
     expect(result.current.isSeeding).toBe(false);
@@ -566,7 +566,7 @@ describe('useKnowledgeExplorer', () => {
   it('setLens changes the active lens', () => {
     const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
 
-    expect(result.current.activeLens).toBe('structural');
+    expect(result.current.activeLens).toBe('community');
 
     act(() => {
       result.current.setLens('semantic');

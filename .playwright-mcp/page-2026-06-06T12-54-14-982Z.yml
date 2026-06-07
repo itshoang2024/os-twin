@@ -1,0 +1,804 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation "Main Navigation" [ref=e3]:
+      - img [ref=e5]
+      - navigation [ref=e6]:
+        - link "Home" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e8]: home
+        - link "Plans" [ref=e9] [cursor=pointer]:
+          - /url: /plans
+          - generic [ref=e11]: folder
+        - link "Knowledge" [ref=e12] [cursor=pointer]:
+          - /url: /knowledge
+          - generic [ref=e13]: auto_stories
+        - link "Roles" [ref=e14] [cursor=pointer]:
+          - /url: /roles
+          - generic [ref=e15]: person
+        - link "Skills" [ref=e16] [cursor=pointer]:
+          - /url: /skills
+          - generic [ref=e17]: extension
+        - link "MCP" [ref=e18] [cursor=pointer]:
+          - /url: /mcp
+          - generic [ref=e19]: terminal
+        - link "Settings" [ref=e20] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e21]: settings
+      - button "Expand sidebar" [ref=e23]:
+        - generic [ref=e24]: chevron_right
+    - navigation "Top Bar" [ref=e25]:
+      - search "Search plans, EPICs, tasks (Cmd+K)" [ref=e27]:
+        - generic [ref=e28]: search
+        - generic [ref=e29]: Search plans, EPICs, tasks...
+        - generic [ref=e30]: ⌘K
+      - generic [ref=e31]:
+        - generic [ref=e36]: "off"
+        - button "Switch to dark mode" [ref=e37]:
+          - generic [ref=e38]: dark_mode
+        - button "0 unread notifications" [ref=e40]:
+          - generic [ref=e41]: notifications
+        - button "PA expand_more" [ref=e43]:
+          - generic [ref=e44]: PA
+          - generic [ref=e45]: expand_more
+    - main [ref=e46]:
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - heading "Plans" [level=1] [ref=e50]
+            - paragraph [ref=e51]: Browse and manage all plans
+          - link "add New Plan" [ref=e52] [cursor=pointer]:
+            - /url: /plans/new
+            - button "add New Plan" [ref=e53]:
+              - generic [ref=e54]: add
+              - text: New Plan
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]:
+              - generic [ref=e58]:
+                - generic [ref=e59]: search
+                - textbox "Search plans..." [ref=e60]
+              - button "filter_list Status expand_more" [ref=e62]:
+                - generic [ref=e63]: filter_list
+                - text: Status
+                - generic [ref=e64]: expand_more
+              - button "category Domain expand_more" [ref=e66]:
+                - generic [ref=e67]: category
+                - text: Domain
+                - generic [ref=e68]: expand_more
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - generic [ref=e71]: "Sort:"
+                - combobox [ref=e72] [cursor=pointer]:
+                  - option "Newest" [selected]
+                  - option "Oldest"
+                  - option "Highest Progress"
+                  - option "Lowest Progress"
+                  - option "A-Z"
+              - generic [ref=e74]:
+                - button "grid_view" [ref=e75]:
+                  - generic [ref=e76]: grid_view
+                - button "view_list" [ref=e77]:
+                  - generic [ref=e78]: view_list
+          - generic [ref=e79]:
+            - 'link "custom — delete Ontology Workbench — Palantir-Aligned Refactor 0% 0/2 EPICs CP: 0/0" [ref=e183] [cursor=pointer]':
+              - /url: /plans/80854bfb206e
+              - generic [ref=e184]:
+                - generic [ref=e185]: custom
+                - generic [ref=e187]:
+                  - generic [ref=e188]: —
+                  - button "delete" [ref=e189]:
+                    - generic [ref=e190]: delete
+              - heading "Ontology Workbench — Palantir-Aligned Refactor" [level=3] [ref=e191]
+              - paragraph
+              - generic [ref=e192]:
+                - generic [ref=e193]:
+                  - img [ref=e194]
+                  - generic [ref=e197]: 0%
+                - generic [ref=e198]:
+                  - generic [ref=e199]: 0/2 EPICs
+                  - generic [ref=e200]: "CP: 0/0"
+            - 'link "custom — delete QA EPIC-002 smoke 0% 0/1 EPICs CP: 0/0 1× A" [ref=e202] [cursor=pointer]':
+              - /url: /plans/abe06f808af0
+              - generic [ref=e203]:
+                - generic [ref=e204]: custom
+                - generic [ref=e206]:
+                  - generic [ref=e207]: —
+                  - button "delete" [ref=e208]:
+                    - generic [ref=e209]: delete
+              - heading "QA EPIC-002 smoke" [level=3] [ref=e210]
+              - paragraph
+              - generic [ref=e211]:
+                - generic [ref=e212]:
+                  - img [ref=e213]
+                  - generic [ref=e216]: 0%
+                - generic [ref=e217]:
+                  - generic [ref=e218]: 0/1 EPICs
+                  - generic [ref=e219]: "CP: 0/0"
+              - generic "1x architect" [ref=e222]:
+                - generic [ref=e223]: 1×
+                - generic [ref=e224]: A
+            - 'link "custom — delete Event-Driven Orchestration for Ostwin Agent Flow 71.4% 5/7 EPICs CP: 5/7 1× A 1× P 5× E" [ref=e225] [cursor=pointer]':
+              - /url: /plans/ad9d7e49ca4f
+              - generic [ref=e226]:
+                - generic [ref=e227]: custom
+                - generic [ref=e229]:
+                  - generic [ref=e230]: —
+                  - button "delete" [ref=e231]:
+                    - generic [ref=e232]: delete
+              - heading "Event-Driven Orchestration for Ostwin Agent Flow" [level=3] [ref=e233]
+              - paragraph
+              - generic [ref=e234]:
+                - generic [ref=e235]:
+                  - img [ref=e236]
+                  - generic [ref=e239]: 71.4%
+                - generic [ref=e240]:
+                  - generic [ref=e241]: 5/7 EPICs
+                  - generic [ref=e242]: "CP: 5/7"
+              - generic [ref=e244]:
+                - generic "1x architect" [ref=e245]:
+                  - generic [ref=e246]: 1×
+                  - generic [ref=e247]: A
+                - generic "1x principal-engineer" [ref=e248]:
+                  - generic [ref=e249]: 1×
+                  - generic [ref=e250]: P
+                - generic "5x engineer" [ref=e251]:
+                  - generic [ref=e252]: 5×
+                  - generic [ref=e253]: E
+            - 'link "custom — delete Ontology Workbench — Palantir-Aligned Refactor 0% 0/2 EPICs CP: 0/0" [ref=e254] [cursor=pointer]':
+              - /url: /plans/24826a074baa
+              - generic [ref=e255]:
+                - generic [ref=e256]: custom
+                - generic [ref=e258]:
+                  - generic [ref=e259]: —
+                  - button "delete" [ref=e260]:
+                    - generic [ref=e261]: delete
+              - heading "Ontology Workbench — Palantir-Aligned Refactor" [level=3] [ref=e262]
+              - paragraph
+              - generic [ref=e263]:
+                - generic [ref=e264]:
+                  - img [ref=e265]
+                  - generic [ref=e268]: 0%
+                - generic [ref=e269]:
+                  - generic [ref=e270]: 0/2 EPICs
+                  - generic [ref=e271]: "CP: 0/0"
+            - 'link "custom — delete Ontology Workbench — Palantir-Aligned Refactor 0% 0/2 EPICs CP: 0/0" [ref=e273] [cursor=pointer]':
+              - /url: /plans/b8b7a1769154
+              - generic [ref=e274]:
+                - generic [ref=e275]: custom
+                - generic [ref=e277]:
+                  - generic [ref=e278]: —
+                  - button "delete" [ref=e279]:
+                    - generic [ref=e280]: delete
+              - heading "Ontology Workbench — Palantir-Aligned Refactor" [level=3] [ref=e281]
+              - paragraph
+              - generic [ref=e282]:
+                - generic [ref=e283]:
+                  - img [ref=e284]
+                  - generic [ref=e287]: 0%
+                - generic [ref=e288]:
+                  - generic [ref=e289]: 0/2 EPICs
+                  - generic [ref=e290]: "CP: 0/0"
+            - 'link "custom — delete Developing the first version of Ontology 0% 0/16 EPICs CP: 0/0" [ref=e292] [cursor=pointer]':
+              - /url: /plans/701f088f092e
+              - generic [ref=e293]:
+                - generic [ref=e294]: custom
+                - generic [ref=e296]:
+                  - generic [ref=e297]: —
+                  - button "delete" [ref=e298]:
+                    - generic [ref=e299]: delete
+              - heading "Developing the first version of Ontology" [level=3] [ref=e300]
+              - paragraph
+              - generic [ref=e301]:
+                - generic [ref=e302]:
+                  - img [ref=e303]
+                  - generic [ref=e306]: 0%
+                - generic [ref=e307]:
+                  - generic [ref=e308]: 0/16 EPICs
+                  - generic [ref=e309]: "CP: 0/0"
+            - 'link "custom — delete Knowledge Ontology Operations and Enterprise Concept Map 0% 0/10 EPICs CP: 0/0" [ref=e311] [cursor=pointer]':
+              - /url: /plans/5af935cdef82
+              - generic [ref=e312]:
+                - generic [ref=e313]: custom
+                - generic [ref=e315]:
+                  - generic [ref=e316]: —
+                  - button "delete" [ref=e317]:
+                    - generic [ref=e318]: delete
+              - heading "Knowledge Ontology Operations and Enterprise Concept Map" [level=3] [ref=e319]
+              - paragraph
+              - generic [ref=e320]:
+                - generic [ref=e321]:
+                  - img [ref=e322]
+                  - generic [ref=e325]: 0%
+                - generic [ref=e326]:
+                  - generic [ref=e327]: 0/10 EPICs
+                  - generic [ref=e328]: "CP: 0/0"
+            - 'link "custom — delete Kids Sports Todo App 0% 0/5 EPICs CP: 0/0" [ref=e330] [cursor=pointer]':
+              - /url: /plans/b156e4dbf0a2
+              - generic [ref=e331]:
+                - generic [ref=e332]: custom
+                - generic [ref=e334]:
+                  - generic [ref=e335]: —
+                  - button "delete" [ref=e336]:
+                    - generic [ref=e337]: delete
+              - heading "Kids Sports Todo App" [level=3] [ref=e338]
+              - paragraph
+              - generic [ref=e339]:
+                - generic [ref=e340]:
+                  - img [ref=e341]
+                  - generic [ref=e344]: 0%
+                - generic [ref=e345]:
+                  - generic [ref=e346]: 0/5 EPICs
+                  - generic [ref=e347]: "CP: 0/0"
+            - 'link "custom — delete Kids Group-Ordering Landing Page 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e349] [cursor=pointer]':
+              - /url: /plans/70dcf91cc1b4
+              - generic [ref=e350]:
+                - generic [ref=e351]: custom
+                - generic [ref=e353]:
+                  - generic [ref=e354]: —
+                  - button "delete" [ref=e355]:
+                    - generic [ref=e356]: delete
+              - heading "Kids Group-Ordering Landing Page" [level=3] [ref=e357]
+              - paragraph
+              - generic [ref=e358]:
+                - generic [ref=e359]:
+                  - img [ref=e360]
+                  - generic [ref=e363]: 33.3%
+                - generic [ref=e364]:
+                  - generic [ref=e365]: 2/6 EPICs
+                  - generic [ref=e366]: "CP: 1/2"
+              - generic [ref=e368]:
+                - generic "1x architect" [ref=e369]:
+                  - generic [ref=e370]: 1×
+                  - generic [ref=e371]: A
+                - generic "5x engineer" [ref=e372]:
+                  - generic [ref=e373]: 5×
+                  - generic [ref=e374]: E
+            - 'link "custom — delete Kids Group-Buying Landing Page 0% 0/5 EPICs CP: 0/0" [ref=e375] [cursor=pointer]':
+              - /url: /plans/9ffada3fca7a
+              - generic [ref=e376]:
+                - generic [ref=e377]: custom
+                - generic [ref=e379]:
+                  - generic [ref=e380]: —
+                  - button "delete" [ref=e381]:
+                    - generic [ref=e382]: delete
+              - heading "Kids Group-Buying Landing Page" [level=3] [ref=e383]
+              - paragraph
+              - generic [ref=e384]:
+                - generic [ref=e385]:
+                  - img [ref=e386]
+                  - generic [ref=e389]: 0%
+                - generic [ref=e390]:
+                  - generic [ref=e391]: 0/5 EPICs
+                  - generic [ref=e392]: "CP: 0/0"
+            - 'link "custom — delete Create A Landing Page Marketing Site For A Public Kids Produ 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e394] [cursor=pointer]':
+              - /url: /plans/b70d800e12d4
+              - generic [ref=e395]:
+                - generic [ref=e396]: custom
+                - generic [ref=e398]:
+                  - generic [ref=e399]: —
+                  - button "delete" [ref=e400]:
+                    - generic [ref=e401]: delete
+              - heading "Create A Landing Page Marketing Site For A Public Kids Produ" [level=3] [ref=e402]
+              - paragraph
+              - generic [ref=e403]:
+                - generic [ref=e404]:
+                  - img [ref=e405]
+                  - generic [ref=e408]: 33.3%
+                - generic [ref=e409]:
+                  - generic [ref=e410]: 2/6 EPICs
+                  - generic [ref=e411]: "CP: 1/2"
+              - generic [ref=e413]:
+                - generic "1x architect" [ref=e414]:
+                  - generic [ref=e415]: 1×
+                  - generic [ref=e416]: A
+                - generic "5x engineer" [ref=e417]:
+                  - generic [ref=e418]: 5×
+                  - generic [ref=e419]: E
+            - 'link "custom — delete Competitive Analysis - Vietcombank vs FE Credit 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e420] [cursor=pointer]':
+              - /url: /plans/5e0501d8c9e4
+              - generic [ref=e421]:
+                - generic [ref=e422]: custom
+                - generic [ref=e424]:
+                  - generic [ref=e425]: —
+                  - button "delete" [ref=e426]:
+                    - generic [ref=e427]: delete
+              - heading "Competitive Analysis - Vietcombank vs FE Credit" [level=3] [ref=e428]
+              - paragraph
+              - generic [ref=e429]:
+                - generic [ref=e430]:
+                  - img [ref=e431]
+                  - generic [ref=e434]: 33.3%
+                - generic [ref=e435]:
+                  - generic [ref=e436]: 2/6 EPICs
+                  - generic [ref=e437]: "CP: 1/2"
+              - generic [ref=e439]:
+                - generic "1x architect" [ref=e440]:
+                  - generic [ref=e441]: 1×
+                  - generic [ref=e442]: A
+                - generic "5x engineer" [ref=e443]:
+                  - generic [ref=e444]: 5×
+                  - generic [ref=e445]: E
+            - 'link "custom — delete Risk Audit Quy Trình Rà Soát Hợp Đồng Vay Hộ Nghèo X Y D Ng M T Ostwin Plan 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e446] [cursor=pointer]':
+              - /url: /plans/28d18a679711
+              - generic [ref=e447]:
+                - generic [ref=e448]: custom
+                - generic [ref=e450]:
+                  - generic [ref=e451]: —
+                  - button "delete" [ref=e452]:
+                    - generic [ref=e453]: delete
+              - heading "Risk Audit Quy Trình Rà Soát Hợp Đồng Vay Hộ Nghèo X Y D Ng M T Ostwin Plan" [level=3] [ref=e454]
+              - paragraph
+              - generic [ref=e455]:
+                - generic [ref=e456]:
+                  - img [ref=e457]
+                  - generic [ref=e460]: 33.3%
+                - generic [ref=e461]:
+                  - generic [ref=e462]: 2/6 EPICs
+                  - generic [ref=e463]: "CP: 1/2"
+              - generic [ref=e465]:
+                - generic "1x architect" [ref=e466]:
+                  - generic [ref=e467]: 1×
+                  - generic [ref=e468]: A
+                - generic "5x engineer" [ref=e469]:
+                  - generic [ref=e470]: 5×
+                  - generic [ref=e471]: E
+            - 'link "custom — delete Risk Audit On A Process Or System L P Danh S Ch Audit C C X 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e472] [cursor=pointer]':
+              - /url: /plans/f9cd6131c13a
+              - generic [ref=e473]:
+                - generic [ref=e474]: custom
+                - generic [ref=e476]:
+                  - generic [ref=e477]: —
+                  - button "delete" [ref=e478]:
+                    - generic [ref=e479]: delete
+              - heading "Risk Audit On A Process Or System L P Danh S Ch Audit C C X" [level=3] [ref=e480]
+              - paragraph
+              - generic [ref=e481]:
+                - generic [ref=e482]:
+                  - img [ref=e483]
+                  - generic [ref=e486]: 33.3%
+                - generic [ref=e487]:
+                  - generic [ref=e488]: 2/6 EPICs
+                  - generic [ref=e489]: "CP: 1/2"
+              - generic [ref=e491]:
+                - generic "1x architect" [ref=e492]:
+                  - generic [ref=e493]: 1×
+                  - generic [ref=e494]: A
+                - generic "5x engineer" [ref=e495]:
+                  - generic [ref=e496]: 5×
+                  - generic [ref=e497]: E
+            - 'link "custom — delete Risk Audit On Administrative Commune Merger Mapping For Nam 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e498] [cursor=pointer]':
+              - /url: /plans/1dd62e0734c0
+              - generic [ref=e499]:
+                - generic [ref=e500]: custom
+                - generic [ref=e502]:
+                  - generic [ref=e503]: —
+                  - button "delete" [ref=e504]:
+                    - generic [ref=e505]: delete
+              - heading "Risk Audit On Administrative Commune Merger Mapping For Nam" [level=3] [ref=e506]
+              - paragraph
+              - generic [ref=e507]:
+                - generic [ref=e508]:
+                  - img [ref=e509]
+                  - generic [ref=e512]: 33.3%
+                - generic [ref=e513]:
+                  - generic [ref=e514]: 2/6 EPICs
+                  - generic [ref=e515]: "CP: 1/2"
+              - generic [ref=e517]:
+                - generic "1x architect" [ref=e518]:
+                  - generic [ref=e519]: 1×
+                  - generic [ref=e520]: A
+                - generic "5x engineer" [ref=e521]:
+                  - generic [ref=e522]: 5×
+                  - generic [ref=e523]: E
+            - 'link "custom — delete Kiểm soát dự án công nghệ thông tin 0% 0/2 EPICs CP: 0/0" [ref=e524] [cursor=pointer]':
+              - /url: /plans/021f774a4c1e
+              - generic [ref=e525]:
+                - generic [ref=e526]: custom
+                - generic [ref=e528]:
+                  - generic [ref=e529]: —
+                  - button "delete" [ref=e530]:
+                    - generic [ref=e531]: delete
+              - heading "Kiểm soát dự án công nghệ thông tin" [level=3] [ref=e532]
+              - paragraph
+              - generic [ref=e533]:
+                - generic [ref=e534]:
+                  - img [ref=e535]
+                  - generic [ref=e538]: 0%
+                - generic [ref=e539]:
+                  - generic [ref=e540]: 0/2 EPICs
+                  - generic [ref=e541]: "CP: 0/0"
+            - 'link "custom — delete Download và phân tích Báo cáo tài chính 2025 của Ngân hàng Nông nghiệp (Agribank) 40% 2/5 EPICs CP: 1/2 1× A 1× A 2× R +1" [ref=e543] [cursor=pointer]':
+              - /url: /plans/995cba158db5
+              - generic [ref=e544]:
+                - generic [ref=e545]: custom
+                - generic [ref=e547]:
+                  - generic [ref=e548]: —
+                  - button "delete" [ref=e549]:
+                    - generic [ref=e550]: delete
+              - heading "Download và phân tích Báo cáo tài chính 2025 của Ngân hàng Nông nghiệp (Agribank)" [level=3] [ref=e551]
+              - paragraph
+              - generic [ref=e552]:
+                - generic [ref=e553]:
+                  - img [ref=e554]
+                  - generic [ref=e557]: 40%
+                - generic [ref=e558]:
+                  - generic [ref=e559]: 2/5 EPICs
+                  - generic [ref=e560]: "CP: 1/2"
+              - generic [ref=e562]:
+                - generic "1x architect" [ref=e563]:
+                  - generic [ref=e564]: 1×
+                  - generic [ref=e565]: A
+                - generic "1x audit" [ref=e566]:
+                  - generic [ref=e567]: 1×
+                  - generic [ref=e568]: A
+                - generic "2x researcher" [ref=e569]:
+                  - generic [ref=e570]: 2×
+                  - generic [ref=e571]: R
+                - generic [ref=e572]: "+1"
+            - 'link "custom — delete Scheduled Financial Report Scraper 100% 2/2 EPICs CP: 2/2 1× A 1× E" [ref=e573] [cursor=pointer]':
+              - /url: /plans/eacffc3cf2ed
+              - generic [ref=e574]:
+                - generic [ref=e575]: custom
+                - generic [ref=e577]:
+                  - generic [ref=e578]: —
+                  - button "delete" [ref=e579]:
+                    - generic [ref=e580]: delete
+              - heading "Scheduled Financial Report Scraper" [level=3] [ref=e581]
+              - paragraph
+              - generic [ref=e582]:
+                - generic [ref=e583]:
+                  - img [ref=e584]
+                  - generic [ref=e587]: 100%
+                - generic [ref=e588]:
+                  - generic [ref=e589]: 2/2 EPICs
+                  - generic [ref=e590]: "CP: 2/2"
+              - generic [ref=e592]:
+                - generic "1x architect" [ref=e593]:
+                  - generic [ref=e594]: 1×
+                  - generic [ref=e595]: A
+                - generic "1x engineer" [ref=e596]:
+                  - generic [ref=e597]: 1×
+                  - generic [ref=e598]: E
+            - 'link "custom — delete Financial Report Scraper and Parser 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e599] [cursor=pointer]':
+              - /url: /plans/8843544f5b3f
+              - generic [ref=e600]:
+                - generic [ref=e601]: custom
+                - generic [ref=e603]:
+                  - generic [ref=e604]: —
+                  - button "delete" [ref=e605]:
+                    - generic [ref=e606]: delete
+              - heading "Financial Report Scraper and Parser" [level=3] [ref=e607]
+              - paragraph
+              - generic [ref=e608]:
+                - generic [ref=e609]:
+                  - img [ref=e610]
+                  - generic [ref=e613]: 33.3%
+                - generic [ref=e614]:
+                  - generic [ref=e615]: 2/6 EPICs
+                  - generic [ref=e616]: "CP: 1/2"
+              - generic [ref=e618]:
+                - generic "1x architect" [ref=e619]:
+                  - generic [ref=e620]: 1×
+                  - generic [ref=e621]: A
+                - generic "5x engineer" [ref=e622]:
+                  - generic [ref=e623]: 5×
+                  - generic [ref=e624]: E
+            - 'link "custom — delete Agribank 2024 Audit Synthesis 100% 5/5 EPICs CP: 5/5 1× A 2× R 1× D +1" [ref=e625] [cursor=pointer]':
+              - /url: /plans/525915e927f4
+              - generic [ref=e626]:
+                - generic [ref=e627]: custom
+                - generic [ref=e629]:
+                  - generic [ref=e630]: —
+                  - button "delete" [ref=e631]:
+                    - generic [ref=e632]: delete
+              - heading "Agribank 2024 Audit Synthesis" [level=3] [ref=e633]
+              - paragraph
+              - generic [ref=e634]:
+                - generic [ref=e635]:
+                  - img [ref=e636]
+                  - generic [ref=e639]: 100%
+                - generic [ref=e640]:
+                  - generic [ref=e641]: 5/5 EPICs
+                  - generic [ref=e642]: "CP: 5/5"
+              - generic [ref=e644]:
+                - generic "1x architect" [ref=e645]:
+                  - generic [ref=e646]: 1×
+                  - generic [ref=e647]: A
+                - generic "2x researcher" [ref=e648]:
+                  - generic [ref=e649]: 2×
+                  - generic [ref=e650]: R
+                - generic "1x data-scientist" [ref=e651]:
+                  - generic [ref=e652]: 1×
+                  - generic [ref=e653]: D
+                - generic [ref=e654]: "+1"
+            - 'link "custom — delete Agribank 2025 Audit Synthesis 0% 0/0 EPICs CP: 0/5" [ref=e655] [cursor=pointer]':
+              - /url: /plans/292ee02fa82b
+              - generic [ref=e656]:
+                - generic [ref=e657]: custom
+                - generic [ref=e659]:
+                  - generic [ref=e660]: —
+                  - button "delete" [ref=e661]:
+                    - generic [ref=e662]: delete
+              - heading "Agribank 2025 Audit Synthesis" [level=3] [ref=e663]
+              - paragraph
+              - generic [ref=e664]:
+                - generic [ref=e665]:
+                  - img [ref=e666]
+                  - generic [ref=e669]: 0%
+                - generic [ref=e670]:
+                  - generic [ref=e671]: 0/0 EPICs
+                  - generic [ref=e672]: "CP: 0/5"
+            - 'link "custom — delete Agribank 2025 Audit Synthesis 0% 0/0 EPICs CP: 0/5" [ref=e674] [cursor=pointer]':
+              - /url: /plans/d4339751313b
+              - generic [ref=e675]:
+                - generic [ref=e676]: custom
+                - generic [ref=e678]:
+                  - generic [ref=e679]: —
+                  - button "delete" [ref=e680]:
+                    - generic [ref=e681]: delete
+              - heading "Agribank 2025 Audit Synthesis" [level=3] [ref=e682]
+              - paragraph
+              - generic [ref=e683]:
+                - generic [ref=e684]:
+                  - img [ref=e685]
+                  - generic [ref=e688]: 0%
+                - generic [ref=e689]:
+                  - generic [ref=e690]: 0/0 EPICs
+                  - generic [ref=e691]: "CP: 0/5"
+            - 'link "custom — delete Agribank 2025 Audit Synthesis 100% 5/5 EPICs CP: 5/5 1× A 2× R 1× D +1" [ref=e693] [cursor=pointer]':
+              - /url: /plans/adfd025a1205
+              - generic [ref=e694]:
+                - generic [ref=e695]: custom
+                - generic [ref=e697]:
+                  - generic [ref=e698]: —
+                  - button "delete" [ref=e699]:
+                    - generic [ref=e700]: delete
+              - heading "Agribank 2025 Audit Synthesis" [level=3] [ref=e701]
+              - paragraph
+              - generic [ref=e702]:
+                - generic [ref=e703]:
+                  - img [ref=e704]
+                  - generic [ref=e707]: 100%
+                - generic [ref=e708]:
+                  - generic [ref=e709]: 5/5 EPICs
+                  - generic [ref=e710]: "CP: 5/5"
+              - generic [ref=e712]:
+                - generic "1x architect" [ref=e713]:
+                  - generic [ref=e714]: 1×
+                  - generic [ref=e715]: A
+                - generic "2x researcher" [ref=e716]:
+                  - generic [ref=e717]: 2×
+                  - generic [ref=e718]: R
+                - generic "1x data-scientist" [ref=e719]:
+                  - generic [ref=e720]: 1×
+                  - generic [ref=e721]: D
+                - generic [ref=e722]: "+1"
+            - 'link "custom — delete Coffee vs Tea: Origins & Rituals Infographic 0% 0/1 EPICs CP: 0/0" [ref=e723] [cursor=pointer]':
+              - /url: /plans/ced7503eb9d8
+              - generic [ref=e724]:
+                - generic [ref=e725]: custom
+                - generic [ref=e727]:
+                  - generic [ref=e728]: —
+                  - button "delete" [ref=e729]:
+                    - generic [ref=e730]: delete
+              - 'heading "Coffee vs Tea: Origins & Rituals Infographic" [level=3] [ref=e731]'
+              - paragraph
+              - generic [ref=e732]:
+                - generic [ref=e733]:
+                  - img [ref=e734]
+                  - generic [ref=e737]: 0%
+                - generic [ref=e738]:
+                  - generic [ref=e739]: 0/1 EPICs
+                  - generic [ref=e740]: "CP: 0/0"
+            - 'link "custom — delete abbdd2998ea0 33.3% 2/6 EPICs CP: 1/2 1× A 5× E" [ref=e742] [cursor=pointer]':
+              - /url: /plans/abbdd2998ea0
+              - generic [ref=e743]:
+                - generic [ref=e744]: custom
+                - generic [ref=e746]:
+                  - generic [ref=e747]: —
+                  - button "delete" [ref=e748]:
+                    - generic [ref=e749]: delete
+              - heading "abbdd2998ea0" [level=3] [ref=e750]
+              - paragraph
+              - generic [ref=e751]:
+                - generic [ref=e752]:
+                  - img [ref=e753]
+                  - generic [ref=e756]: 33.3%
+                - generic [ref=e757]:
+                  - generic [ref=e758]: 2/6 EPICs
+                  - generic [ref=e759]: "CP: 1/2"
+              - generic [ref=e761]:
+                - generic "1x architect" [ref=e762]:
+                  - generic [ref=e763]: 1×
+                  - generic [ref=e764]: A
+                - generic "5x engineer" [ref=e765]:
+                  - generic [ref=e766]: 5×
+                  - generic [ref=e767]: E
+            - 'link "custom — delete Phase 1 — Foundation & Core Booking Engine (v3 — Rental-only, Agency Handoff Spec) 0% 0/5 EPICs CP: 0/0" [ref=e768] [cursor=pointer]':
+              - /url: /plans/989f1359b2d4
+              - generic [ref=e769]:
+                - generic [ref=e770]: custom
+                - generic [ref=e772]:
+                  - generic [ref=e773]: —
+                  - button "delete" [ref=e774]:
+                    - generic [ref=e775]: delete
+              - heading "Phase 1 — Foundation & Core Booking Engine (v3 — Rental-only, Agency Handoff Spec)" [level=3] [ref=e776]
+              - paragraph
+              - generic [ref=e777]:
+                - generic [ref=e778]:
+                  - img [ref=e779]
+                  - generic [ref=e782]: 0%
+                - generic [ref=e783]:
+                  - generic [ref=e784]: 0/5 EPICs
+                  - generic [ref=e785]: "CP: 0/0"
+            - 'link "custom — delete KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT) 0% 0/3 EPICs CP: 0/0" [ref=e787] [cursor=pointer]':
+              - /url: /plans/11b7dcac8cc8
+              - generic [ref=e788]:
+                - generic [ref=e789]: custom
+                - generic [ref=e791]:
+                  - generic [ref=e792]: —
+                  - button "delete" [ref=e793]:
+                    - generic [ref=e794]: delete
+              - heading "KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT)" [level=3] [ref=e795]
+              - paragraph
+              - generic [ref=e796]:
+                - generic [ref=e797]:
+                  - img [ref=e798]
+                  - generic [ref=e801]: 0%
+                - generic [ref=e802]:
+                  - generic [ref=e803]: 0/3 EPICs
+                  - generic [ref=e804]: "CP: 0/0"
+            - 'link "custom — delete Landing page or marketing site - Developing new website for coffee and tea 80% 4/5 EPICs CP: 4/5 2× A 2× E 1× U" [ref=e806] [cursor=pointer]':
+              - /url: /plans/19748b04ba34
+              - generic [ref=e807]:
+                - generic [ref=e808]: custom
+                - generic [ref=e810]:
+                  - generic [ref=e811]: —
+                  - button "delete" [ref=e812]:
+                    - generic [ref=e813]: delete
+              - heading "Landing page or marketing site - Developing new website for coffee and tea" [level=3] [ref=e814]
+              - paragraph
+              - generic [ref=e815]:
+                - generic [ref=e816]:
+                  - img [ref=e817]
+                  - generic [ref=e820]: 80%
+                - generic [ref=e821]:
+                  - generic [ref=e822]: 4/5 EPICs
+                  - generic [ref=e823]: "CP: 4/5"
+              - generic [ref=e825]:
+                - generic "2x architect" [ref=e826]:
+                  - generic [ref=e827]: 2×
+                  - generic [ref=e828]: A
+                - generic "2x engineer" [ref=e829]:
+                  - generic [ref=e830]: 2×
+                  - generic [ref=e831]: E
+                - generic "1x ux-researcher" [ref=e832]:
+                  - generic [ref=e833]: 1×
+                  - generic [ref=e834]: U
+            - 'link "custom — delete Coffee vs Tea: Origins & Rituals Infographic 0% 0/5 EPICs CP: 0/0" [ref=e835] [cursor=pointer]':
+              - /url: /plans/a51f99b99773
+              - generic [ref=e836]:
+                - generic [ref=e837]: custom
+                - generic [ref=e839]:
+                  - generic [ref=e840]: —
+                  - button "delete" [ref=e841]:
+                    - generic [ref=e842]: delete
+              - 'heading "Coffee vs Tea: Origins & Rituals Infographic" [level=3] [ref=e843]'
+              - paragraph
+              - generic [ref=e844]:
+                - generic [ref=e845]:
+                  - img [ref=e846]
+                  - generic [ref=e849]: 0%
+                - generic [ref=e850]:
+                  - generic [ref=e851]: 0/5 EPICs
+                  - generic [ref=e852]: "CP: 0/0"
+            - 'link "custom — delete Coffee vs Tea: Origins & Rituals Infographic 0% 0/5 EPICs CP: 0/0" [ref=e854] [cursor=pointer]':
+              - /url: /plans/5a405d9ae21c
+              - generic [ref=e855]:
+                - generic [ref=e856]: custom
+                - generic [ref=e858]:
+                  - generic [ref=e859]: —
+                  - button "delete" [ref=e860]:
+                    - generic [ref=e861]: delete
+              - 'heading "Coffee vs Tea: Origins & Rituals Infographic" [level=3] [ref=e862]'
+              - paragraph
+              - generic [ref=e863]:
+                - generic [ref=e864]:
+                  - img [ref=e865]
+                  - generic [ref=e868]: 0%
+                - generic [ref=e869]:
+                  - generic [ref=e870]: 0/5 EPICs
+                  - generic [ref=e871]: "CP: 0/0"
+            - 'link "custom — delete KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT) 0% 0/3 EPICs CP: 0/0" [ref=e873] [cursor=pointer]':
+              - /url: /plans/84f186310603
+              - generic [ref=e874]:
+                - generic [ref=e875]: custom
+                - generic [ref=e877]:
+                  - generic [ref=e878]: —
+                  - button "delete" [ref=e879]:
+                    - generic [ref=e880]: delete
+              - heading "KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT)" [level=3] [ref=e881]
+              - paragraph
+              - generic [ref=e882]:
+                - generic [ref=e883]:
+                  - img [ref=e884]
+                  - generic [ref=e887]: 0%
+                - generic [ref=e888]:
+                  - generic [ref=e889]: 0/3 EPICs
+                  - generic [ref=e890]: "CP: 0/0"
+            - 'link "custom — delete Web app with login + database - develop new design for family diary 0% 0/5 EPICs CP: 0/0" [ref=e892] [cursor=pointer]':
+              - /url: /plans/b64115d22426
+              - generic [ref=e893]:
+                - generic [ref=e894]: custom
+                - generic [ref=e896]:
+                  - generic [ref=e897]: —
+                  - button "delete" [ref=e898]:
+                    - generic [ref=e899]: delete
+              - heading "Web app with login + database - develop new design for family diary" [level=3] [ref=e900]
+              - paragraph
+              - generic [ref=e901]:
+                - generic [ref=e902]:
+                  - img [ref=e903]
+                  - generic [ref=e906]: 0%
+                - generic [ref=e907]:
+                  - generic [ref=e908]: 0/5 EPICs
+                  - generic [ref=e909]: "CP: 0/0"
+            - 'link "custom — delete Landing page or marketing site - develop marketing landingpage for OSTwin a new harnessing platform 0% 0/3 EPICs CP: 0/0" [ref=e911] [cursor=pointer]':
+              - /url: /plans/a1be9bd0d920
+              - generic [ref=e912]:
+                - generic [ref=e913]: custom
+                - generic [ref=e915]:
+                  - generic [ref=e916]: —
+                  - button "delete" [ref=e917]:
+                    - generic [ref=e918]: delete
+              - heading "Landing page or marketing site - develop marketing landingpage for OSTwin a new harnessing platform" [level=3] [ref=e919]
+              - paragraph
+              - generic [ref=e920]:
+                - generic [ref=e921]:
+                  - img [ref=e922]
+                  - generic [ref=e925]: 0%
+                - generic [ref=e926]:
+                  - generic [ref=e927]: 0/3 EPICs
+                  - generic [ref=e928]: "CP: 0/0"
+            - 'link "custom — delete Searching Eyes — Hollywood-Grade AI Video Studio Redesign 0% 0/12 EPICs CP: 0/0" [ref=e930] [cursor=pointer]':
+              - /url: /plans/51a9eba1f1af
+              - generic [ref=e931]:
+                - generic [ref=e932]: custom
+                - generic [ref=e934]:
+                  - generic [ref=e935]: —
+                  - button "delete" [ref=e936]:
+                    - generic [ref=e937]: delete
+              - heading "Searching Eyes — Hollywood-Grade AI Video Studio Redesign" [level=3] [ref=e938]
+              - paragraph
+              - generic [ref=e939]:
+                - generic [ref=e940]:
+                  - img [ref=e941]
+                  - generic [ref=e944]: 0%
+                - generic [ref=e945]:
+                  - generic [ref=e946]: 0/12 EPICs
+                  - generic [ref=e947]: "CP: 0/0"
+            - 'link "custom — delete KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT) 75% 3/4 EPICs CP: 3/4 1× A 3× E" [ref=e949] [cursor=pointer]':
+              - /url: /plans/03b9eaf2b882
+              - generic [ref=e950]:
+                - generic [ref=e951]: custom
+                - generic [ref=e953]:
+                  - generic [ref=e954]: —
+                  - button "delete" [ref=e955]:
+                    - generic [ref=e956]: delete
+              - heading "KẾ HOẠCH KIỂM TOÁN CHUYÊN ĐỀ DỊCH VỤ CÔNG TRỰC TUYẾN (DVCTT)" [level=3] [ref=e957]
+              - paragraph
+              - generic [ref=e958]:
+                - generic [ref=e959]:
+                  - img [ref=e960]
+                  - generic [ref=e963]: 75%
+                - generic [ref=e964]:
+                  - generic [ref=e965]: 3/4 EPICs
+                  - generic [ref=e966]: "CP: 3/4"
+              - generic [ref=e968]:
+                - generic "1x architect" [ref=e969]:
+                  - generic [ref=e970]: 1×
+                  - generic [ref=e971]: A
+                - generic "3x engineer" [ref=e972]:
+                  - generic [ref=e973]: 3×
+                  - generic [ref=e974]: E
+  - alert [ref=e182]

@@ -1,0 +1,55 @@
+- generic [ref=e1]:
+  - generic [ref=e18]:
+    - navigation "Main Navigation" [ref=e19]:
+      - img [ref=e21]
+      - navigation [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e25]: home
+        - link "Plans" [active] [ref=e26] [cursor=pointer]:
+          - /url: /plans
+          - generic [ref=e27]: folder
+        - link "Knowledge" [ref=e28] [cursor=pointer]:
+          - /url: /knowledge
+          - generic [ref=e29]: auto_stories
+        - link "Roles" [ref=e30] [cursor=pointer]:
+          - /url: /roles
+          - generic [ref=e31]: person
+        - link "Skills" [ref=e32] [cursor=pointer]:
+          - /url: /skills
+          - generic [ref=e33]: extension
+        - link "MCP" [ref=e34] [cursor=pointer]:
+          - /url: /mcp
+          - generic [ref=e35]: terminal
+        - link "Settings" [ref=e36] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e37]: settings
+      - button "Expand sidebar" [ref=e39]:
+        - generic [ref=e40]: chevron_right
+    - navigation "Top Bar" [ref=e41]:
+      - search "Search plans, EPICs, tasks (Cmd+K)" [ref=e43]:
+        - generic [ref=e44]: search
+        - generic [ref=e45]: Search plans, EPICs, tasks...
+        - generic [ref=e46]: ⌘K
+      - generic [ref=e47]:
+        - generic [ref=e52]: "off"
+        - button "Switch to dark mode" [ref=e53]:
+          - generic [ref=e54]: dark_mode
+        - button "0 unread notifications" [ref=e56]:
+          - generic [ref=e57]: notifications
+        - button "PA expand_more" [ref=e59]:
+          - generic [ref=e60]: PA
+          - generic [ref=e61]: expand_more
+    - main [ref=e62]:
+      - generic [ref=e183]:
+        - generic [ref=e184]:
+          - generic [ref=e185]:
+            - heading "Plans" [level=1] [ref=e186]
+            - paragraph [ref=e187]: Browse and manage all plans
+          - link "add New Plan" [ref=e188] [cursor=pointer]:
+            - /url: /plans/new
+            - button "add New Plan" [ref=e189]:
+              - generic [ref=e190]: add
+              - text: New Plan
+        - paragraph [ref=e192]: Failed to load plans. Please try again later.
+  - alert [ref=e181]

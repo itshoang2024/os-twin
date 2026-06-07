@@ -1,0 +1,169 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img "OsTwin" [ref=e6]
+      - heading "OsTwin" [level=1] [ref=e7]
+      - paragraph [ref=e8]: Enter your API key to continue
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - generic [ref=e12]: OSTWIN API Key
+        - textbox "ostwin_••••••••••••" [active] [ref=e13]
+      - button "login Authenticate" [disabled] [ref=e14]:
+        - generic [ref=e15]: login
+        - text: Authenticate
+    - paragraph [ref=e16]:
+      - text: Find your key in
+      - code [ref=e17]: ~/.ostwin/.env
+  - generic [ref=e18]:
+    - navigation "Main Navigation" [ref=e19]:
+      - img [ref=e21]
+      - navigation [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e25]: home
+        - link "Plans" [ref=e26] [cursor=pointer]:
+          - /url: /plans
+          - generic [ref=e27]: folder
+        - link "Knowledge" [ref=e28] [cursor=pointer]:
+          - /url: /knowledge
+          - generic [ref=e29]: auto_stories
+        - link "Roles" [ref=e30] [cursor=pointer]:
+          - /url: /roles
+          - generic [ref=e31]: person
+        - link "Skills" [ref=e32] [cursor=pointer]:
+          - /url: /skills
+          - generic [ref=e33]: extension
+        - link "MCP" [ref=e34] [cursor=pointer]:
+          - /url: /mcp
+          - generic [ref=e35]: terminal
+        - link "Settings" [ref=e36] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e37]: settings
+      - button "Expand sidebar" [ref=e39]:
+        - generic [ref=e40]: chevron_right
+    - navigation "Top Bar" [ref=e41]:
+      - search "Search plans, EPICs, tasks (Cmd+K)" [ref=e43]:
+        - generic [ref=e44]: search
+        - generic [ref=e45]: Search plans, EPICs, tasks...
+        - generic [ref=e46]: ⌘K
+      - generic [ref=e47]:
+        - generic [ref=e52]: "off"
+        - button "Switch to dark mode" [ref=e53]:
+          - generic [ref=e54]: dark_mode
+        - button "0 unread notifications" [ref=e56]:
+          - generic [ref=e57]: notifications
+        - button "PA expand_more" [ref=e59]:
+          - generic [ref=e60]: PA
+          - generic [ref=e61]: expand_more
+    - main [ref=e62]:
+      - generic [ref=e64]:
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - img [ref=e70]
+              - generic [ref=e73]: Ostwin Pro
+              - generic [ref=e74]: Live dashboard
+            - generic [ref=e75]:
+              - paragraph [ref=e76]: Agentic command center
+              - heading "Build, monitor, and steer every plan from one landing page." [level=1] [ref=e77]
+              - paragraph [ref=e78]: Start a new workspace from a prompt, review live operating metrics, and use the filterable plan grid powered by SWR-backed mock APIs.
+            - generic [ref=e79]:
+              - generic [ref=e80]:
+                - generic [ref=e81]:
+                  - button "Add image" [ref=e82]:
+                    - generic [ref=e83]: add_photo_alternate
+                  - textbox "Prompt" [ref=e84]:
+                    - /placeholder: What do you want to build?
+                  - button "Send prompt (Ctrl or Cmd + Enter)" [disabled] [ref=e86]:
+                    - generic [ref=e87]: arrow_upward
+                - generic [ref=e88]: Press Ctrl/⌘+Enterto send · Enter for new line
+              - generic [ref=e89]:
+                - button "Launch a compliance audit plan" [ref=e90]
+                - button "Map a customer onboarding workflow" [ref=e91]
+                - button "Draft an ecommerce logistics rollout" [ref=e92]
+              - generic [ref=e93]:
+                - tablist "Plan template categories" [ref=e94]:
+                  - tab "engineering Engineering" [selected] [ref=e95]:
+                    - generic [ref=e96]: engineering
+                    - generic [ref=e97]: Engineering
+                  - tab "campaign Marketing" [ref=e98]:
+                    - generic [ref=e99]: campaign
+                    - generic [ref=e100]: Marketing
+                  - tab "handshake Sales" [ref=e101]:
+                    - generic [ref=e102]: handshake
+                    - generic [ref=e103]: Sales
+                  - tab "support_agent Support" [ref=e104]:
+                    - generic [ref=e105]: support_agent
+                    - generic [ref=e106]: Support
+                  - tab "settings Operations" [ref=e107]:
+                    - generic [ref=e108]: settings
+                    - generic [ref=e109]: Operations
+                  - tab "science Research" [ref=e110]:
+                    - generic [ref=e111]: science
+                    - generic [ref=e112]: Research
+                  - tab "verified Compliance" [ref=e113]:
+                    - generic [ref=e114]: verified
+                    - generic [ref=e115]: Compliance
+                  - tab "palette Creative" [ref=e116]:
+                    - generic [ref=e117]: palette
+                    - generic [ref=e118]: Creative
+                - tabpanel "engineering Engineering" [ref=e119]:
+                  - button "Landing page or marketing site Single page with hero, features, and call to action 7 fields arrow_forward" [ref=e120]:
+                    - generic [ref=e121]:
+                      - generic [ref=e122]: Landing page or marketing site
+                      - generic [ref=e123]: Single page with hero, features, and call to action
+                    - generic [ref=e124]:
+                      - generic [ref=e125]: 7 fields
+                      - generic [ref=e126]: arrow_forward
+                  - button "Web app with login + database Multi-user app with auth, persistence, and a dashboard 8 fields arrow_forward" [ref=e127]:
+                    - generic [ref=e128]:
+                      - generic [ref=e129]: Web app with login + database
+                      - generic [ref=e130]: Multi-user app with auth, persistence, and a dashboard
+                    - generic [ref=e131]:
+                      - generic [ref=e132]: 8 fields
+                      - generic [ref=e133]: arrow_forward
+                  - button "Internal tool or admin dashboard CRUD interface over your data, for you or your team 8 fields arrow_forward" [ref=e134]:
+                    - generic [ref=e135]:
+                      - generic [ref=e136]: Internal tool or admin dashboard
+                      - generic [ref=e137]: CRUD interface over your data, for you or your team
+                    - generic [ref=e138]:
+                      - generic [ref=e139]: 8 fields
+                      - generic [ref=e140]: arrow_forward
+                  - button "Browser extension or integration Add behavior to web pages or connect two services 6 fields arrow_forward" [ref=e141]:
+                    - generic [ref=e142]:
+                      - generic [ref=e143]: Browser extension or integration
+                      - generic [ref=e144]: Add behavior to web pages or connect two services
+                    - generic [ref=e145]:
+                      - generic [ref=e146]: 6 fields
+                      - generic [ref=e147]: arrow_forward
+          - complementary [ref=e148]:
+            - generic [ref=e150]:
+              - paragraph [ref=e151]: Activity
+              - heading "Recent orchestration" [level=2] [ref=e152]
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - heading "Recent Ideas" [level=3] [ref=e157]
+                - link "View all" [ref=e158] [cursor=pointer]:
+                  - /url: /ideas
+              - generic [ref=e160]: No ideas yet. Start brainstorming above!
+        - region "Animated operating metrics" [ref=e161]:
+          - generic [ref=e162]:
+            - generic [ref=e163]:
+              - paragraph [ref=e164]: Mock API telemetry
+              - heading "Animated operating metrics" [level=2] [ref=e165]
+            - link "View all plans arrow_forward" [ref=e166] [cursor=pointer]:
+              - /url: /plans
+              - text: View all plans
+              - generic [ref=e167]: arrow_forward
+          - generic [ref=e168]:
+            - generic [ref=e169]: Failed to load stats
+            - generic [ref=e170]: Failed to load stats
+            - generic [ref=e171]: Failed to load stats
+            - generic [ref=e172]: Failed to load stats
+        - region "Filterable plan grid" [ref=e173]:
+          - generic [ref=e175]:
+            - paragraph [ref=e176]: Plan operations
+            - heading "Filterable plan grid" [level=2] [ref=e177]
+            - paragraph [ref=e178]: Search, sort, filter by domain or status, and jump directly into any active workspace.
+          - paragraph [ref=e180]: Failed to load plans. Please try again later.
+  - alert [ref=e181]

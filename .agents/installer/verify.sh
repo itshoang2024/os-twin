@@ -138,4 +138,6 @@ print_completion_banner() {
     echo -e "    ${DIM}Stored in: ${INSTALL_DIR}/.env${NC}"
     echo ""
   fi
+
+  return 0
 }
