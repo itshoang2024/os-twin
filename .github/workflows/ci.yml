@@ -565,6 +565,8 @@ jobs:
             Write-Host "::error::ostwin CLI not found: $ostwin"
             exit 1
           }
+          $ostwinScript = Join-Path $env:RUNNER_TEMP 'ostwin.ps1'
+          Copy-Item -Path $ostwin -Destination $ostwinScript -Force
 
           $dashboardUrl = 'http://127.0.0.1:3366/api/status'
           $dashboardReady = $false
@@ -601,7 +603,7 @@ jobs:
             exit 1
           }
 
-          $planOutput = & pwsh -NoProfile -File $ostwin plan create that.plan.md 2>&1 | Out-String
+          $planOutput = & pwsh -NoProfile -File $ostwinScript plan create that.plan.md 2>&1 | Out-String
           Write-Host $planOutput
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::ostwin plan create failed with code $LASTEXITCODE"
@@ -663,7 +665,7 @@ jobs:
             exit 1
           }
 
-          & pwsh -NoProfile -File $ostwin run $planId 2>&1 | Tee-Object -FilePath ostwin-run-output.log
+          & pwsh -NoProfile -File $ostwinScript run $planId 2>&1 | Tee-Object -FilePath ostwin-run-output.log
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::ostwin run failed with code $LASTEXITCODE"
             exit $LASTEXITCODE

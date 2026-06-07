@@ -59,7 +59,7 @@ def real_embedder() -> KnowledgeEmbedder:
 
         def embed_one(self, text: str) -> list[float]:
             digest = hashlib.sha256((text or "").encode("utf-8")).digest()
-            return [((digest[i % len(digest)] / 255.0) * 2.0) - 1.0 for i in range(1024)]
+            return [(digest[i % len(digest)] / 255.0) for i in range(1024)]
 
     return _OfflineEmbedder()  # type: ignore[return-value]
 
