@@ -1,6 +1,4 @@
 # Redirect old doc paths to new structure
-/installer.sh https://raw.githubusercontent.com/igot-ai/os-twin/main/install.sh 302
-/install.sh https://raw.githubusercontent.com/igot-ai/os-twin/main/install.sh 302
 /roles-and-zero-agent /concepts/zero-agent-pattern/ 301
 /skills /concepts/skills/ 301
 /mcp-isolation /concepts/mcp-isolation/ 301

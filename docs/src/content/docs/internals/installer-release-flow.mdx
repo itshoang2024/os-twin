@@ -1,0 +1,195 @@
+---
+title: Installer Release Flow
+description: How the packaged OSTwin installer is built, released, and exposed through the docs domain.
+sidebar:
+  order: 2
+---
+
+## Canonical install URL
+
+Use one public install URL in docs, demos, and release notes:
+
+```bash
+curl -fsSL https://twin.igot.ai/installer.sh | bash
+```
+
+The docs build copies the repository root bootstrapper into the Cloudflare Pages static assets:
+
+```bash
+cd docs
+npm run sync-installer
+```
+
+That command copies:
+
+```text
+../install.sh -> docs/public/installer.sh
+../install.sh -> docs/public/install.sh
+```
+
+Keep `/install.sh` as a compatibility alias, but write new user-facing examples with `/installer.sh`.
+
+## What gets compiled
+
+The packaged binary entrypoint is:
+
+```text
+installer/cmd/ostwin-installer/main.go
+```
+
+From a local checkout, compile it directly with:
+
+```bash
+cd installer
+go build -o /tmp/ostwin-installer ./cmd/ostwin-installer
+```
+
+For release builds, `.goreleaser.yml` is the source of truth:
+
+```yaml
+builds:
+  - id: ostwin-installer
+    dir: installer
+    main: ./cmd/ostwin-installer
+    binary: ostwin-installer
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{ .Version }}"
+      - "-X main.commit={{ .Commit }}"
+      - "-X main.date={{ .Date }}"
+      - "-X main.sourceRef={{ .Tag }}"
+```
+
+GoReleaser builds `darwin`, `linux`, and `windows` archives for `amd64` and `arm64`. The `sourceRef` linker value is important: tagged releases make the installer download the matching source archive instead of whatever happens to be on `main`.
+
+## GitHub release workflow
+
+The active installer workflow is `.github/workflows/installer-release.yml`.
+
+Pull requests and `main` pushes validate the package:
+
+```bash
+cd installer
+go mod verify
+go test ./...
+go build -o /tmp/ostwin-installer ./cmd/ostwin-installer
+cd ..
+bash -n install.sh
+bash -n build.sh
+goreleaser check
+goreleaser release --snapshot --clean --skip=publish
+```
+
+Tag pushes publish the release:
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The tag path runs:
+
+```bash
+goreleaser release --clean
+```
+
+That publishes:
+
+```text
+install.sh
+checksums.txt
+ostwin-installer_darwin_amd64.tar.gz
+ostwin-installer_darwin_arm64.tar.gz
+ostwin-installer_linux_amd64.tar.gz
+ostwin-installer_linux_arm64.tar.gz
+ostwin-installer_windows_amd64.tar.gz
+ostwin-installer_windows_arm64.tar.gz
+```
+
+The release `install.sh` is the bootstrap script. It downloads the matching packaged `ostwin-installer` archive from GitHub Releases, verifies `checksums.txt` when available, then delegates to the native `.agents/install.sh` or `.agents/install.ps1` inside the source archive.
+
+## Cloudflare Pages consistency
+
+Cloudflare Pages serves files from the docs build output. `docs/scripts/sync-installer.mjs` copies root `install.sh` into `docs/public/installer.sh` and `docs/public/install.sh` before `astro build`, so both files are emitted into `docs/dist/`.
+
+Cloudflare Pages also reads `docs/public/_headers` during the docs build. The installer endpoints set explicit shell-script content type and a short cache:
+
+```text
+/installer.sh
+  Content-Type: text/x-shellscript; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/install.sh
+  Content-Type: text/x-shellscript; charset=utf-8
+  Cache-Control: public, max-age=300
+```
+
+For OSTwin, the consistency rule is:
+
+1. The repository root `install.sh` owns the public bootstrapper source.
+2. The docs build copies that file into Cloudflare Pages static assets.
+3. Cloudflare serves `https://twin.igot.ai/installer.sh` directly.
+4. The installer itself downloads versioned release assets from GitHub, not from Cloudflare.
+
+This keeps Cloudflare deployment independent from installer release publishing. A docs deploy can update the public bootstrapper copy or prose, but it does not need to rebuild installer binaries.
+
+## Docs deployment
+
+The active Cloudflare Pages deployment workflow is:
+
+```text
+.github/workflows/deploy-docs.yml
+```
+
+It runs on `main` pushes that touch `install.sh`, `docs/**`, or the deploy workflow itself, and it can also be started with `workflow_dispatch`.
+
+The workflow requires these repository secrets:
+
+```text
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+```
+
+The deploy command should remain:
+
+```bash
+cd docs
+npm install --package-lock=false
+npm run build
+npx wrangler pages deploy dist --project-name=ostwin-docs
+```
+
+The docs project already has `wrangler` as a dev dependency, and `docs/wrangler.toml` sets the Pages output directory to `dist`. The workflow uses `npm install --package-lock=false` because this repo does not currently include `docs/package-lock.json`; switch to `npm ci` only after adding and maintaining that lockfile.
+
+## Release checklist
+
+Before tagging:
+
+```bash
+cd installer
+go test ./...
+go build -o /tmp/ostwin-installer ./cmd/ostwin-installer
+cd ..
+bash -n install.sh
+bash -n .agents/install.sh
+cd docs
+npm install --package-lock=false
+npm run build
+```
+
+After tagging:
+
+1. Confirm `.github/workflows/installer-release.yml` completed.
+2. Confirm the release includes `install.sh`, `checksums.txt`, and all six platform archives.
+3. Confirm the public URL resolves:
+
+```bash
+curl -I https://twin.igot.ai/installer.sh
+curl -fsSL https://twin.igot.ai/installer.sh | bash -s -- --dry-run --yes
+```
+
+If the public URL returns `404`, deploy the docs site or verify that the Cloudflare Pages custom domain is attached to the project that contains `docs/public/installer.sh` in its build output.
+
+If the GitHub release URL returns `404`, the latest release does not have installer assets. Tag a new release after `.github/workflows/installer-release.yml` is green. The Cloudflare bootstrapper URL can still work because it serves the root `install.sh` copy directly.
