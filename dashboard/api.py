@@ -29,15 +29,16 @@ from fastapi.staticfiles import StaticFiles
 # ── Load ~/.ostwin/.env early ──
 # This makes the dashboard self-contained: it works whether started via
 # `ostwin dashboard` (which already sources .env) or directly via `python api.py`.
-# NOTE: This is a one-time bootstrap load.  For live hot-reload when the
-# .env file is edited at runtime, see dashboard/env_watcher.py which is
-# started as an async task in startup_all().
+# NOTE: This is a one-time bootstrap load.  It intentionally does not
+# overwrite variables already supplied by the parent process/test harness;
+# live hot-reload of edited .env values is handled by dashboard/env_watcher.py
+# after startup.
 _env_file = Path.home() / ".ostwin" / ".env"
 if _env_file.is_file():
     try:
         from dotenv import load_dotenv
 
-        load_dotenv(_env_file, override=True)
+        load_dotenv(_env_file, override=False)
     except ImportError:
         # Manual fallback — only set vars not already in the environment
         with _env_file.open() as _f:
@@ -175,8 +176,32 @@ async def app_lifespan(_app):
     # so asyncio.to_thread() routes CPU/IO-heavy work here instead of the
     # tiny default pool. Must happen after the event loop is running.
     loop = asyncio.get_running_loop()
-    loop.set_default_executor(_heavy_executor)
+    # A TestClient creates a fresh event loop per lifespan and shuts down that
+    # loop's default executor on exit.  Reusing one module-level executor across
+    # lifespans leaves later tests with "cannot schedule new futures after
+    # shutdown".  Create a fresh executor per lifespan instead.
+    heavy_executor = ThreadPoolExecutor(
+        max_workers=_HEAVY_POOL_SIZE,
+        thread_name_prefix="heavy-ops",
+    )
+    loop.set_default_executor(heavy_executor)
     logger.info("Heavy-ops thread pool installed (size=%d)", _HEAVY_POOL_SIZE)
+
+    async def _lifespan_shutdown() -> None:
+        try:
+            await _shutdown_app()
+        finally:
+            heavy_executor.shutdown(wait=False, cancel_futures=True)
+
+    pytest_current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
+    needs_knowledge_mcp_lifespan = (
+        not pytest_current_test
+        or "test_knowledge_mcp.py" in pytest_current_test
+    )
+    needs_memory_mcp_lifespan = (
+        not pytest_current_test
+        or "test_memory_mcp" in pytest_current_test
+    )
 
     # Migrated from the legacy @app.on_event("startup") handler. Using
     # create_task so the lifecycle doesn't block the server from accepting
@@ -190,7 +215,16 @@ async def app_lifespan(_app):
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to load persisted master model: %s", exc)
 
-    asyncio.create_task(startup_all())
+    # Pytest creates many short-lived TestClient lifespan contexts.  The
+    # dashboard-wide pollers started by startup_all() are intentionally
+    # process-long tasks in production, but they can keep the AnyIO test portal
+    # alive during TestClient teardown and make the full suite hang.  Skip only
+    # those dashboard pollers under pytest; route-specific lifespans below
+    # (including MCP) still run so integration tests keep their coverage.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        logger.info("Skipping dashboard startup pollers under pytest")
+    else:
+        asyncio.create_task(startup_all())
     
     # Start knowledge service background tasks (retention sweeper)
     try:
@@ -200,12 +234,15 @@ async def app_lifespan(_app):
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to start knowledge background services: %s", exc)
 
-    # Start Memory Pool MCP session manager (Plan 007)
-    try:
-        from dashboard.routes.memory_mcp import startup_knowledge as _start_pool
-        await _start_pool()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to start memory pool MCP: %s", exc)
+    # Start Memory Pool MCP session manager (Plan 007).  Most API tests do not
+    # exercise MCP and should not pay for long-lived MCP background machinery.
+    # Keep it enabled for MCP-specific tests and production.
+    if needs_memory_mcp_lifespan:
+        try:
+            from dashboard.routes.memory_mcp import startup_knowledge as _start_pool
+            await _start_pool()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to start memory pool MCP: %s", exc)
 
     # Drive the FastMCP app's own lifespan inside ours so its
     # ``session_manager.run()`` initialises the task group. Without this,
@@ -222,7 +259,7 @@ async def app_lifespan(_app):
     #      session manager bound to the new task group.
     #   3. Re-mount the fresh inner app onto the parent so dispatch keeps
     #      working through the rest of this lifespan window.
-    if _mcp_lifespan_app is not None:
+    if _mcp_lifespan_app is not None and needs_knowledge_mcp_lifespan:
         try:
             from dashboard.knowledge.mcp_server import (  # noqa: WPS433
                 get_mcp_app,
@@ -240,13 +277,13 @@ async def app_lifespan(_app):
             try:
                 yield
             finally:
-                await _shutdown_app()
+                await _lifespan_shutdown()
     else:
         # MCP mount failed (logged at mount time); still drive shutdown.
         try:
             yield
         finally:
-            await _shutdown_app()
+            await _lifespan_shutdown()
 
 
 def _replace_mounted_mcp_app(parent_app, fresh_mcp_app) -> None:

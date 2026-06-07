@@ -4,6 +4,7 @@ import hashlib
 import asyncio
 import re
 import logging
+import shutil
 import zipfile
 from email.parser import BytesParser
 from email.policy import default
@@ -21,13 +22,105 @@ from dashboard.api_utils import (
     AGENTS_DIR, PROJECT_ROOT, PLANS_DIR, GLOBAL_PLANS_DIR,
     get_plan_roles_config, build_roles_list,
     resolve_runtime_plan_warrooms_dir,
-    process_notification
+    process_notification,
+    canonical_room_status,
 )
 import dashboard.global_state as global_state
 from dashboard.auth import get_current_user
 
 router = APIRouter(tags=["plans"])
 logger = logging.getLogger(__name__)
+
+
+def _is_ostwin_runtime_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lstrip("/")
+    return normalized.startswith((
+        ".war-rooms/",
+        ".opencode/",
+        ".agents/logs/",
+        ".agents/plans/",
+        ".agents/mcp/",
+    ))
+
+
+def _git_ready_detail(working_dir: Path) -> tuple[bool, str, dict]:
+    if shutil.which("git") is None:
+        return False, "git executable was not found on PATH", {"reason": "git_not_found"}
+    if not working_dir.exists() or not working_dir.is_dir():
+        return False, f"working_dir does not exist: {working_dir}", {"reason": "working_dir_missing"}
+
+    def run_git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(working_dir), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    root_result = run_git("rev-parse", "--show-toplevel")
+    if root_result.returncode != 0:
+        return False, f"working_dir is not inside a Git work tree: {working_dir}", {"reason": "not_git_worktree"}
+    git_root = Path(root_result.stdout.strip())
+
+    def run_root_git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(git_root), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    head_result = run_root_git("rev-parse", "--verify", "HEAD")
+    if head_result.returncode != 0:
+        return False, "Git repository has no HEAD commit", {"reason": "head_missing", "source_git_root": str(git_root)}
+
+    in_progress = []
+    for state_path in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+        path_result = run_root_git("rev-parse", "--git-path", state_path)
+        state_file = git_root / path_result.stdout.strip() if path_result.returncode == 0 else None
+        if state_file and state_file.exists():
+            in_progress.append(state_path)
+    if in_progress:
+        return False, f"Git operation in progress: {', '.join(in_progress)}", {
+            "reason": "git_operation_in_progress",
+            "source_git_root": str(git_root),
+            "in_progress": in_progress,
+        }
+
+    status_result = run_root_git("status", "--porcelain=v1", "--untracked-files=all")
+    if status_result.returncode != 0:
+        return False, status_result.stderr.strip() or status_result.stdout.strip(), {"reason": "git_status_failed", "source_git_root": str(git_root)}
+
+    dirty_tracked = []
+    dirty_untracked = []
+    for line in status_result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip('"')
+        if line.startswith("?? "):
+            if not _is_ostwin_runtime_path(path):
+                dirty_untracked.append(path)
+        else:
+            dirty_tracked.append(path)
+
+    if dirty_tracked:
+        return False, f"Tracked files have uncommitted changes: {', '.join(dirty_tracked[:10])}", {
+            "reason": "dirty_tracked_files",
+            "source_git_root": str(git_root),
+            "dirty_paths": dirty_tracked,
+        }
+    if dirty_untracked:
+        return False, f"Untracked non-runtime files are present: {', '.join(dirty_untracked[:10])}", {
+            "reason": "untracked_non_runtime_files",
+            "source_git_root": str(git_root),
+            "dirty_paths": dirty_untracked,
+        }
+
+    return True, "Git preflight passed", {
+        "reason": "ok",
+        "source_git_root": str(git_root),
+        "base_ref": head_result.stdout.strip(),
+    }
 
 
 class RoomFeedbackRequest(BaseModel):
@@ -828,7 +921,7 @@ def _update_epic_asset_sections(plan_id: str, all_assets: list, assets_dir: Path
             epic_block,
         )
         epic_block = _re_mod.sub(
-            r"\n?> Assets: .*\n?",
+            r"\n+> Assets: .*\n+",
             "\n",
             epic_block,
         )
@@ -866,7 +959,9 @@ def _update_epic_asset_sections(plan_id: str, all_assets: list, assets_dir: Path
                     insert_pos = separator_match.start()
 
                 if insert_pos is not None:
-                    epic_block = epic_block[:insert_pos] + "\n" + asset_line + epic_block[insert_pos:]
+                    before = epic_block[:insert_pos].rstrip()
+                    after = epic_block[insert_pos:].lstrip()
+                    epic_block = f"{before}\n\n{asset_line}\n{after}"
                 else:
                     epic_block = epic_block.rstrip() + "\n\n" + asset_line
 
@@ -1495,7 +1590,7 @@ async def list_plans(
                 try:
                     prog = json.loads(prog_file.read_text())
                     p["epic_count"] = prog.get("total", p.get("epic_count", 0))
-                    p["completed_epics"] = prog.get("passed", 0)
+                    p["completed_epics"] = prog.get("done", prog.get("passed", 0))
                     p["active_epics"] = prog.get("active", 0)
                     p["pct_complete"] = prog.get("pct_complete", 0)
                     p["escalations"] = sum(
@@ -1582,7 +1677,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
     }
     active_epics = 0
     total_epics = 0
-    passed_epics = 0
+    done_epics = 0
     escalations = 0
 
     seen_progress_files = set()
@@ -1616,7 +1711,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             prog = json.loads(Path(pf_path).read_text())
             active_epics += prog.get("active", 0)
             total_epics += prog.get("total", 0)
-            passed_epics += prog.get("passed", 0)
+            done_epics += prog.get("done", prog.get("passed", 0))
             for room in prog.get("rooms", []):
                 if room.get("status") == "manager-triage":
                     escalations += 1
@@ -1624,7 +1719,7 @@ async def get_stats(user: dict = Depends(get_current_user)):
             pass
 
     # Weighted average completion rate
-    completion_rate = (passed_epics / total_epics * 100) if total_epics > 0 else 0
+    completion_rate = (done_epics / total_epics * 100) if total_epics > 0 else 0
 
     current_stats = {
         "total_plans": total_plans,
@@ -1983,17 +2078,27 @@ async def save_plan(plan_id: str, request: SavePlanRequest, user: dict = Depends
             meta_file.write_text(json.dumps(meta, indent=2) + "\n")
         except Exception: pass
 
+    final_content = normalized_content
+    # R2-FIX-1: Parse asset sections from the saved markdown and merge edits into meta,
+    # then regenerate the sections so meta.json and PLAN.md stay in sync.
+    try:
+        _merge_markdown_asset_edits_into_meta(plan_id, normalized_content)
+        _sync_asset_sections(plan_id)
+        final_content = plan_file.read_text()
+    except Exception:
+        pass  # Best-effort: don't fail save if asset section sync fails
+
     # Update zvec if available
     if store:
         try:
             # Re-parse epic count
-            epics_found = re.findall(r"^#{2,3} (?:(?:Epic|Task):\s*\S+|EPIC-\d+|TASK-\d+)", normalized_content, re.MULTILINE)
+            epics_found = re.findall(r"^#{2,3} (?:(?:Epic|Task):\s*\S+|EPIC-\d+|TASK-\d+)", final_content, re.MULTILINE)
             epic_count = len(epics_found)
 
             store.index_plan(
                 plan_id=plan_id,
                 title=title,
-                content=normalized_content,
+                content=final_content,
                 epic_count=epic_count,
                 filename=f"{plan_id}.md",
                 status=meta.get("status", "draft"),
@@ -2002,14 +2107,6 @@ async def save_plan(plan_id: str, request: SavePlanRequest, user: dict = Depends
             )
         except Exception as e:
             logger.error(f"Failed to update zvec in save_plan: {e}")
-
-    # R2-FIX-1: Parse asset sections from the saved markdown and merge edits into meta,
-    # then regenerate the sections so meta.json and PLAN.md stay in sync.
-    try:
-        _merge_markdown_asset_edits_into_meta(plan_id, normalized_content)
-        _sync_asset_sections(plan_id)
-    except Exception:
-        pass  # Best-effort: don't fail save if asset section sync fails
 
     return {"status": "saved", "plan_id": plan_id}
 
@@ -2261,11 +2358,31 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
             slug = plan_id
         working_dir = str(Path.home() / ".ostwin" / "projects" / slug)
 
+    workspace_isolation = request.workspace_isolation or os.environ.get("OSTWIN_WORKSPACE_ISOLATION") or "room-worktree"
+    if workspace_isolation not in {"room-worktree", "shared"}:
+        raise HTTPException(status_code=422, detail="workspace_isolation must be 'room-worktree' or 'shared'")
+    worktree_root = request.worktree_root or ""
+
     wd_path = Path(working_dir)
     if not wd_path.is_absolute():
         wd_path = Path.home() / ".ostwin" / "projects" / working_dir
-    # Create the directory if it doesn't exist
-    wd_path.mkdir(parents=True, exist_ok=True)
+    if workspace_isolation == "room-worktree":
+        ok, message, detail = _git_ready_detail(wd_path)
+        if not ok:
+            raise HTTPException(status_code=422, detail={
+                "message": message,
+                "workspace_isolation": workspace_isolation,
+                **detail,
+            })
+        if not (wd_path / ".opencode" / "opencode.json").exists():
+            raise HTTPException(status_code=422, detail={
+                "message": f"Ostwin runtime is not initialized in {wd_path}. Run 'ostwin init' first, review/commit tracked changes, then rerun.",
+                "reason": "runtime_not_initialized",
+                "workspace_isolation": workspace_isolation,
+            })
+    else:
+        # Shared mode preserves the legacy non-Git experiment path.
+        wd_path.mkdir(parents=True, exist_ok=True)
     working_dir = str(wd_path)
 
     # --- .meta.json: upsert — merge into existing, preserve created_at ---
@@ -2283,6 +2400,8 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
         "title": title,
         "working_dir": working_dir,
         "warrooms_dir": str(Path(working_dir) / ".war-rooms") if Path(working_dir).is_absolute() else str(PROJECT_ROOT / working_dir / ".war-rooms"),
+        "workspace_isolation": workspace_isolation,
+        "worktree_root": worktree_root,
         "status": "launched",
     }
     # Preserve original created_at; only set if missing
@@ -2343,7 +2462,7 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
 
     # Ensure target project is initialized with ostwin
     wd_path = Path(working_dir) if Path(working_dir).is_absolute() else PROJECT_ROOT / working_dir
-    if not (wd_path / ".agents").exists():
+    if workspace_isolation == "shared" and not (wd_path / ".agents").exists():
         logger.info(f"run_plan: target dir {wd_path} not initialized, running ostwin init...")
         if ostwin_bin.exists():
             init_result = subprocess.run(
@@ -2402,7 +2521,14 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
     # Spawn OS Twin in background (capture output to log file)
     # Run from working_dir - ostwin will auto-detect project context
     proc = subprocess.Popen(
-        [str(ostwin_bin), "run", str(launch_plan_path), "--non-interactive"],
+        [
+            str(ostwin_bin), "run", str(launch_plan_path), "--non-interactive",
+            "--workspace-isolation", workspace_isolation,
+            *(
+                ["--worktree-root", worktree_root]
+                if worktree_root else []
+            ),
+        ],
         cwd=str(wd_path),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
@@ -3086,13 +3212,13 @@ async def get_plan_progress(plan_id: str, user: dict = Depends(get_current_user)
     warrooms_dir = resolve_runtime_plan_warrooms_dir(plan_id)
     if not warrooms_dir:
         return {
-            "total": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
+            "total": 0, "done": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
             "pct_complete": 0, "rooms": []
         }
     prog_file = warrooms_dir / "progress.json"
     if not prog_file.exists():
         return {
-            "total": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
+            "total": 0, "done": 0, "passed": 0, "failed": 0, "blocked": 0, "active": 0, "pending": 0,
             "pct_complete": 0, "rooms": []
         }
     try:
@@ -3113,15 +3239,15 @@ async def update_epic_state(plan_id: str, epic_ref: str, body: dict, user: dict 
     Writes the new status to ``room-xxx/status`` and recalculates
     ``progress.json`` by scanning every room in the plan's warrooms dir.
 
-    Accepted body: ``{ "status": "passed" | "developing" | "pending" | ... }``
+    Accepted body: ``{ "status": "done" | "developing" | "pending" | ... }``
     """
     from dashboard.api_utils import resolve_plan_warrooms_dir
 
-    new_status = body.get("status") or body.get("lifecycle_state")
+    new_status = canonical_room_status(body.get("status") or body.get("lifecycle_state"))
     if not new_status:
         raise HTTPException(status_code=422, detail="Missing 'status' in request body")
 
-    ALLOWED_STATUSES = {"passed", "developing", "pending", "blocked", "failed-final", "signoff"}
+    ALLOWED_STATUSES = {"done", "developing", "optimize", "review", "triage", "pending", "blocked", "failed", "signoff"}
     if new_status not in ALLOWED_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status '{new_status}'. Allowed: {sorted(ALLOWED_STATUSES)}")
 
@@ -3165,7 +3291,7 @@ def _recalculate_progress(warrooms_dir: Path):
     """
     from datetime import datetime, timezone
 
-    total = passed = failed = blocked = active = pending = 0
+    total = done = failed = blocked = active = pending = 0
     rooms = []
 
     for room_dir in sorted(warrooms_dir.glob("room-*")):
@@ -3174,14 +3300,15 @@ def _recalculate_progress(warrooms_dir: Path):
         total += 1
 
         status_file = room_dir / "status"
-        status = status_file.read_text().strip() if status_file.exists() else "pending"
+        raw_status = status_file.read_text().strip() if status_file.exists() else "pending"
+        status = canonical_room_status(raw_status)
 
         tr_file = room_dir / "task-ref"
         task_ref = tr_file.read_text().strip() if tr_file.exists() else "?"
 
-        if status == "passed":
-            passed += 1
-        elif status == "failed-final":
+        if status == "done":
+            done += 1
+        elif status == "failed":
             failed += 1
         elif status == "blocked":
             blocked += 1
@@ -3190,9 +3317,9 @@ def _recalculate_progress(warrooms_dir: Path):
         else:
             active += 1
 
-        rooms.append({"room_id": room_dir.name, "task_ref": task_ref, "status": status})
+        rooms.append({"room_id": room_dir.name, "task_ref": task_ref, "status": status, "raw_status": raw_status})
 
-    pct_complete = round((passed / total) * 100, 1) if total > 0 else 0
+    pct_complete = round((done / total) * 100, 1) if total > 0 else 0
 
     # Critical path progress from DAG.json
     critical_path_str = ""
@@ -3208,7 +3335,7 @@ def _recalculate_progress(warrooms_dir: Path):
                     cp_room_id = cp_node.get("room_id")
                     if cp_room_id:
                         cp_status_file = warrooms_dir / cp_room_id / "status"
-                        if cp_status_file.exists() and cp_status_file.read_text().strip() == "passed":
+                        if cp_status_file.exists() and canonical_room_status(cp_status_file.read_text().strip()) == "done":
                             cp_passed += 1
                 critical_path_str = f"{cp_passed}/{len(cp)}"
         except (json.JSONDecodeError, OSError):
@@ -3217,7 +3344,8 @@ def _recalculate_progress(warrooms_dir: Path):
     progress_data = {
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total": total,
-        "passed": passed,
+        "done": done,
+        "passed": done,
         "failed": failed,
         "blocked": blocked,
         "active": active,
@@ -3434,7 +3562,7 @@ async def plan_room_action(
 
     status_file = room_dir / "status"
     if action == "stop":
-        status_file.write_text("failed-final")
+        status_file.write_text("failed")
     elif action == "pause":
         status_file.write_text("paused")
     elif action in ("resume", "start"):

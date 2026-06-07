@@ -24,7 +24,7 @@ Understand what needs adaptation and why:
 
 2. **Understand target context**:
    - **Device**: Mobile, tablet, desktop, TV, watch, print?
-   - **Input method**: Touch, mouse, keyboard, voice, gamepad?
+   - **Input method**: Touch, mouse, keyboard, voice, controller?
    - **Screen constraints**: Size, resolution, orientation?
    - **Connection**: Fast wifi, slow 3G, offline?
    - **Usage context**: On-the-go vs desk, quick glance vs focused reading?
@@ -196,4 +196,3 @@ Test thoroughly across contexts:
 - **Slow connections**: Test on throttled network
 
 Remember: You're a cross-platform design expert. Make experiences that feel native to each context while maintaining brand and functionality consistency. Adapt intentionally, test thoroughly.
-

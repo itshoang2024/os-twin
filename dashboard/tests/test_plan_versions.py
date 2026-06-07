@@ -12,8 +12,10 @@ Usage:
 import os
 import sys
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from dashboard.api import app
+from dashboard import global_state
 
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://localhost:3366")
 
@@ -98,10 +100,55 @@ Final version of the plan.
 """
 
 
-API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-HEADERS = {"X-API-Key": API_KEY}
+HEADERS = {"X-API-Key": "test-key"}
 
-def test_version_snapshot_on_save():
+
+class FakePlanVersionStore:
+    def __init__(self):
+        self._plans = {}
+        self._versions = {}
+
+    def save_plan_version(self, **kwargs):
+        plan_id = kwargs["plan_id"]
+        versions = self._versions.setdefault(plan_id, [])
+        record = {
+            **kwargs,
+            "version": len(versions) + 1,
+            "created_at": "2026-06-07T00:00:00Z",
+        }
+        versions.append(record)
+        return record
+
+    def get_plan_versions(self, plan_id: str):
+        return [
+            {k: v for k, v in record.items() if k != "content"}
+            for record in reversed(self._versions.get(plan_id, []))
+        ]
+
+    def get_plan_version(self, plan_id: str, version: int):
+        for record in self._versions.get(plan_id, []):
+            if record["version"] == version:
+                return record
+        return None
+
+    def index_plan(self, **kwargs):
+        self._plans[kwargs["plan_id"]] = dict(kwargs)
+
+    def get_plan(self, plan_id: str):
+        return self._plans.get(plan_id)
+
+    def get_epics_for_plan(self, plan_id: str):
+        return []
+
+
+@pytest.fixture
+def fake_version_store(monkeypatch):
+    store = FakePlanVersionStore()
+    monkeypatch.setattr(global_state, "store", store)
+    return store
+
+
+def test_version_snapshot_on_save(fake_version_store):
     """Saving a plan with changed content should create a version snapshot."""
     with TestClient(app, headers=HEADERS) as client:
         # 1. Create plan
@@ -174,9 +221,13 @@ def test_version_snapshot_on_save():
         assert "EPIC-002" in v2_detail["content"], "V2 content should have EPIC-002"
         print(f"  ✓ Version 2 content is correct (V2 with two epics)")
 
-        # 7. Save with same content → should NOT create a version
+        # 7. Save the canonical current content again → should NOT create a version
+        resp = client.get(f"/api/plans/{plan_id}")
+        assert resp.status_code == 200
+        current_content = resp.json()["plan"]["content"]
+
         resp = client.post(f"/api/plans/{plan_id}/save", json={
-            "content": PLAN_V3,
+            "content": current_content,
             "change_source": "manual_save",
         })
         assert resp.status_code == 200
@@ -188,7 +239,7 @@ def test_version_snapshot_on_save():
     return True
 
 
-def test_restore_version():
+def test_restore_version(fake_version_store):
     """Restoring a version should set it as current and snapshot the previous current."""
     with TestClient(app, headers=HEADERS) as client:
         # 1. Create and populate

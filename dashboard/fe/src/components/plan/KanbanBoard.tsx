@@ -28,9 +28,8 @@ const stateMapping = [
   { state: 'review', label: 'QA Gate' },            // final QA review gate
   { state: 'optimize', label: 'Optimize' },         // fixing after review feedback
   { state: 'triage', label: 'Triage' },             // manager escalation handling
-  { state: 'failed', label: 'Auto-Retry' },         // auto-decision: retry or exhaust
-  { state: 'passed', label: 'Passed' },             // terminal: success
-  { state: 'failed-final', label: 'Failed' },       // terminal: exhausted retries
+  { state: 'done', label: 'Done' },                 // terminal: success
+  { state: 'failed', label: 'Failed' },             // terminal: failure
 ];
 
 type ViewMode = 'LIFECYCLE' | 'TIMELINE';
@@ -38,21 +37,19 @@ type ViewMode = 'LIFECYCLE' | 'TIMELINE';
 // Valid transitions matching V2 lifecycle state machine from Resolve-Pipeline.ps1
 // developing.done → in-review (first reviewer) or review (no reviewer chain)
 // optimize.done   → in-review or review
-// {role}-review.pass → next reviewer or review (final gate) or passed
+// {role}-review.pass → done
 // {role}-review.fail → optimize
-// review.pass → passed | review.fail → developing
-// triage.fix → developing | triage.redesign → developing | triage.reject → failed-final
-// failed (auto) → developing (retry) or failed-final (exhausted)
+// review.pass → done | review.fail → optimize
+// triage.fix → optimize | triage.redesign → developing | triage.reject → failed
 const validTransitions: Record<string, string[]> = {
   'pending':      ['developing'],
   'developing':   ['in-review', 'review', 'failed'],
-  'in-review':    ['review', 'optimize', 'triage', 'passed', 'in-review'],
-  'review':       ['passed', 'developing', 'triage'],
+  'in-review':    ['review', 'optimize', 'triage', 'done', 'in-review'],
+  'review':       ['done', 'optimize', 'triage'],
   'optimize':     ['in-review', 'review', 'failed'],
-  'triage':       ['developing', 'failed-final'],
-  'failed':       ['developing', 'failed-final'],
-  'passed':       [],
-  'failed-final': [],
+  'triage':       ['developing', 'optimize', 'failed'],
+  'done':         [],
+  'failed':       [],
 };
 
 export default function KanbanBoard() {
@@ -190,9 +187,9 @@ export default function KanbanBoard() {
   const activeEpic = activeId ? epics?.find(e => e.epic_ref === activeId) : null;
 
   // Count summary stats — use progress data if available, else count from epics
-  const passedCount = progress?.passed ?? epics?.filter(e => normalizeLifecycleState(e.lifecycle_state || 'pending') === 'passed').length ?? 0;
-  const failedCount = progress?.failed ?? epics?.filter(e => normalizeLifecycleState(e.lifecycle_state || 'pending') === 'failed-final').length ?? 0;
-  const activeCount = progress?.active ?? epics?.filter(e => !['pending', 'passed', 'failed-final'].includes(normalizeLifecycleState(e.lifecycle_state || 'pending'))).length ?? 0;
+  const doneCount = progress?.done ?? progress?.passed ?? epics?.filter(e => normalizeLifecycleState(e.lifecycle_state || 'pending') === 'done').length ?? 0;
+  const failedCount = progress?.failed ?? epics?.filter(e => normalizeLifecycleState(e.lifecycle_state || 'pending') === 'failed').length ?? 0;
+  const activeCount = progress?.active ?? epics?.filter(e => !['pending', 'done', 'failed'].includes(normalizeLifecycleState(e.lifecycle_state || 'pending'))).length ?? 0;
 
   return (
     <div className="h-full flex flex-col p-6 overflow-hidden">
@@ -205,9 +202,9 @@ export default function KanbanBoard() {
             {progress?.total ?? epics?.length ?? 0} TOTAL
           </span>
           {/* Status summary chips */}
-          {passedCount > 0 && (
+          {doneCount > 0 && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-              ✓ {passedCount} passed
+              ✓ {doneCount} done
             </span>
           )}
           {activeCount > 0 && (
@@ -324,15 +321,17 @@ function isOverStateInvalid(activeEpic: Epic | null | undefined, overState: stri
 function normalizeLifecycleState(rawState: string): string {
   const fixedStates = new Set([
     'pending', 'developing', 'optimize', 'review',
-    'triage', 'failed', 'passed', 'failed-final',
+    'triage', 'done', 'failed',
   ]);
   if (fixedStates.has(rawState)) return rawState;
   if (rawState.endsWith('-review')) return 'in-review';
   const legacyMap: Record<string, string> = {
     'engineering': 'developing',
     'fixing': 'optimize',
+    'passed': 'done',
+    'failed-final': 'failed',
     'manager-triage': 'triage',
-    'signoff': 'passed',
+    'signoff': 'done',
   };
   return legacyMap[rawState] || 'pending';
 }

@@ -28,8 +28,8 @@ The packaged bootstrapper and native installers can install or validate many run
     Use the public bootstrapper for normal installs:
 
     ```bash
-    curl -fsSL https://twin.igot-ai/install.sh | bash
-    curl -fsSL https://twin.igot-ai/install.sh | bash -s -- --yes
+    curl -fsSL https://twin.igot.ai/installer.sh | bash
+    curl -fsSL https://twin.igot.ai/installer.sh | bash -s -- --yes
     ```
 
     The bootstrapper first tries the packaged Go `ostwin-installer` release. That binary provides the guided terminal flow, downloads the matching source archive, and delegates to the native platform installer.
@@ -44,6 +44,7 @@ The packaged bootstrapper and native installers can install or validate many run
     --dir ~/.ostwin
     --port 3366
     --skip-optional
+    --sync-skills
     --no-start
     ```
   </TabItem>

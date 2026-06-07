@@ -357,7 +357,9 @@ class TestJobsAPI:
         mock_service.list_jobs.return_value = []
         response = client.get("/api/knowledge/namespaces/test-ns/jobs", headers=auth_headers)
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data["jobs"] == []
+        assert data["graph_counts"] == {"entities": 0, "chunks": 0, "relations": 0}
 
     def test_list_jobs_returns_jobs(
         self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock
@@ -384,8 +386,9 @@ class TestJobsAPI:
         response = client.get("/api/knowledge/namespaces/test-ns/jobs", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 1
-        assert data[0]["job_id"] == "job-1"
+        assert len(data["jobs"]) == 1
+        assert data["jobs"][0]["job_id"] == "job-1"
+        assert data["graph_counts"] == {"entities": 0, "chunks": 0, "relations": 0}
 
     def test_get_job_success(
         self, client: TestClient, auth_headers: dict[str, str], mock_service: MagicMock

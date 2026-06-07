@@ -33,7 +33,7 @@ export default function ProgressFooter() {
 
   // Status distribution from progress.json
   const statusCounts = progress ? {
-    passed: progress.passed,
+    passed: progress.done ?? progress.passed,
     failed: progress.failed,
     active: progress.active,
     pending: progress.pending,
@@ -45,7 +45,7 @@ export default function ProgressFooter() {
     ? Object.entries(dag.waves).find(([, epics]) => 
         epics.some(e => {
           const room = progress?.rooms?.find(r => r.task_ref === e);
-          return room && !['passed', 'failed-final'].includes(room.status);
+          return room && !['done', 'passed', 'failed', 'failed-final'].includes(room.status);
         })
       )?.[0]
     : null;
@@ -58,7 +58,7 @@ export default function ProgressFooter() {
   const offset = circumference - (pctComplete / 100) * circumference;
 
   // Failed rooms for quick access
-  const failedRooms = progress?.rooms?.filter(r => r.status === 'failed-final') ?? [];
+  const failedRooms = progress?.rooms?.filter(r => r.status === 'failed' || r.status === 'failed-final') ?? [];
 
   return (
     <div className="relative">

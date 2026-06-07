@@ -39,11 +39,11 @@ describe('commands', () => {
 
   const MOCK_ROOMS = {
     rooms: [
-      { room_id: 'room-1', status: 'passed', message_count: 10, epic_ref: 'E-1' },
+      { room_id: 'room-1', status: 'done', message_count: 10, epic_ref: 'E-1' },
       { room_id: 'room-2', status: 'engineering', message_count: 5, epic_ref: 'E-2' },
-      { room_id: 'room-3', status: 'failed-final', message_count: 3, epic_ref: 'E-3' },
+      { room_id: 'room-3', status: 'failed', message_count: 3, epic_ref: 'E-3' },
     ],
-    summary: { total: 3, passed: 1, engineering: 1, failed_final: 1, pending: 0, qa_review: 0, fixing: 0 },
+    summary: { total: 3, done: 1, passed: 1, engineering: 1, failed: 1, failed_final: 1, pending: 0, qa_review: 0, optimize: 0, fixing: 0 },
   };
 
   const MOCK_PLANS = {
@@ -214,7 +214,7 @@ describe('commands', () => {
       // New-shape summary: dashboard 3366 reports developing/review.
       sandbox.stub(api, 'getRooms').resolves({
         rooms: [],
-        summary: { total: 5, passed: 1, failed_final: 0, pending: 1, developing: 2, review: 1, fixing: 0 },
+        summary: { total: 5, done: 1, passed: 1, failed: 0, failed_final: 0, pending: 1, developing: 2, review: 1, optimize: 0, fixing: 0 },
       });
       const [resp] = await routeCommand('u1', 'telegram', 'dashboard');
       // pending(1) + developing(2) + review(1) = 4 active
@@ -225,7 +225,7 @@ describe('commands', () => {
       // Mixed shape — older callers may still publish engineering/qa_review.
       sandbox.stub(api, 'getRooms').resolves({
         rooms: [],
-        summary: { total: 4, passed: 0, failed_final: 0, pending: 0, developing: 1, review: 1, engineering: 1, qa_review: 1, fixing: 0 },
+        summary: { total: 4, done: 0, passed: 0, failed: 0, failed_final: 0, pending: 0, developing: 1, review: 1, engineering: 1, qa_review: 1, optimize: 0, fixing: 0 },
       });
       const [resp] = await routeCommand('u1', 'telegram', 'dashboard');
       // developing(1) + engineering(1) + review(1) + qa_review(1) = 4
@@ -316,7 +316,7 @@ describe('commands', () => {
       const [resp] = await routeCommand('u1', 'telegram', 'status');
       expect(resp.text).to.include('room-1');
       expect(resp.text).to.include('room-2');
-      expect(resp.text).to.include('PASSED');
+      expect(resp.text).to.include('DONE');
     });
 
     it('returns "No War-Rooms" when empty', async () => {
@@ -361,11 +361,11 @@ describe('commands', () => {
 
       const [resp] = await routeCommand('u1', 'telegram', 'errors');
       expect(resp.text).to.include('room-3');
-      expect(resp.text).to.include('FAILED-FINAL');
+      expect(resp.text).to.include('FAILED');
     });
 
     it('returns stable message when no errors', async () => {
-      sandbox.stub(api, 'getRooms').resolves({ rooms: [{ room_id: 'r1', status: 'passed' }], summary: {} } as any);
+      sandbox.stub(api, 'getRooms').resolves({ rooms: [{ room_id: 'r1', status: 'done' }], summary: {} } as any);
 
       const [resp] = await routeCommand('u1', 'telegram', 'errors');
       expect(resp.text).to.include('stable');
@@ -1060,7 +1060,7 @@ describe('commands', () => {
 
     it('shows "no failed rooms" when all healthy', async () => {
       sandbox.stub(api, 'getRooms').resolves({
-        rooms: [{ room_id: 'r1', status: 'passed', message_count: 5 }],
+        rooms: [{ room_id: 'r1', status: 'done', message_count: 5 }],
         summary: {},
       });
       const [resp] = await routeCommand('u1', 'telegram', 'triage', '');

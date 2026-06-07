@@ -35,6 +35,13 @@ const ORCHESTRATION_NOTIFICATION_EVENTS: Record<string, NotificationEvent> = {
 
 const MAX_SEEN_ORCHESTRATION_EVENTS = 1000;
 
+function normalizeRoomStatus(status = ''): string {
+  if (status === 'passed') return 'done';
+  if (status === 'failed-final') return 'failed';
+  if (status === 'fixing') return 'optimize';
+  return status;
+}
+
 export class NotificationRouter {
   private ws: WebSocket | null = null;
   private registry: ConnectorRegistry;
@@ -150,7 +157,7 @@ export class NotificationRouter {
         } else if (eventType === 'plan.run.failed') {
           messageBody = `🛑 *Plan Failed:* \`${planId}\`\nRun: \`${runId}\`\nFailed epic: \`${epicRef}\`\nRoom: \`${roomId}\`\nRole: \`${role}\`\nReason: ${reason}${preview}`;
         } else if (eventType === 'epic.passed') {
-          messageBody = `✅ *EPIC Passed:* \`${epicRef}\`\nPlan: \`${planId}\`\nRun: \`${runId}\`\nRoom: \`${roomId}\`${preview}`;
+          messageBody = `✅ *EPIC Done:* \`${epicRef}\`\nPlan: \`${planId}\`\nRun: \`${runId}\`\nRoom: \`${roomId}\`${preview}`;
         } else if (eventType === 'epic.retrying') {
           messageBody = `🔄 *EPIC Retry:* \`${epicRef}\`\nPlan: \`${planId}\`\nRun: \`${runId}\`\nRoom: \`${roomId || 'unknown room'}\`\n${evt?.summary || payload.reason || 'Retrying after feedback or failure.'}${preview}`;
         } else if (eventType === 'user.feedback.requested') {
@@ -163,8 +170,8 @@ export class NotificationRouter {
           const agentName = payload.agent_name || role;
           messageBody = `🏗️ *War-Room Created:* \`${epicRef}\`\nPlan: \`${planId}\`\nRun: \`${runId}\`\nRoom: \`${roomId || 'unknown room'}\`\nAgent: \`${agentName}\`${preview}`;
         } else if (eventType === 'room.status.changed') {
-          const previousStatus = evt?.previous_status || payload.previous_status || 'unknown';
-          const nextStatus = evt?.status || payload.status || 'unknown';
+          const previousStatus = normalizeRoomStatus(evt?.previous_status || payload.previous_status || 'unknown');
+          const nextStatus = normalizeRoomStatus(evt?.status || payload.status || 'unknown');
           const agentName = payload.agent_name || role;
           messageBody = `🔁 *War-Room State Changed:* \`${epicRef}\`\nPlan: \`${planId}\`\nRun: \`${runId}\`\nRoom: \`${roomId || 'unknown room'}\`\nAgent: \`${agentName}\`\nStatus: \`${previousStatus}\` → \`${nextStatus}\`${preview}`;
         } else {
@@ -181,14 +188,14 @@ export class NotificationRouter {
         break;
 
       case 'room_updated':
-        const status = data.room.status;
-        if (status === 'passed') {
+        const status = normalizeRoomStatus(data.room.status);
+        if (status === 'done') {
           notification = 'epic_passed';
-          messageBody = `✅ *EPIC Passed:* \`${roomId}\`\nAll tasks completed successfully.`;
+          messageBody = `✅ *EPIC Done:* \`${roomId}\`\nAll tasks completed successfully.`;
         } else if (status === 'failed') {
           notification = 'epic_failed';
           messageBody = `❌ *EPIC Failed:* \`${roomId}\`\nInvestigation required.`;
-        } else if (status === 'fixing') {
+        } else if (status === 'optimize') {
           notification = 'epic_retry';
           messageBody = `🔄 *EPIC Retrying:* \`${roomId}\`\nAddressing QA feedback.`;
         } else if (status === 'pending_feedback') {

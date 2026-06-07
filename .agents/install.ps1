@@ -40,6 +40,9 @@
 .PARAMETER SkipOptional
     Skip optional components (Pester, etc.)
 
+.PARAMETER SyncSkills
+    Force bundled skill copy and dashboard sync on existing installs.
+
 .PARAMETER NoStart
     Install only; do not start dashboard/channel services.
     Auto-start is still registered so services launch on next login.
@@ -77,6 +80,8 @@ param(
 
     [switch]$SkipOptional,
 
+    [switch]$SyncSkills,
+
     [switch]$NoStart,
 
     [switch]$Help
@@ -105,6 +110,7 @@ $script:SkipOptional = $SkipOptional.IsPresent
 $script:DashboardOnly = $DashboardOnly.IsPresent
 $script:StartChannel = $Channel.IsPresent -or $true  # default: true (mirrors bash)
 $script:DashboardPort = $Port
+$script:SyncSkills = $SyncSkills.IsPresent
 $script:VenvDir = Join-Path $script:InstallDir ".venv"
 $script:FirstInstall = -not (Test-Path $script:VenvDir)
 $script:PythonVersion = ""
@@ -241,11 +247,20 @@ Verify-Components
 if ($script:StartServices) {
     Write-Header "9. Starting dashboard"
     Start-Dashboard
-    Publish-Skills
+    if ($script:FirstInstall -or $script:SyncSkills) {
+        Publish-Skills
+    }
+    else {
+        Write-Header "9b. Publishing skills to backend (skipped)"
+        Write-Info "Skill sync skipped on existing install. Re-run with -SyncSkills to refresh built-in skills."
+    }
 }
 else {
     Write-Header "9. Dashboard (skipped — -NoStart)"
     Write-Info "Skipping dashboard startup (-NoStart). Start manually: ostwin dashboard start"
+    if ($script:SyncSkills) {
+        Write-Info "Skill sync requested but dashboard startup is disabled; start Ostwin, then run: ostwin skills sync -InstallFrom `"$($script:InstallDir)\.agents`""
+    }
 }
 
 # Step 9c: Channels

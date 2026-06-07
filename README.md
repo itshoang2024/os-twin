@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ostwin.igot.ai">Docs</a> ·
+  <a href="https://twin.igot.ai">Docs</a> ·
   <a href="https://github.com/igot-ai/os-twin/issues">Issues</a> ·
   <a href="#quick-start">Quick Start</a>
 </p>
@@ -33,7 +33,7 @@
 
 ```bash
 # 1. Install with the two-stage bootstrapper
-curl -fsSL https://twin.igot-ai/install.sh | bash
+curl -fsSL https://twin.igot.ai/installer.sh | bash
 
 # 2. Or install from a local clone
 git clone https://github.com/igot-ai/os-twin.git
@@ -70,8 +70,8 @@ The installer auto-detects missing dependencies and installs them.
 ### Recommended Bootstrapper
 
 ```bash
-curl -fsSL https://twin.igot-ai/install.sh | bash
-curl -fsSL https://twin.igot-ai/install.sh | bash -s -- --yes
+curl -fsSL https://twin.igot.ai/installer.sh | bash
+curl -fsSL https://twin.igot.ai/installer.sh | bash -s -- --yes
 ```
 
 The bootstrapper prefers the packaged Go `ostwin-installer` release. That binary provides the guided terminal flow, downloads the matching release source archive, and delegates to the native platform installer. If the release binary is unavailable, `install.sh` safely falls back to the source-archive Bash installer. Integrity mismatches fail closed and do not fall back.
@@ -89,7 +89,7 @@ ostwin-installer_windows_amd64.tar.gz
 ostwin-installer_windows_arm64.tar.gz
 ```
 
-The direct GitHub release entrypoint is also valid:
+After a tagged installer release publishes assets, the direct GitHub release entrypoint is also valid:
 
 ```bash
 curl -fsSL https://github.com/igot-ai/os-twin/releases/latest/download/install.sh | bash
@@ -103,6 +103,7 @@ Useful forwarded options:
 --dir ~/.ostwin
 --port 3366
 --skip-optional
+--sync-skills
 --no-start
 ```
 
@@ -266,7 +267,7 @@ We welcome contributions — new roles, skills, MCP extensions, and docs improve
 4. Push to the branch (`git push origin feat/my-feature`)
 5. Open a Pull Request
 
-See [CONTRIBUTE.md](CONTRIBUTE.md) for detailed guidelines and the [contribution guide](https://ostwin.igot.ai/contributing/guide/) for creating custom roles and publishing skills.
+See [CONTRIBUTE.md](CONTRIBUTE.md) for detailed guidelines and the [contribution guide](https://twin.igot.ai/contributing/guide/) for creating custom roles and publishing skills.
 
 ## Troubleshooting
 

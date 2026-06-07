@@ -13,6 +13,7 @@ Transport: stdio (invoked via deepagents --mcp-config)
 import json
 import os
 import pathlib
+import tempfile
 from datetime import datetime, timezone
 from typing import Annotated, get_args, Literal
 
@@ -32,9 +33,10 @@ StatusType = Literal[
     "pending",
     "developing",
     "review",
-    "fixing",
     "optimize",
     "triage",
+    "done",
+    "failed",
 ]
 
 
@@ -59,6 +61,22 @@ def _resolve_room_dir(room_dir: str) -> str:
 mcp = FastMCP("agent-os-warroom", log_level="CRITICAL")
 
 
+def _atomic_write_text(path: str, text: str) -> None:
+    """Atomically replace a small war-room state file."""
+    directory = os.path.dirname(path) or "."
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=directory, delete=False) as tmp:
+            tmp_path = tmp.name
+            tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 def _get_lifecycle(room_dir: str) -> dict | None:
     """Read lifecycle.json and return the parsed JSON dictionary, or None."""
     lc_path = os.path.join(room_dir, "lifecycle.json")
@@ -74,13 +92,11 @@ def _get_lifecycle(room_dir: str) -> dict | None:
 @mcp.tool()
 def update_status(
     room_dir: Annotated[str, Field(description="Absolute or relative path to the war-room directory")],
-    status: Annotated[str, Field(description="New status matching a non-terminal state from the room's lifecycle.json (e.g. developing, review, fixing, optimize). Terminal states (passed, failed-final) are manager-only.")],
+    status: Annotated[StatusType, Field(description="New status matching a canonical state from the room's lifecycle.json (e.g. developing, review, optimize, triage, done, failed).")],
 ) -> str:
     """Update the war-room status file.
 
     Validates status against the room's lifecycle.json if present.
-    Terminal states (passed, failed-final) are reserved for the manager —
-    agents must NOT set them directly.
     Returns a confirmation string "status:{status}".
     """
     room_dir = _resolve_room_dir(room_dir)
@@ -107,13 +123,11 @@ def update_status(
             old_status = f.read().strip()
 
     # Write new status
-    with open(status_file, "w") as f:
-        f.write(status)
+    _atomic_write_text(status_file, status)
 
     # Write state_changed_at (epoch seconds)
     epoch = int(datetime.now(timezone.utc).timestamp())
-    with open(os.path.join(room_dir, "state_changed_at"), "w") as f:
-        f.write(str(epoch))
+    _atomic_write_text(os.path.join(room_dir, "state_changed_at"), str(epoch))
 
     # Append audit log
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

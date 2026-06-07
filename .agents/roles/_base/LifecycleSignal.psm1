@@ -165,6 +165,57 @@ function Test-FreshLifecycleSignal {
     return $false
 }
 
+function Write-LifecycleSignalEvent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Message,
+        [Parameter(Mandatory)][string]$FromRole,
+        [Parameter(Mandatory)][string]$Type,
+        [Parameter(Mandatory)][string]$Ref,
+        [string]$ToRole = 'manager'
+    )
+
+    $configPath = Join-Path $RoomDir 'config.json'
+    if (-not (Test-Path $configPath)) { return $null }
+
+    try {
+        $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+        if (-not ($cfg.PSObject.Properties.Name -contains 'plan_id') -or [string]::IsNullOrWhiteSpace([string]$cfg.plan_id)) { return $null }
+
+        $agentsDir = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
+        $eventsModule = Join-Path $agentsDir 'events' 'OrchestrationEvents.psm1'
+        if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue) -and (Test-Path $eventsModule)) {
+            Import-Module (Resolve-Path $eventsModule).Path -Force
+        }
+        if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return $null }
+
+        $runId = if ($cfg.PSObject.Properties.Name -contains 'run_id' -and $cfg.run_id) { "$($cfg.run_id)" } elseif ($env:OSTWIN_RUN_ID) { $env:OSTWIN_RUN_ID } else { 'run_legacy' }
+        $eventsPath = if ($cfg.PSObject.Properties.Name -contains 'events_path' -and $cfg.events_path) { "$($cfg.events_path)" } else { '' }
+        $status = if (Test-Path (Join-Path $RoomDir 'status')) { (Get-Content (Join-Path $RoomDir 'status') -Raw).Trim() } else { '' }
+        $event = [ordered]@{
+            event_type = 'lifecycle.signal.posted'
+            plan_id    = "$($cfg.plan_id)"
+            run_id     = $runId
+            room_id    = if ($cfg.PSObject.Properties.Name -contains 'room_id') { "$($cfg.room_id)" } else { Split-Path $RoomDir -Leaf }
+            epic_ref   = if ($cfg.PSObject.Properties.Name -contains 'task_ref') { "$($cfg.task_ref)" } else { $Ref }
+            role       = ($FromRole -replace ':.*$', '')
+            state      = $status
+            summary    = "Lifecycle signal '$Type' posted for $Ref."
+            payload    = [ordered]@{
+                message_id = $Message['id']
+                from       = $FromRole
+                to         = $ToRole
+                type       = $Type
+                ref        = $Ref
+            }
+        }
+        return (Write-OrchestrationEvent -EventsPath $eventsPath -Event $event)
+    } catch {
+        throw "Failed to emit lifecycle signal event before channel append: $($_.Exception.Message)"
+    }
+}
+
 function Write-LifecycleSignal {
     [CmdletBinding()]
     param(
@@ -195,6 +246,11 @@ function Write-LifecycleSignal {
         type = $Type
         ref  = $Ref
         body = $Body
+    }
+
+    $event = Write-LifecycleSignalEvent -RoomDir $RoomDir -Message $msg -FromRole $FromRole -Type $Type -Ref $Ref -ToRole $ToRole
+    if ($event -and ($event.PSObject.Properties.Name -contains 'event_id')) {
+        $msg['event_id'] = $event.event_id
     }
 
     ($msg | ConvertTo-Json -Compress -Depth 8) |

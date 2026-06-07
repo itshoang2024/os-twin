@@ -7,7 +7,7 @@
     goal-verification.json in the war-room directory.
 
     This report is read by:
-    - Manager loop (gate before "passed" status)
+    - Manager loop (gate before terminal "done" status)
     - Get-WarRoomStatus (dashboard goal completion display)
     - Remove-WarRoom archive mode
 

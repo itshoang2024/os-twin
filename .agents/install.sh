@@ -11,6 +11,7 @@
 #   ./install.sh --channel        # Also install & start the channel connectors (Telegram + Discord + Slack)
 #   ./install.sh --search-engine  # Also install & start SearXNG search
 #   ./install.sh --search-engine-mode local|docker
+#   ./install.sh --sync-skills # Force built-in skill copy/sync on existing installs
 #   ./install.sh --daemon      # Install dashboard/host daemon autostart
 #   ./install.sh --no-daemon   # Skip dashboard/host daemon autostart
 #   ./install.sh --ngrok       # Enable ngrok auto-start when token is set
@@ -52,6 +53,7 @@ SOURCE_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")"
 # shellcheck disable=SC2034
 AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false
 START_CHANNEL=false; INSTALL_SEARCH_ENGINE=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
+SYNC_SKILLS=false
 INSTALL_HOST_DAEMON=prompt; REGISTER_AUTOSTART=true; NGROK_ENABLED=prompt
 SEARCH_ENGINE_MODE="${OSTWIN_SEARCH_ENGINE_MODE:-}"
 # shellcheck disable=SC2034
@@ -93,6 +95,7 @@ while [[ $# -gt 0 ]]; do
       SEARCH_ENGINE_MODE="docker"
       shift
       ;;
+    --sync-skills) SYNC_SKILLS=true; shift ;;
     --no-opencode-config) SKIP_OPENCODE_CONFIG=true; shift ;;
     --no-start|--skip-start) START_SERVICES=false; shift ;;
     --help|-h)        head -27 "$0" | tail -25; exit 0 ;;
@@ -255,7 +258,12 @@ if $START_SERVICES; then
   start_opencode_server || warn "OpenCode server failed to start (non-fatal)"
   header "9a. Starting dashboard"
   start_dashboard || warn "Dashboard failed to start (non-fatal)"
-  publish_skills || warn "Skill publishing failed (non-fatal)"
+  if $FIRST_INSTALL || $SYNC_SKILLS; then
+    publish_skills || warn "Skill publishing failed (non-fatal)"
+  else
+    header "9b. Publishing skills to backend (skipped)"
+    info "Skill sync skipped on existing install. Re-run with --sync-skills to refresh built-in skills."
+  fi
   if $INSTALL_SEARCH_ENGINE; then
     header "9c. Starting SearXNG (metasearch engine)"
     start_searxng || warn "SearXNG start failed (non-fatal)"
@@ -266,6 +274,9 @@ if $START_SERVICES; then
 else
   header "9. Runtime services (skipped)"
   info "Skipping OpenCode/dashboard startup (--no-start). Start services from the runtime entrypoint."
+  if $SYNC_SKILLS; then
+    info "Skill sync requested but dashboard startup is disabled; start Ostwin, then run: ostwin skills sync --install-from \"$INSTALL_DIR/.agents\""
+  fi
 fi
 
 header "9d. Installing channel dependencies (Telegram + Discord + Slack)"

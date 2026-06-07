@@ -79,7 +79,7 @@ Check for these problems and fix them:
 - **Generic names like "John Doe" or "Jane Smith".** Use diverse, realistic-sounding names.
 - **Fake round numbers like `99.99%`, `50%`, `$100.00`.** Use organic, messy data: `47.2%`, `$99.00`, `+1 (312) 847-1928`.
 - **Placeholder company names like "Acme Corp", "Nexus", "SmartFlow".** Invent contextual, believable brand names.
-- **AI copywriting cliches.** Never use "Elevate", "Seamless", "Unleash", "Next-Gen", "Game-changer", "Delve", "Tapestry", or "In the world of...". Write plain, specific language.
+- **AI copywriting cliches.** Never use "Elevate", "Seamless", "Unleash", "Next-Gen", "Revolutionary", "Delve", "Tapestry", or "In the world of...". Write plain, specific language.
 - **Exclamation marks in success messages.** Remove them. Be confident, not loud.
 - **"Oops!" error messages.** Be direct: "Connection failed. Please try again."
 - **Passive voice.** Use active voice: "We couldn't save your changes" instead of "Mistakes were made."

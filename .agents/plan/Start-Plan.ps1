@@ -37,6 +37,8 @@ param(
 
     [string]$ProjectDir = (Get-Location).Path,
 
+    [switch]$IgnorePlanWorkingDir,
+
     [switch]$DryRun,
 
     [switch]$Resume,
@@ -49,7 +51,12 @@ param(
 
     [switch]$Unified,
 
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [ValidateSet('room-worktree','shared')]
+    [string]$WorkspaceIsolation = 'shared',
+
+    [string]$WorktreeRoot = ''
 )
 
 # --- Resolve paths ---
@@ -121,6 +128,11 @@ $eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
 if (Test-Path $eventsModule) {
     $eventsModule = (Resolve-Path $eventsModule).Path
     Import-Module $eventsModule -Force
+}
+$workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
+if (Test-Path $workspaceModule) {
+    $workspaceModule = (Resolve-Path $workspaceModule).Path
+    Import-Module $workspaceModule -Force
 }
 
 # --- Helper Functions ---
@@ -270,15 +282,20 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 
 # --- Parse plan: extract ALL epics and tasks (Requirement 1) ---
 # Parse global working_dir from PLAN.md
-if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
+if (-not $IgnorePlanWorkingDir -and $planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            try {
-                Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
-                New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
-            } catch {
+            if ($WorkspaceIsolation -eq 'shared') {
+                try {
+                    Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+                    New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
+                } catch {
+                    Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
+                    $workingDirWarningShown = $true
+                }
+            } else {
                 Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
                 $workingDirWarningShown = $true
             }
@@ -523,6 +540,38 @@ if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
     }
 }
 
+$workspaceManifest = $null
+if (-not $DryRun) {
+    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
+        exit 1
+    }
+
+    $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
+    if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
+        $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir
+        if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'run_id') -and $workspaceManifest.run_id) {
+            $runId = "$($workspaceManifest.run_id)"
+            $env:OSTWIN_RUN_ID = $runId
+        }
+    } elseif (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue) {
+        try {
+            $workspaceManifest = Initialize-PlanIntegrationWorkspace `
+                -WarRoomsDir $warRoomsDir `
+                -PlanId $planId `
+                -RunId $runId `
+                -SourceWorkingDir $ProjectDir `
+                -WorkspaceIsolation $WorkspaceIsolation `
+                -WorktreeRoot $WorktreeRoot
+        } catch {
+            Write-Error "Workspace initialization failed: $($_.Exception.Message)"
+            exit 1
+        }
+    } elseif ($WorkspaceIsolation -eq 'shared') {
+        $workspaceManifest = $null
+    }
+}
+
 # room-000 is created before the final plan_id is known. Reconcile its config so
 # negotiation, dashboard, and channel layers share the same execution context.
 $room000Config = Join-Path $room000Dir 'config.json'
@@ -537,6 +586,9 @@ if (-not $DryRun -and (Test-Path $room000Config)) {
             $r0cfg.run_id = $runId
         } else {
             $r0cfg | Add-Member -NotePropertyName run_id -NotePropertyValue $runId
+        }
+        if ($r0cfg.PSObject.Properties.Name -contains 'workspace') {
+            $r0cfg.PSObject.Properties.Remove('workspace')
         }
         $r0cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath $room000Config -Encoding utf8
     } catch {
@@ -638,11 +690,12 @@ Write-Host ""
 Write-Host "  Plan: $PlanFile"
 Write-Host "  Plan ID: $planId"
 Write-Host "  Project: $ProjectDir"
+Write-Host "  Workspace isolation: $WorkspaceIsolation"
 
 if ($Resume) {
     Write-Host "  Mode: RESUME (using existing war-rooms)" -ForegroundColor Yellow
     
-    # --- RESET MECHANISM: Clear failed-final/blocked rooms ---
+    # --- RESUME NORMALIZATION: canonicalize legacy statuses and clear restartable blocked rooms ---
     $targetWarRoomsDir = Join-Path $ProjectDir ".war-rooms"
     if (Test-Path $targetWarRoomsDir) {
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
@@ -650,7 +703,20 @@ if ($Resume) {
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
-                if ($status -in @("failed", "failed-final", "blocked")) {
+                if ($status -eq "passed") {
+                    Write-Host "  → Normalizing $($rd.Name) from passed to done" -ForegroundColor Yellow
+                    "done" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "failed-final") {
+                    Write-Host "  → Normalizing $($rd.Name) from failed-final to failed" -ForegroundColor Yellow
+                    "failed" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "fixing") {
+                    Write-Host "  → Normalizing $($rd.Name) from fixing to optimize" -ForegroundColor Yellow
+                    "optimize" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                    
+                    # Clear old PID files
+                    $pidDir = Join-Path $rd.FullName "pids"
+                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
+                } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                     
@@ -660,13 +726,6 @@ if ($Resume) {
                     $qaRetriesFile = Join-Path $rd.FullName "qa_retries"
                     if (Test-Path $qaRetriesFile) { Remove-Item $qaRetriesFile -Force -ErrorAction SilentlyContinue }
 
-                    # Clear old PID files
-                    $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
-                } elseif ($status -eq "fixing") {
-                    Write-Host "  → Moving $($rd.Name) from fixing to developing" -ForegroundColor Yellow
-                    "developing" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                    
                     # Clear old PID files
                     $pidDir = Join-Path $rd.FullName "pids"
                     if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
@@ -819,8 +878,11 @@ function New-PlanWarRooms {
                         Write-Host "    [RECONCILE] $($entry.RoomId): role $currentRole → $primaryRole (from plan Roles: directive)" -ForegroundColor Yellow
                         $existingConfig.assignment.assigned_role = $primaryRole
                         $existingConfig.assignment.candidate_roles = $candidateRoles
-                        $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                     }
+                    if ($existingConfig.PSObject.Properties.Name -contains 'workspace') {
+                        $existingConfig.PSObject.Properties.Remove('workspace')
+                    }
+                    $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                 } catch {
                     Write-Host "    [WARN] Failed to reconcile $($entry.RoomId): $($_.Exception.Message)" -ForegroundColor Yellow
                 }
@@ -840,8 +902,12 @@ function New-PlanWarRooms {
             }
         }
         if (-not (Test-Path $resolvedWorkingDir)) {
-            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            if ($WorkspaceIsolation -eq 'shared') {
+                Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+                New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            } else {
+                Write-Host "    Deferring working_dir creation to room worktree: $resolvedWorkingDir" -ForegroundColor DarkGray
+            }
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }
@@ -970,7 +1036,7 @@ if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
 
 # --- Auto-Pass room-000 if no review/expand needed ---
 if ($Unified -and -not ($Review -or $Expand) -and -not $Resume) {
-    "passed" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
+    "done" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
 }
 
 # --- Legacy Negotiation Loop (blocking) ---

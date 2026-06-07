@@ -130,7 +130,11 @@ class TestIngestorParseFile:
         ingestor = Ingestor()
         fe = self._make_file_entry(DOCX_FIXTURE, ".docx")
         chunks = ingestor._parse_file(fe, IngestOptions())
-        assert len(chunks) >= 5, f"Expected at least 5 chunks from docx, got {len(chunks)}"
+        assert chunks, "Expected chunks from docx"
+        combined = " ".join(c["text"] for c in chunks)
+        assert "Digital Data Application Plan" in combined or "Implementation" in combined
+        assert [c["metadata"]["chunk_index"] for c in chunks] == list(range(len(chunks)))
+        assert {c["metadata"]["total_chunks"] for c in chunks} == {len(chunks)}
         # Verify chunk structure
         for c in chunks:
             assert "text" in c

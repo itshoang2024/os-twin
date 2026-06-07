@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from dashboard.api_utils import PLANS_DIR, WARROOMS_DIR, read_room, process_notification
+from dashboard.api_utils import PLANS_DIR, WARROOMS_DIR, read_room, process_notification, canonical_room_status
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,8 @@ PLAN_STATUS_BY_EVENT = {
 
 ROOM_STATUS_BY_EVENT = {
     "room.status.changed": None,  # status comes from payload/status field
-    "epic.passed": "passed",
-    "epic.retrying": "fixing",
+    "epic.passed": "done",
+    "epic.retrying": "optimize",
     "epic.failed": "failed",
 }
 
@@ -216,7 +216,7 @@ def _project_room_status(event: dict[str, Any], events_path: Path, warrooms_dir:
 
     status = event.get("status") or event.get("payload", {}).get("status") or ROOM_STATUS_BY_EVENT.get(event_type)
     if status:
-        (room_dir / "status").write_text(str(status), encoding="utf-8")
+        (room_dir / "status").write_text(canonical_room_status(str(status)), encoding="utf-8")
     return room_dir
 
 
@@ -240,7 +240,7 @@ def apply_projection(
     if store:
         room_id = event.get("room_id") or event.get("payload", {}).get("room_id")
         epic_ref = event.get("epic_ref") or event.get("payload", {}).get("epic_ref")
-        room_status = event.get("status") or event.get("payload", {}).get("status") or ROOM_STATUS_BY_EVENT.get(event_type)
+        room_status = canonical_room_status(event.get("status") or event.get("payload", {}).get("status") or ROOM_STATUS_BY_EVENT.get(event_type))
         try:
             if room_dir:
                 store.upsert_room_metadata(room_dir.name, read_room(room_dir))
@@ -273,7 +273,7 @@ def legacy_message_for_event(
             "room_id": room_id,
             "plan_id": event.get("plan_id"),
             "task_ref": event.get("epic_ref") or event.get("payload", {}).get("epic_ref"),
-            "status": event.get("status") or event.get("payload", {}).get("status") or ROOM_STATUS_BY_EVENT.get(event_type) or "unknown",
+            "status": canonical_room_status(event.get("status") or event.get("payload", {}).get("status") or ROOM_STATUS_BY_EVENT.get(event_type) or "unknown"),
         }
     if event.get("plan_id") and not room.get("plan_id"):
         room["plan_id"] = event.get("plan_id")

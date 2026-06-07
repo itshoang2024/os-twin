@@ -76,6 +76,7 @@ func newRootCommand() *cobra.Command {
 	flags.BoolVar(&opts.SearchEngine, "search-engine", false, "install the optional SearXNG search engine")
 	flags.StringVar(&opts.SearchEngineMode, "search-engine-mode", opts.SearchEngineMode, "SearXNG install method: docker or local")
 	flags.BoolVar(&opts.SkipOptional, "skip-optional", false, "skip optional components")
+	flags.BoolVar(&opts.SyncSkills, "sync-skills", false, "force bundled skill copy and dashboard sync on existing installs")
 	flags.BoolVar(&opts.NoOpenCodeConfig, "no-opencode-config", false, "skip writing OpenCode config")
 	flags.BoolVar(&opts.NoStart, "no-start", false, "install without starting services")
 

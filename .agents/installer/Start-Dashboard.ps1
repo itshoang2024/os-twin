@@ -184,7 +184,7 @@ function Publish-Skills {
     Write-Header "9b. Publishing skills to backend"
 
     if (-not $script:DashboardHealthy) {
-        Write-Warn "Dashboard not healthy — skipping skill sync (run 'ostwin sync-skills' later)"
+        Write-Warn "Dashboard not healthy — skipping skill sync (run 'ostwin skills sync' later)"
         return
     }
 

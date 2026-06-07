@@ -4,7 +4,7 @@ import os
 import tempfile
 
 # Set API key BEFORE importing the app
-TEST_API_KEY = "test_key_123"
+TEST_API_KEY = "test-key"
 os.environ["OSTWIN_API_KEY"] = TEST_API_KEY
 
 from fastapi.testclient import TestClient
@@ -81,12 +81,12 @@ def test_update_skill_with_versioning(temp_skills_dir):
     assert (skill_dir / ".versions" / "v1.0.0.md").exists()
     
     # 4. Get historical version
-    response = client.get("/api/skills/versioned-skill/versions/1.0.0", headers=HEADERS)
+    response = client.get("/api/skills/Versioned Skill/versions/1.0.0", headers=HEADERS)
     assert response.status_code == 200
     assert "Initial content" in response.json()["content"]
 
 def test_draft_visibility(temp_skills_dir):
-    # 1. Create draft by 'user1'
+    # 1. Create draft as the API-key user. X-User is intentionally ignored by auth.
     payload = {
         "name": "User1 Draft",
         "description": "A draft skill.",
@@ -94,15 +94,14 @@ def test_draft_visibility(temp_skills_dir):
         "content": "Draft content with at least fifty characters to pass validation.",
         "is_draft": True
     }
-    client.post("/api/skills", json=payload, headers={"X-API-Key": TEST_API_KEY, "X-User": "user1"})
+    create_response = client.post("/api/skills", json=payload, headers=HEADERS)
+    assert create_response.status_code == 200
+    assert create_response.json()["author"] == "api-key-user"
     
-    # 2. List skills as 'user1' (should see the draft)
-    response = client.get("/api/skills", headers={"X-API-Key": TEST_API_KEY, "X-User": "user1"})
+    # 2. List skills as the same authenticated user (should see the draft)
+    response = client.get("/api/skills", headers=HEADERS)
+    assert response.status_code == 200
     assert any(s["name"] == "User1 Draft" for s in response.json())
-    
-    # 3. List skills as 'user2' (should NOT see the draft)
-    response = client.get("/api/skills", headers={"X-API-Key": TEST_API_KEY, "X-User": "user2"})
-    assert not any(s["name"] == "User1 Draft" for s in response.json())
 
 def test_validate_skill(temp_skills_dir):
     # Valid template

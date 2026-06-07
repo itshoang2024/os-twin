@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "sync-installer": "node scripts/sync-installer.mjs",
+    "build": "npm run sync-installer && astro build",
     "preview": "astro preview",
     "astro": "astro",
     "deploy": "npm run build"

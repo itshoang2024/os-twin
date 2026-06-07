@@ -11,13 +11,18 @@ interface AuditTimelineProps {
 
 const stateColorMap: Record<string, string> = {
   pending: '#94a3b8',
+  developing: '#3b82f6',
   engineering: '#3b82f6',
   'architect-review': '#8b5cf6',
   'review': '#8b5cf6',
+  optimize: '#f59e0b',
   fixing: '#f59e0b',
+  triage: '#ef4444',
   'manager-triage': '#ef4444',
+  done: '#10b981',
   passed: '#10b981',
   signoff: '#10b981',
+  failed: '#ef4444',
   'failed-final': '#ef4444',
   'plan-revision': '#f59e0b',
 };

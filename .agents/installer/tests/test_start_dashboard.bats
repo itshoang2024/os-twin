@@ -20,6 +20,21 @@ setup() {
   declare -f publish_skills > /dev/null
 }
 
+@test "dashboard warmup log uses readiness wording" {
+  local content
+  content="$(cat "$INSTALLER_DIR/start-dashboard.sh")"
+
+  [[ "$content" != *"Health check failed"* ]]
+  [[ "$content" == *"WAIT FOR Ostwin ready"* ]]
+}
+
+@test "publish_skills waits for healthy dashboard signal" {
+  local content
+  content="$(cat "$INSTALLER_DIR/start-dashboard.sh")"
+
+  [[ "$content" == *'${DASH_OK:-false}'* ]]
+}
+
 @test "_dashboard_port_listeners queries only LISTEN sockets on the requested port" {
   lsof() {
     [[ "$*" == "-nP -tiTCP:3366 -sTCP:LISTEN" ]] && echo "123"
