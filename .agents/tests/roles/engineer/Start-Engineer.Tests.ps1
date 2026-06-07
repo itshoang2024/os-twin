@@ -28,14 +28,8 @@ BeforeAll {
         $scriptPath = Join-Path $TestDrive "capture-agent-$(Get-Random).ps1"
         $escapedCapture = $CapturePath -replace "'", "''"
         @"
-`$promptFile = `$null
-for (`$i = 0; `$i -lt `$args.Count; `$i++) {
-    if (`$args[`$i] -eq '--file' -and (`$i + 1) -lt `$args.Count -and `$args[`$i + 1] -match 'prompt\.txt$') {
-        `$promptFile = `$args[`$i + 1]
-    }
-}
-if (-not `$promptFile) { throw 'prompt.txt argument not found' }
-Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$escapedCapture' -Encoding utf8 -NoNewline
+`$inputText = [Console]::In.ReadToEnd()
+`$inputText | Out-File -FilePath '$escapedCapture' -Encoding utf8 -NoNewline
 Write-Output 'captured'
 "@ | Out-File $scriptPath -Encoding utf8
 

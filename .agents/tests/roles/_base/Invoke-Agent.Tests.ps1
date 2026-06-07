@@ -97,14 +97,8 @@ Describe "Invoke-Agent" {
             $script:capturedPrompt = Join-Path $TestDrive "captured-prompt-$(Get-Random).txt"
             $script:capturePromptMock = Join-Path $TestDrive "capture-prompt-$(Get-Random).ps1"
             @"
-`$promptFile = `$null
-for (`$i = 0; `$i -lt `$args.Count; `$i++) {
-    if (`$args[`$i] -eq '--file' -and (`$i + 1) -lt `$args.Count -and `$args[`$i + 1] -match 'prompt\.txt$') {
-        `$promptFile = `$args[`$i + 1]
-    }
-}
-if (-not `$promptFile) { throw 'prompt.txt argument not found' }
-Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedPrompt)' -Encoding utf8 -NoNewline
+`$inputText = [Console]::In.ReadToEnd()
+`$inputText | Out-File -FilePath '$($script:capturedPrompt)' -Encoding utf8 -NoNewline
 "@ | Out-File $script:capturePromptMock -Encoding utf8
         }
 
@@ -162,7 +156,7 @@ Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedProm
         }
 
 
-        It "appends only the current channel.jsonl last item to prompt.txt" {
+        It "appends only the current channel.jsonl last item to prompt stdin" {
             @(
                 '{"type":"done","from":"engineer","body":"OLD current channel body"}',
                 '',
@@ -530,24 +524,21 @@ Write-Output "PROJDIR_CHECK:`$val"
             $script:argsMockCmd = Get-PwshAgentCmd $script:argsMock
         }
 
-        It "passes a short positional message and prompt via --file" {
+        It "passes prompt via stdin without a positional placeholder" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "Hello world test" `
                 -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
 
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:argsDump
-            # First arg should be the short positional placeholder (required by opencode run)
-            $capturedArgs[0] | Should -Be "..."
+            # No synthetic positional placeholder should be passed.
+            $capturedArgs | Should -Not -Contain "..."
             # Legacy 'start' positional must NOT be present
             $capturedArgs | Should -Not -Contain "start"
             # Prompt should NOT appear as inline text on the command line
             $capturedArgs | Should -Not -Contain "Hello world test"
-            # Prompt file should be attached via --file
-            $capturedArgs | Should -Contain "--file"
-            # Should contain an absolute path to prompt.txt
-            $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
-            $promptArg | Should -Not -BeNullOrEmpty
+            # Prompt file is delivered over stdin, not attached via --file.
+            $capturedArgs | Should -Not -Contain "--file"
         }
 
         It "passes --model flag" {
@@ -654,7 +645,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $args | Should -Contain "test"
         }
 
-        It "passes --file flag for each extra file plus prompt file" {
+        It "passes --file flag only for each extra file" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "review these files" `
                 -Files @("file1.txt", "file2.txt") `
@@ -662,14 +653,11 @@ Write-Output "PROJDIR_CHECK:`$val"
 
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:argsDump
-            # --file should appear 3 times: file1.txt, file2.txt, plus prompt.txt
+            # --file should appear only for caller-provided attachments.
             $fileFlags = $capturedArgs | Where-Object { $_ -eq "--file" }
-            $fileFlags.Count | Should -Be 3
+            $fileFlags.Count | Should -Be 2
             $capturedArgs | Should -Contain "file1.txt"
             $capturedArgs | Should -Contain "file2.txt"
-            # Prompt file should also be present
-            $promptArg = $capturedArgs | Where-Object { $_ -match 'prompt\.txt$' }
-            $promptArg | Should -Not -BeNullOrEmpty
         }
 
         It "passes --attach flag" {
@@ -739,7 +727,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $args | Should -Not -Contain "--mcp-config"
         }
 
-        It "passes short message positional, not legacy 'start' or inline prompt" {
+        It "passes no positional placeholder, legacy 'start', or inline prompt" {
             $captureMock = Join-Path $TestDrive "capture-wrapper-$(Get-Random).ps1"
             @"
 Write-Output "ARGS: `$(`$args -join ' ')"
@@ -750,14 +738,15 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -AgentCmd (Get-PwshAgentCmd $captureMock) -TimeoutSeconds 5
 
             $result.Output | Should -Not -BeNullOrEmpty
-            # Should contain the short positional placeholder
-            $result.Output | Should -Match "\.\.\."
+            # Should not contain the old synthetic positional placeholder.
+            $result.Output | Should -Not -Match "ARGS: \.\.\."
             # Legacy 'start' positional must NOT be present
             $result.Output | Should -Not -Match "ARGS: start "
             # Should NOT contain the raw prompt text inline
             $result.Output | Should -Not -Match "test positional prompt"
-            # Should contain --file (prompt passed via file)
-            $result.Output | Should -Match "--file"
+            # Prompt file is passed via stdin, not as an attachment.
+            $result.Output | Should -Not -Match "--file"
+            $result.Output | Should -Match "PROMPT_FILE=.*\.ostwin/logs/.*-prompt\.txt"
         }
 
         It "always passes --dangerously-skip-permissions flag" {
@@ -993,10 +982,8 @@ Write-Output "ARGS: `$(`$args -join ' ')"
         #
         # Expected full invocation (with ProjectDir resolved):
         #   opencode run \
-        #     "..." \
         #     --model <model> --agent <role> \
         #     --dir <project-dir> \
-        #     --file <prompt.txt> \
         #     --dangerously-skip-permissions
 
         BeforeEach {
@@ -1025,22 +1012,17 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $capturedArgs = Get-Content $script:safeArgsDump
 
             # Verify exact argument order:
-            # [0] positional message
-            # [1,2] --model <model>
-            # [3,4] --agent <role>
-            # [5,6] --dir <project-dir>
-            # [7,8] --file <prompt.txt>
-            # [9] --dangerously-skip-permissions
-            $capturedArgs[0] | Should -Be "..."
-            $capturedArgs[1] | Should -Be "--model"
-            $capturedArgs[2] | Should -Be "google-vertex/zai-org/glm-5-maas"
-            $capturedArgs[3] | Should -Be "--agent"
-            $capturedArgs[4] | Should -Be "engineer"
-            $capturedArgs[5] | Should -Be "--dir"
-            $capturedArgs[6] | Should -Be $script:projectDir
-            $capturedArgs[7] | Should -Be "--file"
-            $capturedArgs[8] | Should -Match "prompt\.txt$"
-            $capturedArgs[9] | Should -Be "--dangerously-skip-permissions"
+            # [0,1] --model <model>
+            # [2,3] --agent <role>
+            # [4,5] --dir <project-dir>
+            # [6] --dangerously-skip-permissions
+            $capturedArgs[0] | Should -Be "--model"
+            $capturedArgs[1] | Should -Be "google-vertex/zai-org/glm-5-maas"
+            $capturedArgs[2] | Should -Be "--agent"
+            $capturedArgs[3] | Should -Be "engineer"
+            $capturedArgs[4] | Should -Be "--dir"
+            $capturedArgs[5] | Should -Be $script:projectDir
+            $capturedArgs[6] | Should -Be "--dangerously-skip-permissions"
         }
 
         It "--dir value is never concatenated with adjacent arguments" {
@@ -1100,7 +1082,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -Because "spaces in path must be preserved as a single argument, not split"
         }
 
-        It "prompt text is never inlined — only passed via --file" {
+        It "prompt text is never inlined and prompt file is not attached" {
             $longPrompt = "This is a detailed prompt about authentication and user management"
 
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
@@ -1114,29 +1096,15 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             # Prompt text must NOT appear anywhere in the argument list
             $joined = $capturedArgs -join "|"
             $joined | Should -Not -Match "detailed prompt" `
-                -Because "prompt is written to prompt.txt, never passed inline"
+                -Because "prompt is written to a log file and passed via stdin, never inline"
             $joined | Should -Not -Match "authentication and user management" `
                 -Because "no part of the prompt should leak into CLI args"
 
-            # Collect all --file values
-            $fileValues = [System.Collections.ArrayList]@()
-            for ($i = 0; $i -lt $capturedArgs.Count; $i++) {
-                if ($capturedArgs[$i] -eq "--file") {
-                    [void]$fileValues.Add($capturedArgs[$i + 1])
-                }
-            }
-
-            # The prompt file must be attached via --file
-            $promptFileArg = $fileValues | Where-Object { $_ -match "prompt\.txt$" }
-            $promptFileArg | Should -Not -BeNullOrEmpty `
-                -Because "prompt must be delivered via --file flag"
-
-            # Verify the path ends with artifacts/prompt.txt
-            $promptFileArg | Should -Match "artifacts[/\\]prompt\.txt$" `
-                -Because "prompt file should be in the artifacts directory"
+            $capturedArgs | Should -Not -Contain "--file" `
+                -Because "prompt must be delivered via stdin rather than --file"
         }
 
-        It "extra --file args appear before prompt.txt file" {
+        It "extra --file args are preserved without adding prompt.txt" {
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "engineer" -Prompt "multi-file test" `
                 -Model "test-model" `
@@ -1152,10 +1120,9 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 if ($capturedArgs[$i] -eq "--file") { $fileValues += $capturedArgs[$i + 1] }
             }
 
-            $fileValues.Count | Should -Be 3 -Because "2 user files + 1 prompt.txt"
+            $fileValues.Count | Should -Be 2 -Because "only caller-provided files are attached"
             $fileValues[0] | Should -Be "src/main.ts"
             $fileValues[1] | Should -Be "README.md"
-            $fileValues[2] | Should -Match "prompt\.txt$"
         }
 
         It "total argument count matches expected structure" {
@@ -1167,9 +1134,9 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
 
-            # Expected: message(1) + --model(2) + --agent(2) + --dir(2) + --file(2) + --dangerously-skip-permissions(1) = 10
-            $capturedArgs.Count | Should -Be 10 `
-                -Because "exactly 10 args: positional + --model X + --agent X + --dir X + --file X + --dangerously-skip-permissions"
+            # Expected: --model(2) + --agent(2) + --dir(2) + --dangerously-skip-permissions(1) = 7
+            $capturedArgs.Count | Should -Be 7 `
+                -Because "exactly 7 args: --model X + --agent X + --dir X + --dangerously-skip-permissions"
         }
 
         It "without ProjectDir, --dir is omitted and arg count adjusts" {
@@ -1189,8 +1156,8 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $capturedArgs | Should -Not -Contain "--dir" `
                 -Because "no .war-rooms parent means no --dir flag"
 
-            # Expected: message(1) + --model(2) + --agent(2) + --file(2) + --dangerously-skip-permissions(1) = 8
-            $capturedArgs.Count | Should -Be 8
+            # Expected: --model(2) + --agent(2) + --dangerously-skip-permissions(1) = 5
+            $capturedArgs.Count | Should -Be 5
         }
     }
 

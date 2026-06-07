@@ -23,8 +23,6 @@
 | `room-*/triage-context.md` | `Start-ManagerLoop.ps1` | 592 |
 | `room-*/pids/*.pid` | `Invoke-Agent.ps1` wrapper bash | 372 |
 | `room-*/pids/spawn.lock` | `Start-ManagerLoop.ps1` | 348 |
-| `room-*/artifacts/prompt.txt` | `Invoke-Agent.ps1` | 265 |
-| `room-*/artifacts/*-prompt-debug.md` | `Invoke-Agent.ps1` | 269 |
 | `room-*/artifacts/*-output.txt` | `Invoke-Agent.ps1` wrapper bash | 376 |
 | `room-*/artifacts/*-output.txt.wrapper.log` | `Invoke-Agent.ps1` wrapper bash | 375 |
 | `room-*/artifacts/run-agent.sh` | `Invoke-Agent.ps1` | 380 |
@@ -52,7 +50,12 @@
 
 ### Ghi vào `~/.ostwin/`
 
-**Không.** Trừ khi `working_dir` trong plan trỏ tới thư mục chưa có `.agents/` → trigger `ostwin init` → ghi `~/.ostwin/mcp/mcp-config.json` (init.sh:237-241). Trên source repo đã có `.agents/` nên **không trigger**.
+| File | Source | Line | Giải thích |
+|---|---|---|---|
+| `logs/*-prompt.txt` | `Invoke-Agent.ps1` | prompt assembly | Compiled prompt persisted for audit and piped to agent stdin |
+| `logs/*-prompt-debug.md` | `Invoke-Agent.ps1` | prompt assembly | Human-readable prompt debug copy |
+
+Ngoài ra, nếu `working_dir` trong plan trỏ tới thư mục chưa có `.agents/` → trigger `ostwin init` → ghi `~/.ostwin/mcp/mcp-config.json` (init.sh:237-241). Trên source repo đã có `.agents/` nên không trigger init path này.
 
 ### Có thể tạo thư mục mới
 

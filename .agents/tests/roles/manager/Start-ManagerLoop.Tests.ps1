@@ -2006,7 +2006,7 @@ Context "PLAN-REVIEW Verdict Logic" {
                 $artifactsDir = Join-Path $RoomDir "artifacts"
                 New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
                 $pidFile = ($RoomDir -replace "'", "''") + "/pids/$Role.pid"
-                $promptFile = ($RoomDir -replace "'", "''") + "/artifacts/prompt.txt"
+                $promptFile = ($RoomDir -replace "'", "''") + "/logs/prompt.txt"
                 $outputFile = ($RoomDir -replace "'", "''") + "/artifacts/$Role-output.txt"
                 $content = @"
 # --- run-agent.ps1 — Unified agent wrapper (all platforms) ---
@@ -2273,7 +2273,7 @@ Context "PLAN-REVIEW Verdict Logic" {
                 $artifactsDir = Join-Path $RoomDir "artifacts"
                 New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
                 $pidFile = ($RoomDir -replace "'", "''") + "/pids/$Role.pid"
-                $promptFile = ($RoomDir -replace "'", "''") + "/artifacts/prompt.txt"
+                $promptFile = ($RoomDir -replace "'", "''") + "/logs/prompt.txt"
                 $outputFile = ($RoomDir -replace "'", "''") + "/artifacts/$Role-output.txt"
                 $content = @"
 # --- run-agent.ps1 — Unified agent wrapper (all platforms) ---
@@ -2286,7 +2286,7 @@ Context "PLAN-REVIEW Verdict Logic" {
 `$env:AGENT_OS_PROJECT_DIR = '/Users/test/project'
 `$PID | Out-File -FilePath '$pidFile' -Encoding ascii -NoNewline
 "[wrapper] PID=`$PID, CMD=opencode" | Out-File -FilePath '$outputFile' -Encoding utf8 -Append
-& opencode run '...' --model $Model --agent $Role --file '$promptFile' 2>&1 | Out-File -FilePath '$outputFile' -Encoding utf8 -Append
+Get-Content -Raw -Path '$promptFile' | & opencode run --model $Model --agent $Role 2>&1 | Out-File -FilePath '$outputFile' -Encoding utf8 -Append
 "@
                 $scriptPath = Join-Path $artifactsDir "run-agent.ps1"
                 $content | Out-File -FilePath $scriptPath -Encoding utf8 -NoNewline -Force

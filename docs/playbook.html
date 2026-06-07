@@ -791,7 +791,7 @@
     <a href="#ddd-tdd"><span class="nav-num">07</span>DDD & TDD for Agents</a>
 
     <div class="nav-section-label">Execution</div>
-    <a href="#epic"><span class="nav-num">08</span>The EPIC Planning Standard</a>
+    <a href="#epic"><span class="nav-num">08</span>EPIC Planning &amp; Design</a>
     <a href="#agentic-ops"><span class="nav-num">09</span>Agentic Ops Best Practices</a>
 
     <div class="nav-section-label">The Core Thesis</div>
@@ -1421,13 +1421,21 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
     <!-- ── 08. EPIC PLANNING ── -->
     <section id="epic">
       <div class="section-eyebrow">08 · Execution</div>
-      <h2>The EPIC Planning Standard</h2>
+      <h2>The EPIC Planning &amp; Design Standard</h2>
       <p>
         In agentic systems, the EPIC is not just a project management artifact — it is the <strong>primary source of
           truth</strong> for everything the agent will produce. A weak EPIC produces weak code. A precise EPIC produces
         precise code. Every field in the EPIC format exists for a reason: it gives the agent unambiguous
         instruction, gives QA testable criteria, and gives the Supervisor traceable accountability.
       </p>
+
+      <div class="callout blue">
+        <div class="callout-label">Expanded planning rule</div>
+        <p><strong>Every product initiative starts as a Product Owner outline, becomes a Feature Map, is decomposed into
+          multiple EPICs, and only then enters Engineering design.</strong> Engineering must not code from a vague idea.
+          The minimum starting design is a C4 Model package that explains context, containers, components, and code-level
+          responsibilities for every EPIC.</p>
+      </div>
 
       <blockquote>
         <strong>The EPIC is the spec. The EPIC is the test. The EPIC is the contract between human intent and machine
@@ -1437,24 +1445,349 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
       <h3>The EPIC Hierarchy</h3>
       <div class="flow">
         <div class="flow-step">
-          <div class="flow-box accent">EPIC</div>
-          <div class="flow-label">Business outcome</div>
+          <div class="flow-box accent">Product Goal</div>
+          <div class="flow-label">Why / success metric</div>
         </div>
         <div class="flow-arrow">→</div>
         <div class="flow-step">
-          <div class="flow-box">Stories</div>
-          <div class="flow-label">User-facing capability</div>
+          <div class="flow-box">Feature Map</div>
+          <div class="flow-label">User journey + capabilities</div>
         </div>
         <div class="flow-arrow">→</div>
         <div class="flow-step">
-          <div class="flow-box">Tasks</div>
-          <div class="flow-label">Technical deliverable</div>
+          <div class="flow-box">EPICs</div>
+          <div class="flow-label">Business outcomes</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">C4 Design</div>
+          <div class="flow-label">Technical breakdown</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">Stories + Tasks</div>
+          <div class="flow-label">Buildable work</div>
         </div>
         <div class="flow-arrow">→</div>
         <div class="flow-step">
           <div class="flow-box green">AC + DoD</div>
           <div class="flow-label">Completion proof</div>
         </div>
+      </div>
+
+      <h3>Stage 1 — Product Owner Composes the Multi-EPIC Outline</h3>
+      <p>
+        The Product Owner team begins with a <strong>portfolio-level plan</strong>, not a single oversized EPIC. Their job is
+        to define the product intent, identify the user-facing capabilities, and split the work into a MECE set of EPICs
+        that can be independently designed, implemented, and reviewed. A good PO outline is detailed enough for
+        Architects and Engineers to challenge, but not so technical that it pre-decides implementation.
+      </p>
+      <pre><code><span class="code-comment"># Product Owner Planning Outline</span>
+<span class="code-key">Initiative:</span>        <span class="code-val">{name of product capability}</span>
+<span class="code-key">Outcome:</span>           <span class="code-val">{measurable customer/business result}</span>
+<span class="code-key">Primary users:</span>     <span class="code-val">{personas / roles}</span>
+<span class="code-key">Success metrics:</span>   <span class="code-val">{activation, adoption, cycle-time, revenue, quality}</span>
+<span class="code-key">Constraints:</span>       <span class="code-val">{deadline, compliance, platform, data, security}</span>
+
+<span class="code-comment">## Candidate EPICs</span>
+EPIC-001 — {foundation capability}       <span class="code-comment"># enables other work</span>
+EPIC-002 — {core user workflow}          <span class="code-comment"># visible value path</span>
+EPIC-003 — {admin / operations workflow} <span class="code-comment"># supportability path</span>
+EPIC-004 — {observability / hardening}   <span class="code-comment"># launch readiness path</span>
+
+<span class="code-comment">## PO Review Questions</span>
+- Does every feature map to exactly one EPIC owner?
+- Can a user-facing slice be delivered after each EPIC?
+- Are dependencies explicit rather than assumed?
+- Are there hidden compliance, data, or operational requirements?</code></pre>
+
+      <h3>Stage 2 — Feature Mapping Before EPIC Finalization</h3>
+      <p>
+        A Feature Map translates the product goal into a structured set of user activities, capabilities, rules, data,
+        and non-functional needs. It prevents teams from writing EPICs around technical layers only. Every EPIC must
+        trace back to one or more Feature Map rows; if it does not, it is either unnecessary or the map is incomplete.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature Map Layer</th>
+              <th>Question to Answer</th>
+              <th>Output</th>
+              <th>EPIC Trace</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>User Activity</strong></td>
+              <td>What job is the user trying to complete?</td>
+              <td>Journey steps, actors, triggers</td>
+              <td>Defines EPIC outcome and story boundaries</td>
+            </tr>
+            <tr>
+              <td><strong>Capability</strong></td>
+              <td>What must the product do at each step?</td>
+              <td>Feature list, permissions, states</td>
+              <td>Maps to stories and acceptance criteria</td>
+            </tr>
+            <tr>
+              <td><strong>Business Rule</strong></td>
+              <td>What policy, validation, or exception applies?</td>
+              <td>Rules, edge cases, invariants</td>
+              <td>Maps to GIVEN/WHEN/THEN AC</td>
+            </tr>
+            <tr>
+              <td><strong>Data Contract</strong></td>
+              <td>What data is created, read, updated, or exposed?</td>
+              <td>Entities, events, API shapes</td>
+              <td>Maps to C4 components and test fixtures</td>
+            </tr>
+            <tr>
+              <td><strong>Quality Attribute</strong></td>
+              <td>What must be true for launch readiness?</td>
+              <td>Security, performance, observability, accessibility</td>
+              <td>Maps to DoD and QA test plan</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <pre><code><span class="code-comment"># Required traceability block inside every EPIC</span>
+<span class="code-key">Feature Map Trace:</span>
+  user_activity: <span class="code-val">FM-A2 — Plan owner filters active initiatives</span>
+  capability:    <span class="code-val">FM-C4 — Filter by status, owner, and risk</span>
+  rules:         <span class="code-val">FM-R1 — Archived plans hidden by default</span>
+  data:          <span class="code-val">FM-D3 — PlanSummary contract</span>
+  qualities:     <span class="code-val">FM-Q2 — Initial render &lt; 2s, keyboard accessible</span></code></pre>
+
+      <h3>Stage 3 — C4 Model Is the Starting Point for Technical Design</h3>
+      <p>
+        Before implementation, the Architect and Engineering team create a C4 design package. This is the bridge between
+        product intent and agent execution. It tells agents where the work lives, what contracts must not break, which
+        components own behavior, and how each EPIC fits into the overall system.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>C4 Level</th>
+              <th>Required Design Content</th>
+              <th>How Agents Use It</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>C1 — System Context</strong></td>
+              <td>Users, external systems, trust boundaries, source-of-truth systems</td>
+              <td>Prevents agents from inventing integrations or actors</td>
+            </tr>
+            <tr>
+              <td><strong>C2 — Containers</strong></td>
+              <td>Apps, APIs, workers, databases, queues, storage, deployment boundaries</td>
+              <td>Routes tasks to frontend/backend/infra and defines dependencies</td>
+            </tr>
+            <tr>
+              <td><strong>C3 — Components</strong></td>
+              <td>Modules, services, pages, hooks, repositories, adapters, ownership</td>
+              <td>Gives engineers exact implementation locations and interfaces</td>
+            </tr>
+            <tr>
+              <td><strong>C4 — Code</strong></td>
+              <td>Key classes/functions/types, API contracts, event schemas, test seams</td>
+              <td>Turns tasks into concrete code changes and test targets</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout green">
+        <div class="callout-label">C4 gate</div>
+        <p>No EPIC enters <strong>ACTIVE</strong> until its C1–C3 design is approved and its C4-level implementation notes
+          are sufficient for the first engineering task. If C4 is missing, agents will infer architecture from nearby code,
+          which is how hidden coupling and inconsistent designs enter the system.</p>
+      </div>
+
+      <h4>C4 Package Template</h4>
+      <p>
+        The C4 package is a short, practical design file, not a decorative diagram. It must be written so a fresh agent
+        can start from the file, understand the target architecture, and avoid touching unrelated boundaries.
+      </p>
+      <pre><code><span class="code-comment"># docs/architecture/EPIC-001-c4.md</span>
+
+<span class="code-comment">## C1 — System Context</span>
+<span class="code-key">Primary users:</span> <span class="code-val">{who uses the capability}</span>
+<span class="code-key">External systems:</span> <span class="code-val">{APIs, auth providers, databases, queues, SaaS}</span>
+<span class="code-key">Trust boundaries:</span> <span class="code-val">{browser/server, public/private API, tenant boundary}</span>
+<span class="code-key">Source of truth:</span> <span class="code-val">{which system owns each core record}</span>
+
+<span class="code-comment">## C2 — Containers</span>
+- Web App: {pages/routes affected}
+- API: {endpoints and handlers affected}
+- Worker: {async jobs affected, if any}
+- Database: {tables/collections/migrations affected}
+- Observability: {logs, metrics, traces, alerts}
+
+<span class="code-comment">## C3 — Components</span>
+- Component/Module: {name} — owns {responsibility}
+- Service: {name} — accepts {input contract}, returns {output contract}
+- Adapter: {name} — integrates with {external system}
+- Repository: {name} — persists {aggregate/entity}
+
+<span class="code-comment">## C4 — Code-Level Notes</span>
+<span class="code-key">Types/contracts:</span> <span class="code-val">{TypeScript interfaces, DTOs, schema names}</span>
+<span class="code-key">Functions/classes:</span> <span class="code-val">{functions to create/change}</span>
+<span class="code-key">Test seams:</span> <span class="code-val">{unit, integration, e2e targets}</span>
+<span class="code-key">Do not touch:</span> <span class="code-val">{protected modules and out-of-scope files}</span>
+<span class="code-key">Open risks:</span> <span class="code-val">{risks requiring ADR, spike, or escalation}</span></code></pre>
+
+      <h4>Agent Flow From C4 to Code</h4>
+      <p>
+        The C4 design must directly drive agent execution. Every engineering agent follows the same reading order before
+        coding: Product Intent → Feature Map Trace → C4 Package → PLAN.md task → AC → code. If any layer conflicts with
+        another, the agent stops and escalates instead of guessing.
+      </p>
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-box accent">Product Intent</div>
+          <div class="flow-label">Why and for whom</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">Feature Trace</div>
+          <div class="flow-label">What must exist</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">C4 Package</div>
+          <div class="flow-label">Where it belongs</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">PLAN Task</div>
+          <div class="flow-label">What to change</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box green">AC/Test</div>
+          <div class="flow-label">How to prove it</div>
+        </div>
+      </div>
+
+      <div class="callout red">
+        <div class="callout-label">Stop condition</div>
+        <p>If the Feature Map says a capability is required but the C4 package has no component owner, stop. If C4 names a
+          component but PLAN.md has no task for it, stop. If AC verifies behavior that is outside IN scope, stop. These are
+          planning defects, not implementation choices.</p>
+      </div>
+
+      <h3>Stage 4 — Engineering Co-Develops the Best Plan</h3>
+      <p>
+        After PO and Architecture draft the plan, Engineers co-develop it before coding. Co-development means the
+        engineers challenge feasibility, dependency order, data contracts, testing strategy, rollout risk, and operational
+        support. This stage produces a better plan, not just a larger plan.
+      </p>
+      <ul class="checklist">
+        <li class="done"><strong>PO validates value</strong> — the EPIC still maps to the intended user outcome and Feature Map.</li>
+        <li class="done"><strong>Architect validates shape</strong> — C4 boundaries, data ownership, and integration points are coherent.</li>
+        <li class="done"><strong>Engineers validate feasibility</strong> — tasks are buildable, dependencies are ordered, contracts are explicit.</li>
+        <li class="done"><strong>QA validates testability</strong> — AC are executable, edge cases are present, DoD is measurable.</li>
+        <li><strong>Team resolves gaps before ACTIVE</strong> — unresolved questions become blockers, not assumptions.</li>
+      </ul>
+
+      <h4>Co-Development Review Prompts</h4>
+      <p>
+        Use these prompts during the planning review. The answers become part of PLAN.md or the C4 package; they are not
+        lost in chat. The goal is to convert team judgment into reusable agent context.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Reviewer</th>
+              <th>Must Challenge</th>
+              <th>Required Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Product Owner</strong></td>
+              <td>Does this EPIC deliver a user-visible or business-visible slice?</td>
+              <td>Confirmed outcome, metric, Feature Map rows, priority rationale</td>
+            </tr>
+            <tr>
+              <td><strong>Architect</strong></td>
+              <td>Are boundaries, ownership, and contracts clear enough for parallel agents?</td>
+              <td>C4 notes, dependency graph, ADR references, protected boundaries</td>
+            </tr>
+            <tr>
+              <td><strong>Engineer</strong></td>
+              <td>Can each task be implemented without guessing file locations or contracts?</td>
+              <td>Task split, routing tags, implementation order, test seams</td>
+            </tr>
+            <tr>
+              <td><strong>QA</strong></td>
+              <td>Can every AC be tested objectively, including edge cases and regressions?</td>
+              <td>AC revisions, fixture needs, test plan, pass/fail evidence format</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre><code><span class="code-comment"># PLAN.md Co-Development Notes — required before ACTIVE</span>
+<span class="code-key">PO decision:</span>          <span class="code-val">approved / split / needs rewrite</span>
+<span class="code-key">Architecture decision:</span><span class="code-val">approved / ADR required / redesign required</span>
+<span class="code-key">Engineering decision:</span> <span class="code-val">ready / re-slice tasks / blocked by dependency</span>
+<span class="code-key">QA decision:</span>          <span class="code-val">testable / AC incomplete / fixtures missing</span>
+<span class="code-key">Open questions:</span>
+  - Q1: {question} — owner: {role} — due: {date or before ACTIVE}
+<span class="code-key">Final gate:</span> <span class="code-val">ACTIVE only when all decisions are approved or explicitly accepted as risk</span></code></pre>
+
+      <h3>Stage 5 — Full-Team Review Gates Per EPIC</h3>
+      <p>
+        Each EPIC must be developed and reviewed by the full team: Product Owner, Architect, Engineer, and QA. Reviews
+        are not ceremonies; they are quality gates that determine whether agents have enough context to proceed safely.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>Owner</th>
+              <th>Required Evidence</th>
+              <th>Exit Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Gate 1 — Product Fit</strong></td>
+              <td>Product Owner</td>
+              <td>Outcome, users, metrics, Feature Map trace, IN/OUT scope</td>
+              <td>Approve / split / reject</td>
+            </tr>
+            <tr>
+              <td><strong>Gate 2 — Architecture Fit</strong></td>
+              <td>Architect + Engineers</td>
+              <td>C4 diagrams, data contracts, dependency graph, risks</td>
+              <td>Approve / redesign / create ADR</td>
+            </tr>
+            <tr>
+              <td><strong>Gate 3 — Implementation Fit</strong></td>
+              <td>Engineering Team</td>
+              <td>Stories, tasks, routing tags, sequencing, code ownership</td>
+              <td>Approve / re-slice / clarify</td>
+            </tr>
+            <tr>
+              <td><strong>Gate 4 — QA Fit</strong></td>
+              <td>QA</td>
+              <td>GIVEN/WHEN/THEN AC, test data, edge cases, regression plan</td>
+              <td>Approve / add AC / block</td>
+            </tr>
+            <tr>
+              <td><strong>Gate 5 — Launch Fit</strong></td>
+              <td>Full Team</td>
+              <td>DoD, observability, rollout, rollback, support notes</td>
+              <td>ACTIVE / defer / escalate</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- ── CANONICAL FORMAT ── -->
@@ -1466,15 +1799,38 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
       </p>
 
       <pre><code><span class="code-comment">## EPIC-001 - {Outcome Statement}</span>
-<span class="code-key">Roles:</span>        <span class="code-val">@engineer, @qa, @devops</span>
+<span class="code-key">Roles:</span>        <span class="code-val">@product-owner, @architect, @engineer, @qa, @devops</span>
+<span class="code-key">Feature Map:</span>  <span class="code-val">[FM-A2, FM-C4, FM-R1, FM-D3, FM-Q2]</span>
+<span class="code-key">C4 Package:</span>   <span class="code-val">docs/architecture/EPIC-001-c4.md</span>
 <span class="code-comment"># One-paragraph definition of the business problem and the goal.</span>
 <span class="code-comment"># Lead with the conclusion (Pyramid Principle).</span>
 <span class="code-comment"># Then state what this EPIC delivers and why it matters.</span>
+
+<span class="code-comment">### Product Intent</span>
+<span class="code-key">Users:</span>           <span class="code-val">{primary and secondary users}</span>
+<span class="code-key">Success metrics:</span> <span class="code-val">{measurable impact}</span>
+<span class="code-key">IN scope:</span>        <span class="code-val">{included capabilities}</span>
+<span class="code-key">OUT scope:</span>       <span class="code-val">{explicit exclusions}</span>
+
+<span class="code-comment">### Feature Map Trace</span>
+- [ ] User activity mapped to EPIC outcome
+- [ ] Capability rows mapped to stories/tasks
+- [ ] Rules and edge cases mapped to AC
+- [ ] Data contracts mapped to C4 components
+- [ ] Quality attributes mapped to DoD / QA plan
+
+<span class="code-comment">### C4 Design Summary</span>
+- C1 Context: {actors, external systems, trust boundaries}
+- C2 Containers: {apps, APIs, database, workers, queues}
+- C3 Components: {modules/services/pages/hooks/adapters changed}
+- C4 Code: {key types/functions/contracts/tests to create or modify}
 
 <span class="code-comment">### Definition of Done</span>
 - [ ] All Acceptance Criteria pass (QA verified)
 - [ ] No HIGH or CRITICAL bugs open
 - [ ] Unit test coverage ≥ 80% for new code
+- [ ] Feature Map trace remains complete after implementation
+- [ ] C4 package updated to match final implementation
 - [ ] CONTEXT.md updated to reflect completion
 - [ ] Deployed to staging and smoke-tested
 
@@ -1487,6 +1843,12 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
 - [ ] Task 1: {technical deliverable} — [routing-tag]
 - [ ] Task 2: {technical deliverable} — [routing-tag]
 - [ ] Task 3: {technical deliverable} — [routing-tag]
+
+<span class="code-comment">### Full-Team Review Gates</span>
+- [ ] PO approved Feature Map trace and business value
+- [ ] Architect approved C4 boundaries and dependencies
+- [ ] Engineering approved implementation slice and sequencing
+- [ ] QA approved AC, fixtures, and regression plan
 
 <span class="code-key">depends_on:</span> <span class="code-val">[EPIC-000]</span></code></pre>
 
@@ -1524,6 +1886,18 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
               <td>Which agent roles participate. Controls MCP scoping and routing.</td>
               <td>Agent Router, Supervisor</td>
               <td>Tasks get assigned to wrong agents or not at all.</td>
+            </tr>
+            <tr>
+              <td><strong>Feature Map</strong></td>
+              <td>Trace from product journey, capability, rule, data, and quality rows to this EPIC.</td>
+              <td>PO, Architect, QA</td>
+              <td>EPICs drift away from product intent or duplicate another EPIC's scope.</td>
+            </tr>
+            <tr>
+              <td><strong>C4 Package</strong></td>
+              <td>Technical design anchor covering C1 context, C2 containers, C3 components, and C4 code notes.</td>
+              <td>Architect, Engineer, QA</td>
+              <td>Agents infer architecture from local code and create hidden coupling.</td>
             </tr>
             <tr>
               <td><strong>Definition &amp; Goal</strong></td>
@@ -1604,6 +1978,18 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
           </thead>
           <tbody>
             <tr>
+              <td><strong>product-owner</strong></td>
+              <td>Owns product outcome, Feature Map, success metrics, and IN/OUT scope</td>
+              <td>planning docs, ROOM bus</td>
+              <td><span class="badge badge-sup">PO</span></td>
+            </tr>
+            <tr>
+              <td><strong>architect</strong></td>
+              <td>Owns C4 design, ADRs, boundaries, dependency graph, and technical risks</td>
+              <td>filesystem (read), codegraph, ROOM bus</td>
+              <td><span class="badge badge-sup">Architect</span></td>
+            </tr>
+            <tr>
               <td><strong>engineer</strong></td>
               <td>Claims tasks, implements code, writes TODO.md release notes, posts RELEASE</td>
               <td>filesystem (rw), shell, git, DB</td>
@@ -1634,7 +2020,8 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
         <div class="callout-label">Routing rule</div>
         <p>Tasks tagged with <code>[backend]</code> or <code>[frontend]</code> are routed to Engineers with matching
           capabilities. Tasks tagged <code>[infra]</code> route to DevOps. The role list in the EPIC header determines
-          <strong>which agent classes participate at all</strong>.
+          <strong>which agent classes participate at all</strong>. Product Owner and Architect roles participate in planning
+          and approval gates even when they do not implement code.
         </p>
       </div>
 
@@ -1853,20 +2240,40 @@ AC-3: <span class="code-kw">GIVEN</span> invalid userId (non-existent)
         your own.
       </p>
       <pre><code><span class="code-comment">## EPIC-003 - Centralized MCP Skill Registry</span>
-<span class="code-key">Roles:</span> <span class="code-val">@engineer, @qa, @devops</span>
+<span class="code-key">Roles:</span> <span class="code-val">@product-owner, @architect, @engineer, @qa, @devops</span>
+<span class="code-key">Feature Map:</span> <span class="code-val">[FM-A1, FM-C2, FM-R3, FM-D2, FM-Q1]</span>
+<span class="code-key">C4 Package:</span> <span class="code-val">docs/architecture/EPIC-003-c4.md</span>
 
 Build a centralized skill registry that enables agents to discover,
 load, and version SKILL.md files dynamically via MCP. Currently,
 skills are hardcoded in system prompts, causing context bloat and
 version drift across agent sessions.
 
+<span class="code-comment">### Product Intent</span>
+<span class="code-key">Users:</span> <span class="code-val">Agent operators, role authors, engineering leads</span>
+<span class="code-key">Success metrics:</span> <span class="code-val">Skill lookup p95 &lt; 300ms; zero version drift in new sessions</span>
 <span class="code-key">IN scope:</span>  Skill CRUD API, version tagging, MCP server integration
 <span class="code-key">OUT scope:</span> Skill authoring UI, permission model, skill marketplace
+
+<span class="code-comment">### Feature Map Trace</span>
+- [ ] FM-A1: Agent operator starts a task requiring a skill
+- [ ] FM-C2: System discovers and loads a versioned SKILL.md
+- [ ] FM-R3: Non-existent or deprecated skills return typed errors
+- [ ] FM-D2: SkillVersion contract persisted and exposed through API
+- [ ] FM-Q1: Registry is observable, fast, and safe to roll back
+
+<span class="code-comment">### C4 Design Summary</span>
+- C1 Context: Agents call the MCP server; operators manage registry entries
+- C2 Containers: Dashboard API, MCP Skill Adapter, Postgres skill_registry table
+- C3 Components: SkillRegistry service, SkillVersionRepository, SkillLoader adapter
+- C4 Code: SkillVersion type, GET/POST skill handlers, adapter contract tests
 
 <span class="code-comment">### Definition of Done</span>
 - [ ] All Acceptance Criteria pass (QA verified)
 - [ ] No HIGH or CRITICAL bugs open
 - [ ] Unit test coverage ≥ 80% for registry module
+- [ ] Feature Map trace verified by PO and QA
+- [ ] C4 package updated after implementation
 - [ ] CONTEXT.md updated with registry architecture decisions
 - [ ] API deployed to staging; agents can query skills via MCP
 - [ ] No regressions in existing skill loading paths
@@ -1892,6 +2299,12 @@ version drift across agent sessions.
 - [ ] Task 4: Write integration tests for all AC — [qa]
 - [ ] Task 5: Deploy registry service to staging — [infra]
 
+<span class="code-comment">### Full-Team Review Gates</span>
+- [ ] PO approved registry value, scope, and Feature Map trace
+- [ ] Architect approved C4 package and dependency graph
+- [ ] Engineering approved service/API/task breakdown
+- [ ] QA approved AC, fixtures, and regression plan
+
 <span class="code-key">depends_on:</span> <span class="code-val">[EPIC-001, EPIC-002]</span></code></pre>
 
       <!-- ── EPIC LIFECYCLE ── -->
@@ -1903,12 +2316,22 @@ version drift across agent sessions.
       <div class="flow">
         <div class="flow-step">
           <div class="flow-box accent">DRAFT</div>
-          <div class="flow-label">Human writes EPIC</div>
+          <div class="flow-label">PO writes outline</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">MAPPED</div>
+          <div class="flow-label">Feature Map trace</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-box">DESIGNED</div>
+          <div class="flow-label">C4 approved</div>
         </div>
         <div class="flow-arrow">→</div>
         <div class="flow-step">
           <div class="flow-box">PLANNED</div>
-          <div class="flow-label">Supervisor writes PLAN.md</div>
+          <div class="flow-label">Team approves PLAN.md</div>
         </div>
         <div class="flow-arrow">→</div>
         <div class="flow-step">
@@ -1948,7 +2371,9 @@ version drift across agent sessions.
       <ul class="checklist">
         <li><strong>Has a unique EPIC-{NNN} ID</strong> — sequential, zero-padded, never reused</li>
         <li><strong>Outcome statement is one sentence</strong> — Pyramid Principle BLUF</li>
-        <li><strong>Roles are explicitly listed</strong> — <code>Role: engineer, qa</code></li>
+        <li><strong>Roles are explicitly listed</strong> — <code>Roles: @product-owner, @architect, @engineer, @qa</code></li>
+        <li><strong>Feature Map trace is complete</strong> — activity, capability, rule, data, and quality rows linked</li>
+        <li><strong>C4 package exists</strong> — C1–C3 approved; C4 notes sufficient for first task</li>
         <li><strong>Definition paragraph states problem + solution + scope</strong></li>
         <li><strong>IN/OUT scope is explicit</strong> — eliminates scope creep</li>
         <li><strong>DoD is a binary checklist (≥5 items)</strong> — pass/fail, not "good enough"</li>
@@ -1957,6 +2382,7 @@ version drift across agent sessions.
           <code>[infra]</code>
         </li>
         <li><strong><code>depends_on</code> is declared</strong> — even if empty <code>[]</code></li>
+        <li><strong>Full-team review gates are checked</strong> — PO, Architect, Engineering, and QA agree before ACTIVE</li>
         <li><strong>All content is in English</strong> — token-efficient, highest model compliance</li>
       </ul>
     </section>
