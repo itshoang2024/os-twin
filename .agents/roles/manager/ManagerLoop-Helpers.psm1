@@ -1218,10 +1218,252 @@ $actionLine
 
 # ---------------------------------------------------------------------------
 # Invoke-TriageMediation
-# Turns a reviewer escalation into a manager-authored lifecycle signal. ESCALATE
-# means the epic roles need a short mediated debate/clarification loop: manager
-# asks the counterpart role to respond, then lifecycle routes back to review.
+# Starts a manager-as-leader triage judge when a reviewer escalates. ESCALATE
+# means the deterministic loop should compile the current epic member context,
+# then invoke --agent manager to judge the last escalator message. The manager
+# agent posts the actual lifecycle signal (fix/reject/etc.); Start-ManagerLoop
+# remains the authority that applies state transitions after that signal appears.
 # ---------------------------------------------------------------------------
+function Resolve-ManagerRolePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RoleName)
+
+    $agentsDir = _ctx 'agentsDir'
+    $projectRoot = if ($agentsDir) { Split-Path $agentsDir -Parent } else { '' }
+    $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+    $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $_homeDir '.ostwin' }
+
+    $candidates = @()
+    if ($agentsDir) { $candidates += (Join-Path $agentsDir (Join-Path 'roles' $RoleName)) }
+    $candidates += (Join-Path $ostwinHome (Join-Path '.agents' (Join-Path 'roles' $RoleName)))
+    if ($projectRoot) { $candidates += (Join-Path $projectRoot (Join-Path 'contributes' (Join-Path 'roles' $RoleName))) }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+    return $null
+}
+
+function Read-ManagerRoleHeader {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RoleName)
+
+    $rolePath = Resolve-ManagerRolePath -RoleName $RoleName
+    $roleMd = if ($rolePath) { Join-Path $rolePath 'ROLE.md' } else { '' }
+    if (-not $roleMd -or -not (Test-Path $roleMd)) {
+        return [pscustomobject]@{
+            Name = $RoleName
+            Description = "$RoleName role"
+            Tags = @()
+            TrustLevel = ''
+            Path = $roleMd
+        }
+    }
+
+    $content = Get-Content $roleMd -Raw
+    $header = ''
+    if ($content -match '(?s)^---\s*\r?\n(.*?)\r?\n---') { $header = $Matches[1] }
+
+    $name = $RoleName
+    $description = "$RoleName role"
+    $tags = @()
+    $trustLevel = ''
+
+    if ($header) {
+        foreach ($line in ($header -split "\r?\n")) {
+            if ($line -match '^name:\s*(.+)$') { $name = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^description:\s*(.+)$') { $description = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^trust_level:\s*(.+)$') { $trustLevel = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^tags:\s*\[(.*)\]\s*$') {
+                $tags = @($Matches[1] -split ',' | ForEach-Object { $_.Trim().Trim('"').Trim("'") } | Where-Object { $_ })
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Name = $name
+        Description = $description
+        Tags = $tags
+        TrustLevel = $trustLevel
+        Path = $roleMd
+    }
+}
+
+function Get-ManagerEpicMemberRoles {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle
+    )
+
+    $roles = [System.Collections.Generic.List[string]]::new()
+    if ($Lifecycle -and $Lifecycle.states) {
+        foreach ($stateName in $Lifecycle.states.PSObject.Properties.Name) {
+            $stateDef = $Lifecycle.states.$stateName
+            if ($stateDef -and $stateDef.role) {
+                $base = ([string]$stateDef.role) -replace ':.*$', ''
+                if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+            }
+        }
+    }
+
+    $roomConfigFile = Join-Path $RoomDir 'config.json'
+    if (Test-Path $roomConfigFile) {
+        try {
+            $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
+            if ($roomCfg.assignment -and $roomCfg.assignment.assigned_role) {
+                $base = ([string]$roomCfg.assignment.assigned_role) -replace ':.*$', ''
+                if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+            }
+            if ($roomCfg.assignment -and $roomCfg.assignment.candidate_roles) {
+                foreach ($candidate in @($roomCfg.assignment.candidate_roles)) {
+                    $base = ([string]$candidate) -replace ':.*$', ''
+                    if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+                }
+            }
+        } catch { }
+    }
+
+    return @($roles)
+}
+
+function Build-ManagerTeamDomainContext {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle
+    )
+
+    $memberRoles = Get-ManagerEpicMemberRoles -RoomDir $RoomDir -Lifecycle $Lifecycle
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('## Team Domain Context') | Out-Null
+    $lines.Add('') | Out-Null
+    if (-not $memberRoles -or $memberRoles.Count -eq 0) {
+        $lines.Add('Current epic members: _No member roles resolved from lifecycle/config._') | Out-Null
+    } else {
+        $lines.Add('Current epic members:') | Out-Null
+        foreach ($roleName in $memberRoles) {
+            $header = Read-ManagerRoleHeader -RoleName $roleName
+            $tagText = if ($header.Tags -and $header.Tags.Count -gt 0) { $header.Tags -join ', ' } else { 'none' }
+            $trustText = if ($header.TrustLevel) { $header.TrustLevel } else { 'unspecified' }
+            $lines.Add("- $($header.Name): $($header.Description) (tags: $tagText; trust_level: $trustText)") | Out-Null
+        }
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Leadership stance: You are the generic team leader for this epic. Inherit the domain language, risk lens, and evaluation expectations from the member descriptions above. Judge the escalation against the current epic context, not against a fixed engineering-manager persona.') | Out-Null
+    return ($lines -join "`n")
+}
+
+function Build-ManagerTriagePrompt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$TaskRef,
+        [Parameter(Mandatory)]$EscalationMessage
+    )
+
+    $agentsDir = _ctx 'agentsDir'
+    $managerRolePath = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'roles' (Join-Path 'manager' 'ROLE.md')) } else { '' }
+    $managerRole = if ($managerRolePath -and (Test-Path $managerRolePath)) { Get-Content $managerRolePath -Raw } else { '# manager' }
+    $teamDomain = Build-ManagerTeamDomainContext -RoomDir $RoomDir -Lifecycle $Lifecycle
+    $briefPath = Join-Path $RoomDir 'brief.md'
+    $brief = if (Test-Path $briefPath) { Get-Content $briefPath -Raw } else { '_No brief.md found._' }
+    $tasksPath = Join-Path $RoomDir 'TASKS.md'
+    $tasks = if (Test-Path $tasksPath) { Get-Content $tasksPath -Raw } else { '_No TASKS.md found._' }
+
+    $readMessages = _ctx 'readMessages'
+    $recent = @()
+    try { $recent = & $readMessages -RoomDir $RoomDir -Last 8 -AsObject } catch { $recent = @() }
+    $recentText = if ($recent -and $recent.Count -gt 0) {
+        (@($recent) | ForEach-Object { "### $($_.from) -> $($_.to) [$($_.type)]`n$($_.body)" }) -join "`n`n"
+    } else { '_No recent messages found._' }
+
+    $escalationBody = if ($EscalationMessage.body) { [string]$EscalationMessage.body } else { '' }
+    $raiser = if ($EscalationMessage.from) { [string]$EscalationMessage.from } else { 'unknown' }
+
+    return @"
+$managerRole
+
+$teamDomain
+
+## Current Epic Context
+
+Task/Epic reference: $TaskRef
+
+### Brief
+$brief
+
+### TASKS.md
+$tasks
+
+## Recent Member Messages
+
+$recentText
+
+## Last Escalator Message To Review
+
+Escalator: $raiser
+
+$escalationBody
+
+## Your Triage Task
+
+Review the last message from the escalator/member as the team leader for this epic.
+
+Judge:
+1. What is the actual blocker?
+2. Is the answer already in the brief, TASKS.md, artifacts, or prior messages?
+3. Which exact member/domain should answer or act next?
+4. Is this classification: CLARIFICATION, MEMBER_WORK_DEFECT, DOMAIN_DESIGN_ISSUE, PLAN_GAP, BLOCKED, or INVALID_ALREADY_ANSWERED?
+5. Should lifecycle retry budget be consumed? Default is NO for clarification/debate.
+6. What exact next channel message should be posted?
+
+Post your decision to the war-room channel as `manager`. If another member must act, post `fix` to that member with narrow instructions. If no member action is needed, post `done` to the escalator with the resolved answer and return path. Include classification, evidence considered, decision, next role, retry impact, and return path to the original escalator.
+"@
+}
+
+function Start-ManagerTriageAgent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$Prompt,
+        [Parameter(Mandatory)][string]$TaskRef
+    )
+
+    $agentsDir = _ctx 'agentsDir'
+    $invokeAgent = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'roles' (Join-Path '_base' 'Invoke-Agent.ps1')) } else { '' }
+    if (-not $invokeAgent -or -not (Test-Path $invokeAgent)) { throw "Invoke-Agent.ps1 not found for manager triage." }
+
+    $artifactsDir = Join-Path $RoomDir 'artifacts'
+    if (-not (Test-Path $artifactsDir)) { New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null }
+    $promptPath = Join-Path $artifactsDir 'manager-triage-prompt.md'
+    $Prompt | Out-File -FilePath $promptPath -Encoding utf8 -Force
+
+    if ($env:OSTWIN_MANAGER_TRIAGE_NO_AGENT -eq '1') {
+        return [pscustomobject]@{ Started = $false; Reason = 'disabled'; PromptPath = $promptPath }
+    }
+
+    if (Test-SpawnLock -RoomDir $RoomDir -Role 'manager') {
+        return [pscustomobject]@{ Started = $false; Reason = 'spawn-lock'; PromptPath = $promptPath }
+    }
+    $managerPid = Join-Path $RoomDir (Join-Path 'pids' 'manager.pid')
+    if (Test-PidAlive $managerPid) {
+        return [pscustomobject]@{ Started = $false; Reason = 'pid-alive'; PromptPath = $promptPath }
+    }
+
+    Write-SpawnLock -RoomDir $RoomDir -Role 'manager'
+    Set-RoleRunStatus -RoomDir $RoomDir -Role 'manager' -Status 'active' | Out-Null
+    $timeout = Resolve-RoleTimeout -RoleName 'manager' -RoomDir $RoomDir
+    $roomId = Split-Path $RoomDir -Leaf
+    Start-Job -Name "ostwin-triage-$roomId-manager" -ScriptBlock {
+        param($invoke, $room, $prompt, $timeoutSeconds)
+        & $invoke -RoomDir $room -RoleName 'manager' -Prompt $prompt -TimeoutSeconds $timeoutSeconds
+    } -ArgumentList $invokeAgent, $RoomDir, $Prompt, $timeout | Out-Null
+
+    return [pscustomobject]@{ Started = $true; Reason = 'started'; PromptPath = $promptPath }
+}
+
 function Invoke-TriageMediation {
     [CmdletBinding()]
     param(
@@ -1261,82 +1503,25 @@ function Invoke-TriageMediation {
     $raiser = if ($latestEscalation.from) { [string]$latestEscalation.from } else { '' }
     $raiserBase = $raiser -replace ':.*$', ''
 
-    $roomCfg = $null
-    $roomConfigFile = Join-Path $RoomDir 'config.json'
-    if (Test-Path $roomConfigFile) {
-        try { $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json } catch { $roomCfg = $null }
-    }
-
-    $targetState = $triageDef.signals.fix.target
-    $targetDef = if ($targetState -and $Lifecycle.states.$targetState) { $Lifecycle.states.$targetState } else { $null }
-    $targetRole = if ($targetDef -and $targetDef.role) { $targetDef.role -replace ':.*$', '' } else { 'engineer' }
-
-    $candidateCounterpart = ''
-    if ($roomCfg -and $roomCfg.assignment -and $roomCfg.assignment.candidate_roles) {
-        foreach ($candidate in @($roomCfg.assignment.candidate_roles)) {
-            $candidateBase = ([string]$candidate) -replace ':.*$', ''
-            if ($candidateBase -and $candidateBase -ne 'manager' -and $candidateBase -ne $raiserBase) {
-                $candidateCounterpart = $candidateBase
-                break
-            }
-        }
-    }
-    if ($candidateCounterpart) { $targetRole = $candidateCounterpart }
-
-    $qaPlanPath = Join-Path $RoomDir 'QA-plan.md'
-    $qaPlanNote = if (Test-Path $qaPlanPath) { "`n- Review QA plan: $qaPlanPath" } else { '' }
     $escalationBody = if ($latestEscalation.body) { [string]$latestEscalation.body } else { '' }
 
     $managerNotes = @"
-Manager mediation for ESCALATE: $raiserBase requested counterpart input before the reviewer can proceed.
+Manager triage judge requested for ESCALATE: $raiserBase asked for leadership mediation before review can proceed.
 
-Counterpart role: $targetRole
-
-Instructions for ${targetRole}:
-- Read the latest escalation and any QA-plan blocker.
-- Answer the reviewer directly in the channel with the missing confirmation, correction, fixture, runtime target, or design decision.
-- Make only low-risk fixes that are necessary to unblock the reviewer; otherwise explain the decision and post DONE.
-$qaPlanNote
-
-After $targetRole posts DONE, lifecycle will return to review so $raiserBase can continue with the new context.
+The deterministic manager loop compiled the current epic member ROLE.md headers, recent messages, brief, TASKS.md, and the latest escalator message, then invoked --agent manager to judge the next action.
 "@
 
-    Write-TriageContext -RoomDir $RoomDir -Classification 'role-mediation' -QaFeedback $escalationBody -ArchitectGuidance '' -ManagerNotes $managerNotes
-
-    $signalBody = @"
-VERDICT: FIX
-
-Manager triage mediation for $TaskRef.
-
-Escalation raised by: $raiserBase
-Counterpart requested: $targetRole
-
-$managerNotes
-
-Original escalation:
-$escalationBody
-"@
-
-    $agentsDir = _ctx 'agentsDir'
-    $signalWriter = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'channel' 'Write-LifecycleSignal.ps1') } else { '' }
-    if (-not $signalWriter -or -not (Test-Path $signalWriter)) {
-        throw "Unable to write triage mediation signal because Write-LifecycleSignal.ps1 was not found."
-    }
-
-    $msg = & $signalWriter -RoomDir $RoomDir `
-        -From 'manager' `
-        -To $targetRole `
-        -Type 'fix' `
-        -Ref $TaskRef `
-        -Body $signalBody `
-        -State 'triage' `
-        -LifecycleSignal
+    Write-TriageContext -RoomDir $RoomDir -Classification 'leader-triage' -QaFeedback $escalationBody -ArchitectGuidance '' -ManagerNotes $managerNotes
+    $prompt = Build-ManagerTriagePrompt -RoomDir $RoomDir -Lifecycle $Lifecycle -TaskRef $TaskRef -EscalationMessage $latestEscalation
+    $start = Start-ManagerTriageAgent -RoomDir $RoomDir -Prompt $prompt -TaskRef $TaskRef
 
     return [pscustomobject]@{
-        Signal = 'fix'
-        TargetRole = $targetRole
+        Signal = 'manager-triage'
+        TargetRole = 'manager'
         RaisedBy = $raiserBase
-        MessageId = $msg.id
+        PromptPath = $start.PromptPath
+        Started = $start.Started
+        Reason = $start.Reason
         AlreadyPresent = $false
     }
 }
@@ -1393,6 +1578,12 @@ Export-ModuleMember -Function @(
     'Set-BlockedDescendants',
     'Invoke-ManagerTriage',
     'Write-TriageContext',
+    'Resolve-ManagerRolePath',
+    'Read-ManagerRoleHeader',
+    'Get-ManagerEpicMemberRoles',
+    'Build-ManagerTeamDomainContext',
+    'Build-ManagerTriagePrompt',
+    'Start-ManagerTriageAgent',
     'Invoke-TriageMediation',
     'Complete-PlanApproval'
 )

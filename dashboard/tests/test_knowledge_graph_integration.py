@@ -61,7 +61,11 @@ def real_embedder() -> KnowledgeEmbedder:
             digest = hashlib.sha256((text or "").encode("utf-8")).digest()
             return [(digest[i % len(digest)] / 255.0) for i in range(1024)]
 
-    return _OfflineEmbedder()  # type: ignore[return-value]
+    embedder = _OfflineEmbedder()
+    from dashboard.knowledge.graph.index import kuzudb
+
+    kuzudb._embedder_singleton = embedder
+    return embedder  # type: ignore[return-value]
 
 
 @pytest.fixture

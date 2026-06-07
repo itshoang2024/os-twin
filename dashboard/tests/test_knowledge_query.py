@@ -96,7 +96,11 @@ def real_embedder() -> KnowledgeEmbedder:
             values = [(digest[i % len(digest)] / 255.0) for i in range(1024)]
             return values
 
-    return _OfflineEmbedder()  # type: ignore[return-value]
+    embedder = _OfflineEmbedder()
+    from dashboard.knowledge.graph.index import kuzudb
+
+    kuzudb._embedder_singleton = embedder
+    return embedder  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -108,7 +112,7 @@ def no_llm(monkeypatch: pytest.MonkeyPatch) -> KnowledgeLLM:
     bleed into tests that rely on graceful-degradation behaviour.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    return KnowledgeLLM(api_key=None)
+    return KnowledgeLLM(api_key=None, model="")
 
 
 def _make_service(kb_dir: Path, embedder: KnowledgeEmbedder, llm: KnowledgeLLM) -> KnowledgeService:
@@ -320,13 +324,16 @@ class TestGraphMode:
 
         engine = populated_service._get_query_engine("query-test")
         original_kg = engine.kg
+        original_graph_rag_engine = engine.graph_rag_engine
         engine.kg = _FakeKuzu()
+        engine.graph_rag_engine = None
         try:
             result = populated_service.query(
                 "query-test", "Acme widgets", mode="graph", threshold=0.0
             )
         finally:
             engine.kg = original_kg
+            engine.graph_rag_engine = original_graph_rag_engine
         assert len(result.entities) == 3
         # Sorted by pagerank score desc.
         assert result.entities[0].id == "e3"
@@ -393,13 +400,16 @@ class TestGraphMode:
 
         engine = populated_service._get_query_engine("query-test")
         original_kg = engine.kg
+        original_graph_rag_engine = engine.graph_rag_engine
         engine.kg = _FakeKuzu()
+        engine.graph_rag_engine = None
         try:
             result = populated_service.query(
                 "query-test", "anything", mode="graph", threshold=0.0
             )
         finally:
             engine.kg = original_kg
+            engine.graph_rag_engine = original_graph_rag_engine
         assert len(result.entities) == _MAX_ENTITIES_PER_QUERY
 
 

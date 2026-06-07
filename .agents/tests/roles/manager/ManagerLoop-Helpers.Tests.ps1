@@ -513,8 +513,10 @@ Describe "Invoke-TriageMediation" {
     BeforeEach {
         $script:PriorEventWsDisabled = $env:OSTWIN_EVENT_WS_DISABLED
         $script:PriorEventFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+        $script:PriorManagerTriageNoAgent = $env:OSTWIN_MANAGER_TRIAGE_NO_AGENT
         $env:OSTWIN_EVENT_WS_DISABLED = '1'
         $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+        $env:OSTWIN_MANAGER_TRIAGE_NO_AGENT = '1'
         $script:wd = Join-Path $TestDrive "itm-$(Get-Random)"
         New-Item -ItemType Directory -Path $script:wd -Force | Out-Null
         Set-TestContext -RoomsDir $script:wd
@@ -538,55 +540,38 @@ Describe "Invoke-TriageMediation" {
     AfterEach {
         $env:OSTWIN_EVENT_WS_DISABLED = $script:PriorEventWsDisabled
         $env:OSTWIN_EVENT_FILE_ENABLED = $script:PriorEventFileEnabled
+        $env:OSTWIN_MANAGER_TRIAGE_NO_AGENT = $script:PriorManagerTriageNoAgent
     }
 
-    It "turns a QA automation escalation into a manager fix request for the counterpart role" {
+    It "turns a QA automation escalation into a compiled manager triage prompt" {
         & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE`nNeed engineer to confirm baseUrl."
 
         $result = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
 
-        $result.Signal | Should -Be "fix"
-        $result.TargetRole | Should -Be "engineer"
+        $result.Signal | Should -Be "manager-triage"
+        $result.TargetRole | Should -Be "manager"
         $result.RaisedBy | Should -Be "qa-automation-engineer"
+        $result.Started | Should -BeFalse
+        $result.Reason | Should -Be "disabled"
         Test-Path (Join-Path $script:rd "artifacts/triage-context.md") | Should -BeTrue
+        Test-Path $result.PromptPath | Should -BeTrue
 
-        $fixMsgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -Last 1 -AsObject
-        $fixMsgs[-1].from | Should -Be "manager"
-        $fixMsgs[-1].to | Should -Be "engineer"
-        $fixMsgs[-1].event_id | Should -Match '^evt_'
-        $fixMsgs[-1].plan_id | Should -Be "plan-itm"
-        $fixMsgs[-1].run_id | Should -Be "run-itm"
-        $fixMsgs[-1].room_id | Should -Be (Split-Path $script:rd -Leaf)
-        $fixMsgs[-1].body | Should -Match "Manager triage mediation"
-        $fixMsgs[-1].body | Should -Match "Need engineer to confirm baseUrl"
-
-        Test-Path $script:eventsPath | Should -BeTrue
-        $event = Get-Content $script:eventsPath -Raw | ConvertFrom-Json
-        $event.event_type | Should -Be "lifecycle.signal.posted"
-        $event.event_id | Should -Be $fixMsgs[-1].event_id
-        $event.plan_id | Should -Be "plan-itm"
-        $event.run_id | Should -Be "run-itm"
-        $event.room_id | Should -Be (Split-Path $script:rd -Leaf)
-        $event.epic_ref | Should -Be "TASK-TEST"
-        $event.role | Should -Be "manager"
-        $event.state | Should -Be "triage"
-        $event.payload.from | Should -Be "manager"
-        $event.payload.to | Should -Be "engineer"
-        $event.payload.type | Should -Be "fix"
-
-        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "triage" | Should -Be "fix"
+        $prompt = Get-Content $result.PromptPath -Raw
+        $prompt | Should -Match "## Team Domain Context"
+        $prompt | Should -Match "engineer"
+        $prompt | Should -Match "qa-automation-engineer"
+        $prompt | Should -Match "## Last Escalator Message To Review"
+        $prompt | Should -Match "Need engineer to confirm baseUrl"
+        $prompt | Should -Match "Post your decision to the war-room channel as"
     }
 
     It "is idempotent when a manager triage signal is already present" {
         & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE"
-        Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST" | Out-Null
-        $firstCount = (& $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject).Count
+        & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "Manager decision already present."
 
         $second = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
         $second.AlreadyPresent | Should -BeTrue
         $second.Signal | Should -Be "fix"
-        $secondCount = (& $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject).Count
-        $secondCount | Should -Be $firstCount
     }
 }
 
