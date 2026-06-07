@@ -14,6 +14,7 @@ import subprocess
 _re_mod = re
 from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from dashboard.models import CreatePlanRequest, SavePlanRequest, RefineRequest, UpdatePlanRoleConfigRequest, RunRequest
 from dashboard.api_utils import (
@@ -27,6 +28,13 @@ from dashboard.auth import get_current_user
 
 router = APIRouter(tags=["plans"])
 logger = logging.getLogger(__name__)
+
+
+class RoomFeedbackRequest(BaseModel):
+    content: str
+    source: str = "bot"
+    user_id: str = "unknown"
+    run_id: Optional[str] = None
 
 
 def _resolve_plans_dir_for_write() -> Path:
@@ -1417,7 +1425,7 @@ async def list_plans(
             status_match = re.search(r"^>\s*Status:\s*(\w+)", content, re.MULTILINE)
             status = status_match.group(1).lower() if status_match else "stored"
 
-            from dashboard.zvec_store import uuid7
+            from dashboard.zvec_store import plan_backfill_enabled, uuid7
             p = {
                 "plan_id": plan_id,
                 "time_id": uuid7(),
@@ -1429,16 +1437,21 @@ async def list_plans(
                 "filename": f.name,
             }
 
-            # Best-effort: backfill zvec index for this missing plan
-            if store:
+            # Best-effort zvec backfill is disabled by default. Listing plans
+            # should not mutate the vector store unless explicitly opted in for
+            # migrations with OSTWIN_PLAN_BACKFILL_ENABLED=true.
+            if store and plan_backfill_enabled():
                 try:
-                    store.index_plan(
+                    indexed = store.index_plan(
                         plan_id=plan_id, title=p["title"], content=content,
                         epic_count=p.get("epic_count", 0), filename=f.name,
                         status=p["status"], created_at=p["created_at"],
                         file_mtime=f.stat().st_mtime,
                     )
-                    logger.info("Backfilled zvec index for plan %s", plan_id)
+                    if indexed:
+                        logger.info("Backfilled zvec index for plan %s", plan_id)
+                    else:
+                        logger.warning("Failed to backfill plan %s into zvec", plan_id)
                 except Exception as e:
                     logger.warning("Failed to backfill plan %s into zvec: %s", plan_id, e)
 
@@ -3333,7 +3346,12 @@ async def get_plan_room_roles(plan_id: str, room_id: str, user: dict = Depends(g
     return {"plan_id": plan_id, "room_id": room_id, "roles": role_instances, "count": len(role_instances)}
 
 @router.get("/api/plans/{plan_id}/rooms/{room_id}/channel")
-async def get_plan_room_channel(plan_id: str, room_id: str, user: dict = Depends(get_current_user)):
+async def get_plan_room_channel(
+    plan_id: str,
+    room_id: str,
+    limit: int = Query(0, ge=0, le=100),
+    user: dict = Depends(get_current_user),
+):
     """Get channel messages for a plan-scoped war-room."""
     from dashboard.api_utils import read_channel
     warrooms_dir = resolve_runtime_plan_warrooms_dir(plan_id)
@@ -3342,7 +3360,48 @@ async def get_plan_room_channel(plan_id: str, room_id: str, user: dict = Depends
     room_dir = warrooms_dir / room_id
     if not room_dir.exists():
         raise HTTPException(status_code=404, detail=f"Room {room_id} not found in plan {plan_id}")
-    return {"messages": read_channel(room_dir), "plan_id": plan_id, "room_id": room_id}
+    return {"messages": read_channel(room_dir, limit=limit or None), "plan_id": plan_id, "room_id": room_id}
+
+
+@router.post("/api/plans/{plan_id}/rooms/{room_id}/feedback")
+async def post_plan_room_feedback(
+    plan_id: str,
+    room_id: str,
+    request: RoomFeedbackRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Append user feedback from bot replies into a room's TASKS.md."""
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Feedback content is required")
+
+    warrooms_dir = resolve_runtime_plan_warrooms_dir(plan_id)
+    if not warrooms_dir:
+        raise HTTPException(status_code=404, detail=f"Room {room_id} not found in plan {plan_id}")
+    room_dir = warrooms_dir / room_id
+    if not room_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Room {room_id} not found in plan {plan_id}")
+
+    tasks_file = room_dir / "TASKS.md"
+    existing = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else ""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    feedback_block = (
+        "\n\n## User Feedback\n\n"
+        f"- ts: `{timestamp}`\n"
+        f"- source: `{request.source}`\n"
+        f"- user: `{request.user_id}`\n"
+        f"- run: `{request.run_id or ''}`\n\n"
+        f"{content}\n"
+    )
+    tasks_file.write_text(existing.rstrip() + feedback_block, encoding="utf-8")
+
+    return {
+        "status": "ok",
+        "plan_id": plan_id,
+        "room_id": room_id,
+        "tasks_path": str(tasks_file),
+        "bytes_written": len(feedback_block.encode("utf-8")),
+    }
 
 @router.get("/api/plans/{plan_id}/rooms/{room_id}/state")
 async def get_plan_room_state(plan_id: str, room_id: str, user: dict = Depends(get_current_user)):

@@ -207,6 +207,87 @@ Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$($script:capturedProm
         }
     }
 
+    Context "Orchestration runtime failure events" {
+        BeforeEach {
+            $script:priorEventFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+            $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+            $script:eventsPath = Join-Path $TestDrive "events-$(Get-Random).jsonl"
+            [ordered]@{
+                room_id     = 'room-evt-001'
+                task_ref    = 'EPIC-999'
+                plan_id     = 'pt-events'
+                run_id      = 'run-events'
+                events_path = $script:eventsPath
+                status      = [ordered]@{ current = 'developing' }
+            } | ConvertTo-Json -Depth 6 | Out-File (Join-Path $script:roomDir 'config.json') -Encoding utf8
+        }
+
+        AfterEach {
+            $env:OSTWIN_EVENT_FILE_ENABLED = $script:priorEventFileEnabled
+        }
+
+        It "writes agent.run.failed when a launched command exits non-zero" {
+            $failScript = Join-Path $TestDrive "fail-agent-$(Get-Random).ps1"
+            "Write-Output 'intentional failure'; exit 7" | Out-File $failScript -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "fail" `
+                -AgentCmd (Get-PwshAgentCmd $failScript) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 7
+            Test-Path $script:eventsPath | Should -BeTrue
+            $event = Get-Content $script:eventsPath -Raw | ConvertFrom-Json
+            $event.event_type | Should -Be 'agent.run.failed'
+            $event.plan_id | Should -Be 'pt-events'
+            $event.room_id | Should -Be 'room-evt-001'
+            $event.epic_ref | Should -Be 'EPIC-999'
+            $event.role | Should -Be 'engineer'
+            $event.state | Should -Be 'developing'
+            $event.payload.exit_code | Should -Be 7
+        }
+
+        It "does not write agent.run.failed when the worker advanced room state before being killed" {
+            'developing' | Out-File (Join-Path $script:roomDir 'status') -Encoding utf8 -NoNewline
+            $configPath = Join-Path $script:roomDir 'config.json'
+            $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+            $cfg.status.current = 'pending'
+            $cfg | ConvertTo-Json -Depth 6 | Out-File $configPath -Encoding utf8
+
+            $advanceThenKilledScript = Join-Path $TestDrive "advance-then-killed-$(Get-Random).ps1"
+            @'
+Write-Output 'warroom_report_progress percent=100'
+Write-Output 'warroom_update_status status=review'
+'review' | Out-File (Join-Path $env:AGENT_OS_ROOM_DIR 'status') -Encoding utf8 -NoNewline
+exit 137
+'@ | Out-File $advanceThenKilledScript -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "advance then killed" `
+                -AgentCmd (Get-PwshAgentCmd $advanceThenKilledScript) -TimeoutSeconds 5
+
+            $result.ExitCode | Should -Be 137
+            (Get-Content (Join-Path $script:roomDir 'status') -Raw).Trim() | Should -Be 'review'
+            Test-Path $script:eventsPath | Should -BeFalse
+        }
+
+        It "writes agent.run.timed_out when a launched command times out" {
+            $slowScript = Join-Path $TestDrive "slow-agent-$(Get-Random).ps1"
+            "Start-Sleep -Seconds 30" | Out-File $slowScript -Encoding utf8
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "qa" -Prompt "slow" `
+                -AgentCmd (Get-PwshAgentCmd $slowScript) -TimeoutSeconds 1
+
+            $result.ExitCode | Should -Be 124
+            $result.TimedOut | Should -BeTrue
+            Test-Path $script:eventsPath | Should -BeTrue
+            $event = Get-Content $script:eventsPath -Raw | ConvertFrom-Json
+            $event.event_type | Should -Be 'agent.run.timed_out'
+            $event.role | Should -Be 'qa'
+            $event.payload.timed_out | Should -BeTrue
+        }
+    }
+
     Context "Config resolution" {
         It "uses OSTWIN_AGENT_CMD env var override" {
             $env:OSTWIN_AGENT_CMD = "echo"

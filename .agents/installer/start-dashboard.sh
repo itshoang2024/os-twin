@@ -238,6 +238,8 @@ _check_tunnel() {
     TUNNEL_URL="$tunnel_url"
   elif [[ -n "$tunnel_error" ]]; then
     warn "Tunnel failed: $tunnel_error"
+  elif [[ "${OSTWIN_NGROK_ENABLED:-true}" =~ ^(0|false|no|off)$ ]]; then
+    info "Tunnel disabled — run build/install with --ngrok to enable port forwarding"
   elif [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
     info "Tunnel not configured — set NGROK_AUTHTOKEN in ~/.ostwin/.env to enable port forwarding"
   else

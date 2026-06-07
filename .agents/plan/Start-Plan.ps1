@@ -58,27 +58,35 @@ param(
 # .agents folder which might only contain .war-rooms or project-local config.
 #
 # Resolution order:
-#   1. $OSTWIN_HOME env var (explicit override)
-#   2. $ProjectDir/.agents — but ONLY if it contains the required scripts
-#   3. Fallback: derive from $PSScriptRoot (the script's own install location)
+#   1. $ProjectDir/.agents — but ONLY if it contains the required scripts
+#   2. Script's own installation tree (keeps Start-Plan and helper scripts in sync)
+#   3. $OSTWIN_HOME env var (installed global fallback)
 $installDir = $PSScriptRoot | Split-Path   # e.g. /Users/paulaan/.ostwin
 
-if ($env:OSTWIN_HOME -and (Test-Path $env:OSTWIN_HOME)) {
-    # OSTWIN_HOME is the install root (e.g. ~/.ostwin).
-    # Scripts live under .agents/ (e.g. ~/.ostwin/.agents/war-rooms/New-WarRoom.ps1)
+function Test-OstwinScriptTree {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    return (Test-Path (Join-Path $Path "war-rooms" "New-WarRoom.ps1")) -and
+           (Test-Path (Join-Path $Path "plan" "Build-DependencyGraph.ps1"))
+}
+
+$agentsDir = $null
+$projectAgentsDir = Join-Path $ProjectDir ".agents"
+if (Test-OstwinScriptTree -Path $projectAgentsDir) {
+    $agentsDir = $projectAgentsDir
+} elseif (Test-OstwinScriptTree -Path $installDir) {
+    $agentsDir = $installDir
+} elseif ($env:OSTWIN_HOME -and (Test-Path $env:OSTWIN_HOME)) {
     $candidate = Join-Path $env:OSTWIN_HOME ".agents"
-    if (Test-Path $candidate) {
+    if (Test-OstwinScriptTree -Path $candidate) {
         $agentsDir = $candidate
-    } else {
+    } elseif (Test-OstwinScriptTree -Path $env:OSTWIN_HOME) {
         $agentsDir = $env:OSTWIN_HOME
     }
-} else {
-    $agentsDir = Join-Path $ProjectDir ".agents"
-    $sentinel  = Join-Path $agentsDir "war-rooms" "New-WarRoom.ps1"
-    if (-not (Test-Path $sentinel)) {
-        # Project .agents dir is missing or doesn't contain Ostwin scripts — use installation
-        $agentsDir = $installDir
-    }
+}
+
+if (-not $agentsDir) {
+    $agentsDir = $installDir
 }
 
 $newWarRoom = Join-Path $agentsDir "war-rooms" "New-WarRoom.ps1"
@@ -108,6 +116,11 @@ $planParserModule = Join-Path $agentsDir "lib" "PlanParser.psm1"
 if (Test-Path $planParserModule) {
     $planParserModule = (Resolve-Path $planParserModule).Path
     Import-Module $planParserModule -Force
+}
+$eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+if (Test-Path $eventsModule) {
+    $eventsModule = (Resolve-Path $eventsModule).Path
+    Import-Module $eventsModule -Force
 }
 
 # --- Helper Functions ---
@@ -233,7 +246,7 @@ if ($isUnderspecified) {
 $expandPlanScript = Join-Path $agentsDir "plan" "Expand-Plan.ps1"
 $shouldExpand = $Expand -or ($isUnderspecified -and $config.manager.auto_expand_plan -eq $true)
 if ($shouldExpand -and (Test-Path $expandPlanScript)) {
-    Write-OstwinLog "Detected underspecified epics or forced expansion. Running Expand-Plan..."
+    Write-OstwinLog -Message "Detected underspecified epics or forced expansion. Running Expand-Plan..." -Level "INFO" -Caller "manager"
     $expandOutFile = $PlanFile -replace '\.md$', '.refined.md'
     if ($DryRun) {
         Write-Host "  [DRY RUN] Would expand epics (e.g. EPIC-001) in $PlanFile → $expandOutFile" -ForegroundColor Yellow
@@ -246,7 +259,7 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
             if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
                 $diff = "Expansion diff placeholder" 
                 if (Get-Command git -ErrorAction SilentlyContinue) { $diff = git diff --no-index $PlanFile $expandOutFile }
-                Write-OstwinLog -Message "Plan expansion diff:`n$diff`n" -Level "info" -Caller "manager"
+                Write-OstwinLog -Message "Plan expansion diff:`n$diff`n" -Level "INFO" -Caller "manager"
             }
 
             $PlanFile = $expandOutFile
@@ -480,6 +493,75 @@ if ($planStem -match '^[0-9a-fA-F]{8,64}$') {
     }
 }
 
+# --- Establish orchestration event execution context ---
+$eventsPath = ''
+$env:OSTWIN_PLAN_ID = $planId
+$runId = "run_$([guid]::NewGuid().ToString('N'))"
+$env:OSTWIN_RUN_ID = $runId
+Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue
+
+# EPIC-003 resume rule: v1 refuses to append a contradictory continuation to
+# an event history that has already recorded plan.run.failed. A future archival
+# run-id flow may permit explicit resume into a fresh log.
+if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
+    try {
+        $hasFailedRun = $false
+        foreach ($line in (Get-Content $eventsPath -ErrorAction Stop)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try {
+                $evt = $line | ConvertFrom-Json
+                if ($evt.event_type -eq 'plan.run.failed') { $hasFailedRun = $true; break }
+            } catch { }
+        }
+        if ($hasFailedRun) {
+            Write-Error "Cannot resume plan '$planId': events.jsonl already contains plan.run.failed. Use an explicit retry/reset that creates a fresh event log."
+            exit 1
+        }
+    } catch {
+        Write-Error "Cannot verify resume safety for plan '$planId': $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+# room-000 is created before the final plan_id is known. Reconcile its config so
+# negotiation, dashboard, and channel layers share the same execution context.
+$room000Config = Join-Path $room000Dir 'config.json'
+if (-not $DryRun -and (Test-Path $room000Config)) {
+    try {
+        $r0cfg = Get-Content $room000Config -Raw | ConvertFrom-Json
+        $r0cfg.plan_id = $planId
+        if ($r0cfg.PSObject.Properties.Name -contains 'events_path') {
+            $r0cfg.PSObject.Properties.Remove('events_path')
+        }
+        if ($r0cfg.PSObject.Properties.Name -contains 'run_id') {
+            $r0cfg.run_id = $runId
+        } else {
+            $r0cfg | Add-Member -NotePropertyName run_id -NotePropertyValue $runId
+        }
+        $r0cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath $room000Config -Encoding utf8
+    } catch {
+        Write-Warning "Failed to stamp room-000 config with orchestration event context: $_"
+    }
+}
+
+if (-not $DryRun -and (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) {
+    $startedEvent = [ordered]@{
+        event_type = 'plan.run.started'
+        plan_id    = $planId
+        run_id     = $runId
+        summary    = "Plan run started for $planId."
+        payload    = [ordered]@{
+            plan_file    = $PlanFile
+            project_dir  = $ProjectDir
+            warrooms_dir = $warRoomsDir
+            resume       = [bool]$Resume
+            run_id       = $runId
+            skip_loop    = [bool]$SkipLoop
+        }
+    }
+    Write-OrchestrationEvent -Event $startedEvent | Out-Null
+}
+
 # --- Register plan in the local registry so the dashboard can see it ---
 if (-not $DryRun) {
     try {
@@ -528,6 +610,7 @@ if (-not $DryRun) {
         }
 
         $meta["plan_id"] = $planId
+        $meta["run_id"] = $runId
         if ($title) { $meta["title"] = $title }
         if (-not $meta["created_at"]) { $meta["created_at"] = (Get-Date).ToUniversalTime().ToString("o") }
         if (-not $meta["status"] -or $meta["status"] -in @("draft","stored")) { $meta["status"] = "active" }
@@ -639,7 +722,7 @@ if ($DryRun) {
 
 # --- Room Creation Logic ---
 function New-PlanWarRooms {
-    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $maxRetries, $timeoutSeconds)
+    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $runId, $eventsPath, $maxRetries, $timeoutSeconds)
     
     # --- Re-parse plan in case it changed during negotiation (uses PlanParser module) ---
     $planContent = Get-Content $PlanFile -Raw
@@ -793,6 +876,7 @@ function New-PlanWarRooms {
             WorkingDir       = $resolvedWorkingDir
             WarRoomsDir      = $warRoomsDir
             PlanId           = $planId
+            RunId            = $runId
             AssignedRole     = $primaryRole
             CandidateRoles   = $candidateRoles
             MaxRetries       = $maxRetries
@@ -824,7 +908,8 @@ function New-PlanWarRooms {
         if ($entry.Assets) {
             $roomArgs['Assets'] = $entry.Assets
         }
-
+        # New-WarRoom appends the room.created source event before writing room,
+        # status, or role config projections. Keep Start-Plan from duplicating it.
         & $newWarRoom @roomArgs
     }
 
@@ -832,6 +917,19 @@ function New-PlanWarRooms {
     Write-Host "[DAG] Building dependency graph..." -ForegroundColor Cyan
     $buildDag = Join-Path $agentsDir "plan" "Build-DependencyGraph.ps1"
     $null = & $buildDag -WarRoomsDir $warRoomsDir
+    if (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue) {
+        $dagEvent = [ordered]@{
+            event_type = 'plan.dag.built'
+            plan_id    = $planId
+            run_id     = $runId
+            summary    = "Dependency graph built for $planId."
+            payload    = [ordered]@{
+                warrooms_dir = $warRoomsDir
+                dag_path     = (Join-Path $warRoomsDir 'DAG.json')
+            }
+        }
+        Write-OrchestrationEvent -Event $dagEvent | Out-Null
+    }
 }
 
 # ===========================================================================
@@ -840,7 +938,7 @@ function New-PlanWarRooms {
 # Always called — even in Resume mode. New-PlanWarRooms skips existing rooms
 # internally (reconcile only) but MUST rebuild DAG.json so the manager loop
 # sees all rooms, not just room-000.
-New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
+New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -runId $runId -eventsPath $eventsPath -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
 
 # ===========================================================================
 # Phase B: Dependency review (reads actual brief.md from each war-room)

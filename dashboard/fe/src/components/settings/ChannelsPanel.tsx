@@ -3,6 +3,104 @@
 import { useState } from 'react';
 import { useChannels, ChannelStatus, useChannelSetup, ConnectorConfig } from '@/hooks/use-channels';
 
+const NOTIFICATION_EVENTS = [
+  {
+    id: 'plan.run.started',
+    title: 'Plan Started',
+    description: 'plan.run.started',
+    group: 'Plan',
+  },
+  {
+    id: 'plan.run.completed',
+    title: 'Plan Completed',
+    description: 'plan.run.completed',
+    group: 'Plan',
+  },
+  {
+    id: 'plan.run.failed',
+    title: 'Plan Failed',
+    description: 'plan.run.failed',
+    group: 'Plan',
+  },
+  {
+    id: 'epic.passed',
+    title: 'Epic Passed',
+    description: 'epic.passed',
+    group: 'Epic',
+  },
+  {
+    id: 'epic.failed',
+    title: 'Epic Failed',
+    description: 'epic.failed',
+    group: 'Epic',
+  },
+  {
+    id: 'epic.retrying',
+    title: 'Epic Retry',
+    description: 'epic.retrying',
+    group: 'Epic',
+  },
+  {
+    id: 'room.created',
+    title: 'Room Created',
+    description: 'room.created',
+    group: 'Room',
+  },
+  {
+    id: 'room.status.changed',
+    title: 'Room Status Changed',
+    description: 'room.status.changed',
+    group: 'Room',
+  },
+] as const;
+
+const SUPPORTED_NOTIFICATION_EVENT_IDS = new Set<string>(NOTIFICATION_EVENTS.map(event => event.id));
+
+const LEGACY_NOTIFICATION_EVENT_IDS: Record<string, string> = {
+  plan_started: 'plan.run.started',
+  plan_completed: 'plan.run.completed',
+  plan_failed: 'plan.run.failed',
+  epic_passed: 'epic.passed',
+  epic_failed: 'epic.failed',
+  epic_retry: 'epic.retrying',
+  room_created: 'room.created',
+  room_status_changed: 'room.status.changed',
+};
+
+interface ChannelItem {
+  id: string;
+  kind?: string;
+  user_id?: string;
+  channel_id?: string;
+  conversation_id?: string;
+  title?: string;
+  platform?: string;
+  created_at?: string;
+  updated_at?: string;
+  enabled?: boolean;
+  registered_events?: string[];
+  notification_events?: string[];
+}
+
+function supportedNotificationEvents(events: string[] | undefined): string[] {
+  const normalized = (events || [])
+    .map(event => LEGACY_NOTIFICATION_EVENT_IDS[event] || event)
+    .filter(event => SUPPORTED_NOTIFICATION_EVENT_IDS.has(event));
+  return Array.from(new Set(normalized));
+}
+
+function getChannelItems(config: ConnectorConfig): ChannelItem[] {
+  return Array.isArray(config.settings?.channel_items) ? config.settings.channel_items : [];
+}
+
+function channelItemLabel(item: ChannelItem): string {
+  return item.title || item.conversation_id || item.channel_id || item.user_id || item.id;
+}
+
+function channelItemEventCount(item: ChannelItem): number {
+  return supportedNotificationEvents(item.registered_events || item.notification_events).length;
+}
+
 export function ChannelsPanel() {
   const { channels = [], isLoading, connect, disconnect, test, regeneratePairing, updateSettings } = useChannels();
 
@@ -301,21 +399,61 @@ function SetupWizard({ platform, onComplete }: { platform: string, onComplete: (
 }
 
 function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: ConnectorConfig, onUpdate: (settings: Partial<ConnectorConfig>) => void, onRegenerate: () => void, onBack: () => void }) {
-  const [events, setEvents] = useState<string[]>(config.notification_preferences?.events || []);
+  const [events, setEvents] = useState<string[]>(supportedNotificationEvents(config.notification_preferences?.events));
   const [notificationsEnabled, setNotificationsEnabled] = useState(config.notification_preferences?.enabled ?? true);
-
-  const allEvents = ['plan_started', 'epic_passed', 'epic_failed', 'task_completed', 'escalation_required'];
+  const [channelItems, setChannelItems] = useState<ChannelItem[]>(() => {
+    const fallbackEvents = supportedNotificationEvents(config.notification_preferences?.events);
+    return getChannelItems(config).map(item => ({
+      ...item,
+      enabled: item.enabled ?? true,
+      registered_events: supportedNotificationEvents(item.registered_events || item.notification_events || fallbackEvents),
+    }));
+  });
+  const [expandedChannelItems, setExpandedChannelItems] = useState<string[]>(() => {
+    const items = getChannelItems(config);
+    return items[0]?.id ? [items[0].id] : [];
+  });
 
   const toggleEvent = (event: string) => {
     setEvents(prev => prev.includes(event) ? prev.filter(e => e !== event) : [...prev, event]);
   };
 
+  const toggleChannelItem = (itemId: string) => {
+    if (!notificationsEnabled) return;
+    setChannelItems(prev => prev.map(item => (
+      item.id === itemId ? { ...item, enabled: !(item.enabled ?? true) } : item
+    )));
+  };
+
+  const toggleChannelItemEvent = (itemId: string, event: string) => {
+    if (!notificationsEnabled) return;
+    setChannelItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const registeredEvents = item.registered_events || [];
+      return {
+        ...item,
+        registered_events: registeredEvents.includes(event)
+          ? registeredEvents.filter(e => e !== event)
+          : [...registeredEvents, event],
+      };
+    }));
+  };
+
+  const toggleChannelItemExpanded = (itemId: string) => {
+    setExpandedChannelItems(prev => (
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    ));
+  };
+
   const handleSave = () => {
     onUpdate({
       notification_preferences: {
-        events,
+        events: channelItems.length > 0 ? [] : events,
         enabled: notificationsEnabled
-      }
+      },
+      settings: {
+        channel_items: channelItems,
+      },
     });
   };
 
@@ -344,18 +482,88 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-faint mb-2 block">Event Triggers</label>
-          {allEvents.map(event => (
-            <label key={event} className="flex items-center justify-between p-2 hover:bg-background border border-transparent hover:border-border-light rounded-lg cursor-pointer transition-all">
-              <span className="text-[11px] text-text-main capitalize">{event.replace('_', ' ')}</span>
-              <input
-                type="checkbox"
-                checked={events.includes(event)}
-                onChange={() => toggleEvent(event)}
-                className="w-4 h-4 accent-primary"
-              />
-            </label>
-          ))}
+          <div className="mb-2">
+            <label className="text-[10px] font-bold uppercase tracking-widest text-text-faint block">Event Triggers</label>
+            <p className="text-[10px] text-text-faint mt-1">
+              {channelItems.length > 0
+                ? 'Choose registered events for each paired channel target.'
+                : 'Leave all unchecked to receive every supported plan, epic, and room event.'}
+            </p>
+          </div>
+          {channelItems.length > 0 ? (
+            <div className="space-y-3">
+              {channelItems.map(item => (
+                <div key={item.id} className={`bg-background border border-border-light rounded-lg overflow-hidden ${notificationsEnabled ? '' : 'opacity-60'}`}>
+                  <div className="flex items-center gap-3 p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleChannelItemExpanded(item.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      aria-expanded={expandedChannelItems.includes(item.id)}
+                    >
+                      <span className="material-symbols-outlined text-lg text-text-muted transition-transform">
+                        {expandedChannelItems.includes(item.id) ? 'expand_less' : 'expand_more'}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-bold text-text-main truncate">{channelItemLabel(item)}</span>
+                        <span className="block text-[10px] font-mono text-text-faint truncate">{item.conversation_id || item.id}</span>
+                      </span>
+                      <span className="shrink-0 rounded-full border border-border-light bg-slate-50 px-2 py-0.5 text-[9px] font-bold text-text-faint">
+                        {channelItemEventCount(item)} events
+                      </span>
+                    </button>
+                    <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold text-text-faint cursor-pointer">
+                      On
+                      <input
+                        type="checkbox"
+                        checked={notificationsEnabled && (item.enabled ?? true)}
+                        disabled={!notificationsEnabled}
+                        onChange={() => toggleChannelItem(item.id)}
+                        className="w-4 h-4 accent-primary"
+                      />
+                    </label>
+                  </div>
+                  {expandedChannelItems.includes(item.id) && (
+                    <div className="grid grid-cols-1 gap-1.5 border-t border-border-light p-3 pt-2">
+                      {NOTIFICATION_EVENTS.map(event => (
+                        <label key={event.id} className="flex items-center justify-between gap-2 py-1.5 px-2 rounded hover:bg-slate-50 cursor-pointer">
+                          <span className="min-w-0">
+                            <span className="text-[10px] font-bold text-text-main">{event.title}</span>
+                            <span className="ml-2 text-[9px] font-mono text-text-faint">{event.description}</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={(item.registered_events || []).includes(event.id)}
+                            disabled={!notificationsEnabled || item.enabled === false}
+                            onChange={() => toggleChannelItemEvent(item.id, event.id)}
+                            className="w-4 h-4 accent-primary"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            NOTIFICATION_EVENTS.map(event => (
+              <label key={event.id} className="flex items-center justify-between p-2 hover:bg-background border border-transparent hover:border-border-light rounded-lg cursor-pointer transition-all gap-3">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-text-main">{event.title}</span>
+                    <span className="text-[9px] font-mono text-text-faint bg-slate-50 border border-border-light rounded px-1.5 py-0.5">{event.group}</span>
+                  </span>
+                  <span className="block text-[10px] font-mono text-text-faint truncate">{event.description}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={events.includes(event.id)}
+                  onChange={() => toggleEvent(event.id)}
+                  className="w-4 h-4 accent-primary"
+                />
+              </label>
+            ))
+          )}
         </div>
 
         <div>
@@ -371,26 +579,6 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
               </div>
             </div>
 
-            <div className="p-3 bg-background border border-border-light rounded-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-text-muted">Authorized Users</span>
-                <span className="text-[10px] text-text-faint font-bold">{config.authorized_users?.length || 0} Paired</span>
-              </div>
-              <div className="space-y-1 max-h-[120px] overflow-y-auto pr-1">
-                {config.authorized_users && config.authorized_users.length > 0 ? (
-                  config.authorized_users.map(userId => (
-                    <div key={userId} className="flex items-center gap-2 p-1.5 bg-slate-50 rounded border border-slate-100/50">
-                      <span className="material-symbols-outlined text-sm text-text-muted">person</span>
-                      <span className="text-[10px] font-mono text-text-main truncate flex-1">{userId}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-2 text-[10px] text-text-faint italic bg-slate-50/50 rounded border border-dashed border-border-light">
-                    No users authorized yet.
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -399,6 +587,11 @@ function SettingsView({ config, onUpdate, onRegenerate, onBack }: { config: Conn
 }
 
 function ConnectedView({ channel, onShowSettings, onTest: _onTest }: { channel: ChannelStatus, onShowSettings: () => void, onTest: () => void }) {
+  const channelItems = channel.config ? getChannelItems(channel.config) : [];
+  const eventCount = channelItems.length > 0
+    ? channelItems.reduce((total, item) => total + supportedNotificationEvents(item.registered_events || item.notification_events).length, 0)
+    : channel.config?.notification_preferences?.events?.length || 0;
+
   return (
     <div className="flex flex-col items-center justify-center h-full py-6 text-center">
       <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-4 border border-emerald-100">
@@ -410,11 +603,11 @@ function ConnectedView({ channel, onShowSettings, onTest: _onTest }: { channel: 
       <div className="grid grid-cols-2 gap-3 w-full">
         <div className="p-3 bg-background border border-border-light rounded-lg">
           <div className="text-[10px] font-bold text-text-faint uppercase mb-1">Users</div>
-          <div className="text-sm font-black text-text-main">{channel.config?.authorized_users?.length || 0}</div>
+          <div className="text-sm font-black text-text-main">{channelItems.length || channel.config?.authorized_users?.length || 0}</div>
         </div>
         <div className="p-3 bg-background border border-border-light rounded-lg">
           <div className="text-[10px] font-bold text-text-faint uppercase mb-1">Events</div>
-          <div className="text-sm font-black text-text-main">{channel.config?.notification_preferences?.events?.length || 0}</div>
+          <div className="text-sm font-black text-text-main">{eventCount}</div>
         </div>
       </div>
 

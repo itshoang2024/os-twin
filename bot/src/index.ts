@@ -9,6 +9,8 @@
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 
+import './logger';
+
 // config.ts loads .env from the project root — import it first
 import './config';
 import config from './config';
@@ -20,12 +22,19 @@ import { ConnectorConfig } from './connectors/base';
 import { NotificationRouter } from './notifications';
 import { flushSessionsSync } from './sessions';
 
+function dashboardWebSocketUrl(dashboardUrl: string): string {
+  const base = dashboardUrl.replace(/\/$/, '');
+  if (base.startsWith('https://')) return `${base.replace(/^https:\/\//, 'wss://')}/api/ws`;
+  if (base.startsWith('http://')) return `${base.replace(/^http:\/\//, 'ws://')}/api/ws`;
+  return 'ws://localhost:3366/api/ws';
+}
+
 console.log('╔═══════════════════════════════════╗');
 console.log('║   OS Twin — Unified Bot Gateway   ║');
 console.log('╚═══════════════════════════════════╝');
 
 async function main() {
-  const notificationRouter = new NotificationRouter(registry);
+  const notificationRouter = new NotificationRouter(registry, dashboardWebSocketUrl(config.DASHBOARD_URL));
 
   const tgConnector = new TelegramConnector();
   const dcConnector = new DiscordConnector();
@@ -124,4 +133,3 @@ main().catch(err => {
   console.error('[INDEX] Fatal startup error:', err);
   process.exit(1);
 });
-

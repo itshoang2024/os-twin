@@ -1,8 +1,11 @@
 """Tests for dashboard/zvec_store.py — pure/static methods that don't need zvec runtime."""
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
-from dashboard.zvec_store import OSTwinStore
+from dashboard.zvec_store import PLANS_COLLECTION, OSTwinStore
 
 
 # ── OSTwinStore._sanitize_text ─────────────────────────────────────
@@ -80,6 +83,34 @@ class TestSanitizeText:
         # Accented characters should decompose to ASCII base
         result = OSTwinStore._sanitize_text("caf\u00E9")
         assert result == "cafe"
+
+
+# ── OSTwinStore.migrate_collections ─────────────────────────────────
+
+
+class TestMigrateCollections:
+    """Tests for schema migration checks."""
+
+    def test_rebuilds_collection_when_embedding_is_not_vector(self, tmp_path):
+        store = OSTwinStore.__new__(OSTwinStore)
+        store.zvec_dir = tmp_path / ".zvec"
+        stale_collection = store.zvec_dir / PLANS_COLLECTION
+        stale_collection.mkdir(parents=True)
+
+        stale_schema = SimpleNamespace(
+            fields=[
+                SimpleNamespace(name="time_id"),
+                SimpleNamespace(name="embedding"),
+            ],
+            vectors=[],
+        )
+        stale_collection_handle = SimpleNamespace(schema=stale_schema)
+
+        with patch("zvec.open", return_value=stale_collection_handle):
+            stats = store.migrate_collections()
+
+        assert PLANS_COLLECTION in stats["migrated"]
+        assert not stale_collection.exists()
 
 
 # ── OSTwinStore._parse_plan_epics ──────────────────────────────────
