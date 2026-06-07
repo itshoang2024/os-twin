@@ -170,17 +170,67 @@ $stallCycles = 0
 $script:planFailed = $false
 
 function Add-CanonicalLifecycleAliases {
-    param($Lifecycle)
+    param(
+        $Lifecycle,
+        [string]$LifecyclePath = ''
+    )
 
     if (-not $Lifecycle -or -not $Lifecycle.states) { return $Lifecycle }
+    $changed = $false
     if (($Lifecycle.states.PSObject.Properties.Name -contains 'passed') -and -not ($Lifecycle.states.PSObject.Properties.Name -contains 'done')) {
         $Lifecycle.states | Add-Member -NotePropertyName done -NotePropertyValue $Lifecycle.states.passed -Force
+        $changed = $true
     }
     if ($Lifecycle.states.PSObject.Properties.Name -contains 'failed-final') {
         $Lifecycle.states | Add-Member -NotePropertyName failed -NotePropertyValue ([pscustomobject]@{ type = 'terminal' }) -Force
+        $changed = $true
     }
     if (($Lifecycle.states.PSObject.Properties.Name -contains 'fixing') -and -not ($Lifecycle.states.PSObject.Properties.Name -contains 'optimize')) {
         $Lifecycle.states | Add-Member -NotePropertyName optimize -NotePropertyValue $Lifecycle.states.fixing -Force
+        $changed = $true
+    }
+
+    # Triage is an active manager state. Ensure every permitted manager channel
+    # decision has a lifecycle transition so the loop can always make progress
+    # once manager writes to the channel. Preserve custom targets/actions when
+    # they already exist; only backfill missing canonical signals.
+    if ($Lifecycle.states.PSObject.Properties.Name -contains 'triage') {
+        if (-not $Lifecycle.states.triage.signals) {
+            $Lifecycle.states.triage | Add-Member -NotePropertyName signals -NotePropertyValue ([pscustomobject]@{}) -Force
+            $changed = $true
+        }
+        $triageSignals = $Lifecycle.states.triage.signals
+        $stateNames = @($Lifecycle.states.PSObject.Properties.Name)
+
+        $doneTarget = if ($stateNames -contains 'review') { 'review' } elseif ($stateNames -contains 'done') { 'done' } else { $Lifecycle.initial_state }
+        $fixTarget = if ($stateNames -contains 'optimize') { 'optimize' } elseif ($stateNames -contains 'developing') { 'developing' } else { $Lifecycle.initial_state }
+        $redesignTarget = if ($stateNames -contains 'developing') { 'developing' } else { $Lifecycle.initial_state }
+        $rejectTarget = if ($stateNames -contains 'failed') { 'failed' } elseif ($stateNames -contains 'failed-final') { 'failed-final' } elseif ($stateNames -contains 'done') { 'done' } else { $Lifecycle.initial_state }
+
+        if ($doneTarget -and -not ($triageSignals.PSObject.Properties.Name -contains 'done')) {
+            $triageSignals | Add-Member -NotePropertyName done -NotePropertyValue ([pscustomobject]@{ target = $doneTarget }) -Force
+            $changed = $true
+        }
+        if ($fixTarget -and -not ($triageSignals.PSObject.Properties.Name -contains 'fix')) {
+            $triageSignals | Add-Member -NotePropertyName fix -NotePropertyValue ([pscustomobject]@{ target = $fixTarget; actions = @('increment_retries') }) -Force
+            $changed = $true
+        }
+        if ($redesignTarget -and -not ($triageSignals.PSObject.Properties.Name -contains 'redesign')) {
+            $triageSignals | Add-Member -NotePropertyName redesign -NotePropertyValue ([pscustomobject]@{ target = $redesignTarget; actions = @('increment_retries', 'revise_brief') }) -Force
+            $changed = $true
+        }
+        if ($rejectTarget -and -not ($triageSignals.PSObject.Properties.Name -contains 'reject')) {
+            $triageSignals | Add-Member -NotePropertyName reject -NotePropertyValue ([pscustomobject]@{ target = $rejectTarget }) -Force
+            $changed = $true
+        }
+    }
+
+    if ($changed -and $LifecyclePath) {
+        try {
+            $Lifecycle | ConvertTo-Json -Depth 20 | Out-File -FilePath $LifecyclePath -Encoding utf8
+        } catch {
+            Write-Log "WARN" "Failed to persist canonical lifecycle aliases to '$LifecyclePath': $($_.Exception.Message)"
+        }
     }
     return $Lifecycle
 }
@@ -250,7 +300,7 @@ while (-not $script:shuttingDown) {
         # --- Resolve Worker Script via centralized Resolve-Role ---
         $roomConfigFile = Join-Path $roomDir "config.json"
         $roomLifecycleFile = Join-Path $roomDir "lifecycle.json"
-        $lifecycle = if (Test-Path $roomLifecycleFile) { Add-CanonicalLifecycleAliases (Get-Content $roomLifecycleFile -Raw | ConvertFrom-Json) } else { $null }
+        $lifecycle = if (Test-Path $roomLifecycleFile) { Add-CanonicalLifecycleAliases -Lifecycle (Get-Content $roomLifecycleFile -Raw | ConvertFrom-Json) -LifecyclePath $roomLifecycleFile } else { $null }
         if ($rawStatus -ne $status -and $status) {
             Write-Log "INFO" "[$taskRef] Normalizing legacy room status '$rawStatus' -> '$status'."
             Write-RoomStatus $roomDir $status
@@ -363,7 +413,7 @@ while (-not $script:shuttingDown) {
                                     }
                                     & $resolvePipeline @pipelineArgs
                                     # Reload lifecycle for this iteration
-                                    $lifecycle = Get-Content $roomLifecycleCheck -Raw | ConvertFrom-Json
+                                    $lifecycle = Add-CanonicalLifecycleAliases -Lifecycle (Get-Content $roomLifecycleCheck -Raw | ConvertFrom-Json) -LifecyclePath $roomLifecycleCheck
                                 }
                             } catch {
                                 Write-Log "WARN" "[$taskRef] Task analysis failed: $_. Using default lifecycle."

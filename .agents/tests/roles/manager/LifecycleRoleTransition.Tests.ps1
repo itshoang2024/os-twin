@@ -54,6 +54,7 @@ BeforeAll {
                     role    = "manager"
                     type    = "triage"
                     signals = @{
+                        done     = @{ target = "review" }
                         fix      = @{ target = "optimize"; actions = @("increment_retries") }
                         redesign = @{ target = "developing"; actions = @("increment_retries", "revise_brief") }
                         reject   = @{ target = "failed-final" }
@@ -442,6 +443,19 @@ Describe "Lifecycle Role Transition — engineer to qa" {
             $optimizeRole = $lc.states.$targetState.role
             $optimizeRole | Should -Be "engineer"
             $optimizeRole | Should -Not -Be $triageRole
+        }
+
+        It "triage → review (done signal) returns to evaluator when escalation is resolved" {
+            & $script:NewWarRoom -RoomId "room-flc005b" -TaskRef "EPIC-FLC5B" `
+                                 -TaskDescription "Triage done to review" -WarRoomsDir $script:warRoomsDir
+            $rd = Join-Path $script:warRoomsDir "room-flc005b"
+            Write-GameLifecycle -RoomDir $rd
+            $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
+
+            $lc.states.triage.role | Should -Be "manager"
+            $targetState = $lc.states.triage.signals.done.target
+            $targetState | Should -Be "review"
+            $lc.states.$targetState.role | Should -Be "qa"
         }
 
         It "triage → developing (redesign signal) routes to engineer for full restart" {

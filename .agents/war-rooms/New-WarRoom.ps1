@@ -499,6 +499,7 @@ if (-not (Test-Path $lifecyclePath)) {
                     role    = 'manager'
                     type    = 'triage'
                     signals = [ordered]@{
+                        done     = [ordered]@{ target = 'review' }
                         fix      = [ordered]@{ target = 'optimize'; actions = @('increment_retries') }
                         redesign = [ordered]@{ target = 'developing'; actions = @('increment_retries', 'revise_brief') }
                         reject   = [ordered]@{ target = 'failed' }

@@ -48,7 +48,7 @@ BeforeAll {
                         signals = @{ done = @{ target = "review" } }
                     }
                     triage = @{ role = "manager"; type = "triage";
-                        signals = @{ fix = @{ target = "optimize"; actions = @("increment_retries") }; redesign = @{ target = "developing"; actions = @("increment_retries","revise_brief") }; reject = @{ target = "failed" } }
+                        signals = @{ done = @{ target = "review" }; fix = @{ target = "optimize"; actions = @("increment_retries") }; redesign = @{ target = "developing"; actions = @("increment_retries","revise_brief") }; reject = @{ target = "failed" } }
                     }
                     done   = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
@@ -562,7 +562,8 @@ Describe "Invoke-TriageMediation" {
         $prompt | Should -Match "qa-automation-engineer"
         $prompt | Should -Match "## Last Escalator Message To Review"
         $prompt | Should -Match "Need engineer to confirm baseUrl"
-        $prompt | Should -Match "Post your decision to the war-room channel as"
+        $prompt | Should -Match "MUST post exactly one lifecycle decision message"
+        $prompt | Should -Match "`done` to the escalator"
     }
 
     It "uses the causal pre-triage escalation when triage state_changed_at is newer" {

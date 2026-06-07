@@ -51,6 +51,7 @@ BeforeAll {
                     role = "manager"
                     type = "triage"
                     signals = @{
+                        done     = @{ target = "review" }
                         fix      = @{ target = "optimize"; actions = @("increment_retries") }
                         redesign = @{ target = "developing"; actions = @("increment_retries", "revise_brief") }
                         reject   = @{ target = "failed" }
@@ -454,6 +455,7 @@ Classified as implementation bug. Engineer should fix.
             # This test validates that behavior is inherited without override.
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
+            $lc.states.triage.signals.done.target | Should -Be "review"
             $lc.states.review.signals.fail.target | Should -Be "optimize"
             $lc.states.triage.signals.fix.target  | Should -Be "optimize"
         }

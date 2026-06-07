@@ -135,6 +135,7 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-bi-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.triage.type | Should -Be "triage"
             $lc.states.triage.role | Should -Be "manager"
+            $lc.states.triage.signals.done.target | Should -Be "review"
             $lc.states.triage.signals.reject.target | Should -Be "failed"
             $lc.states.done.type | Should -Be "terminal"
             $lc.states.failed.type | Should -Be "terminal"

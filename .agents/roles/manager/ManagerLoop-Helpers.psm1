@@ -1419,7 +1419,15 @@ Judge:
 5. Should lifecycle retry budget be consumed? Default is NO for clarification/debate.
 6. What exact next channel message should be posted?
 
-Post your decision to the war-room channel as `manager`. If another member must act, post `fix` to that member with narrow instructions. If no member action is needed, post `done` to the escalator with the resolved answer and return path. Include classification, evidence considered, decision, next role, retry impact, and return path to the original escalator.
+You MUST post exactly one lifecycle decision message to the war-room channel as `manager`. Do not answer only in plain text. Do not say "no new channel post should be made".
+
+Allowed triage decision message types:
+- `done` to the escalator when the escalation is resolved or already answered. This sends lifecycle back to review.
+- `fix` to the responsible member when clarification or rework is needed. Include `Retry impact: none` for clarification-only routing.
+- `redesign` when the plan/approach must restart from developing.
+- `reject` when the room should fail.
+
+Include classification, evidence considered, decision, next role, retry impact, and return path to the original escalator.
 "@
 }
 
@@ -1458,7 +1466,7 @@ function Start-ManagerTriageAgent {
     $roomId = Split-Path $RoomDir -Leaf
     Start-Job -Name "ostwin-triage-$roomId-manager" -ScriptBlock {
         param($invoke, $room, $prompt, $timeoutSeconds)
-        & $invoke -RoomDir $room -RoleName 'manager' -Prompt $prompt -TimeoutSeconds $timeoutSeconds
+        & $invoke -RoomDir $room -RoleName 'manager' -Prompt $prompt -TimeoutSeconds $timeoutSeconds -ForkSession
     } -ArgumentList $invokeAgent, $RoomDir, $Prompt, $timeout | Out-Null
 
     return [pscustomobject]@{ Started = $true; Reason = 'started'; PromptPath = $promptPath }
