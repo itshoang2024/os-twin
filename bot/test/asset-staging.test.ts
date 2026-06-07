@@ -370,10 +370,8 @@ describe('asset-staging', () => {
         { data: new Uint8Array(10), name: 'old.png', mimeType: 'image/png', stagedAt: Date.now() },
       ];
 
-      // Simulate session timeout by setting lastActivity to 31 minutes ago
-      session.lastActivity = Date.now() - 31 * 60 * 1000;
+      session.lastActivity = Date.now() - 8 * 24 * 60 * 60 * 1000;
 
-      // getSession will create a fresh session since lastActivity is expired
       const freshSession = sessions.getSession(USER, PLATFORM);
       expect(freshSession.pendingAttachments).to.have.length(0);
     });

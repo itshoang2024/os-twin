@@ -289,27 +289,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 9
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: dashboard/fe/pnpm-lock.yaml
+          bun-version: latest
 
       - name: Install frontend dependencies
         working-directory: dashboard/fe
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Run dashboard frontend unit tests
         working-directory: dashboard/fe
         run: |
           mkdir -p ../test-results
-          pnpm exec vitest run --reporter=default --reporter=junit --outputFile=../test-results/dashboard-fe-vitest-results.xml
+          bunx vitest run --reporter=default --reporter=junit --outputFile=../test-results/dashboard-fe-vitest-results.xml
 
       - name: Upload dashboard frontend test results
         if: always()
@@ -342,29 +335,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: '22'
-
-      - name: Install pnpm
-        shell: bash
-        run: npm install -g pnpm
+          bun-version: latest
 
       - name: Install bot dependencies
         shell: bash
         working-directory: bot
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: bun install --frozen-lockfile
 
       - name: TypeScript compile check
         shell: bash
         working-directory: bot
-        run: npx tsc --noEmit
+        run: bunx tsc --noEmit
 
       - name: Run bot tests
         shell: bash
         working-directory: bot
-        run: pnpm test
+        run: bun --bun run test
 
   # ─────────────────────────────────────────────────────────────────────────
   # Job 5: Smoke test — install.sh (Linux only)

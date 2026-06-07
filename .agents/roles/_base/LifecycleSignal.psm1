@@ -149,7 +149,7 @@ function Test-FreshLifecycleSignal {
         try { $changedAt = [long](Get-Content $changedFile -Raw).Trim() } catch { $changedAt = 0 }
     }
 
-    foreach ($line in [System.IO.File]::ReadLines($channelFile)) {
+    foreach ($line in [System.IO.File]::ReadAllLines($channelFile)) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try { $msg = $line | ConvertFrom-Json } catch { continue }
 
@@ -253,8 +253,8 @@ function Write-LifecycleSignal {
         $msg['event_id'] = $event.event_id
     }
 
-    ($msg | ConvertTo-Json -Compress -Depth 8) |
-        Out-File -FilePath $channelFile -Encoding utf8 -Append
+    $line = ($msg | ConvertTo-Json -Compress -Depth 8) + [Environment]::NewLine
+    [System.IO.File]::AppendAllText($channelFile, $line, [System.Text.Encoding]::UTF8)
 
     return [pscustomobject]$msg
 }
