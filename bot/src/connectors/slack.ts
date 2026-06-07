@@ -10,6 +10,8 @@ import {
 import { askAgent } from '../agent-bridge';
 import { getSession } from '../sessions';
 import { chunk } from './utils';
+import { slackConversationId } from '../conversation-bindings';
+import { isAuthorizedUser, persistAuthorizedUser, persistPairingCode, upsertChannelItem } from './authorization';
 
 const SLACK_MSG_LIMIT = 3000;
 
@@ -45,6 +47,7 @@ export class SlackConnector implements Connector {
 
     this.status = 'connecting';
     this.pairingCode = config.pairing_code || Math.random().toString(16).slice(2, 10);
+    if (!config.pairing_code) persistPairingCode('slack', this.pairingCode);
     this.authorizedUsers = new Set(config.authorized_users || []);
 
     this.app = new App({
@@ -62,10 +65,13 @@ export class SlackConnector implements Connector {
       // Allow if it's a slash command /pair
       if ((body as any).command === '/pair') return next!();
 
-      // Check authorization (allow if no users configured yet = first user)
-      if (this.authorizedUsers.size > 0 && userId && !this.authorizedUsers.has(userId)) {
-        // We can't easily reply here without more context, but Bolt's built-in 
-        // listeners can handle it. For middleware, we just check.
+      // Slack tokens identify the app/bot installation, not a specific human
+      // owner. Require explicit /pair so owner notifications survive restarts.
+      if (userId && !isAuthorizedUser(this.authorizedUsers, userId)) {
+        // Slash command handlers provide a nicer ephemeral unauthorized reply.
+        // For other events, fail closed here.
+        if ((body as any).command) return next!();
+        return;
       }
 
       await next!();
@@ -80,6 +86,8 @@ export class SlackConnector implements Connector {
       const args = command.text.trim();
       if (args === this.pairingCode) {
         this.authorizedUsers.add(userId);
+        persistAuthorizedUser('slack', userId);
+        this.recordSlackChannelItem(userId, command.channel_id, command.team_id);
         await respond({
           text: `✅ *Pairing successful!* <@${userId}> is now authorized.`,
           response_type: 'ephemeral'
@@ -103,7 +111,8 @@ export class SlackConnector implements Connector {
 
       const text = command.text.trim();
       const [cmd, ...args] = text.split(/\s+/);
-      const responses = await routeCommand(userId, 'slack', cmd || 'menu', args.join(' '));
+      const conversationId = slackConversationId(command.team_id, command.channel_id);
+      const responses = await routeCommand(userId, 'slack', cmd || 'menu', args.join(' '), conversationId);
       await this.sendResponses(say, userId, responses);
     });
 
@@ -117,7 +126,8 @@ export class SlackConnector implements Connector {
           return;
         }
         const args = command.text.trim();
-        const responses = await routeCommand(userId, 'slack', def.name, args);
+        const conversationId = slackConversationId(command.team_id, command.channel_id);
+        const responses = await routeCommand(userId, 'slack', def.name, args, conversationId);
         await this.sendResponses(say, userId, responses);
       });
     }
@@ -131,7 +141,8 @@ export class SlackConnector implements Connector {
           await this.sendUnauthorized(respond, userId);
           return;
         }
-        const responses = await routeCommand(userId, 'slack', def.name);
+        const conversationId = slackConversationId(command.team_id, command.channel_id);
+        const responses = await routeCommand(userId, 'slack', def.name, '', conversationId);
         await this.sendResponses(say, userId, responses);
       });
     }
@@ -145,11 +156,12 @@ export class SlackConnector implements Connector {
       if (!this.isAuthorized(userId)) return;
 
       const actionId = (action as any).action_id;
-      const responses = await routeCallback(userId, 'slack', actionId);
-      
       // If the action happened in a thread, reply in that thread
       const channelId = (body as any).channel?.id;
       const threadTs = (body as any).message?.thread_ts || (body as any).message?.ts;
+      const teamId = (body as any).team?.id || (body as any).team_id || 'unknown';
+      const conversationId = channelId ? slackConversationId(teamId, channelId, threadTs) : undefined;
+      const responses = await routeCallback(userId, 'slack', actionId, conversationId);
       
       if (channelId) {
         await this.sendResponsesChat(channelId, responses, threadTs);
@@ -175,8 +187,11 @@ export class SlackConnector implements Connector {
       
       // Route all free-text through OpenCode-backed agent
       const threadTs = (message as any).thread_ts || (message as any).ts;
+      const channelId = (message as any).channel;
+      const teamId = (message as any).team || (message as any).team_id || 'unknown';
+      const conversationId = channelId ? slackConversationId(teamId, channelId, threadTs) : undefined;
       
-      const result = await askAgent(text, { userId, platform: 'slack' });
+      const result = await askAgent(text, { userId, platform: 'slack', conversationId });
       await this.sendResponses(say, userId, [{ text: result.text }], threadTs);
     });
 
@@ -202,7 +217,8 @@ export class SlackConnector implements Connector {
 
   public async sendMessage(targetId: string, response: BotResponse): Promise<void> {
     if (!this.app) throw new Error('Slack app not started');
-    await this.sendResponsesChat(targetId, [response]);
+    const target = targetId.match(/^slack:team:[^:]+:channel:([^:]+)(?::thread:([^:]+))?$/);
+    await this.sendResponsesChat(target ? target[1] : targetId, [response], target?.[2]);
   }
 
   public getSetupInstructions(): SetupStep[] {
@@ -238,7 +254,25 @@ export class SlackConnector implements Connector {
   // ── Helpers ─────────────────────────────────────────────────────
 
   private isAuthorized(userId: string): boolean {
-    return this.authorizedUsers.size === 0 || this.authorizedUsers.has(userId);
+    return isAuthorizedUser(this.authorizedUsers, userId);
+  }
+
+  private recordSlackChannelItem(userId: string, channelId?: string, teamId?: string): void {
+    upsertChannelItem('slack', {
+      id: `user:${userId}`,
+      kind: 'slack_user',
+      user_id: userId,
+      conversation_id: channelId && teamId ? slackConversationId(teamId, channelId) : undefined,
+    });
+    if (channelId && teamId) {
+      upsertChannelItem('slack', {
+        id: `channel:${teamId}:${channelId}`,
+        kind: 'slack_channel',
+        user_id: userId,
+        channel_id: channelId,
+        conversation_id: slackConversationId(teamId, channelId),
+      });
+    }
   }
 
   private async sendUnauthorized(respond: RespondFn, _userId: string) {

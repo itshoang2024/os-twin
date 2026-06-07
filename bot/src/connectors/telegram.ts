@@ -13,9 +13,43 @@ import {
 import { getSession, getStagedFiles } from '../sessions';
 import { askAgent } from '../agent-bridge';
 import { flushStagedAttachments, getStagedCount } from '../asset-staging';
+import { telegramConversationId } from '../conversation-bindings';
+import { isAuthorizedUser, persistAuthorizedUser, persistPairingCode, upsertChannelItem } from './authorization';
+import api from '../api';
+
+interface RepliedNotificationContext {
+  planId: string;
+  runId?: string;
+  roomId: string;
+}
 
 function escapeMarkdown(text: string): string {
   return text.replace(/([_*\[\]()`~>#+\-=|{}.!\\])/g, '\\$1');
+}
+
+function parseRepliedNotificationContext(text?: string): RepliedNotificationContext | null {
+  if (!text) return null;
+  const planMatch = text.match(/(?:^|\n)Plan:\s*`?([^`\s]+)/i);
+  const runMatch = text.match(/(?:^|\n)Run:\s*`?([^`\s]+)/i);
+  const roomMatch = text.match(/(?:^|\n)Room:\s*`?([^`\s]+)/i);
+  if (!planMatch || !roomMatch) return null;
+  return {
+    planId: planMatch[1],
+    runId: runMatch?.[1],
+    roomId: roomMatch[1],
+  };
+}
+
+function formatRoomLogs(roomId: string, messages: any[]): string {
+  if (!Array.isArray(messages) || messages.length === 0) return `📜 No messages in \`${roomId}\`.`;
+  const lines = [`📜 *Logs for \`${roomId}\`* (last ${messages.length}):`];
+  for (const message of messages.slice(-3)) {
+    const role = message.from || '?';
+    const type = message.type ? `[${message.type}]` : '';
+    const body = String(message.body || '').slice(0, 300).replace(/\n/g, ' ').replace(/[*_`]/g, '');
+    lines.push(`\`${role}\` ${type}: ${body}`);
+  }
+  return lines.join('\n');
 }
 
 async function safeReply(ctx: Context, text: string): Promise<void> {
@@ -47,6 +81,7 @@ export class TelegramConnector implements Connector {
 
     this.status = 'connecting';
     this.pairingCode = config.pairing_code || Math.random().toString(16).slice(2, 10);
+    if (!config.pairing_code) persistPairingCode('telegram', this.pairingCode);
     this.authorizedChats = new Set(config.authorized_users || []);
 
     this.bot = new Telegraf(token, { telegram: { agent: ipv4Agent } });
@@ -59,14 +94,19 @@ export class TelegramConnector implements Connector {
       // Always allow /pair
       if ((ctx.message as any)?.text?.startsWith('/pair')) return next();
 
-      // Check authorization (allow if no chats configured yet = first user)
-      if (this.authorizedChats.size > 0 && !this.authorizedChats.has(chatId)) {
+      // Bot tokens identify the bot account, not the human owner. Telegram's
+      // Bot API cannot fetch the owner of a token, so every human/chat must
+      // explicitly authorize with /pair. Persisted authorized_users are the
+      // source of truth for owner notifications after restart.
+      if (!isAuthorizedUser(this.authorizedChats, chatId)) {
         await ctx.reply(
           `🔒 *Unauthorized.* This bot is private. Use \`/pair ${this.pairingCode}\` to authorize.`,
           { parse_mode: 'Markdown' }
         );
         return;
       }
+
+      this.recordTelegramChannelItem(ctx).catch(err => console.warn('[TELEGRAM] Failed to record channel item:', err.message));
 
       return next();
     });
@@ -77,18 +117,76 @@ export class TelegramConnector implements Connector {
       const args = ctx.message.text.split(/\s+/).slice(1).join(' ');
       if (args === this.pairingCode) {
         this.authorizedChats.add(chatId);
-        // Note: In a real app, we should probably persist this back to config
+        persistAuthorizedUser('telegram', chatId);
+        await this.recordTelegramChannelItem(ctx);
         await ctx.reply('✅ *Pairing successful!* You are now authorized.', { parse_mode: 'Markdown' });
       } else {
-        await ctx.reply('❌ *Invalid pairing code.*', { parse_mode: 'Markdown' });
+        await ctx.reply(`❌ *Invalid pairing code.* Use \`/pair ${this.pairingCode}\` from the Telegram account/chat that should receive owner notifications.`, { parse_mode: 'Markdown' });
       }
     });
 
+    this.bot.command('logs', async (ctx) => {
+      const userId = String(ctx.chat.id);
+      const repliedText = (ctx.message as any).reply_to_message?.text || (ctx.message as any).reply_to_message?.caption;
+      const replyContext = parseRepliedNotificationContext(repliedText);
+      if (!replyContext) {
+        const args = ctx.message.text.replace(/^\/logs(@\S+)?/, '').trim();
+        const conversationId = telegramConversationId(userId, (ctx.message as any).message_thread_id);
+        const responses = await routeCommand(userId, 'telegram', 'logs', args, conversationId);
+        await this.sendResponses(ctx, responses);
+        return;
+      }
+
+      const data = await api.getPlanRoomChannel(replyContext.planId, replyContext.roomId, 3);
+      if (data?._error) {
+        await safeReply(ctx, `⚠️ Failed to fetch logs: ${data._error}`);
+        return;
+      }
+      await safeReply(ctx, formatRoomLogs(replyContext.roomId, data.messages || []));
+    });
+
+    const handleRoomFeedbackCommand = async (ctx: Context) => {
+      const message = ctx.message as any;
+      if (!ctx.chat || !message?.text) return;
+      const userId = String(ctx.chat.id);
+      const args = message.text.replace(/^\/(feedback|feedbak)(@\S+)?/, '').trim();
+      const repliedText = message.reply_to_message?.text || message.reply_to_message?.caption;
+      const replyContext = parseRepliedNotificationContext(repliedText);
+      if (!replyContext) {
+        const conversationId = telegramConversationId(userId, message.message_thread_id);
+        const responses = await routeCommand(userId, 'telegram', 'feedback', args, conversationId);
+        await this.sendResponses(ctx, responses);
+        return;
+      }
+      if (!args) {
+        await safeReply(ctx, '📝 Reply with `/feedback <your feedback>` so I can write it to that room\'s TASKS.md.');
+        return;
+      }
+
+      const result = await api.postPlanRoomFeedback({
+        planId: replyContext.planId,
+        roomId: replyContext.roomId,
+        runId: replyContext.runId,
+        content: args,
+        source: 'telegram_reply',
+        userId: `telegram:${userId}`,
+      });
+      if (result?._error) {
+        await safeReply(ctx, `❌ Failed to save feedback: ${result._error}`);
+        return;
+      }
+      await safeReply(ctx, `✅ Feedback saved to \`${replyContext.roomId}/TASKS.md\`.`);
+    };
+    this.bot.command('feedback', handleRoomFeedbackCommand);
+    this.bot.command('feedbak', handleRoomFeedbackCommand);
+
     // ── Slash commands (no arguments) — driven by COMMAND_REGISTRY
     for (const def of getCommandsWithoutArgsForPlatform(this.platform)) {
+      if (def.name === 'logs' || def.name === 'feedback') continue;
       this.bot.command(def.name, async (ctx) => {
         const userId = String(ctx.chat.id);
-        const responses = await routeCommand(userId, 'telegram', def.name);
+        const conversationId = telegramConversationId(userId, (ctx.message as any).message_thread_id);
+        const responses = await routeCommand(userId, 'telegram', def.name, '', conversationId);
         await this.sendResponses(ctx, responses);
       });
     }
@@ -96,10 +194,12 @@ export class TelegramConnector implements Connector {
     // Commands with inline arguments — driven by COMMAND_REGISTRY
     for (const def of getCommandsWithArgsForPlatform(this.platform)) {
       const cmdName = def.name;
+      if (cmdName === 'logs' || cmdName === 'feedback') continue;
       this.bot.command(cmdName, async (ctx) => {
         const userId = String(ctx.chat.id);
         const args = ctx.message.text.replace(new RegExp(`^\\/${cmdName}(@\\S+)?`), '').trim();
-        const responses = await routeCommand(userId, 'telegram', cmdName, args);
+        const conversationId = telegramConversationId(userId, (ctx.message as any).message_thread_id);
+        const responses = await routeCommand(userId, 'telegram', cmdName, args, conversationId);
         await this.sendResponses(ctx, responses);
       });
     }
@@ -110,10 +210,11 @@ export class TelegramConnector implements Connector {
       const userId = String((cbQuery as any).message?.chat?.id);
       const data = (cbQuery as any).data as string | undefined;
       if (!userId || !data) return;
+      const conversationId = telegramConversationId(userId, (cbQuery as any).message?.message_thread_id);
 
       await ctx.answerCbQuery();
 
-      const responses = await routeCallback(userId, 'telegram', data);
+      const responses = await routeCallback(userId, 'telegram', data, conversationId);
       await this.sendResponsesChat(userId, responses);
     });
 
@@ -140,7 +241,8 @@ export class TelegramConnector implements Connector {
           const attachments = stagedFiles.length > 0
             ? stagedFiles.map(f => ({ name: f.name, contentType: f.contentType, sizeBytes: f.sizeBytes }))
             : undefined;
-          const result = await askAgent(msgText, { userId, platform: 'telegram', attachments });
+          const conversationId = telegramConversationId(userId, (ctx.message as any).message_thread_id);
+          const result = await askAgent(msgText, { userId, platform: 'telegram', conversationId, attachments });
           await safeReply(ctx, result.text);
           // Send image attachments as photos
           if (result.attachments?.length) {
@@ -237,7 +339,8 @@ export class TelegramConnector implements Connector {
           if (caption) {
             try {
               const attachments = downloadable.map(d => ({ name: d.name, contentType: d.contentType, sizeBytes: d.data.byteLength }));
-              const result = await askAgent(caption, { userId, platform: 'telegram', attachments });
+              const conversationId = telegramConversationId(userId, (ctx.message as any).message_thread_id);
+              const result = await askAgent(caption, { userId, platform: 'telegram', conversationId, attachments });
               await safeReply(ctx, result.text);
             } catch (err: any) {
               console.warn('[TELEGRAM] Agent bridge error:', err.message);
@@ -307,7 +410,8 @@ export class TelegramConnector implements Connector {
 
   public async sendMessage(targetId: string, response: BotResponse): Promise<void> {
     if (!this.bot) throw new Error('Telegram bot not started');
-    await this.sendResponsesChat(targetId, [response]);
+    const target = targetId.match(/^telegram:chat:([^:]+)(?::thread:([^:]+))?$/);
+    await this.sendResponsesChat(target ? target[1] : targetId, [response], target?.[2]);
   }
 
   public getSetupInstructions(): SetupStep[] {
@@ -344,6 +448,23 @@ export class TelegramConnector implements Connector {
     );
   }
 
+  private async recordTelegramChannelItem(ctx: Context): Promise<void> {
+    const chat = ctx.chat as any;
+    if (!chat?.id) return;
+    const chatId = String(chat.id);
+    const threadId = (ctx.message as any)?.message_thread_id;
+    const title = chat.title || chat.username || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || undefined;
+    const conversationId = telegramConversationId(chatId, threadId);
+    upsertChannelItem('telegram', {
+      id: threadId ? `${chatId}:${threadId}` : chatId,
+      kind: 'telegram_chat',
+      user_id: chatId,
+      channel_id: chatId,
+      conversation_id: conversationId,
+      title,
+    });
+  }
+
   private async sendResponses(ctx: Context, responses: BotResponse[]): Promise<void> {
     for (const resp of responses) {
       const text = resp.text.length > 4000 ? resp.text.slice(0, 4000) + '\n\n_(truncated)_' : resp.text;
@@ -360,22 +481,23 @@ export class TelegramConnector implements Connector {
     }
   }
 
-  private async sendResponsesChat(chatId: string, responses: BotResponse[]): Promise<void> {
+  private async sendResponsesChat(chatId: string, responses: BotResponse[], threadId?: string): Promise<void> {
     if (!this.bot) return;
     for (const resp of responses) {
       const text = resp.text.length > 4000 ? resp.text.slice(0, 4000) + '\n\n_(truncated)_' : resp.text;
+      const threadOptions = threadId ? { message_thread_id: Number(threadId) } : {};
       if (resp.buttons && resp.buttons.length) {
         const keyboard = TelegramConnector.buildKeyboard(resp.buttons);
         try {
-          await this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(keyboard) });
+          await this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...threadOptions, ...Markup.inlineKeyboard(keyboard) });
         } catch {
-          await this.bot.telegram.sendMessage(chatId, escapeMarkdown(text), { parse_mode: 'Markdown', ...Markup.inlineKeyboard(keyboard) });
+          await this.bot.telegram.sendMessage(chatId, escapeMarkdown(text), { parse_mode: 'Markdown', ...threadOptions, ...Markup.inlineKeyboard(keyboard) });
         }
       } else {
         try {
-          await this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+          await this.bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...threadOptions });
         } catch {
-          await this.bot.telegram.sendMessage(chatId, escapeMarkdown(text), { parse_mode: 'Markdown' });
+          await this.bot.telegram.sendMessage(chatId, escapeMarkdown(text), { parse_mode: 'Markdown', ...threadOptions });
         }
       }
     }

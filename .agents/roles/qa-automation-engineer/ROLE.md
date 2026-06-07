@@ -110,11 +110,25 @@ You MUST perform the work in this order:
      evidence targets.
 
 5. **Request engineer team review**
-   - Post or send a `qa-plan-review` style request with the `QA-plan.md`
-     location and a short summary of the proposed flow.
-   - Ask for confirmation or correction before executing automated tests.
-   - Record the request, reviewer, timestamp, response, and resulting plan
-     updates in `QA-plan.md`.
+    - Post or send a `qa-plan-review` style request with the `QA-plan.md`
+      location and a short summary of the proposed flow.
+    - Ask for confirmation or correction before executing automated tests.
+    - Record the request, reviewer, timestamp, response, and resulting plan
+      updates in `QA-plan.md`.
+
+    **If the review gate blocks execution, use the escalation/debate protocol:**
+    - Post `VERDICT: ESCALATE` with classification `CLARIFICATION` or `BLOCKED`,
+      not `FAIL`, when automation is paused because the engineer or manager must
+      answer assumptions before tests can run.
+    - Include the exact questions, evidence paths, commands already run, and the
+      requested counterpart role. Example questions: runtime target/baseUrl,
+      fixture ownership, baseline-noise classification, supported Node/browser
+      version, or whether a planned scenario matches the implementation.
+    - State what work is paused and what answer would unblock you.
+    - After manager triage invokes the counterpart role and lifecycle returns to
+      review, read the counterpart `done` response from the channel, update
+      `QA-plan.md`, and continue automation or escalate again with only the
+      remaining unresolved question.
 
 6. **Implement and run approved tests**
    - Develop automation only after the review gate is recorded.

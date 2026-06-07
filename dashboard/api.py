@@ -352,7 +352,7 @@ app = FastAPI(
 
 # --- WebSocket ---
 from fastapi import WebSocket, WebSocketDisconnect
-from dashboard.ws_router import manager
+from dashboard.ws_router import handle_client_message, manager
 
 
 @app.websocket("/api/ws")
@@ -364,15 +364,7 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
-                if msg.get("type") == "ping":
-                    import time
-
-                    await websocket.send_json(
-                        {
-                            "type": "pong",
-                            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                        }
-                    )
+                await handle_client_message(websocket, msg)
             except Exception:
                 pass
     except WebSocketDisconnect:

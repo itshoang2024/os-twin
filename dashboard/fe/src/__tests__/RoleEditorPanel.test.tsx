@@ -5,7 +5,7 @@ import RoleEditorPanel from '../components/roles/RoleEditorPanel';
 import { Role } from '../types';
 import { apiPost } from '../lib/api-client';
 import useSWR from 'swr';
-import { useModelRegistry, useRoleDependencies } from '../hooks/use-roles';
+import { useModelRegistry, useRole, useRoleDependencies } from '../hooks/use-roles';
 
 // Mock SWR - use vi.fn() so we can control return values per-test
 vi.mock('swr', () => {
@@ -19,6 +19,7 @@ vi.mock('swr', () => {
 // Mock hooks - use vi.fn() so we can set stable returns in beforeEach
 vi.mock('../hooks/use-roles', () => ({
   useModelRegistry: vi.fn(),
+  useRole: vi.fn(),
   useRoleDependencies: vi.fn(),
 }));
 
@@ -79,6 +80,7 @@ const stableRegistryReturn = {
   isError: undefined 
 };
 const stableDepsReturn = { dependencies: null, isLoading: false, isError: undefined };
+const stableRoleReturn = { role: undefined, isLoading: false, isError: undefined, updateRole: vi.fn(), deleteRole: vi.fn(), testRole: vi.fn(), refresh: vi.fn() };
 
 describe('RoleEditorPanel', () => {
   const mockOnClose = vi.fn();
@@ -89,6 +91,7 @@ describe('RoleEditorPanel', () => {
     // Set stable return values to prevent infinite re-render loops
     (useSWR as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stableSWRReturn);
     (useModelRegistry as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stableRegistryReturn);
+    (useRole as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stableRoleReturn);
     (useRoleDependencies as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stableDepsReturn);
   });
 
@@ -162,6 +165,53 @@ describe('RoleEditorPanel', () => {
     const mcpSelector = screen.getByTestId('mcp-selector');
     expect(mcpSelector).toHaveTextContent('unity-mcp');
     expect(mcpSelector).toHaveTextContent('github-mcp');
+  });
+
+  it('hydrates edit form from the role detail endpoint', () => {
+    const tableRole: Role = {
+      id: 'r1',
+      name: 'engineer',
+      provider: 'claude',
+      version: 'claude-opus-4',
+      temperature: 0.3,
+      budget_tokens_max: 500000,
+      max_retries: 3,
+      timeout_seconds: 300,
+      skill_refs: [],
+      mcp_refs: [],
+      description: 'table summary',
+      instructions: '',
+    };
+    const detailedRole: Role = {
+      ...tableRole,
+      max_retries: 7,
+      timeout_seconds: 1200,
+      skill_refs: ['implement-epic'],
+      mcp_refs: ['unity-mcp'],
+      description: 'full role detail',
+      instructions: 'Detailed ROLE.md instructions',
+    };
+    (useRole as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...stableRoleReturn,
+      role: detailedRole,
+    });
+
+    render(
+      <RoleEditorPanel
+        role={tableRole}
+        isOpen={true}
+        onClose={mockOnClose}
+        existingRoles={existingRoles}
+      />
+    );
+
+    expect(useRole).toHaveBeenCalledWith('r1');
+    expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('1200')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('full role detail')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Detailed ROLE.md instructions')).toBeInTheDocument();
+    expect(screen.getByTestId('skill-chip-input')).toHaveTextContent('implement-epic');
+    expect(screen.getByTestId('mcp-selector')).toHaveTextContent('unity-mcp');
   });
 
   it('includes mcp_refs in save payload when creating a new role', async () => {

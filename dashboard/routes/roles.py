@@ -1,9 +1,6 @@
 import json
 import logging
-import uuid
 import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
@@ -11,6 +8,7 @@ from dashboard.models import Role, CreateRoleRequest
 from dashboard.api_utils import AGENTS_DIR, PLANS_DIR, GLOBAL_ROLES_DIR
 from dashboard.auth import get_current_user
 import dashboard.global_state as global_state
+from dashboard.lib.roles.store import RoleRepository, stable_role_id, utc_now
 
 router = APIRouter(tags=["roles"])
 logger = logging.getLogger(__name__)
@@ -127,264 +125,48 @@ def _resolve_model_id(version: str) -> str:
     return version
 
 
-def _read_role_json(role_name: str) -> dict:
-    """Read individual role.json from disk (the engine's per-role definition)."""
-    role_file = GLOBAL_ROLES_DIR / role_name / "role.json"
-    if not role_file.exists():
-        role_file = AGENTS_DIR / "roles" / role_name / "role.json"
-        
-    if role_file.exists():
-        try:
-            return json.loads(role_file.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
-
-
-def _read_engine_config() -> dict:
-    """Read the engine's global config.json."""
-    if ENGINE_CONFIG_FILE.exists():
-        try:
-            return json.loads(ENGINE_CONFIG_FILE.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+def _role_repository() -> RoleRepository:
+    return RoleRepository(
+        global_roles_dir=GLOBAL_ROLES_DIR,
+        project_roles_dir=AGENTS_DIR / "roles",
+        roles_config_file=ROLES_CONFIG_FILE,
+        engine_config_file=ENGINE_CONFIG_FILE,
+    )
 
 
 def load_roles() -> List[Role]:
-    roles_list = []
-    loaded_names = set()
-    
-    # 1. Load from config.json cache if exists
-    if ROLES_CONFIG_FILE.exists():
-        with open(ROLES_CONFIG_FILE, "r") as f:
-            try:
-                data = json.load(f)
-                roles_list = [Role(**r) for r in data]
-                loaded_names = {r.name for r in roles_list}
-            except: pass
-
-    # 2. If config.json doesn't exist or is empty, bootstrap from registry.json
-    if not roles_list:
-        registry_file = GLOBAL_ROLES_DIR / "registry.json"
-        if not registry_file.exists():
-            registry_file = AGENTS_DIR / "roles" / "registry.json"
-            
-        if registry_file.exists():
-            registry = json.loads(registry_file.read_text())
-            engine_config = _read_engine_config()
-            for r in registry.get("roles", []):
-                name = r["name"]
-                if name in loaded_names: continue
-                role_json = _read_role_json(name)
-                engine_role = engine_config.get(name, {})
-                model = engine_role.get("default_model") or role_json.get("model") or r.get("default_model", "google-vertex/gemini-3-flash-preview")
-                timeout = engine_role.get("timeout_seconds") or role_json.get("timeout_seconds") or role_json.get("timeout", r.get("timeout_seconds", 300))
-                retries = engine_role.get("max_retries") or role_json.get("max_retries", r.get("max_retries", 3))
-                instance_type = engine_role.get("instance_type") or role_json.get("instance_type") or r.get("instance_type", "worker")
-                skill_refs = role_json.get("skill_refs", role_json.get("skills", []))
-                mcp_refs = role_json.get("mcp_refs", [])
-                description = role_json.get("description", r.get("description", ""))
-                role_md_file = GLOBAL_ROLES_DIR / name / "ROLE.md"
-                if not role_md_file.exists():
-                    role_md_file = AGENTS_DIR / "roles" / name / "ROLE.md"
-                instructions = ""
-                if role_md_file.exists():
-                    try:
-                        instructions = role_md_file.read_text()
-                    except OSError:
-                        pass
-                now = datetime.now(timezone.utc).isoformat()
-                role = Role(
-                    id=str(uuid.uuid4()),
-                    name=name,
-                    description=description,
-                    instructions=instructions,
-                    provider=_detect_provider(model).lower(),
-                    version=model,
-                    temperature=0.7,
-                    budget_tokens_max=500000,
-                    max_retries=retries,
-                    timeout_seconds=timeout,
-                    skill_refs=skill_refs,
-                    mcp_refs=mcp_refs,
-                    instance_type=instance_type,
-                    system_prompt_override=None,
-                    created_at=now,
-                    updated_at=now
-                )
-                roles_list.append(role)
-                loaded_names.add(name)
-
-    # 3. Dynamically discover any other role directories
-    added_new = False
-    
-    # Helper to scan a directory for valid role folders
-    def _scan_dir_for_roles(base_dir: Path):
-        nonlocal added_new
-        if not base_dir.exists(): return
-        engine_config = _read_engine_config()
-        for child in base_dir.iterdir():
-            if child.is_dir() and not child.name.startswith("."):
-                name = child.name
-                if name not in loaded_names:
-                    role_file = child / "role.json"
-                    md_file = child / "ROLE.md"
-                    if role_file.exists() or md_file.exists():
-                        role_json = _read_role_json(name)
-                        engine_role = engine_config.get(name, {})
-                        model = engine_role.get("default_model") or role_json.get("model") or "google-vertex/gemini-3-flash-preview"
-                        timeout = engine_role.get("timeout_seconds") or role_json.get("timeout_seconds") or role_json.get("timeout", 300)
-                        retries = engine_role.get("max_retries") or role_json.get("max_retries", 3)
-                        instance_type = engine_role.get("instance_type") or role_json.get("instance_type") or "worker"
-                        skill_refs = role_json.get("skill_refs", role_json.get("skills", []))
-                        mcp_refs = role_json.get("mcp_refs", [])
-                        description = role_json.get("description", "")
-                        
-                        instructions = ""
-                        # prefer global md file
-                        actual_md = GLOBAL_ROLES_DIR / name / "ROLE.md"
-                        if not actual_md.exists(): actual_md = md_file
-                        if actual_md.exists():
-                            try: instructions = actual_md.read_text()
-                            except OSError: pass
-                            
-                        now = datetime.now(timezone.utc).isoformat()
-                        role = Role(
-                            id=str(uuid.uuid4()), name=name, description=description, instructions=instructions,
-                            provider=_detect_provider(model).lower(), version=model, temperature=0.7,
-                            budget_tokens_max=500000, max_retries=retries, timeout_seconds=timeout, skill_refs=skill_refs,
-                            mcp_refs=mcp_refs, instance_type=instance_type, system_prompt_override=None, created_at=now, updated_at=now
-                        )
-                        roles_list.append(role)
-                        loaded_names.add(name)
-                        added_new = True
-
-    _scan_dir_for_roles(GLOBAL_ROLES_DIR)
-    _scan_dir_for_roles(AGENTS_DIR / "roles")
-
-    if added_new or not ROLES_CONFIG_FILE.exists():
-        save_roles(roles_list)
-        
-    return roles_list
+    return _role_repository().list_roles()
 
 
 def save_roles(roles: List[Role]):
-    ROLES_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(ROLES_CONFIG_FILE, "w") as f:
-        json.dump([r.model_dump() for r in roles], f, indent=2)
+    _role_repository().save_projections(roles)
 
 
 def _sync_role_to_engine(role: Role):
-    """Write role config back to engine files so the PowerShell runtime picks it up."""
-    # Update engine's global config.json
-    engine_config = _read_engine_config()
-    if role.name not in engine_config:
-        engine_config[role.name] = {}
-    engine_config[role.name]["default_model"] = role.version
-    engine_config[role.name]["timeout_seconds"] = role.timeout_seconds
-    engine_config[role.name]["max_retries"] = role.max_retries
-    engine_config[role.name]["instance_type"] = role.instance_type
-    if role.skill_refs:
-        engine_config[role.name]["skill_refs"] = role.skill_refs
-    if role.mcp_refs:
-        engine_config[role.name]["mcp_refs"] = role.mcp_refs
-    try:
-        ENGINE_CONFIG_FILE.write_text(json.dumps(engine_config, indent=2))
-    except OSError as e:
-        logger.warning("Failed to update engine config.json: %s", e)
-
-    # Update individual role.json
-    role_dir = GLOBAL_ROLES_DIR / role.name
-    role_dir.mkdir(parents=True, exist_ok=True)
-    role_file = role_dir / "role.json"
-    role_json = _read_role_json(role.name)
-    role_json["model"] = role.version
-    role_json["skill_refs"] = role.skill_refs
-    role_json["mcp_refs"] = role.mcp_refs
-    role_json["timeout_seconds"] = role.timeout_seconds
-    role_json["max_retries"] = role.max_retries
-    role_json["instance_type"] = role.instance_type
-    role_json["description"] = role.description
-    try:
-        role_file.write_text(json.dumps(role_json, indent=2))
-    except OSError as e:
-        logger.warning("Failed to update role.json for %s: %s", role.name, e)
-
-    # Write ROLE.md
-    if role.instructions:
-        role_md_file = role_dir / "ROLE.md"
-        try:
-            role_md_file.write_text(role.instructions)
-        except OSError as e:
-            logger.warning("Failed to write ROLE.md for %s: %s", role.name, e)
+    """Write a changed role to canonical storage and regenerate projections."""
+    repository = _role_repository()
+    repository.write_role(role)
+    repository.save_projections(load_roles())
 
 
 def sync_roles_from_disk() -> dict:
-    """Merge skill_refs and model from on-disk role.json files into dashboard config.
-    Returns a summary of what was updated."""
+    """Migrate loaded roles into role folders and regenerate projections."""
+    result = _role_repository().sync_from_disk()
     roles = load_roles()
-    engine_config = _read_engine_config()
-    updated = []
-    for role in roles:
-        role_json = _read_role_json(role.name)
-        engine_role = engine_config.get(role.name, {})
-        changed = False
-        disk_skills = role_json.get("skill_refs", role_json.get("skills", []))
-        if disk_skills and not role.skill_refs:
-            role.skill_refs = disk_skills
-            changed = True
-        disk_model = engine_role.get("default_model") or role_json.get("model")
-        if disk_model and disk_model != role.version:
-            role.version = disk_model
-            role.provider = _detect_provider(disk_model)
-            changed = True
-        disk_timeout = engine_role.get("timeout_seconds") or role_json.get("timeout_seconds") or role_json.get("timeout")
-        if disk_timeout and disk_timeout != role.timeout_seconds:
-            role.timeout_seconds = disk_timeout
-            changed = True
-        disk_retries = engine_role.get("max_retries") or role_json.get("max_retries")
-        if disk_retries and disk_retries != role.max_retries:
-            role.max_retries = disk_retries
-            changed = True
-        disk_instance_type = engine_role.get("instance_type") or role_json.get("instance_type")
-        if disk_instance_type and disk_instance_type != role.instance_type:
-            role.instance_type = disk_instance_type
-            changed = True
-        disk_description = role_json.get("description", "")
-        if disk_description and disk_description != role.description:
-            role.description = disk_description
-            changed = True
-        role_md_file = GLOBAL_ROLES_DIR / role.name / "ROLE.md"
-        if not role_md_file.exists():
-            role_md_file = AGENTS_DIR / "roles" / role.name / "ROLE.md"
-        if role_md_file.exists():
-            try:
-                disk_instructions = role_md_file.read_text()
-                if disk_instructions != role.instructions:
-                    role.instructions = disk_instructions
-                    changed = True
-            except OSError:
-                pass
-        if changed:
-            role.updated_at = datetime.now(timezone.utc).isoformat()
-            updated.append(role.name)
-    if updated:
-        save_roles(roles)
-        store = global_state.store
-        if store:
-            for role in roles:
-                if role.name in updated:
-                    store.index_role(
-                        role_id=role.id, name=role.name, provider=role.provider,
-                        version=role.version, temperature=role.temperature,
-                        budget_tokens_max=role.budget_tokens_max, max_retries=role.max_retries,
-                        timeout_seconds=role.timeout_seconds, skill_refs=role.skill_refs,
-                        instance_type=role.instance_type,
-                        system_prompt_override=role.system_prompt_override,
-                        created_at=role.created_at, updated_at=role.updated_at,
-                    )
-    return {"synced": updated, "total": len(roles)}
+    store = global_state.store
+    if store:
+        for role in roles:
+            if role.name in result["synced"]:
+                store.index_role(
+                    role_id=role.id, name=role.name, provider=role.provider,
+                    version=role.version, temperature=role.temperature,
+                    budget_tokens_max=role.budget_tokens_max, max_retries=role.max_retries,
+                    timeout_seconds=role.timeout_seconds, skill_refs=role.skill_refs,
+                    instance_type=role.instance_type,
+                    system_prompt_override=role.system_prompt_override,
+                    created_at=role.created_at, updated_at=role.updated_at,
+                )
+    return result
 
 
 @router.post("/api/roles/sync")
@@ -518,9 +300,9 @@ async def create_role(req: CreateRoleRequest, user: dict = Depends(get_current_u
     if any(r.name == req.name for r in roles):
         raise HTTPException(status_code=400, detail="Role name already exists")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = utc_now()
     new_role = Role(
-        id=str(uuid.uuid4()),
+        id=stable_role_id(req.name),
         **req.model_dump(),
         created_at=now,
         updated_at=now
@@ -563,6 +345,7 @@ async def update_role(role_id: str, req: CreateRoleRequest, user: dict = Depends
             old_name = r.name
             new_name = req.name
             if old_name != new_name:
+                _role_repository().delete_role(r)
                 plans_dir = PLANS_DIR
                 if plans_dir.exists():
                     for f in plans_dir.glob("*.roles.json"):
@@ -578,7 +361,7 @@ async def update_role(role_id: str, req: CreateRoleRequest, user: dict = Depends
                 id=role_id,
                 **req.model_dump(),
                 created_at=r.created_at,
-                updated_at=datetime.now(timezone.utc).isoformat()
+                updated_at=utc_now()
             )
             roles[i] = updated_role
             save_roles(roles)
@@ -615,8 +398,7 @@ async def patch_role_by_name(
 ):
     """Patch a role's settings by name.
 
-    Persists to the dashboard roles cache (primary store) and syncs
-    to role.json + engine config.json (secondary file storage).
+    Persists to the role folder and regenerates config projections.
 
     Accepted body fields:
       - default_model / model: the model version string
@@ -632,7 +414,7 @@ async def patch_role_by_name(
     model = body.get("default_model") or body.get("model")
     if model and model != role.version:
         role.version = model
-        role.provider = _detect_provider(model)
+        role.provider = _detect_provider(model).lower()
         changed = True
 
     timeout = body.get("timeout_seconds") or body.get("timeout")
@@ -653,7 +435,7 @@ async def patch_role_by_name(
     if not changed:
         return role
 
-    role.updated_at = datetime.now(timezone.utc).isoformat()
+    role.updated_at = utc_now()
 
     # Primary: persist to dashboard roles cache
     save_roles(roles)
@@ -772,6 +554,7 @@ async def delete_role(role_id: str, force: bool = False, user: dict = Depends(ge
                         f.write_text(json.dumps(config, indent=2))
                 except Exception: pass
     
+    _role_repository().delete_role(role_to_delete)
     roles = [r for r in roles if r.id != role_id]
     save_roles(roles)
 

@@ -59,6 +59,14 @@ dev = [
 # Use the project .venv by default (matches ~/.ostwin/.venv for prod installs)
 python-preference = "managed"
 
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.pip]
 # Allow pre-release for fast-moving AI packages
 prerelease = "if-necessary-or-explicit"

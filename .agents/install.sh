@@ -11,9 +11,14 @@
 #   ./install.sh --channel        # Also install & start the channel connectors (Telegram + Discord + Slack)
 #   ./install.sh --search-engine  # Also install & start SearXNG search
 #   ./install.sh --search-engine-mode local|docker
+#   ./install.sh --daemon      # Install dashboard/host daemon autostart
+#   ./install.sh --no-daemon   # Skip dashboard/host daemon autostart
+#   ./install.sh --ngrok       # Enable ngrok auto-start when token is set
+#   ./install.sh --no-ngrok    # Disable ngrok auto-start
 #   ./install.sh --dashboard-only  # Install dashboard API + frontend only
 #   ./install.sh --no-opencode-config  # Skip patching the managed OpenCode config
 #   ./install.sh --no-start       # Install only; do not start OpenCode/dashboard services
+#   ./install.sh --no-channel     # Install bot dependencies but do not start channel connectors
 #   ./install.sh --help        # Show this help
 #
 # What gets installed:
@@ -47,6 +52,7 @@ SOURCE_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")"
 # shellcheck disable=SC2034
 AUTO_YES=false; SKIP_OPTIONAL=false; DASHBOARD_ONLY=false
 START_CHANNEL=false; INSTALL_SEARCH_ENGINE=false; DASHBOARD_PORT=3366; SKIP_OPENCODE_CONFIG=false; START_SERVICES=true
+INSTALL_HOST_DAEMON=prompt; REGISTER_AUTOSTART=true; NGROK_ENABLED=prompt
 SEARCH_ENGINE_MODE="${OSTWIN_SEARCH_ENGINE_MODE:-}"
 # shellcheck disable=SC2034
 PYTHON_VERSION=""
@@ -62,7 +68,15 @@ while [[ $# -gt 0 ]]; do
     --port)           DASHBOARD_PORT="$2"; shift 2 ;;
     --skip-optional)  SKIP_OPTIONAL=true; shift ;;
     --dashboard-only) DASHBOARD_ONLY=true; AUTO_YES=true; shift ;;
-    --channel)        START_CHANNEL=true; shift ;;
+    --channel|--with-channel) START_CHANNEL=true; shift ;;
+    --no-channel|--without-channel) START_CHANNEL=false; shift ;;
+    --native)         shift ;;
+    --daemon|--with-daemon|--deamon|--with-deamon)
+      INSTALL_HOST_DAEMON=true; REGISTER_AUTOSTART=true; shift ;;
+    --no-daemon|--without-daemon|--no-deamon|--without-deamon|--no-autostart)
+      INSTALL_HOST_DAEMON=false; REGISTER_AUTOSTART=false; shift ;;
+    --ngrok|--with-ngrok) NGROK_ENABLED=true; shift ;;
+    --no-ngrok|--without-ngrok) NGROK_ENABLED=false; shift ;;
     --search-engine|--with-search-engine) INSTALL_SEARCH_ENGINE=true; shift ;;
     --search-engine-mode|--search-engine-runtime)
       INSTALL_SEARCH_ENGINE=true
@@ -81,7 +95,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-opencode-config) SKIP_OPENCODE_CONFIG=true; shift ;;
     --no-start|--skip-start) START_SERVICES=false; shift ;;
-    --help|-h)        head -23 "$0" | tail -21; exit 0 ;;
+    --help|-h)        head -27 "$0" | tail -25; exit 0 ;;
     *)  echo "[ERROR] Unknown option: $1" >&2
         echo "Run './install.sh --help' for usage." >&2; exit 1 ;;
   esac
@@ -175,8 +189,14 @@ if [[ "$OS" == "macos" ]]; then
   DAEMON_INSTALL="$INSTALL_DIR/.agents/daemons/macos-host/install.sh"
   # shellcheck disable=SC2015
   [[ -f "$DAEMON_INSTALL" ]] && {
-    ask "Install macOS host daemon? (desktop automation)" && bash "$DAEMON_INSTALL" \
-      || info "Skipped macOS daemon. Run manually later: bash $DAEMON_INSTALL"
+    if [[ "$INSTALL_HOST_DAEMON" == "true" ]]; then
+      bash "$DAEMON_INSTALL" || warn "macOS daemon install failed (non-fatal)"
+    elif [[ "$INSTALL_HOST_DAEMON" == "false" ]]; then
+      info "Skipped macOS daemon (--no-daemon). Run manually later: bash $DAEMON_INSTALL"
+    else
+      ask "Install macOS host daemon? (desktop automation)" && bash "$DAEMON_INSTALL" \
+        || info "Skipped macOS daemon. Run manually later: bash $DAEMON_INSTALL"
+    fi
   }
 fi
 
@@ -214,7 +234,7 @@ fi
 if $DASHBOARD_ONLY; then
   header "6. PowerShell modules (skipped — dashboard-only)"; info "Skipping in dashboard-only mode"
 elif ! $SKIP_OPTIONAL && command -v pwsh &>/dev/null; then
-  header "6. PowerShell modules"; install_pester
+  header "6. PowerShell modules"; install_pester; install_websocket_module
 else
   header "6. PowerShell modules (skipped)"; info "PowerShell not available or --skip-optional set"
 fi
@@ -251,12 +271,18 @@ fi
 header "9d. Installing channel dependencies (Telegram + Discord + Slack)"
 install_channels || warn "Channel install failed (non-fatal)"
 ok_time "Section 9 complete" "$(print_duration "$section_9_start")"
-# if $START_CHANNEL && [[ -n "${CHAN_DIR:-}" ]]; then
-#   header "9d. Starting channel connectors"; start_channels
-# fi
-if $START_SERVICES; then
+if $START_SERVICES && $START_CHANNEL; then
+  header "9e. Starting channel connectors"; start_channels || warn "Channel connectors failed to start (non-fatal)"
+elif ! $START_CHANNEL; then
+  header "9e. Channel connectors (not started)"
+  info "Run with --channel to start Telegram/Discord/Slack bot connectors."
+fi
+if $START_SERVICES && $REGISTER_AUTOSTART; then
   header "10. Registering dashboard auto-start"
   setup_autostart || warn "Auto-start registration failed (non-fatal)"
+elif ! $REGISTER_AUTOSTART; then
+  header "10. Dashboard auto-start (skipped)"
+  info "Skipping dashboard auto-start registration (--no-daemon)."
 else
   header "10. Dashboard auto-start (skipped)"
   info "Skipping auto-start registration (--no-start). Register manually later via setup_autostart."

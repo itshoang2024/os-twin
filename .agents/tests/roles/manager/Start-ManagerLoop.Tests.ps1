@@ -13,7 +13,7 @@ BeforeAll {
 
     # Helper: write a minimal v2 lifecycle.json into a room.
     # NOTE: generic role names ('engineer'/'qa') are used here for unit-test isolation.
-    # Game-specific lifecycles (sample/room-001) use 'game-engineer'/'game-qa'.
+    # Game-specific lifecycles (sample/room-001) use 'engineer'/'qa'.
     # review.fail → 'optimize' matches the real lifecycle design: QA failures route
     # to incremental optimization, NOT back to 'developing' (full restart).
     function Write-V2Lifecycle {
@@ -1223,28 +1223,28 @@ Context "PLAN-REVIEW Verdict Logic" {
                                  -TaskDescription "Sender reject test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-501"
 
-            # Multi-stage lifecycle: developing→game-designer→review→passed
+            # Multi-stage lifecycle: developing→designer→review→passed
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-	                    developing     = @{ role = "game-engineer";  type = "work"; signals = @{ done = @{ target = "game-designer" } } }
-	                    'game-designer' = @{ role = "game-designer"; type = "work"; signals = @{ done = @{ target = "review" } } }
-                    review         = @{ role = "game-qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; fail = @{ target = "developing" } } }
+	                    developing     = @{ role = "engineer";  type = "work"; signals = @{ done = @{ target = "designer" } } }
+	                    'designer' = @{ role = "designer"; type = "work"; signals = @{ done = @{ target = "review" } } }
+                    review         = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; fail = @{ target = "developing" } } }
                     passed         = @{ type = "terminal" }
                     failed         = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
 
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "game-designer"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "designer"
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # Post 'done' from 'game-engineer' (WRONG sender for game-designer state)
-            & $script:PostMessage -RoomDir $roomDir -From "game-engineer" -To "manager" `
+            # Post 'done' from 'engineer' (WRONG sender for designer state)
+            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "TASK-501" -Body "Engineer done but I'm not designer"
 
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $stateDef = $lc.states.'game-designer'
+            $stateDef = $lc.states.'designer'
             $expectedRole = ($stateDef.role -replace ':.*$', '')
 
             $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
@@ -1252,24 +1252,24 @@ Context "PLAN-REVIEW Verdict Logic" {
 
             # Sender does NOT match lifecycle role — must be REJECTED
             $senderBase | Should -Not -Be $expectedRole
-            $senderBase | Should -Be "game-engineer"     # confirms who sent it
-            $expectedRole | Should -Be "game-designer"    # confirms who we expected
+            $senderBase | Should -Be "engineer"     # confirms who sent it
+            $expectedRole | Should -Be "designer"    # confirms who we expected
         }
     }
 
     Context "Signal bleed prevention — room-003 cascade scenario" {
-        It "game-engineer done does NOT cascade through game-designer and review" {
+        It "engineer done does NOT cascade through designer and review" {
             & $script:NewWarRoom -RoomId "room-510" -TaskRef "EPIC-510" `
                                  -TaskDescription "Signal bleed test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-510"
 
-            # Room-003 lifecycle: developing → game-designer → review → passed
+            # Room-003 lifecycle: developing → designer → review → passed
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-	                    developing      = @{ role = "game-engineer";  type = "work";   signals = @{ done = @{ target = "game-designer" } } }
-	                    'game-designer' = @{ role = "game-designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "game-qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; done = @{ target = "passed" }; fail = @{ target = "developing" } } }
+	                    developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
+	                    'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; done = @{ target = "passed" }; fail = @{ target = "developing" } } }
                     passed          = @{ type = "terminal" }
                     failed          = @{ type = "terminal" }
                 }
@@ -1280,8 +1280,8 @@ Context "PLAN-REVIEW Verdict Logic" {
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # game-engineer posts 'done'
-            & $script:PostMessage -RoomDir $roomDir -From "game-engineer" -To "manager" `
+            # engineer posts 'done'
+            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "EPIC-510" -Body "All tasks completed"
 
             # --- Step 1: developing state should detect it (correct sender) ---
@@ -1291,34 +1291,34 @@ Context "PLAN-REVIEW Verdict Logic" {
             $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $senderBase = ($msgs[0].from -replace ':.*$', '')
 
-            # developing.role = game-engineer, sender = game-engineer → MATCH
+            # developing.role = engineer, sender = engineer → MATCH
             $senderBase | Should -Be $devRole
 
-            # --- Step 2: transition to game-designer ---
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "game-designer"
+            # --- Step 2: transition to designer ---
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "designer"
 
-            # --- Step 3: game-designer state must REJECT the same signal ---
-            $designerDef = $lc.states.'game-designer'
+            # --- Step 3: designer state must REJECT the same signal ---
+            $designerDef = $lc.states.'designer'
             $designerRole = ($designerDef.role -replace ':.*$', '')
 
-            # The SAME done message is still the latest — but sender is game-engineer
+            # The SAME done message is still the latest — but sender is engineer
             $msgs2 = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $sender2 = ($msgs2[0].from -replace ':.*$', '')
 
-            # game-designer.role = game-designer, sender = game-engineer → NO MATCH
+            # designer.role = designer, sender = engineer → NO MATCH
             $sender2 | Should -Not -Be $designerRole
-            $sender2 | Should -Be "game-engineer"
-            $designerRole | Should -Be "game-designer"
+            $sender2 | Should -Be "engineer"
+            $designerRole | Should -Be "designer"
 
             # If the manager used the old logic (no sender check), it would
-            # transition game-designer → review → passed in seconds.
-            # With sender validation, room stays in game-designer waiting for
-            # actual game-designer agent to post its own done signal.
+            # transition designer → review → passed in seconds.
+            # With sender validation, room stays in designer waiting for
+            # actual designer agent to post its own done signal.
             $currentStatus = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $currentStatus | Should -Be "game-designer"
+            $currentStatus | Should -Be "designer"
         }
 
-        It "game-designer own done signal IS accepted after sender validation" {
+        It "designer own done signal IS accepted after sender validation" {
             & $script:NewWarRoom -RoomId "room-511" -TaskRef "EPIC-511" `
                                  -TaskDescription "Correct sender test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-511"
@@ -1326,23 +1326,23 @@ Context "PLAN-REVIEW Verdict Logic" {
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-                    developing      = @{ role = "game-engineer";  type = "work";   signals = @{ done = @{ target = "game-designer" } } }
-                    'game-designer' = @{ role = "game-designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "game-qa";        type = "review"; signals = @{ pass = @{ target = "passed" } } }
+                    developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
+                    'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ pass = @{ target = "passed" } } }
                     passed          = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
 
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "game-designer"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "designer"
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # game-designer posts done (CORRECT sender)
-            & $script:PostMessage -RoomDir $roomDir -From "game-designer" -To "manager" `
+            # designer posts done (CORRECT sender)
+            & $script:PostMessage -RoomDir $roomDir -From "designer" -To "manager" `
                                   -Type "done" -Ref "EPIC-511" -Body "Design work complete"
 
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $designerDef = $lc.states.'game-designer'
+            $designerDef = $lc.states.'designer'
             $designerRole = ($designerDef.role -replace ':.*$', '')
 
             $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
@@ -1360,7 +1360,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             ($msgTs -gt $changedAt) | Should -BeTrue
         }
 
-        It "stale game-engineer done cannot cascade through 3 states" {
+        It "stale engineer done cannot cascade through 3 states" {
             & $script:NewWarRoom -RoomId "room-512" -TaskRef "EPIC-512" `
                                  -TaskDescription "Triple cascade block" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-512"
@@ -1368,9 +1368,9 @@ Context "PLAN-REVIEW Verdict Logic" {
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-                    developing      = @{ role = "game-engineer";  type = "work";   signals = @{ done = @{ target = "game-designer" } } }
-                    'game-designer' = @{ role = "game-designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
-                    review          = @{ role = "game-qa";        type = "review"; signals = @{ done = @{ target = "passed" } } }
+                    developing      = @{ role = "engineer";  type = "work";   signals = @{ done = @{ target = "designer" } } }
+                    'designer' = @{ role = "designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
+                    review          = @{ role = "qa";        type = "review"; signals = @{ done = @{ target = "passed" } } }
                     passed          = @{ type = "terminal" }
                 }
             } | ConvertTo-Json -Depth 10 | Out-File (Join-Path $roomDir "lifecycle.json") -Encoding utf8
@@ -1379,23 +1379,23 @@ Context "PLAN-REVIEW Verdict Logic" {
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # game-engineer posts done — only this one signal exists
-            & $script:PostMessage -RoomDir $roomDir -From "game-engineer" -To "manager" `
+            # engineer posts done — only this one signal exists
+            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "EPIC-512" -Body "Engineer complete"
 
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
 
-            # Check each state: developing accepts, game-designer rejects, review rejects
+            # Check each state: developing accepts, designer rejects, review rejects
             $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $sender = ($msgs[0].from -replace ':.*$', '')
 
-            # State 1: developing (role=game-engineer) — ACCEPTS
+            # State 1: developing (role=engineer) — ACCEPTS
             ($sender -eq ($lc.states.developing.role -replace ':.*$', '')) | Should -BeTrue
 
-            # State 2: game-designer (role=game-designer) — REJECTS (sender=game-engineer)
-            ($sender -eq ($lc.states.'game-designer'.role -replace ':.*$', '')) | Should -BeFalse
+            # State 2: designer (role=designer) — REJECTS (sender=engineer)
+            ($sender -eq ($lc.states.'designer'.role -replace ':.*$', '')) | Should -BeFalse
 
-            # State 3: review (role=game-qa) — REJECTS (sender=game-engineer)
+            # State 3: review (role=qa) — REJECTS (sender=engineer)
             ($sender -eq ($lc.states.review.role -replace ':.*$', '')) | Should -BeFalse
         }
     }
@@ -2036,12 +2036,12 @@ Context "PLAN-REVIEW Verdict Logic" {
             $lc.initial_state | Should -Be "developing"
         }
 
-        It "developing state: run-agent.ps1 carries game-engineer role" {
+        It "developing state: run-agent.ps1 carries engineer role" {
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
             # Assert the lifecycle definition
             $expectedRole = $script:sampleLifecycle.states.developing.role
-            $expectedRole | Should -Be "game-engineer"
+            $expectedRole | Should -Be "engineer"
 
             # Create a war-room and set to developing state
             & $script:NewWarRoom -RoomId "room-ra-001" -TaskRef "TASK-RA-001" `
@@ -2054,16 +2054,16 @@ Context "PLAN-REVIEW Verdict Logic" {
             $content = Get-Content $scriptPath -Raw
 
             # Assert run-agent.ps1 carries the correct role
-            $content | Should -Match "AGENT_OS_ROLE.*=.*'game-engineer'"
-            $content | Should -Match "\-\-agent game-engineer"
-            $content | Should -Match "game-engineer\.pid"
+            $content | Should -Match "AGENT_OS_ROLE.*=.*'engineer'"
+            $content | Should -Match "\-\-agent engineer"
+            $content | Should -Match "engineer\.pid"
         }
 
-        It "optimize state: run-agent.ps1 carries game-engineer role" {
+        It "optimize state: run-agent.ps1 carries engineer role" {
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
             $expectedRole = $script:sampleLifecycle.states.optimize.role
-            $expectedRole | Should -Be "game-engineer"
+            $expectedRole | Should -Be "engineer"
 
             & $script:NewWarRoom -RoomId "room-ra-002" -TaskRef "TASK-RA-002" `
                                  -TaskDescription "run-agent optimize" -WarRoomsDir $script:warRoomsDir
@@ -2073,16 +2073,16 @@ Context "PLAN-REVIEW Verdict Logic" {
             $scriptPath = Write-MockRunAgentScript -RoomDir $roomDir -Role $expectedRole
             $content = Get-Content $scriptPath -Raw
 
-            $content | Should -Match "AGENT_OS_ROLE.*=.*'game-engineer'"
-            $content | Should -Match "\-\-agent game-engineer"
-            $content | Should -Match "game-engineer\.pid"
+            $content | Should -Match "AGENT_OS_ROLE.*=.*'engineer'"
+            $content | Should -Match "\-\-agent engineer"
+            $content | Should -Match "engineer\.pid"
         }
 
-        It "review state: run-agent.ps1 carries game-qa role (not game-engineer)" {
+        It "review state: run-agent.ps1 carries qa role (not engineer)" {
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
             $expectedRole = $script:sampleLifecycle.states.review.role
-            $expectedRole | Should -Be "game-qa"
+            $expectedRole | Should -Be "qa"
 
             & $script:NewWarRoom -RoomId "room-ra-003" -TaskRef "TASK-RA-003" `
                                  -TaskDescription "run-agent review" -WarRoomsDir $script:warRoomsDir
@@ -2092,12 +2092,12 @@ Context "PLAN-REVIEW Verdict Logic" {
             $scriptPath = Write-MockRunAgentScript -RoomDir $roomDir -Role $expectedRole
             $content = Get-Content $scriptPath -Raw
 
-            # review state MUST use game-qa, never game-engineer
-            $content | Should -Match "AGENT_OS_ROLE.*=.*'game-qa'"
-            $content | Should -Match "\-\-agent game-qa"
-            $content | Should -Match "game-qa\.pid"
-            $content | Should -Not -Match "AGENT_OS_ROLE.*=.*'game-engineer'"
-            $content | Should -Not -Match "\-\-agent game-engineer"
+            # review state MUST use qa, never engineer
+            $content | Should -Match "AGENT_OS_ROLE.*=.*'qa'"
+            $content | Should -Match "\-\-agent qa"
+            $content | Should -Match "qa\.pid"
+            $content | Should -Not -Match "AGENT_OS_ROLE.*=.*'engineer'"
+            $content | Should -Not -Match "\-\-agent engineer"
         }
 
         It "triage state: run-agent.ps1 carries manager role" {
@@ -2163,8 +2163,8 @@ Context "PLAN-REVIEW Verdict Logic" {
         It "PID file path in run-agent.ps1 uses the role name (not a generic name)" {
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
-            # For review state, PID file should be game-qa.pid not game-engineer.pid
-            $reviewRole = $script:sampleLifecycle.states.review.role  # game-qa
+            # For review state, PID file should be qa.pid not engineer.pid
+            $reviewRole = $script:sampleLifecycle.states.review.role  # qa
 
             & $script:NewWarRoom -RoomId "room-ra-005" -TaskRef "TASK-RA-005" `
                                  -TaskDescription "PID path test" -WarRoomsDir $script:warRoomsDir
@@ -2177,7 +2177,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             $content | Should -Match "AGENT_OS_PID_FILE=.*/$reviewRole\.pid"
 
             # And must NOT reference any other role's PID file
-            $allRoles = @('game-engineer', 'game-qa', 'manager', 'engineer', 'qa')
+            $allRoles = @('engineer', 'qa', 'manager', 'engineer', 'qa')
             foreach ($otherRole in ($allRoles | Where-Object { $_ -ne $reviewRole })) {
                 # The AGENT_OS_PID_FILE line should only have the expected role
                 $pidFileLine = ($content -split "`n" | Where-Object { $_ -match 'AGENT_OS_PID_FILE' })
@@ -2189,7 +2189,7 @@ Context "PLAN-REVIEW Verdict Logic" {
         It "exec --agent flag in run-agent.ps1 matches AGENT_OS_ROLE" {
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
-            # Test with both developing (game-engineer) and review (game-qa) states
+            # Test with both developing (engineer) and review (qa) states
             $testCases = @(
                 @{ State = "developing"; ExpectedRole = $script:sampleLifecycle.states.developing.role }
                 @{ State = "review";     ExpectedRole = $script:sampleLifecycle.states.review.role }
@@ -2221,12 +2221,12 @@ Context "PLAN-REVIEW Verdict Logic" {
             }
         }
 
-        It "role bleed guard: review run-agent.ps1 does NOT contain game-engineer anywhere in role fields" {
-            # This guards against the original bug: manager was spawning game-engineer
-            # during review state instead of transitioning to game-qa.
+        It "role bleed guard: review run-agent.ps1 does NOT contain engineer anywhere in role fields" {
+            # This guards against the original bug: manager was spawning engineer
+            # during review state instead of transitioning to qa.
             if (-not $script:sampleLifecycle) { Set-ItResult -Skipped -Because "lifecycle fixture missing" }
 
-            $reviewRole = $script:sampleLifecycle.states.review.role  # game-qa
+            $reviewRole = $script:sampleLifecycle.states.review.role  # qa
 
             & $script:NewWarRoom -RoomId "room-ra-bleed" -TaskRef "TASK-RA-BLEED" `
                                  -TaskDescription "Role bleed guard" -WarRoomsDir $script:warRoomsDir
@@ -2235,13 +2235,13 @@ Context "PLAN-REVIEW Verdict Logic" {
             $scriptPath = Write-MockRunAgentScript -RoomDir $roomDir -Role $reviewRole
             $content = Get-Content $scriptPath -Raw
 
-            # game-engineer must not appear in the role-carrying fields
+            # engineer must not appear in the role-carrying fields
             $roleLines = $content -split "`n" | Where-Object {
                 $_ -match 'AGENT_OS_ROLE|AGENT_OS_PID_FILE|--agent'
             }
             foreach ($line in $roleLines) {
-                $line | Should -Not -Match "game-engineer" `
-                    -Because "review state: run-agent.ps1 role fields must reference '$reviewRole', not 'game-engineer'"
+                $line | Should -Not -Match "engineer" `
+                    -Because "review state: run-agent.ps1 role fields must reference '$reviewRole', not 'engineer'"
             }
         }
     }
@@ -2528,7 +2528,7 @@ Context "PLAN-REVIEW Verdict Logic" {
 # Integration Tests: ManagerLoop helpers vs tests/sample/room-001 fixture
 #
 # These tests run the REAL ManagerLoop-Helpers.psm1 functions against the
-# production-like fixture in tests/sample/room-001 (game-engineer / game-qa
+# production-like fixture in tests/sample/room-001 (engineer / qa
 # lifecycle) to ensure the helpers correctly interpret that data.
 # ===========================================================================
 Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
@@ -2591,8 +2591,8 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
         $lc.version       | Should -Be 2
         $lc.initial_state | Should -Be "developing"
         $lc.states | Should -Not -BeNull
-        $lc.states.developing.role | Should -Be "game-engineer"
-        $lc.states.review.role     | Should -Be "game-qa"
+        $lc.states.developing.role | Should -Be "engineer"
+        $lc.states.review.role     | Should -Be "qa"
     }
 
     # -----------------------------------------------------------------------
@@ -2610,7 +2610,7 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "Find-LatestSignal returns 'pass' when game-qa posts pass after state_changed_at" {
+    It "Find-LatestSignal returns 'pass' when qa posts pass after state_changed_at" {
         $rd = Copy-SampleRoom "fls-pass"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
@@ -2618,49 +2618,49 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
         # Stamp state_changed_at = 0 so all new messages are accepted
         "0" | Out-File (Join-Path $rd "state_changed_at") -Encoding utf8 -NoNewline
 
-        & $script:PostMessage -RoomDir $rd -From "game-qa" -To "manager" -Type "pass" -Ref "EPIC-001" -Body "All tests pass"
+        & $script:PostMessage -RoomDir $rd -From "qa" -To "manager" -Type "pass" -Ref "EPIC-001" -Body "All tests pass"
         $sig = Find-LatestSignal -RoomDir $rd -Lifecycle $lc -StateName "review"
         $sig | Should -Be "pass"
     }
 
     # -----------------------------------------------------------------------
-    It "Find-LatestSignal returns 'fail' when game-qa posts fail" {
+    It "Find-LatestSignal returns 'fail' when qa posts fail" {
         $rd = Copy-SampleRoom "fls-fail"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
 
         "0" | Out-File (Join-Path $rd "state_changed_at") -Encoding utf8 -NoNewline
-        & $script:PostMessage -RoomDir $rd -From "game-qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "Tests failed: login broken"
+        & $script:PostMessage -RoomDir $rd -From "qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "Tests failed: login broken"
         $sig = Find-LatestSignal -RoomDir $rd -Lifecycle $lc -StateName "review"
         $sig | Should -Be "fail"
     }
 
     # -----------------------------------------------------------------------
-    It "Find-LatestSignal rejects signal from game-engineer in review state (wrong role)" {
+    It "Find-LatestSignal rejects signal from engineer in review state (wrong role)" {
         $rd = Copy-SampleRoom "fls-wrong-role"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
 
         "0" | Out-File (Join-Path $rd "state_changed_at") -Encoding utf8 -NoNewline
-        # game-engineer sends 'pass' but review state requires game-qa
-        & $script:PostMessage -RoomDir $rd -From "game-engineer" -To "manager" -Type "pass" -Ref "EPIC-001" -Body "Done"
+        # engineer sends 'pass' but review state requires qa
+        & $script:PostMessage -RoomDir $rd -From "engineer" -To "manager" -Type "pass" -Ref "EPIC-001" -Body "Done"
         $sig = Find-LatestSignal -RoomDir $rd -Lifecycle $lc -StateName "review"
-        $sig | Should -BeNull -Because "review role is game-qa, signal from game-engineer must be rejected"
+        $sig | Should -BeNull -Because "review role is qa, signal from engineer must be rejected"
     }
 
     # -----------------------------------------------------------------------
-    It "Write-RoomStatus transitions review→optimize and removes game-qa PID" {
+    It "Write-RoomStatus transitions review→optimize and removes qa PID" {
         $rd   = Copy-SampleRoom "wrs-sample"
         $lc   = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
 
         $pidDir = Join-Path $rd "pids"
         New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
-        "12345" | Out-File (Join-Path $pidDir "game-qa.pid") -Encoding utf8 -NoNewline
+        "12345" | Out-File (Join-Path $pidDir "qa.pid") -Encoding utf8 -NoNewline
 
         Write-RoomStatus -RoomDir $rd -NewStatus "optimize"
         (Get-Content (Join-Path $rd "status") -Raw).Trim() | Should -Be "optimize"
-        Test-Path (Join-Path $pidDir "game-qa.pid") | Should -BeFalse -Because "game-qa PID removed on leaving review state"
+        Test-Path (Join-Path $pidDir "qa.pid") | Should -BeFalse -Because "qa PID removed on leaving review state"
     }
 
     # -----------------------------------------------------------------------
@@ -2670,9 +2670,9 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
 
         $pidDir = Join-Path $rd "pids"
         New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
-        "11111" | Out-File (Join-Path $pidDir "game-engineer.pid")    -Encoding utf8 -NoNewline
-        "22222" | Out-File (Join-Path $pidDir "game-qa.pid")          -Encoding utf8 -NoNewline
-        "$(Get-Date -UFormat %s)" | Out-File (Join-Path $pidDir "game-qa.spawned_at") -Encoding utf8 -NoNewline
+        "11111" | Out-File (Join-Path $pidDir "engineer.pid")    -Encoding utf8 -NoNewline
+        "22222" | Out-File (Join-Path $pidDir "qa.pid")          -Encoding utf8 -NoNewline
+        "$(Get-Date -UFormat %s)" | Out-File (Join-Path $pidDir "qa.spawned_at") -Encoding utf8 -NoNewline
 
         Write-RoomStatus -RoomDir $rd -NewStatus "passed"
         (Get-Content (Join-Path $rd "status") -Raw).Trim() | Should -Be "passed"
