@@ -59,7 +59,6 @@ Check for these marker files in priority order:
 | `Gemfile` | Ruby | `Gemfile` |
 | `composer.json` | PHP | `composer.json` |
 | `*.csproj` / `*.sln` | .NET | `*.csproj` |
-| `Packages/manifest.json` | Unity | `Packages/manifest.json` |
 
 If none exist, report: **"No package manager detected — cannot verify dependencies"** and skip to Phase 3.
 
@@ -119,13 +118,6 @@ go mod graph | grep -E "^[^ ]+$" | sort | uniq -d || echo "No duplicates"
 # Check for binding redirects needed
 dotnet list package --outdated 2>&1 || true
 dotnet nuget why <package> 2>&1 || true
-```
-
-**Unity:**
-
-```bash
-# Check manifest for version conflicts
-cat Packages/manifest.json | grep -E "(version|dependencies)" || true
 ```
 
 #### 1.4 Record Findings
@@ -211,7 +203,6 @@ Find the application entry point:
 | Rust | `cargo run`, `./target/debug/<binary>` |
 | Go | `go run .`, `go run main.go` |
 | .NET | `dotnet run`, `dotnet <project>.dll` |
-| Unity | Play in Editor, Build & Run |
 
 #### 3.2 Attempt Startup (with timeout)
 
@@ -229,7 +220,7 @@ else
 fi
 ```
 
-For GUI applications (Unity, desktop apps):
+For GUI applications (desktop apps):
 - Attempt to launch
 - Check for crash within 5 seconds
 - Capture any error dialogs
@@ -306,7 +297,6 @@ When dependencies or runtime fails, generate actionable fix instructions.
 | **Cached bad package** | `npm cache clean --force` | Clear npm cache |
 | **Python version wrong** | Use `pyenv` or update `requires-python` | Check `pyproject.toml` |
 | **Missing system lib** | Install via apt/brew/choco | Project-specific |
-| **Unity package conflict** | Edit `Packages/manifest.json` | Resolve version ranges |
 
 #### 5.2 Create Fix Instructions
 

@@ -299,40 +299,6 @@ System.IO.FileLoadException: Could not load file or assembly
 
 ---
 
-## Unity
-
-### Package Version Conflicts
-
-**Symptoms:**
-```
-[Package Manager] Error: Package <name>@<version> cannot be added because it conflicts with <other-package>
-```
-
-**Fixes:**
-```json
-// Packages/manifest.json
-{
-  "dependencies": {
-    "com.unity.some-package": "1.0.0",
-    // Ensure compatible versions
-  }
-}
-```
-
-### Missing Define Constraints
-
-**Symptoms:**
-```
-The type or namespace name '<Type>' could not be found
-```
-
-**Fix:**
-- Check assembly definitions (.asmdef)
-- Add required define constraints
-- Ensure references are added to .asmdef
-
----
-
 ## Environment-Specific Issues
 
 ### macOS

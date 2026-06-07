@@ -170,12 +170,12 @@ return null (no matching signal)
 
 ### Sender validation (signal bleed prevention)
 
-Each lifecycle state declares which `role` owns it. Signals from other roles are **rejected**. This prevents a critical bug where a `done` message from `game-engineer` in the `developing` state could bleed through to `game-designer` state and `review` state, causing the room to cascade to `passed` without actual work.
+Each lifecycle state declares which `role` owns it. Signals from other roles are **rejected**. This prevents a critical bug where a `done` message from `engineer` in the `developing` state could bleed through to `designer` state and `review` state, causing the room to cascade to `passed` without actual work.
 
 **Example:**
-- State `game-designer` has `role: "game-designer"`
-- A stale `done` from `game-engineer` is in the channel
-- `Find-LatestSignal` rejects it because `game-engineer != game-designer`
+- State `designer` has `role: "designer"`
+- A stale `done` from `engineer` is in the channel
+- `Find-LatestSignal` rejects it because `engineer != designer`
 
 ### Strict timing (no grace window)
 

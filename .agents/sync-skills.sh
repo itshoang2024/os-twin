@@ -178,7 +178,7 @@ install_from_dir() {
     skill_name="$(basename "$skill_dir")"
 
     # Skip nested SKILL.md files that live inside another skill's tree
-    # (e.g. develop-unity-ui/references/animation-modify/SKILL.md).
+    # (e.g. develop-ui/references/animation-modify/SKILL.md).
     # The parent skill's cp -r already copies them.
     local _parent="$skill_dir"
     local _is_nested=false

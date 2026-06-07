@@ -4,7 +4,7 @@
   "max_retries": 3,
   "states": {
     "developing": {
-      "role": "game-engineer",
+      "role": "engineer",
       "type": "work",
       "signals": {
         "done": {
@@ -13,7 +13,7 @@
       }
     },
     "optimize": {
-      "role": "game-engineer",
+      "role": "engineer",
       "type": "work",
       "signals": {
         "done": {
@@ -22,7 +22,7 @@
       }
     },
     "review": {
-      "role": "game-qa",
+      "role": "qa",
       "type": "review",
       "signals": {
         "done": {
