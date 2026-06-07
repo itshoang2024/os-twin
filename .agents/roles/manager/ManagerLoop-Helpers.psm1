@@ -209,7 +209,7 @@ function Get-RoomOrchestrationContext {
 # ---------------------------------------------------------------------------
 # Get-LatestFailureMessage
 # Captures the latest relevant semantic failure message for epic.failed payloads.
-# If no channel message exists, falls back to the role output artifact preview.
+# If no channel message exists, falls back to the per-room plan log preview.
 # ---------------------------------------------------------------------------
 function Get-LatestFailureMessage {
     [CmdletBinding()]
@@ -240,6 +240,15 @@ function Get-LatestFailureMessage {
 
     $artifactRole = if ($Role) { ($Role -replace ':.*$', '') } else { '' }
     $candidateFiles = @()
+    $ctx = Get-RoomOrchestrationContext -RoomDir $RoomDir
+    if ($ctx -and -not [string]::IsNullOrWhiteSpace($ctx.PlanId) -and -not [string]::IsNullOrWhiteSpace($ctx.RoomId)) {
+        $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+        $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $_homeDir '.ostwin' }
+        $planLogsDir = Join-Path (Join-Path $ostwinHome '.agents') 'plans'
+        $safePlanId = $ctx.PlanId -replace '[^A-Za-z0-9._-]', '_'
+        $safeRoomId = $ctx.RoomId -replace '[^A-Za-z0-9._-]', '_'
+        $candidateFiles += (Join-Path $planLogsDir "$safePlanId.$safeRoomId.log")
+    }
     if ($artifactRole) { $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' "$artifactRole-output.txt")) }
     $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' 'qa-output.txt'))
     $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' 'engineer-output.txt'))
@@ -254,7 +263,7 @@ function Get-LatestFailureMessage {
                     type         = 'artifact'
                     from         = $artifactRole
                     body_preview = $preview
-                    artifact     = "artifacts/$(Split-Path $outputFile -Leaf)"
+                    artifact     = $outputFile
                 }
             } catch {
                 Write-Log 'DEBUG' "[Get-LatestFailureMessage] Error reading ${outputFile}: $($_.Exception.Message)"

@@ -1084,7 +1084,7 @@ echo -e '{
 cat <project>/.memory/mcp_server.log
 
 # See what tools an opencode-launched agent called
-grep "Calling tool\|⚙\|memory_save" <project>/.war-rooms/room-*/artifacts/*-output.txt
+grep "Calling tool\|⚙\|memory_save" ~/.ostwin/.agents/plans/*.log
 ```
 
 ### Debugging Tips

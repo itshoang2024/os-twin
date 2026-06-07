@@ -44,7 +44,7 @@ Each room maintains its working context:
 - `brief.md` -- the task description
 - `TASKS.md` -- work breakdown with checkboxes
 - `config.json` -- the goal contract (DoD, AC)
-- `artifacts/` -- output files (code, reports)
+- `artifacts/` -- room artifacts such as wrappers, reports, generated files
 - `contexts/` -- per-role context snapshots
 
 These persist for the room's lifetime and are scoped entirely to that room.

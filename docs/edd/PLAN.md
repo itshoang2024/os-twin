@@ -417,7 +417,7 @@ Any caller that needs to update room `status`, `progress.json`, role config JSON
   "summary": "QA timed out after 900 seconds.",
   "payload": {
     "exit_code": 1,
-    "output_artifact": "artifacts/qa-output.txt"
+    "output_file": "~/.ostwin/.agents/plans/pt-example.room-003.log"
   },
   "last_message": {
     "message_id": "qa-fail-...",
@@ -556,12 +556,12 @@ When emitting `epic.failed`, the manager should include:
     "type": "fail",
     "from": "qa",
     "body_preview": "first 500 chars",
-    "artifact": "artifacts/qa-output.txt"
+    "artifact": "~/.ostwin/.agents/plans/pt-example.room-003.log"
   }
 }
 ```
 
-If no channel message exists, use the role output artifact preview instead. If neither exists, set `last_message` to `null` and include `payload.reason`.
+If no channel message exists, use the per-room plan log preview instead. If neither exists, set `last_message` to `null` and include `payload.reason`.
 
 #### Shutdown order
 

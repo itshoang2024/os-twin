@@ -2005,9 +2005,10 @@ Context "PLAN-REVIEW Verdict Logic" {
                 )
                 $artifactsDir = Join-Path $RoomDir "artifacts"
                 New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
+                $roomId = Split-Path $RoomDir -Leaf
                 $pidFile = ($RoomDir -replace "'", "''") + "/pids/$Role.pid"
                 $promptFile = ($RoomDir -replace "'", "''") + "/logs/prompt.txt"
-                $outputFile = ($RoomDir -replace "'", "''") + "/artifacts/$Role-output.txt"
+                $outputFile = "/Users/test/.ostwin/.agents/plans/test-plan.$roomId.log"
                 $content = @"
 # --- run-agent.ps1 — Unified agent wrapper (all platforms) ---
 `$env:AGENT_OS_ROOM_DIR = '$RoomDir'
@@ -2272,9 +2273,10 @@ Context "PLAN-REVIEW Verdict Logic" {
                 )
                 $artifactsDir = Join-Path $RoomDir "artifacts"
                 New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
+                $roomId = Split-Path $RoomDir -Leaf
                 $pidFile = ($RoomDir -replace "'", "''") + "/pids/$Role.pid"
                 $promptFile = ($RoomDir -replace "'", "''") + "/logs/prompt.txt"
-                $outputFile = ($RoomDir -replace "'", "''") + "/artifacts/$Role-output.txt"
+                $outputFile = "/Users/test/.ostwin/.agents/plans/test-plan.$roomId.log"
                 $content = @"
 # --- run-agent.ps1 — Unified agent wrapper (all platforms) ---
 `$env:AGENT_OS_ROOM_DIR = '$RoomDir'

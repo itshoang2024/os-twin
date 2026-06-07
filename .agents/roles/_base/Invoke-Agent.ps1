@@ -202,7 +202,7 @@ function Write-AgentRuntimeFailureEvent {
             exit_code       = $ExitCode
             timed_out       = $TimedOut
             output_file     = $OutputFile
-            output_artifact = if ($OutputFile) { "artifacts/$(Split-Path $OutputFile -Leaf)" } else { '' }
+            output_artifact = ''
             output_preview  = $preview
         }
     }
@@ -477,8 +477,12 @@ if (Test-Path $resolveSkillsScript) {
     }
 }
 
-
-$outputFile = Join-Path $artifactsDir "$RoleName-output.txt"
+$planLogsDir = Join-Path (Join-Path $OstwinHome ".agents") "plans"
+New-Item -ItemType Directory -Path $planLogsDir -Force | Out-Null
+$outputPlanId = if ([string]::IsNullOrWhiteSpace($roomPlanId)) { "no-plan" } else { $roomPlanId }
+$safeOutputPlanId = $outputPlanId -replace '[^A-Za-z0-9._-]', '_'
+$safeOutputRoomId = $roomId -replace '[^A-Za-z0-9._-]', '_'
+$outputFile = Join-Path $planLogsDir "$safeOutputPlanId.$safeOutputRoomId.log"
 $pidFile = Join-Path $pidsDir "$RoleName.pid"
 
 # --- PID is written by bin/agent via AGENT_OS_PID_FILE env var ---

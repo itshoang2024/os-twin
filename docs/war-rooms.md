@@ -26,7 +26,7 @@ War-rooms are the answer to the coordination chaos problem: execution state
   engineer_001.json    # Per-role instance config (model, timeout, skills)
   qa_001.json          # Another role instance
   pids/                # PID files for running processes
-  artifacts/           # Agent output (code, reports, opencode.json)
+  artifacts/           # Room artifacts such as wrappers, reports, generated files
   contexts/            # Per-role context snapshots
   skills/              # Copied skill files scoped to this room
 ```

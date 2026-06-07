@@ -71,12 +71,12 @@ Describe "Invoke-Agent" {
             $result.PSObject.Properties.Name | Should -Contain "TimedOut"
         }
 
-        It "writes output to artifacts file" {
+        It "writes output to per-room plan log" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "qa" -Prompt "review test" `
                 -AgentCmd "echo" -TimeoutSeconds 5
 
-            $result.OutputFile | Should -Match "qa-output\.txt$"
+            $result.OutputFile | Should -Match "\.ostwin[/\\]\.agents[/\\]plans[/\\].+\.$([regex]::Escape((Split-Path $script:roomDir -Leaf)))\.log$"
         }
 
 
