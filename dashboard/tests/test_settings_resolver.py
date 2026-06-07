@@ -262,10 +262,21 @@ def test_atomic_write_cleanup_on_error(tmp_path):
 # ── patch helpers ─────────────────────────────────────────────────────────
 
 def test_patch_namespace(resolver, temp_project):
-    resolver.patch_namespace("runtime", {"max_concurrent_rooms": 100})
+    resolver.patch_namespace(
+        "runtime",
+        {
+            "max_concurrent_rooms": 100,
+            "max_engineer_retries": 7,
+            "state_timeout_seconds": 1800,
+        },
+    )
     cfg = json.loads((temp_project / ".agents" / "config.json").read_text())
     assert cfg["manager"]["max_concurrent_rooms"] == 100
+    assert cfg["manager"]["max_engineer_retries"] == 7
+    assert cfg["manager"]["state_timeout_seconds"] == 1800
     assert "max_concurrent_rooms" not in cfg.get("runtime", {})
+    assert "max_engineer_retries" not in cfg.get("runtime", {})
+    assert "state_timeout_seconds" not in cfg.get("runtime", {})
 
 
 def test_default_config_path_honors_ostwin_project_dir(tmp_path, monkeypatch):

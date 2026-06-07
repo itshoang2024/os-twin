@@ -5,7 +5,7 @@ export interface ConnectorConfig {
   platform: string;
   enabled: boolean;
   credentials: Record<string, string>;
-  settings: Record<string, string | number | boolean | null>;
+  settings: Record<string, any>;
   authorized_users: string[];
   pairing_code: string;
   notification_preferences: {
@@ -30,7 +30,7 @@ export interface SetupStep {
 export function useChannels() {
   const { data, error, mutate, isLoading } = useSWR<ChannelStatus[]>('/channels');
 
-  const connect = async (platform: string, config?: { credentials?: Record<string, string>; settings?: Record<string, string | number | boolean | null> }) => {
+  const connect = async (platform: string, config?: { credentials?: Record<string, string>; settings?: Record<string, any> }) => {
     await apiPost(`/channels/${platform}/connect`, config);
     mutate();
   };

@@ -106,4 +106,62 @@ param(
         $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
         $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
     }
+
+    It "injects the latest manager channel message into the next agent prompt" {
+        $managerDecision = [pscustomobject]@{
+            id   = 'msg-manager-1'
+            ts   = '2026-06-07T18:40:00Z'
+            from = 'manager'
+            to   = 'qa'
+            type = 'done'
+            body = 'Manager decision: escalation resolved. Resume review with this clarification.'
+        } | ConvertTo-Json -Compress
+        $olderEngineer = [pscustomobject]@{
+            id   = 'msg-engineer-1'
+            ts   = '2026-06-07T18:39:00Z'
+            from = 'engineer'
+            to   = 'qa'
+            type = 'done'
+            body = 'Engineer done message.'
+        } | ConvertTo-Json -Compress
+        @($olderEngineer, $managerDecision) | Set-Content -Path (Join-Path $script:roomDir 'channel.jsonl') -Encoding utf8
+
+        $promptCapture = Join-Path $TestDrive 'captured-prompt.txt'
+        $invokeAgent = Join-Path $TestDrive "invoke-capture-prompt.ps1"
+        @"
+[CmdletBinding()]
+param(
+    [string]`$RoomDir,
+    [string]`$RoleName,
+    [string]`$Prompt,
+    [int]`$TimeoutSeconds,
+    [string]`$WorkingDir
+)
+`$Prompt | Out-File -FilePath '$promptCapture' -Encoding utf8 -Force
+[pscustomobject]@{
+    ExitCode = 0
+    Output = 'ok'
+    OutputFile = `$null
+    PidFile = `$null
+    TimedOut = `$false
+}
+"@ | Out-File $invokeAgent -Encoding ascii
+
+        & pwsh -NoProfile -File $script:StartDynamicRole `
+            -RoomDir $script:roomDir `
+            -RoleName "custom-role" `
+            -AgentsDir $script:agentsDir `
+            -OverrideInvokeAgent $invokeAgent `
+            -OverrideReadMessages $script:readMessages `
+            -OverrideGetRoleDef $script:roleDef `
+            -OverrideBuildSystemPrompt $script:buildPrompt `
+            -TimeoutSeconds 10 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0
+
+        $capturedPrompt = Get-Content $promptCapture -Raw
+        $capturedPrompt | Should -Match '## Latest Manager Handoff'
+        $capturedPrompt | Should -Match 'Type: done'
+        $capturedPrompt | Should -Match 'To: qa'
+        $capturedPrompt | Should -Match 'Manager decision: escalation resolved'
+    }
 }

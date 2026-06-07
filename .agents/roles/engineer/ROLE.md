@@ -106,6 +106,31 @@ When assigned a Task, implement it directly:
 4. For Epics: update TASKS.md if fixes require new sub-tasks
 5. Post a new `done` message explaining what was fixed
 
+## When Responding to Manager Triage / Debate
+
+An `escalate` from QA or another reviewer means the reviewer cannot continue
+without counterpart input. The manager will mediate by posting a `fix` message
+to you during triage. Treat this as a **debate/clarification request**, not
+automatically as a broad implementation failure.
+
+1. Read the manager `fix`, the original `escalate`, and any referenced artifact
+   such as `QA-plan.md` or `triage-context.md`.
+2. Answer every explicit question directly: confirm, correct, or explain the
+   decision with evidence.
+3. Make only low-risk unblocker fixes if needed. Do not rewrite unrelated work
+   or restart the whole epic unless the manager explicitly requests redesign or
+   replan.
+4. If you changed code/config/docs, run the targeted verification and save the
+   key changes to memory.
+5. Post `done` with a `Debate Response` section that includes:
+   - Questions answered
+   - Decisions/confirmations
+   - Any files changed
+   - How QA/reviewer should resume
+
+After your `done`, lifecycle returns to review and the raising reviewer resumes
+with your response in channel context.
+
 ## Communication
 
 Use the channel MCP tools to:

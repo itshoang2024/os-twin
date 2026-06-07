@@ -18,6 +18,7 @@ Covers:
 from __future__ import annotations
 
 import os
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,25 @@ def kb_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def real_embedder() -> KnowledgeEmbedder:
-    return KnowledgeEmbedder()
+    """Deterministic offline embedder for graph integration tests."""
+    class _OfflineEmbedder:
+        model_name = "test-offline-embedder"
+
+        def dimension(self) -> int:
+            return 1024
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [self.embed_one(text) for text in texts]
+
+        def embed_one(self, text: str) -> list[float]:
+            digest = hashlib.sha256((text or "").encode("utf-8")).digest()
+            return [(digest[i % len(digest)] / 255.0) for i in range(1024)]
+
+    embedder = _OfflineEmbedder()
+    from dashboard.knowledge.graph.index import kuzudb
+
+    kuzudb._embedder_singleton = embedder
+    return embedder  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -867,7 +886,9 @@ class TestGraphRAGExtractorDeep:
         entities = result[0].metadata[KG_NODES_KEY]
         assert len(entities) == 1
         assert entities[0].embedding == [0.3] * 1024
-        fake_embedder.embed_one.assert_called_once()
+        assert fake_embedder.embed_one.call_count == 2
+        fake_embedder.embed_one.assert_any_call("Dave.Person.")
+        fake_embedder.embed_one.assert_any_call("Dave is here.")
 
     def test_extractor_domain_prompt_passed_to_llm(self) -> None:
         """domain_prompt is forwarded to llm.extract_entities as the third argument."""
@@ -2113,4 +2134,3 @@ class TestGraphModeQueryDelegation:
         assert result.entities[0].name == "Person"
         assert result.entities[0].score == 0.9
         assert result.entities[1].id == "e2"
-

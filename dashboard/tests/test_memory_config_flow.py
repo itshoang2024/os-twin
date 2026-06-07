@@ -448,6 +448,7 @@ class TestCreateClientBaseUrl:
             client = create_client(
                 model="gpt-4",
                 provider="openai",
+                api_key="test-key",
                 base_url="http://proxy:8080/v1",
             )
             assert client.base_url == "http://proxy:8080/v1"
@@ -459,6 +460,7 @@ class TestCreateClientBaseUrl:
             client = create_client(
                 model="gpt-4",
                 provider="openai",
+                api_key="test-key",
                 base_url=None,
             )
             # Should not be a custom URL

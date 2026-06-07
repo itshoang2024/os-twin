@@ -90,6 +90,10 @@ param(
 
 # --- Resolve paths ---
 $agentsDir = (Resolve-Path (Join-Path $PSScriptRoot ".." "..") -ErrorAction SilentlyContinue).Path
+$eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+if (Test-Path $eventsModule) {
+    Import-Module (Resolve-Path $eventsModule).Path -Force
+}
 
 # Resolve OSTWIN_HOME: env var → ~/.ostwin
 $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
@@ -106,10 +110,29 @@ else { Join-Path $agentsDir "config.json" }
 # --- Load plan-specific roles config from room's config.json → plan_id ---
 $planRolesConfig = $null
 $roomConfigFile = Join-Path $absRoomDir "config.json"
+$roomCfg = $null
+$roomPlanId = $env:OSTWIN_PLAN_ID
+$roomRunId = $env:OSTWIN_RUN_ID
+$roomEventsPath = $env:OSTWIN_EVENTS_PATH
+$roomId = Split-Path $absRoomDir -Leaf
+$epicRef = ''
+$lifecycleState = 'unknown'
+$statusFile = Join-Path $absRoomDir 'status'
+if (Test-Path $statusFile) {
+    try {
+        $statusValue = (Get-Content $statusFile -Raw -ErrorAction Stop).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($statusValue)) { $lifecycleState = $statusValue }
+    } catch { }
+}
 if (Test-Path $roomConfigFile) {
     try {
         $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
-        $roomPlanId = $roomCfg.plan_id
+        if ($roomCfg.plan_id) { $roomPlanId = $roomCfg.plan_id }
+        if ($roomCfg.run_id) { $roomRunId = $roomCfg.run_id }
+        if ($roomCfg.events_path) { $roomEventsPath = $roomCfg.events_path }
+        if ($roomCfg.room_id) { $roomId = $roomCfg.room_id }
+        if ($roomCfg.task_ref) { $epicRef = $roomCfg.task_ref }
+        if ($lifecycleState -eq 'unknown' -and $roomCfg.status -and $roomCfg.status.current) { $lifecycleState = $roomCfg.status.current }
         if ($roomPlanId) {
             $planRolesFile = Join-Path $OstwinHome ".agents" "plans" "$roomPlanId.roles.json"
             if (Test-Path $planRolesFile) {
@@ -118,6 +141,72 @@ if (Test-Path $roomConfigFile) {
         }
     }
     catch { }
+}
+
+function Get-CurrentRoomStatus {
+    if (-not (Test-Path $statusFile)) { return '' }
+    try { return (Get-Content $statusFile -Raw -ErrorAction Stop).Trim() } catch { return '' }
+}
+
+function Test-AgentAdvancedRoomState {
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [AllowEmptyString()][string]$OutputText
+    )
+
+    if ($ExitCode -eq 0 -or $ExitCode -eq 124) { return $false }
+    $currentStatus = Get-CurrentRoomStatus
+    if ([string]::IsNullOrWhiteSpace($currentStatus)) { return $false }
+    if ($currentStatus -eq $lifecycleState) { return $false }
+
+    # If the worker already advanced the room, a later wrapper/CLI kill should
+    # not create a contradictory runtime-failure event for a successful handoff.
+    if ($OutputText -match 'warroom_update_status|warroom_report_progress|channel_post_message') {
+        Write-Warning "[Invoke-Agent] Suppressing agent.run.failed for '$RoleName': exitCode=$ExitCode but room advanced from '$lifecycleState' to '$currentStatus'."
+        return $true
+    }
+
+    return $false
+}
+
+function Write-AgentRuntimeFailureEvent {
+    param(
+        [Parameter(Mandatory)][int]$ExitCode,
+        [Parameter(Mandatory)][bool]$TimedOut,
+        [AllowEmptyString()][string]$OutputFile,
+        [AllowEmptyString()][string]$OutputText
+    )
+
+    if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return }
+    if ([string]::IsNullOrWhiteSpace($roomPlanId)) { return }
+    if ([string]::IsNullOrWhiteSpace($roomId) -or [string]::IsNullOrWhiteSpace($epicRef)) { return }
+
+    $eventType = if ($TimedOut) { 'agent.run.timed_out' } else { 'agent.run.failed' }
+    $summary = if ($TimedOut) {
+        "$RoleName timed out after ${TimeoutSeconds}s."
+    } else {
+        "$RoleName exited with code $ExitCode."
+    }
+    $preview = if ($OutputText -and $OutputText.Length -gt 500) { $OutputText.Substring(0, 500) } else { $OutputText }
+    $event = [ordered]@{
+        event_type = $eventType
+        plan_id    = $roomPlanId
+        run_id     = if ($roomRunId) { $roomRunId } else { 'run_legacy' }
+        room_id    = $roomId
+        epic_ref   = $epicRef
+        role       = $RoleName
+        state      = $lifecycleState
+        severity   = 'error'
+        summary    = $summary
+        payload    = [ordered]@{
+            exit_code       = $ExitCode
+            timed_out       = $TimedOut
+            output_file     = $OutputFile
+            output_artifact = ''
+            output_preview  = $preview
+        }
+    }
+    Write-OrchestrationEvent -EventsPath $roomEventsPath -Event $event | Out-Null
 }
 
 # --- Plan roles resolution (highest priority after explicit -Model) ---
@@ -388,8 +477,12 @@ if (Test-Path $resolveSkillsScript) {
     }
 }
 
-
-$outputFile = Join-Path $artifactsDir "$RoleName-output.txt"
+$planLogsDir = Join-Path (Join-Path $OstwinHome ".agents") "plans"
+New-Item -ItemType Directory -Path $planLogsDir -Force | Out-Null
+$outputPlanId = if ([string]::IsNullOrWhiteSpace($roomPlanId)) { "no-plan" } else { $roomPlanId }
+$safeOutputPlanId = $outputPlanId -replace '[^A-Za-z0-9._-]', '_'
+$safeOutputRoomId = $roomId -replace '[^A-Za-z0-9._-]', '_'
+$outputFile = Join-Path $planLogsDir "$safeOutputPlanId.$safeOutputRoomId.log"
 $pidFile = Join-Path $pidsDir "$RoleName.pid"
 
 # --- PID is written by bin/agent via AGENT_OS_PID_FILE env var ---
@@ -478,23 +571,25 @@ $($tasksContent.TrimEnd())
     return $FallbackPrompt
 }
 
-# Write prompt to a file to avoid shell escaping issues. The caller-provided
-# role prompt is primary, latest current channel.jsonl body follows as context,
-# then TASKS.md is appended last to keep the agent focused on the checklist.
+# Write prompt to a persistent log file and feed it over stdin. This avoids
+# shell-escaping issues from quotes/newlines and keeps prompt history out of
+# transient war-room artifacts.
 $compiledPrompt = Get-CompiledPromptText -RoomDir $absRoomDir -FallbackPrompt $Prompt
-$promptFile = Join-Path $artifactsDir "prompt.txt"
+$logsDir = Join-Path $OstwinHome "logs"
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+$promptStamp = Get-Date -Format "yyyyMMdd-HHmmssfff"
+$promptInstanceSuffix = if ($InstanceId) { "-$InstanceId" } else { "" }
+$promptBaseName = "$roomId-$RoleName$promptInstanceSuffix-$promptStamp"
+$promptFile = Join-Path $logsDir "$promptBaseName-prompt.txt"
 $compiledPrompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force
-# Resolve to absolute path for -f flag
 $promptFileAbsolute = (Resolve-Path $promptFile).Path
 
 # --- Debug: write a human-readable copy of the compiled prompt ---
-$debugPromptFile = Join-Path $artifactsDir "$RoleName-prompt-debug.md"
+$debugPromptFile = Join-Path $logsDir "$promptBaseName-prompt-debug.md"
 $compiledPrompt | Out-File -FilePath $debugPromptFile -Encoding utf8 -Force
 
 # Build non-prompt CLI args safely (opencode run flags)
-# Compiled prompt is passed as --file <path> to avoid ARG_MAX limits.
-# A short positional message is required by opencode run — the room prompt is in the file.
-$extraCliArgs = @("...")
+$extraCliArgs = @()
 if ($Model) { $extraCliArgs += "--model"; $extraCliArgs += $Model }
 if ($RoleName) { $extraCliArgs += "--agent"; $extraCliArgs += $RoleName }
 if ($Format) { $extraCliArgs += "--format"; $extraCliArgs += $Format }
@@ -519,8 +614,6 @@ if ($AttachUrl) { $extraCliArgs += "--attach"; $extraCliArgs += $AttachUrl }
 if ($Port -gt 0) { $extraCliArgs += "--port"; $extraCliArgs += $Port.ToString() }
 if ($ProjectDir) { $extraCliArgs += "--dir"; $extraCliArgs += $ProjectDir }
 foreach ($f in $Files) { $extraCliArgs += "--file"; $extraCliArgs += $f }
-# Attach prompt file — avoids inlining huge prompt text on the command line
-$extraCliArgs += "--file"; $extraCliArgs += $promptFileAbsolute
 
 # --- MCP config: use pre-compiled .opencode/opencode.json if available ---
 # opencode run reads MCP config from .opencode/opencode.json (standard location).
@@ -559,7 +652,7 @@ for ($processAttempt = 1; $processAttempt -le $maxProcessRetries; $processAttemp
 
         # Build paths with proper escaping for the target platform
         $safeOutput = $outputFile -replace "'", "'\''"
-        $safePrompt = $promptFile -replace "'", "'\''"
+        $safePrompt = $promptFileAbsolute -replace "'", "'\''"
         $safeCwd = if ($WorkingDir) { $WorkingDir -replace "'", "'\''" } else { "" }
         $safeRoomDir = $absRoomDir.Replace('\', '/').Replace("'", "'\''")
         $safeSkillsDir = $isolatedSkillsDir.Replace('\', '/').Replace("'", "'\''")
@@ -593,7 +686,7 @@ export OSTWIN_PYTHON='$venvPythonUnix'
             # Windows: Use PowerShell wrapper instead of bash
             $winPidFile = $pidFile.Replace('/', '\')
             $winOutput = $outputFile.Replace('/', '\')
-            $winPrompt = $promptFile.Replace('/', '\')
+            $winPrompt = $promptFile.Replace('/', '\').Replace("'", "''")
             $winSkillsDir = $isolatedSkillsDir.Replace('/', '\')
             $winOstwinHome = $OstwinHome.Replace('/', '\')
             $winOpencodeConfig = if ($tempMcpConfig) { $tempMcpConfig.Replace('/', '\') } else { "" }
@@ -609,7 +702,7 @@ export OSTWIN_PYTHON='$venvPythonUnix'
             # This avoids nested pwsh invocations with broken argument passing.
             if ($exe -match '\.ps1$') {
                 # exe is already the .ps1 file — cmdArgs are its parameters
-                $allArgs = $cmdArgs + $extraCliArgs
+                $allArgs = $cmdArgs + $attemptArgs
             } elseif ($exe -eq 'pwsh' -or $exe -eq 'powershell') {
                 # Look for -File flag and extract the script path
                 $fileIdx = [Array]::FindIndex($cmdArgs, [Predicate[object]]{ param($a) $a -eq '-File' })
@@ -623,12 +716,12 @@ export OSTWIN_PYTHON='$venvPythonUnix'
                             ($i -gt 0 -and $cmdArgs[$i - 1] -eq '-ExecutionPolicy')) { continue }
                         $remaining += $cmdArgs[$i]
                     }
-                    $allArgs = $remaining + $extraCliArgs
+                    $allArgs = $remaining + $attemptArgs
                 } else {
-                    $allArgs = $cmdArgs + $extraCliArgs
+                    $allArgs = $cmdArgs + $attemptArgs
                 }
             } else {
-                $allArgs = $cmdArgs + $extraCliArgs
+                $allArgs = $cmdArgs + $attemptArgs
             }
 
             # Serialize args array into the wrapper script as a PowerShell array literal
@@ -664,8 +757,10 @@ if (Test-Path `$envSh) { . `$envSh }
 `$cmdArgs = $argsArrayLiteral
 "[$wrapper] PID=`$PID, CMD=$exe, ARGS=`$(`$cmdArgs -join ' ')" | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
 
-# Execute using call operator with array
-& '$exe' @cmdArgs 2>&1 | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
+            # Execute using call operator with array; prompt is stdin, not argv/--file.
+            Get-Content -Raw -Path '$winPrompt' | & '$exe' @cmdArgs 2>&1 | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
+`$agentExitCode = if (`$null -ne `$global:LASTEXITCODE) { [int]`$global:LASTEXITCODE } else { 0 }
+exit `$agentExitCode
 "@
             $psScriptContent | Out-File -FilePath $psWrapperScript -Encoding utf8 -Force
 
@@ -721,8 +816,8 @@ echo "`$$" > '$safePidFile'
 # Log diagnostic info before exec
 echo "[wrapper] PID=`$$, CMD=$AgentCmd, CWD=`$(pwd)" >> '$safeOutput'
 echo "[wrapper] PROMPT_FILE='$safePrompt' (exists: `$(test -f '$safePrompt' && echo yes || echo no), size: `$(wc -c < '$safePrompt' 2>/dev/null || echo 0) bytes)" >> '$safeOutput'
-echo "[wrapper] EXEC: $AgentCmd $argsLine" >> '$safeOutput'
-exec $AgentCmd $argsLine >> '$safeOutput' 2>&1
+echo "[wrapper] EXEC: cat '$safePrompt' | $AgentCmd $argsLine" >> '$safeOutput'
+exec $AgentCmd $argsLine < '$safePrompt' >> '$safeOutput' 2>&1
 # If exec fails, this line runs:
 echo "[wrapper] EXEC FAILED: exit=`$?" >> '$safeOutput'
 "@
@@ -857,9 +952,14 @@ $output = if (Test-Path $outputFile) {
 }
 else { "No output captured" }
 
+if ($exitCode -ne 0) {
+    if (-not (Test-AgentAdvancedRoomState -ExitCode $exitCode -OutputText $output)) {
+        Write-AgentRuntimeFailureEvent -ExitCode $exitCode -TimedOut:($exitCode -eq 124) -OutputFile $outputFile -OutputText $output
+    }
+}
+
 # --- Clean up temp files (OPT-003: prevent accumulation on retries) ---
 Remove-Item $wrapperScript -Force -ErrorAction SilentlyContinue
-Remove-Item $promptFile -Force -ErrorAction SilentlyContinue
 # Note: opencode.json is no longer generated by Invoke-Agent.
 # Pre-compiled .opencode/opencode.json (from ostwin init/compile) is used directly.
 

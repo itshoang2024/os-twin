@@ -11,6 +11,8 @@
       Get-UnixEpoch, Write-AtomicFile, Test-ValidRoomState,
       Get-ActiveCount, Get-MsgCount, Get-LatestBody,
       Test-StateTimedOut, Stop-RoomProcesses, Write-RoomStatus,
+      Get-RoomOrchestrationContext, Get-LatestFailureMessage,
+      Write-ManagerOrchestrationEvent, Invoke-PlanFailFast,
       Find-LatestSignal, Invoke-SignalActions, Write-Log,
       Write-SpawnLock, Test-SpawnLock, Start-WorkerJob,
       Get-CachedDag, Set-BlockedDescendants, Invoke-ManagerTriage,
@@ -97,6 +99,18 @@ function Test-ValidRoomState {
     return ($null -ne $Lifecycle.states.$State)
 }
 
+function ConvertTo-CanonicalRoomStatus {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Status)
+
+    switch ($Status) {
+        'passed'       { return 'done' }
+        'failed-final' { return 'failed' }
+        'fixing'       { return 'optimize' }
+        default        { return $Status }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Get-ActiveCount
 # ---------------------------------------------------------------------------
@@ -109,7 +123,8 @@ function Get-ActiveCount {
         $s = if (Test-Path (Join-Path $_.FullName "status")) {
             (Get-Content (Join-Path $_.FullName "status") -Raw).Trim()
         } else { "pending" }
-        if ($s -notin @('pending', 'passed', 'failed-final', 'blocked', '')) { $count++ }
+        $canonical = ConvertTo-CanonicalRoomStatus -Status $s
+        if ($canonical -notin @('pending', 'done', 'failed', 'blocked', '')) { $count++ }
     }
     return $count
 }
@@ -146,6 +161,276 @@ function Get-LatestBody {
         Write-Log "DEBUG" "[Get-LatestBody] Error reading '$MsgType' from ${RoomDir}: $($_.Exception.Message)"
     }
     return ""
+}
+
+# ---------------------------------------------------------------------------
+# Get-RoomOrchestrationContext
+# Reads the canonical event metadata stamped into room config by Start-Plan.
+# Falls back to environment for compatibility with direct test/runtime invokes.
+# ---------------------------------------------------------------------------
+function Get-RoomOrchestrationContext {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $roomId = Split-Path $RoomDir -Leaf
+    $planId = $env:OSTWIN_PLAN_ID
+    $runId = $env:OSTWIN_RUN_ID
+    $eventsPath = $env:OSTWIN_EVENTS_PATH
+    $epicRef = if (Test-Path (Join-Path $RoomDir 'task-ref')) { (Get-Content (Join-Path $RoomDir 'task-ref') -Raw).Trim() } else { '' }
+    $state = if (Test-Path (Join-Path $RoomDir 'status')) { (Get-Content (Join-Path $RoomDir 'status') -Raw).Trim() } else { 'unknown' }
+
+    $configFile = Join-Path $RoomDir 'config.json'
+    if (Test-Path $configFile) {
+        try {
+            $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
+            if ($cfg.plan_id) { $planId = $cfg.plan_id }
+            if ($cfg.run_id) { $runId = $cfg.run_id }
+            if ($cfg.events_path) { $eventsPath = $cfg.events_path }
+            if ($cfg.room_id) { $roomId = $cfg.room_id }
+            if ($cfg.task_ref) { $epicRef = $cfg.task_ref }
+            if ($cfg.status -and $cfg.status.current) { $state = $cfg.status.current }
+        } catch {
+            Write-Log 'DEBUG' "[Get-RoomOrchestrationContext] Error reading ${configFile}: $($_.Exception.Message)"
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($runId) -and -not [string]::IsNullOrWhiteSpace($planId)) { $runId = 'run_legacy' }
+
+    return [pscustomobject]@{
+        PlanId     = $planId
+        RunId      = $runId
+        EventsPath = $eventsPath
+        RoomId     = $roomId
+        EpicRef    = $epicRef
+        State      = $state
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Get-LatestFailureMessage
+# Captures the latest relevant semantic failure message for epic.failed payloads.
+# If no channel message exists, falls back to the per-room plan log preview.
+# ---------------------------------------------------------------------------
+function Get-LatestFailureMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [string]$Role = ''
+    )
+
+    $readMessages = _ctx 'readMessages'
+    foreach ($msgType in @('fail', 'error', 'fix')) {
+        try {
+            $msgs = & $readMessages -RoomDir $RoomDir -FilterType $msgType -Last 1 -AsObject
+            if ($msgs -and $msgs.Count -gt 0) {
+                $latest = $msgs[-1]
+                $body = if ($latest.body) { [string]$latest.body } else { '' }
+                return [ordered]@{
+                    message_id   = if ($latest.id) { $latest.id } elseif ($latest.message_id) { $latest.message_id } else { '' }
+                    type         = if ($latest.type) { $latest.type } else { $msgType }
+                    from         = if ($latest.from) { $latest.from } else { '' }
+                    body_preview = if ($body.Length -gt 500) { $body.Substring(0, 500) } else { $body }
+                    artifact     = ''
+                }
+            }
+        } catch {
+            Write-Log 'DEBUG' "[Get-LatestFailureMessage] Error reading '$msgType' from ${RoomDir}: $($_.Exception.Message)"
+        }
+    }
+
+    $artifactRole = if ($Role) { ($Role -replace ':.*$', '') } else { '' }
+    $candidateFiles = @()
+    $ctx = Get-RoomOrchestrationContext -RoomDir $RoomDir
+    if ($ctx -and -not [string]::IsNullOrWhiteSpace($ctx.PlanId) -and -not [string]::IsNullOrWhiteSpace($ctx.RoomId)) {
+        $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+        $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $_homeDir '.ostwin' }
+        $planLogsDir = Join-Path (Join-Path $ostwinHome '.agents') 'plans'
+        $safePlanId = $ctx.PlanId -replace '[^A-Za-z0-9._-]', '_'
+        $safeRoomId = $ctx.RoomId -replace '[^A-Za-z0-9._-]', '_'
+        $candidateFiles += (Join-Path $planLogsDir "$safePlanId.$safeRoomId.log")
+    }
+    if ($artifactRole) { $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' "$artifactRole-output.txt")) }
+    $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' 'qa-output.txt'))
+    $candidateFiles += (Join-Path $RoomDir (Join-Path 'artifacts' 'engineer-output.txt'))
+
+    foreach ($outputFile in $candidateFiles) {
+        if (Test-Path $outputFile) {
+            try {
+                $text = Get-Content $outputFile -Raw -ErrorAction Stop
+                $preview = if ($text.Length -gt 500) { $text.Substring(0, 500) } else { $text }
+                return [ordered]@{
+                    message_id   = ''
+                    type         = 'artifact'
+                    from         = $artifactRole
+                    body_preview = $preview
+                    artifact     = $outputFile
+                }
+            } catch {
+                Write-Log 'DEBUG' "[Get-LatestFailureMessage] Error reading ${outputFile}: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    return $null
+}
+
+# ---------------------------------------------------------------------------
+# Get-LatestChannelMessage
+# Captures the latest channel message for a role so plan-level events can carry
+# useful context from the room that produced the final manager signal.
+# ---------------------------------------------------------------------------
+function Get-LatestChannelMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [string]$Role = ''
+    )
+
+    $readMessages = _ctx 'readMessages'
+    try {
+        $args = @{
+            RoomDir  = $RoomDir
+            Last     = 1
+            AsObject = $true
+        }
+        if ($Role) { $args['FilterFrom'] = $Role }
+        $msgs = & $readMessages @args
+        if ($msgs -and $msgs.Count -gt 0) {
+            $latest = $msgs[-1]
+            $body = if ($latest.body) { [string]$latest.body } else { '' }
+            return [ordered]@{
+                message_id   = if ($latest.id) { $latest.id } elseif ($latest.message_id) { $latest.message_id } else { '' }
+                type         = if ($latest.type) { $latest.type } else { '' }
+                from         = if ($latest.from) { $latest.from } else { '' }
+                to           = if ($latest.to) { $latest.to } else { '' }
+                ref          = if ($latest.ref) { $latest.ref } else { '' }
+                ts           = if ($latest.ts) { $latest.ts } else { '' }
+                body_preview = if ($body.Length -gt 500) { $body.Substring(0, 500) } else { $body }
+            }
+        }
+    } catch {
+        Write-Log 'DEBUG' "[Get-LatestChannelMessage] Error reading latest message from ${RoomDir}: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+# ---------------------------------------------------------------------------
+# Write-ManagerOrchestrationEvent
+# Manager-owned event append helper. Missing event context is tolerated so local
+# unit tests and legacy direct invocations do not break.
+# ---------------------------------------------------------------------------
+function Write-ManagerOrchestrationEvent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$EventType,
+        [Parameter(Mandatory)][string]$Summary,
+        [hashtable]$Payload = @{},
+        [string]$Role = '',
+        [string]$State = '',
+        [string]$Severity = 'info',
+        [object]$LastMessage = $null,
+        [string]$EpicRef = ''
+    )
+
+    if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return $null }
+    $ctx = Get-RoomOrchestrationContext -RoomDir $RoomDir
+    if ([string]::IsNullOrWhiteSpace($ctx.PlanId)) { return $null }
+    $roomScopedEventTypes = @('room.created', 'room.status.changed', 'epic.started', 'epic.passed', 'epic.failed', 'epic.retrying', 'epic.blocked', 'epic.unblocked', 'dependency.created', 'dependency.satisfied', 'dependency.blocked', 'dependency.unblocked', 'role.assigned', 'role.reassigned', 'role.resolved', 'role.spawn.requested', 'agent.run.started', 'agent.run.completed', 'agent.run.failed', 'agent.run.timed_out', 'agent.run.respawned', 'lifecycle.signal.posted', 'lifecycle.transition.applied', 'lifecycle.retry.exhausted', 'lifecycle.escalated', 'channel.message.posted', 'conversation.bound', 'conversation.unbound', 'conversation.subscription.updated')
+    $isRoomScopedEvent = $roomScopedEventTypes -contains $EventType
+    if ($isRoomScopedEvent -and ([string]::IsNullOrWhiteSpace($ctx.RoomId) -or [string]::IsNullOrWhiteSpace($ctx.EpicRef))) {
+        Write-Log 'DEBUG' "[Write-ManagerOrchestrationEvent] Skipping '$EventType' because room context is incomplete for '$RoomDir'."
+        return $null
+    }
+
+    $event = [ordered]@{
+        event_type = $EventType
+        plan_id    = $ctx.PlanId
+        run_id     = $ctx.RunId
+        severity   = $Severity
+        summary    = $Summary
+        payload    = [ordered]@{}
+    }
+    foreach ($key in $Payload.Keys) { $event.payload[$key] = $Payload[$key] }
+
+    $effectiveRole = if ($Role) { $Role } else { 'manager' }
+    $effectiveState = if ($State) { $State } else { $ctx.State }
+    $event['role'] = $effectiveRole
+    $event['state'] = $effectiveState
+    if (-not $event.payload.Contains('role')) { $event.payload['role'] = $effectiveRole }
+    if (-not $event.payload.Contains('agent_name')) { $event.payload['agent_name'] = $effectiveRole }
+
+    if ($isRoomScopedEvent) {
+        $event['room_id'] = $ctx.RoomId
+        $event['epic_ref'] = if ($EpicRef) { $EpicRef } else { $ctx.EpicRef }
+    }
+    if ($LastMessage) { $event['last_message'] = $LastMessage }
+
+    return (Write-OrchestrationEvent -EventsPath $ctx.EventsPath -Event $event)
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-PlanFailFast
+# Implements fail-fast: one unrecoverable epic failure emits epic.failed and
+# plan.run.failed, then stops active room processes before the manager exits.
+# ---------------------------------------------------------------------------
+function Invoke-PlanFailFast {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$Reason,
+        [string]$Role = '',
+        [string]$State = '',
+        [string]$Summary = '',
+        [object]$LastMessage = $null
+    )
+
+    $WarRoomsDir = _ctx 'WarRoomsDir'
+    $ctx = Get-RoomOrchestrationContext -RoomDir $RoomDir
+    $failedSummary = if ($Summary) { $Summary } else { "$($ctx.EpicRef) failed: $Reason" }
+    if (-not $LastMessage) { $LastMessage = Get-LatestFailureMessage -RoomDir $RoomDir -Role $Role }
+
+    $epicPayload = @{
+        reason       = $Reason
+        plan_id      = $ctx.PlanId
+        run_id       = $ctx.RunId
+        room_id      = $ctx.RoomId
+        epic_ref     = $ctx.EpicRef
+        role         = $Role
+        state        = if ($State) { $State } else { $ctx.State }
+        last_message = $LastMessage
+    }
+    Write-ManagerOrchestrationEvent -RoomDir $RoomDir -EventType 'epic.failed' -Summary $failedSummary -Payload $epicPayload -Role $Role -State $State -Severity 'fatal' -LastMessage $LastMessage | Out-Null
+
+    $planPayload = @{
+        reason       = $Reason
+        failed_epic  = [ordered]@{
+            plan_id      = $ctx.PlanId
+            run_id       = $ctx.RunId
+            room_id      = $ctx.RoomId
+            epic_ref     = $ctx.EpicRef
+            role         = $Role
+            state        = if ($State) { $State } else { $ctx.State }
+            summary      = $failedSummary
+            last_message = $LastMessage
+        }
+    }
+    Write-ManagerOrchestrationEvent -RoomDir $RoomDir -EventType 'plan.run.failed' -Summary "Plan $($ctx.PlanId) failed because $($ctx.EpicRef) failed." -Payload $planPayload -Severity 'fatal' | Out-Null
+
+    # Stop all active room processes only after events have been appended.
+    if ($WarRoomsDir -and (Test-Path $WarRoomsDir)) {
+        Get-ChildItem -Path $WarRoomsDir -Directory -Filter 'room-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            $status = if (Test-Path (Join-Path $_.FullName 'status')) { (Get-Content (Join-Path $_.FullName 'status') -Raw).Trim() } else { '' }
+            $canonicalStatus = ConvertTo-CanonicalRoomStatus -Status $status
+            if ($canonicalStatus -notin @('done', 'failed', 'blocked', '')) {
+                Stop-RoomProcesses $_.FullName
+            }
+        }
+    }
+
+    Write-RoomStatus $RoomDir 'failed'
+    return $true
 }
 
 # ---------------------------------------------------------------------------
@@ -217,6 +502,7 @@ function Stop-RoomProcesses {
 function Write-RoomStatus {
     [CmdletBinding()]
     param([string]$RoomDir, [string]$NewStatus)
+    $NewStatus = ConvertTo-CanonicalRoomStatus -Status $NewStatus
     $oldStatus = if (Test-Path (Join-Path $RoomDir "status")) {
         (Get-Content (Join-Path $RoomDir "status") -Raw).Trim()
     } else { "unknown" }
@@ -231,9 +517,19 @@ function Write-RoomStatus {
         "$ts STATUS $oldStatus -> $NewStatus" | Out-File -Append -FilePath (Join-Path $RoomDir "audit.log") -Encoding utf8
     }
 
+    if ($oldStatus -ne $NewStatus) {
+        $statusLastMessage = Get-LatestChannelMessage -RoomDir $RoomDir -Role 'manager'
+        Write-ManagerOrchestrationEvent -RoomDir $RoomDir -EventType 'room.status.changed' -Summary "War-room status changed from '$oldStatus' to '$NewStatus'." -Payload @{
+            previous_status = $oldStatus
+            status          = $NewStatus
+            role            = 'manager'
+            agent_name      = 'manager'
+        } -Role 'manager' -State $NewStatus -LastMessage $statusLastMessage | Out-Null
+    }
+
     $pidDir = Join-Path $RoomDir "pids"
     if (Test-Path $pidDir) {
-        $terminalStates = @('passed', 'failed-final', 'blocked')
+        $terminalStates = @('done', 'failed', 'blocked', 'passed', 'failed-final')
         if ($NewStatus -in $terminalStates) {
             Get-ChildItem $pidDir -Filter "*.pid"        -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
             Get-ChildItem $pidDir -Filter "*.spawned_at" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -261,6 +557,51 @@ function Write-RoomStatus {
 # ---------------------------------------------------------------------------
 # Find-LatestSignal
 # ---------------------------------------------------------------------------
+function Convert-ManagerSignalTimestampToEpoch {
+    [CmdletBinding()]
+    param($Timestamp)
+
+    if (-not $Timestamp) { return 0 }
+    if ($Timestamp -is [datetime]) {
+        return [long]([DateTimeOffset]::new($Timestamp.ToUniversalTime()).ToUnixTimeSeconds())
+    }
+    if ("$Timestamp" -match '^\d+$') { return [long]"$Timestamp" }
+
+    try {
+        return [long]([DateTimeOffset]::new([datetime]::Parse("$Timestamp").ToUniversalTime()).ToUnixTimeSeconds())
+    } catch {
+        Write-Log "DEBUG" "[Find-LatestSignal] Failed to parse timestamp '$Timestamp': $($_.Exception.Message)"
+        return 0
+    }
+}
+
+function Test-ManagerSignalSenderMatches {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$ExpectedRole,
+        [AllowEmptyString()][string]$ActualRole
+    )
+
+    if (-not $ExpectedRole) { return $true }
+    if (-not $ActualRole) { return $false }
+
+    $expectedBase = ($ExpectedRole -replace ':.*$', '')
+    $actualBase = ($ActualRole -replace ':.*$', '')
+
+    if ($actualBase -eq $expectedBase) { return $true }
+
+    # MCP channel_post_message only supports canonical sender roles
+    # (manager|engineer|qa|architect). Dynamic QA evaluator roles such as
+    # qa-automation-engineer may therefore emit their direct channel signal as
+    # from='qa', while the wrapper emits from='qa-automation-engineer'. Treat
+    # canonical qa as an alias only for QA-family dynamic evaluator roles.
+    if ($actualBase -eq 'qa' -and ($expectedBase -eq 'qa' -or $expectedBase -like 'qa-*')) {
+        return $true
+    }
+
+    return $false
+}
+
 function Find-LatestSignal {
     [CmdletBinding()]
     param(
@@ -286,51 +627,39 @@ function Find-LatestSignal {
     }
     Write-Log "DEBUG" "[Find-LatestSignal][$roomId] state='$StateName' role='$expectedRole' state_changed_at=$changedAt signals=($($expectedSignals -join ', '))"
 
+    $candidateSignals = [System.Collections.Generic.List[object]]::new()
+
     foreach ($sigType in $expectedSignals) {
         try {
-            $msgs = & $readMessages -RoomDir $RoomDir -FilterType $sigType -Last 1 -AsObject
+            # Read all messages of this signal type and filter before choosing
+            # the latest. Using -Last 1 before role/timestamp filtering lets a
+            # newer wrong-role message mask an earlier valid lifecycle signal.
+            $msgs = & $readMessages -RoomDir $RoomDir -FilterType $sigType -AsObject
             if ($msgs -and $msgs.Count -gt 0) {
-                $latest = $msgs[-1]
+                foreach ($latest in $msgs) {
+                    $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $latest.ts
+                    $body = if ($latest.body) { [string]$latest.body } else { '' }
+                    $bodyPreview = if ($body.Length -gt 120) { $body.Substring(0, 120) + '...' } else { $body }
 
-                $msgTs = 0
-                if ($latest.ts) {
-                    if ($latest.ts -is [datetime]) {
-                        $msgTs = [long]([DateTimeOffset]::new($latest.ts.ToUniversalTime()).ToUnixTimeSeconds())
-                    } elseif ("$($latest.ts)" -match '^\d+$') {
-                        $msgTs = [int]"$($latest.ts)"
-                    } else {
-                        try { $msgTs = [long]([DateTimeOffset]::new([datetime]::Parse("$($latest.ts)").ToUniversalTime()).ToUnixTimeSeconds()) } catch {
-                            Write-Log "DEBUG" "[Find-LatestSignal] Failed to parse timestamp '$($latest.ts)': $($_.Exception.Message)"
-                        }
-                    }
-                }
-                $bodyPreview = if ($latest.body.Length -gt 120) { $latest.body.Substring(0, 120) + '...' } else { $latest.body }
-
-                if ($expectedRole -and $latest.from) {
-                    $senderBase = ($latest.from -replace ':.*$', '')
-                    if ($senderBase -ne $expectedRole) {
+                    if ($expectedRole -and -not (Test-ManagerSignalSenderMatches -ExpectedRole $expectedRole -ActualRole $latest.from)) {
                         Write-Log "DEBUG" "[Find-LatestSignal][$roomId] signal='$sigType' REJECTED: from='$($latest.from)' != lifecycle role='$expectedRole'"
                         continue
                     }
-                }
 
-                # Accept signals posted at or after the state change.
-                # Using -ge (not -gt) because the worker's MCP tool may update
-                # state_changed_at and post a channel signal in the same epoch
-                # second — -gt would reject that signal as "stale".
-                $accepted = ($msgTs -ge $changedAt)
-                Write-Log "DEBUG" "[Find-LatestSignal][$roomId] signal='$sigType' from='$($latest.from)' msgTs=$msgTs changedAt=$changedAt accepted=$accepted body=[$bodyPreview]"
-                if ($accepted) {
-                    # --- Output-grep cross-check (defense-in-depth) ---
-                    # The agent itself may have posted a different signal via
-                    # the channel_post_message MCP tool than what the worker
-                    # script parsed and re-posted. Prefer the agent's intent.
-                    $outputSignal = Get-OutputSignal -RoomDir $RoomDir -Role $expectedRole
-                    if ($outputSignal -and $outputSignal -ne 'error' -and $outputSignal -ne $sigType -and $outputSignal -in $expectedSignals) {
-                        Write-Log "WARN" "[Find-LatestSignal][$roomId] OUTPUT OVERRIDE: channel='$sigType' but agent output shows msg_type='$outputSignal'. Using '$outputSignal'."
-                        return $outputSignal
+                    # Accept signals posted at or after the state change.
+                    # Using -ge (not -gt) because the worker's MCP tool may update
+                    # state_changed_at and post a channel signal in the same epoch
+                    # second — -gt would reject that signal as "stale".
+                    $accepted = ($msgTs -ge $changedAt)
+                    Write-Log "DEBUG" "[Find-LatestSignal][$roomId] signal='$sigType' from='$($latest.from)' msgTs=$msgTs changedAt=$changedAt accepted=$accepted body=[$bodyPreview]"
+                    if ($accepted) {
+                        $candidateSignals.Add([pscustomobject]@{
+                            Type = $sigType
+                            Timestamp = $msgTs
+                            Id = if ($latest.id) { [string]$latest.id } else { '' }
+                            Message = $latest
+                        }) | Out-Null
                     }
-                    return $sigType
                 }
             } else {
                 Write-Log "DEBUG" "[Find-LatestSignal][$roomId] signal='$sigType' — no messages found"
@@ -339,6 +668,25 @@ function Find-LatestSignal {
             Write-Log "DEBUG" "[Find-LatestSignal][$roomId] signal='$sigType' — error: $($_.Exception.Message)"
         }
     }
+
+    if ($candidateSignals.Count -gt 0) {
+        $selected = $candidateSignals |
+            Sort-Object @{ Expression = 'Timestamp'; Descending = $true }, @{ Expression = 'Id'; Descending = $true } |
+            Select-Object -First 1
+
+        # --- Output-grep cross-check (defense-in-depth) ---
+        # The agent itself may have posted a different signal via the
+        # channel_post_message MCP tool than what the worker script parsed and
+        # re-posted. Prefer the current invocation's direct channel intent only
+        # when it can be found in the latest wrapper segment.
+        $outputSignal = Get-OutputSignal -RoomDir $RoomDir -Role $expectedRole
+        if ($outputSignal -and $outputSignal -ne 'error' -and $outputSignal -ne $selected.Type -and $outputSignal -in $expectedSignals) {
+            Write-Log "WARN" "[Find-LatestSignal][$roomId] OUTPUT OVERRIDE: channel='$($selected.Type)' but agent output shows msg_type='$outputSignal'. Using '$outputSignal'."
+            return $outputSignal
+        }
+        return $selected.Type
+    }
+
     Write-Log "DEBUG" "[Find-LatestSignal][$roomId] no matching signal found"
     return $null
 }
@@ -363,9 +711,19 @@ function Get-OutputSignal {
 
     $lastMsgType = $null
     try {
-        # Read the file and scan for channel_post_message lines from the end
+        # Read the file and scan only the latest wrapper invocation segment.
+        # Agent output files are append-only across --continue retries; scanning
+        # the whole file lets stale MCP calls from a previous invocation override
+        # the current run's channel signal.
         $lines = Get-Content $outputFile -ErrorAction Stop
-        for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        $startIndex = 0
+        for ($j = $lines.Count - 1; $j -ge 0; $j--) {
+            if ($lines[$j] -match '^\[wrapper\]\s+PID=') {
+                $startIndex = $j
+                break
+            }
+        }
+        for ($i = $lines.Count - 1; $i -ge $startIndex; $i--) {
             if ($lines[$i] -match 'channel_post_message\s+(\{.+\})') {
                 $jsonStr = $Matches[1]
                 try {
@@ -843,6 +1201,7 @@ function Write-TriageContext {
         'implementation-bug' { "Engineer: Fix the specific issues listed in QA's report above." }
         'design-issue'       { "Engineer: Follow the architect's guidance above to redesign the approach." }
         'plan-gap'           { "Engineer: The brief has been updated. Re-read brief.md and implement accordingly." }
+        'role-mediation'     { "Counterpart role: answer the escalation, resolve missing assumptions, then post DONE so the reviewer can continue." }
         default              { "Engineer: Address the issues identified above." }
     }
     $guidanceSection = if ($ArchitectGuidance) { $ArchitectGuidance } else { "_Not consulted — classified as implementation bug._" }
@@ -864,6 +1223,341 @@ $ManagerNotes
 $actionLine
 "@
     $content | Out-File -FilePath $contextFile -Encoding utf8 -Force
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-TriageMediation
+# Starts a manager-as-leader triage judge when a reviewer escalates. ESCALATE
+# means the deterministic loop should compile the current epic member context,
+# then invoke --agent manager to judge the last escalator message. The manager
+# agent posts the actual lifecycle signal (fix/reject/etc.); Start-ManagerLoop
+# remains the authority that applies state transitions after that signal appears.
+# ---------------------------------------------------------------------------
+function Resolve-ManagerRolePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RoleName)
+
+    $agentsDir = _ctx 'agentsDir'
+    $projectRoot = if ($agentsDir) { Split-Path $agentsDir -Parent } else { '' }
+    $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+    $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $_homeDir '.ostwin' }
+
+    $candidates = @()
+    if ($agentsDir) { $candidates += (Join-Path $agentsDir (Join-Path 'roles' $RoleName)) }
+    $candidates += (Join-Path $ostwinHome (Join-Path '.agents' (Join-Path 'roles' $RoleName)))
+    if ($projectRoot) { $candidates += (Join-Path $projectRoot (Join-Path 'contributes' (Join-Path 'roles' $RoleName))) }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+    return $null
+}
+
+function Read-ManagerRoleHeader {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RoleName)
+
+    $rolePath = Resolve-ManagerRolePath -RoleName $RoleName
+    $roleMd = if ($rolePath) { Join-Path $rolePath 'ROLE.md' } else { '' }
+    if (-not $roleMd -or -not (Test-Path $roleMd)) {
+        return [pscustomobject]@{
+            Name = $RoleName
+            Description = "$RoleName role"
+            Tags = @()
+            TrustLevel = ''
+            Path = $roleMd
+        }
+    }
+
+    $content = Get-Content $roleMd -Raw
+    $header = ''
+    if ($content -match '(?s)^---\s*\r?\n(.*?)\r?\n---') { $header = $Matches[1] }
+
+    $name = $RoleName
+    $description = "$RoleName role"
+    $tags = @()
+    $trustLevel = ''
+
+    if ($header) {
+        foreach ($line in ($header -split "\r?\n")) {
+            if ($line -match '^name:\s*(.+)$') { $name = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^description:\s*(.+)$') { $description = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^trust_level:\s*(.+)$') { $trustLevel = $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line -match '^tags:\s*\[(.*)\]\s*$') {
+                $tags = @($Matches[1] -split ',' | ForEach-Object { $_.Trim().Trim('"').Trim("'") } | Where-Object { $_ })
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Name = $name
+        Description = $description
+        Tags = $tags
+        TrustLevel = $trustLevel
+        Path = $roleMd
+    }
+}
+
+function Get-ManagerEpicMemberRoles {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle
+    )
+
+    $roles = [System.Collections.Generic.List[string]]::new()
+    if ($Lifecycle -and $Lifecycle.states) {
+        foreach ($stateName in $Lifecycle.states.PSObject.Properties.Name) {
+            $stateDef = $Lifecycle.states.$stateName
+            if ($stateDef -and $stateDef.role) {
+                $base = ([string]$stateDef.role) -replace ':.*$', ''
+                if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+            }
+        }
+    }
+
+    $roomConfigFile = Join-Path $RoomDir 'config.json'
+    if (Test-Path $roomConfigFile) {
+        try {
+            $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
+            if ($roomCfg.assignment -and $roomCfg.assignment.assigned_role) {
+                $base = ([string]$roomCfg.assignment.assigned_role) -replace ':.*$', ''
+                if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+            }
+            if ($roomCfg.assignment -and $roomCfg.assignment.candidate_roles) {
+                foreach ($candidate in @($roomCfg.assignment.candidate_roles)) {
+                    $base = ([string]$candidate) -replace ':.*$', ''
+                    if ($base -and $base -ne 'manager' -and -not $roles.Contains($base)) { $roles.Add($base) | Out-Null }
+                }
+            }
+        } catch { }
+    }
+
+    return @($roles)
+}
+
+function Build-ManagerTeamDomainContext {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle
+    )
+
+    $memberRoles = Get-ManagerEpicMemberRoles -RoomDir $RoomDir -Lifecycle $Lifecycle
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('## Team Domain Context') | Out-Null
+    $lines.Add('') | Out-Null
+    if (-not $memberRoles -or $memberRoles.Count -eq 0) {
+        $lines.Add('Current epic members: _No member roles resolved from lifecycle/config._') | Out-Null
+    } else {
+        $lines.Add('Current epic members:') | Out-Null
+        foreach ($roleName in $memberRoles) {
+            $header = Read-ManagerRoleHeader -RoleName $roleName
+            $tagText = if ($header.Tags -and $header.Tags.Count -gt 0) { $header.Tags -join ', ' } else { 'none' }
+            $trustText = if ($header.TrustLevel) { $header.TrustLevel } else { 'unspecified' }
+            $lines.Add("- $($header.Name): $($header.Description) (tags: $tagText; trust_level: $trustText)") | Out-Null
+        }
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Leadership stance: You are the generic team leader for this epic. Inherit the domain language, risk lens, and evaluation expectations from the member descriptions above. Judge the escalation against the current epic context, not against a fixed engineering-manager persona.') | Out-Null
+    return ($lines -join "`n")
+}
+
+function Build-ManagerTriagePrompt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$TaskRef,
+        [Parameter(Mandatory)]$EscalationMessage
+    )
+
+    $agentsDir = _ctx 'agentsDir'
+    $managerRolePath = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'roles' (Join-Path 'manager' 'ROLE.md')) } else { '' }
+    $managerRole = if ($managerRolePath -and (Test-Path $managerRolePath)) { Get-Content $managerRolePath -Raw } else { '# manager' }
+    $teamDomain = Build-ManagerTeamDomainContext -RoomDir $RoomDir -Lifecycle $Lifecycle
+    $briefPath = Join-Path $RoomDir 'brief.md'
+    $brief = if (Test-Path $briefPath) { Get-Content $briefPath -Raw } else { '_No brief.md found._' }
+    $tasksPath = Join-Path $RoomDir 'TASKS.md'
+    $tasks = if (Test-Path $tasksPath) { Get-Content $tasksPath -Raw } else { '_No TASKS.md found._' }
+
+    $readMessages = _ctx 'readMessages'
+    $recent = @()
+    try { $recent = & $readMessages -RoomDir $RoomDir -Last 8 -AsObject } catch { $recent = @() }
+    $recentText = if ($recent -and $recent.Count -gt 0) {
+        (@($recent) | ForEach-Object { "### $($_.from) -> $($_.to) [$($_.type)]`n$($_.body)" }) -join "`n`n"
+    } else { '_No recent messages found._' }
+
+    $escalationBody = if ($EscalationMessage.body) { [string]$EscalationMessage.body } else { '' }
+    $raiser = if ($EscalationMessage.from) { [string]$EscalationMessage.from } else { 'unknown' }
+
+    return @"
+$managerRole
+
+$teamDomain
+
+## Current Epic Context
+
+Task/Epic reference: $TaskRef
+
+### Brief
+$brief
+
+### TASKS.md
+$tasks
+
+## Recent Member Messages
+
+$recentText
+
+## Last Escalator Message To Review
+
+Escalator: $raiser
+
+$escalationBody
+
+## Your Triage Task
+
+Review the last message from the escalator/member as the team leader for this epic.
+
+Judge:
+1. What is the actual blocker?
+2. Is the answer already in the brief, TASKS.md, artifacts, or prior messages?
+3. Which exact member/domain should answer or act next?
+4. Is this classification: CLARIFICATION, MEMBER_WORK_DEFECT, DOMAIN_DESIGN_ISSUE, PLAN_GAP, BLOCKED, or INVALID_ALREADY_ANSWERED?
+5. Should lifecycle retry budget be consumed? Default is NO for clarification/debate.
+6. What exact next channel message should be posted?
+
+You MUST post exactly one lifecycle decision message to the war-room channel as `manager`. Do not answer only in plain text. Do not say "no new channel post should be made".
+
+Allowed triage decision message types:
+- `done` to the escalator when the escalation is resolved or already answered. This sends lifecycle back to review.
+- `fix` to the responsible member when clarification or rework is needed. Include `Retry impact: none` for clarification-only routing.
+- `redesign` when the plan/approach must restart from developing.
+- `reject` when the room should fail.
+
+Include classification, evidence considered, decision, next role, retry impact, and return path to the original escalator.
+"@
+}
+
+function Start-ManagerTriageAgent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$Prompt,
+        [Parameter(Mandatory)][string]$TaskRef
+    )
+
+    $agentsDir = _ctx 'agentsDir'
+    $invokeAgent = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'roles' (Join-Path '_base' 'Invoke-Agent.ps1')) } else { '' }
+    if (-not $invokeAgent -or -not (Test-Path $invokeAgent)) { throw "Invoke-Agent.ps1 not found for manager triage." }
+
+    $artifactsDir = Join-Path $RoomDir 'artifacts'
+    if (-not (Test-Path $artifactsDir)) { New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null }
+    $promptPath = Join-Path $artifactsDir 'manager-triage-prompt.md'
+    $Prompt | Out-File -FilePath $promptPath -Encoding utf8 -Force
+
+    if ($env:OSTWIN_MANAGER_TRIAGE_NO_AGENT -eq '1') {
+        return [pscustomobject]@{ Started = $false; Reason = 'disabled'; PromptPath = $promptPath }
+    }
+
+    if (Test-SpawnLock -RoomDir $RoomDir -Role 'manager') {
+        return [pscustomobject]@{ Started = $false; Reason = 'spawn-lock'; PromptPath = $promptPath }
+    }
+    $managerPid = Join-Path $RoomDir (Join-Path 'pids' 'manager.pid')
+    if (Test-PidAlive $managerPid) {
+        return [pscustomobject]@{ Started = $false; Reason = 'pid-alive'; PromptPath = $promptPath }
+    }
+
+    Write-SpawnLock -RoomDir $RoomDir -Role 'manager'
+    Set-RoleRunStatus -RoomDir $RoomDir -Role 'manager' -Status 'active' | Out-Null
+    $timeout = Resolve-RoleTimeout -RoleName 'manager' -RoomDir $RoomDir
+    $roomId = Split-Path $RoomDir -Leaf
+    Start-Job -Name "ostwin-triage-$roomId-manager" -ScriptBlock {
+        param($invoke, $room, $prompt, $timeoutSeconds)
+        & $invoke -RoomDir $room -RoleName 'manager' -Prompt $prompt -TimeoutSeconds $timeoutSeconds -ForkSession
+    } -ArgumentList $invokeAgent, $RoomDir, $Prompt, $timeout | Out-Null
+
+    return [pscustomobject]@{ Started = $true; Reason = 'started'; PromptPath = $promptPath }
+}
+
+function Invoke-TriageMediation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$TaskRef
+    )
+
+    $readMessages = _ctx 'readMessages'
+    $triageDef = if ($Lifecycle -and $Lifecycle.states -and $Lifecycle.states.triage) { $Lifecycle.states.triage } else { $null }
+    if (-not $triageDef -or -not $triageDef.signals -or -not $triageDef.signals.fix) { return $null }
+
+    # If the manager already emitted a triage decision for this state entry,
+    # do not duplicate it. Find-LatestSignal will consume it normally.
+    $existing = Find-LatestSignal -RoomDir $RoomDir -Lifecycle $Lifecycle -StateName 'triage'
+    if ($existing) { return [pscustomobject]@{ Signal = $existing; AlreadyPresent = $true } }
+
+    $changedAt = 0
+    $changedFile = Join-Path $RoomDir 'state_changed_at'
+    if (Test-Path $changedFile) {
+        try { $changedAt = [long](Get-Content $changedFile -Raw).Trim() } catch { $changedAt = 0 }
+    }
+
+    $escalations = @()
+    try { $escalations = & $readMessages -RoomDir $RoomDir -FilterType 'escalate' -AsObject } catch { $escalations = @() }
+    if (-not $escalations -or $escalations.Count -eq 0) { return $null }
+
+    $latestEscalation = $null
+    $latestAnyEscalation = $null
+    foreach ($msg in $escalations) {
+        $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $msg.ts
+        if (-not $latestAnyEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestAnyEscalation.ts)) {
+            $latestAnyEscalation = $msg
+        }
+        if ($msgTs -ge $changedAt -and (-not $latestEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestEscalation.ts))) {
+            $latestEscalation = $msg
+        }
+    }
+    if (-not $latestEscalation -and $latestAnyEscalation) {
+        # The escalation that caused review -> triage is usually timestamped just
+        # BEFORE triage's state_changed_at. Filtering strictly against the new
+        # triage timestamp drops the causal message and leaves triage idle with
+        # no manager-output.txt. Fall back to the latest escalation when no
+        # post-triage escalation exists; Find-LatestSignal already validated the
+        # review escalation before the state transition.
+        Write-Log "DEBUG" "[$TaskRef] Triage using latest pre-triage escalation as causal context."
+        $latestEscalation = $latestAnyEscalation
+    }
+    if (-not $latestEscalation) {
+        Write-Log "WARN" "[$TaskRef] Triage has no escalation message to compile for manager."
+        return $null
+    }
+
+    $raiser = if ($latestEscalation.from) { [string]$latestEscalation.from } else { '' }
+    $raiserBase = $raiser -replace ':.*$', ''
+
+    $escalationBody = if ($latestEscalation.body) { [string]$latestEscalation.body } else { '' }
+
+    $managerNotes = @"
+Manager triage judge requested for ESCALATE: $raiserBase asked for leadership mediation before review can proceed.
+
+The deterministic manager loop compiled the current epic member ROLE.md headers, recent messages, brief, TASKS.md, and the latest escalator message, then invoked --agent manager to judge the next action.
+"@
+
+    Write-TriageContext -RoomDir $RoomDir -Classification 'leader-triage' -QaFeedback $escalationBody -ArchitectGuidance '' -ManagerNotes $managerNotes
+    $prompt = Build-ManagerTriagePrompt -RoomDir $RoomDir -Lifecycle $Lifecycle -TaskRef $TaskRef -EscalationMessage $latestEscalation
+    $start = Start-ManagerTriageAgent -RoomDir $RoomDir -Prompt $prompt -TaskRef $TaskRef
+
+    return [pscustomobject]@{
+        Signal = 'manager-triage'
+        TargetRole = 'manager'
+        RaisedBy = $raiserBase
+        PromptPath = $start.PromptPath
+        Started = $start.Started
+        Reason = $start.Reason
+        AlreadyPresent = $false
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -890,11 +1584,17 @@ Export-ModuleMember -Function @(
     'Get-UnixEpoch',
     'Write-AtomicFile',
     'Test-ValidRoomState',
+    'ConvertTo-CanonicalRoomStatus',
     'Set-ManagerLoopContext',
     'Get-ManagerLoopContext',
     'Get-ActiveCount',
     'Get-MsgCount',
     'Get-LatestBody',
+    'Get-RoomOrchestrationContext',
+    'Get-LatestFailureMessage',
+    'Get-LatestChannelMessage',
+    'Write-ManagerOrchestrationEvent',
+    'Invoke-PlanFailFast',
     'Test-StateTimedOut',
     'Stop-RoomProcesses',
     'Write-RoomStatus',
@@ -912,5 +1612,12 @@ Export-ModuleMember -Function @(
     'Set-BlockedDescendants',
     'Invoke-ManagerTriage',
     'Write-TriageContext',
+    'Resolve-ManagerRolePath',
+    'Read-ManagerRoleHeader',
+    'Get-ManagerEpicMemberRoles',
+    'Build-ManagerTeamDomainContext',
+    'Build-ManagerTriagePrompt',
+    'Start-ManagerTriageAgent',
+    'Invoke-TriageMediation',
     'Complete-PlanApproval'
 )

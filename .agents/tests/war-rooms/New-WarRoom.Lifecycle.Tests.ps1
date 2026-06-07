@@ -40,7 +40,7 @@ Describe "New-WarRoom lifecycle.json" {
         }
     }
 
-    Context "Single candidate — developing goes through review to passed" {
+    Context "Single candidate — developing goes through review to done" {
         It "candidate_roles=['engineer'] → developing role is engineer" {
             & $script:NewWarRoom -RoomId "room-sc-01" -TaskRef "EPIC-001" `
                                  -TaskDescription "Engineer only" `
@@ -64,18 +64,19 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.developing.role | Should -Be "reporter"
         }
 
-        It "optimize and fixing states exist with same role as developing" {
+        It "only canonical lifecycle states are generated" {
             & $script:NewWarRoom -RoomId "room-sc-04" -TaskRef "EPIC-004" `
                                  -TaskDescription "Optimize state" `
                                  -WarRoomsDir $script:warRoomsDir `
                                  -CandidateRoles @("engineer")
 
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-sc-04" "lifecycle.json") -Raw | ConvertFrom-Json
+            @($lc.states.PSObject.Properties.Name) | Sort-Object | Should -Be @('developing', 'done', 'failed', 'optimize', 'review', 'triage')
             $lc.states.optimize.role | Should -Be "engineer"
             $lc.states.optimize.type | Should -Be "work"
-            $lc.states.fixing.role | Should -Be "engineer"
-            $lc.states.fixing.type | Should -Be "work"
-            $lc.states.fixing.signals.done.target | Should -Be "review"
+            @($lc.states.PSObject.Properties.Name) | Should -Not -Contain "fixing"
+            @($lc.states.PSObject.Properties.Name) | Should -Not -Contain "passed"
+            @($lc.states.PSObject.Properties.Name) | Should -Not -Contain "failed-final"
         }
     }
 
@@ -90,8 +91,8 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "qa"
-            $lc.states.'review'.signals.done.target | Should -Be "passed"
-            $lc.states.'review'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+            $lc.states.'review'.signals.done.target | Should -Be "done"
+            $lc.states.'review'.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
             $lc.states.'review'.signals.fail.target | Should -Be "optimize"
         }
 
@@ -108,7 +109,7 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.review.role | Should -Be "qa"
         }
 
-        It "three candidates chain correctly: developing → review → review-2 → passed" {
+        It "three candidates collapse to a single canonical review state" {
             & $script:NewWarRoom -RoomId "room-mc-04" -TaskRef "EPIC-012" `
                                  -TaskDescription "Full pipeline" `
                                  -WarRoomsDir $script:warRoomsDir `
@@ -118,11 +119,9 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-04" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "architect"
-            $lc.states.'review'.signals.done.target | Should -Be "review-2"
-            $lc.states.'review'.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
-            $lc.states.'review-2'.role | Should -Be "qa"
-            $lc.states.'review-2'.signals.done.target | Should -Be "passed"
-            $lc.states.'review-2'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+            $lc.states.'review'.signals.done.target | Should -Be "done"
+            $lc.states.'review'.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
+            @($lc.states.PSObject.Properties.Name) | Should -Not -Contain "review-2"
         }
     }
 
@@ -136,9 +135,10 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-bi-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.triage.type | Should -Be "triage"
             $lc.states.triage.role | Should -Be "manager"
-            $lc.states.failed.type | Should -Be "decision"
-            $lc.states.passed.type | Should -Be "terminal"
-            $lc.states.'failed-final'.type | Should -Be "terminal"
+            $lc.states.triage.signals.done.target | Should -Be "review"
+            $lc.states.triage.signals.reject.target | Should -Be "failed"
+            $lc.states.done.type | Should -Be "terminal"
+            $lc.states.failed.type | Should -Be "terminal"
         }
 
         It "does not create error lifecycle signals in any generated state" {
@@ -185,10 +185,10 @@ Describe "New-WarRoom lifecycle.json" {
                 -Because "security capability must upgrade generic engineer worker"
             $lc.states.developing.type | Should -Be "work"
             $lc.states.optimize.role   | Should -Be "security-engineer"
-            $lc.states.fixing.role     | Should -Be "security-engineer"
             $lc.states.review.role     | Should -Be "security-specialist" `
                 -Because "security capability maps reviewer to security-specialist"
             $lc.states.review.type     | Should -Be "review"
+            @($lc.states.PSObject.Properties.Name) | Should -Not -Contain "fixing"
         }
 
         It "RequiredCapabilities=['security'] with explicit security-engineer keeps security-engineer as worker" {
@@ -216,9 +216,8 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-cap-sec-03" "lifecycle.json") -Raw | ConvertFrom-Json
 
             $lc.states.triage.type        | Should -Be "triage"
-            $lc.states.failed.type        | Should -Be "decision"
-            $lc.states.passed.type        | Should -Be "terminal"
-            $lc.states.'failed-final'.type | Should -Be "terminal"
+            $lc.states.done.type          | Should -Be "terminal"
+            $lc.states.failed.type        | Should -Be "terminal"
             Assert-NoLifecycleErrorSignal $lc
         }
     }

@@ -1,6 +1,6 @@
 {
   "name": "game-designer",
-  "description": "Upstream design pipeline \u2014 game brief, GDD, UX design, epics, stories, and brainstorming for Unity mobile games",
+  "description": "Upstream design pipeline — game brief, GDD, UX design, epics, stories, and brainstorming for Unity mobile games",
   "capabilities": [
     "game-brief",
     "gdd-creation",
@@ -19,7 +19,7 @@
     "stories-actionable-without-designer"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 900,
   "skill_refs": [
     "create-game-brief",

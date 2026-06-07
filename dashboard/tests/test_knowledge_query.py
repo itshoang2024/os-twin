@@ -32,6 +32,7 @@ Test harness:
 from __future__ import annotations
 
 import os
+import hashlib
 import statistics
 import threading
 import time
@@ -75,8 +76,31 @@ def kb_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def real_embedder() -> KnowledgeEmbedder:
-    """Real KnowledgeEmbedder; the model load is cached at the class level."""
-    return KnowledgeEmbedder()
+    """Deterministic offline embedder for query tests.
+
+    These tests exercise query/storage behavior, not the external embedding
+    transport.  Using a local embedder keeps the suite green on machines where
+    Ollama is not installed or running.
+    """
+    class _OfflineEmbedder:
+        model_name = "test-offline-embedder"
+
+        def dimension(self) -> int:
+            return 1024
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [self.embed_one(text) for text in texts]
+
+        def embed_one(self, text: str) -> list[float]:
+            digest = hashlib.sha256((text or "").encode("utf-8")).digest()
+            values = [(digest[i % len(digest)] / 255.0) for i in range(1024)]
+            return values
+
+    embedder = _OfflineEmbedder()
+    from dashboard.knowledge.graph.index import kuzudb
+
+    kuzudb._embedder_singleton = embedder
+    return embedder  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -88,7 +112,7 @@ def no_llm(monkeypatch: pytest.MonkeyPatch) -> KnowledgeLLM:
     bleed into tests that rely on graceful-degradation behaviour.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    return KnowledgeLLM(api_key=None)
+    return KnowledgeLLM(api_key=None, model="")
 
 
 def _make_service(kb_dir: Path, embedder: KnowledgeEmbedder, llm: KnowledgeLLM) -> KnowledgeService:
@@ -300,13 +324,16 @@ class TestGraphMode:
 
         engine = populated_service._get_query_engine("query-test")
         original_kg = engine.kg
+        original_graph_rag_engine = engine.graph_rag_engine
         engine.kg = _FakeKuzu()
+        engine.graph_rag_engine = None
         try:
             result = populated_service.query(
                 "query-test", "Acme widgets", mode="graph", threshold=0.0
             )
         finally:
             engine.kg = original_kg
+            engine.graph_rag_engine = original_graph_rag_engine
         assert len(result.entities) == 3
         # Sorted by pagerank score desc.
         assert result.entities[0].id == "e3"
@@ -373,13 +400,16 @@ class TestGraphMode:
 
         engine = populated_service._get_query_engine("query-test")
         original_kg = engine.kg
+        original_graph_rag_engine = engine.graph_rag_engine
         engine.kg = _FakeKuzu()
+        engine.graph_rag_engine = None
         try:
             result = populated_service.query(
                 "query-test", "anything", mode="graph", threshold=0.0
             )
         finally:
             engine.kg = original_kg
+            engine.graph_rag_engine = original_graph_rag_engine
         assert len(result.entities) == _MAX_ENTITIES_PER_QUERY
 
 

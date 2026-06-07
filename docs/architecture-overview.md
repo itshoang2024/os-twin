@@ -65,7 +65,7 @@ primary coordination layer:
 | `room-*/lifecycle.json` | Per-room | State machine definition |
 | `room-*/brief.md` | Per-room | Task description |
 | `room-*/pids/` | Per-room | PID tracking for running processes |
-| `room-*/artifacts/` | Per-room | Agent output files |
+| `room-*/artifacts/` | Per-room | Room artifacts such as wrappers, reports, generated files |
 | `room-*/skills/` | Per-room | Copied skill files for this room |
 | `DAG.json` | Global | Dependency graph across all rooms |
 | `progress.json` | Global | Aggregated completion stats |

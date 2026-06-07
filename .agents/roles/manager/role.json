@@ -20,7 +20,7 @@
     "create-role"
   ],
   "cli": "agent",
-  "model": "google-vertex/zai-org/glm-5-maas",
+  "model": "opencode/big-pickle",
   "timeout": 900,
   "mcp_refs": [
     "global-memory",

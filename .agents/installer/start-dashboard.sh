@@ -114,10 +114,13 @@ start_dashboard() {
   # Source .env so the dashboard process inherits API keys
   local env_file="$INSTALL_DIR/.env"
   if [[ -f "$env_file" ]]; then
+    local path_before_env="$PATH"
     set -a
     # shellcheck source=/dev/null
     source "$env_file"
     set +a
+    export PATH="$path_before_env"
+    hash -r 2>/dev/null || true
   fi
 
   mkdir -p "$INSTALL_DIR/logs"
@@ -184,7 +187,7 @@ start_dashboard() {
     else
       printf 'Nothing listening on port %s yet\n' "$DASHBOARD_PORT" > "$curl_log"
     fi
-    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 "$curl_log" 2>/dev/null || true)"
+    echo "  [$(date +%H:%M:%S)] WAIT FOR Ostwin ready (attempt $_i/60). Details: $(tail -n 1 "$curl_log" 2>/dev/null || true)"
     sleep 1
   done
 
@@ -202,6 +205,10 @@ publish_skills() {
   local start_time
   start_time=$(get_now)
   local sync_script="$INSTALL_DIR/.agents/sync-skills.sh"
+  if [[ "${DASH_OK:-false}" != "true" ]]; then
+    warn "Dashboard not healthy — skipping skill sync (run 'ostwin skills sync' later)"
+    return 0
+  fi
   if [[ -x "$sync_script" ]]; then
     OSTWIN_HOME="$INSTALL_DIR" DASHBOARD_PORT="$DASHBOARD_PORT" \
       bash "$sync_script" --install-from "$INSTALL_DIR/.agents" \
@@ -238,6 +245,8 @@ _check_tunnel() {
     TUNNEL_URL="$tunnel_url"
   elif [[ -n "$tunnel_error" ]]; then
     warn "Tunnel failed: $tunnel_error"
+  elif [[ "${OSTWIN_NGROK_ENABLED:-true}" =~ ^(0|false|no|off)$ ]]; then
+    info "Tunnel disabled — run build/install with --ngrok to enable port forwarding"
   elif [[ -z "${NGROK_AUTHTOKEN:-}" ]]; then
     info "Tunnel not configured — set NGROK_AUTHTOKEN in ~/.ostwin/.env to enable port forwarding"
   else

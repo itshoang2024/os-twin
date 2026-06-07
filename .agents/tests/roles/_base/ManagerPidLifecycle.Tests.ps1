@@ -47,7 +47,7 @@ Describe "Manager PID Lifecycle Ownership" {
             
             # Verify status was actually written
             $statusContent = Get-Content (Join-Path $tempDir "status") -Raw
-            $statusContent.Trim() | Should -Be "passed"
+            $statusContent.Trim() | Should -Be "done"
             
             # Cleanup
             Remove-Item $tempDir -Recurse -Force

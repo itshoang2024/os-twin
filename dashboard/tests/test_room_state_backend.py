@@ -10,6 +10,7 @@ slash-command clients rely on:
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -89,6 +90,25 @@ def test_read_room_extended_metadata(tmp_path):
     assert len(data["roles"]) == 1
     assert data["roles"][0]["role"] == "engineer"
     assert "out.txt" in data["artifact_files"]
+
+
+def test_read_room_retries_transient_status_deadlock(tmp_path, monkeypatch):
+    room = _make_room(tmp_path)
+    original_read_text = Path.read_text
+    calls = {"status": 0}
+
+    def flaky_read_text(self, *args, **kwargs):
+        if self == room / "status" and calls["status"] == 0:
+            calls["status"] += 1
+            raise OSError(errno.EDEADLK, "Resource deadlock avoided")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read_text)
+
+    data = read_room(room)
+
+    assert data["status"] == "developing"
+    assert calls["status"] == 1
 
 
 if __name__ == "__main__":

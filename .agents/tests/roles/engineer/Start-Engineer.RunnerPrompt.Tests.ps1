@@ -73,14 +73,8 @@ $TestDrive
         $scriptPath = Join-Path $TestDrive "capture-agent-$(Get-Random).ps1"
         $escapedCapture = $CapturePath -replace "'", "''"
         @"
-`$promptFile = `$null
-for (`$i = 0; `$i -lt `$args.Count; `$i++) {
-    if (`$args[`$i] -eq '--file' -and (`$i + 1) -lt `$args.Count -and `$args[`$i + 1] -match 'prompt\.txt$') {
-        `$promptFile = `$args[`$i + 1]
-    }
-}
-if (-not `$promptFile) { throw 'prompt.txt argument not found' }
-Get-Content -Path `$promptFile -Raw | Out-File -FilePath '$escapedCapture' -Encoding utf8 -NoNewline
+`$inputText = [Console]::In.ReadToEnd()
+`$inputText | Out-File -FilePath '$escapedCapture' -Encoding utf8 -NoNewline
 Write-Output '$Output'
 "@ | Out-File $scriptPath -Encoding utf8
 
@@ -116,7 +110,7 @@ Write-Output '$Output'
         Remove-Item Env:ENGINEER_CMD -ErrorAction SilentlyContinue
     }
 
-    It "passes the latest relevant task or fix body into prompt.txt" {
+    It "passes the latest relevant task or fix body into prompt stdin" {
         Add-ChannelMessage -RoomDir $script:roomDir -From "manager" -To "engineer" `
             -Type "task" -Ref "EPIC-002" -Body "Initial task body"
         Add-ChannelMessage -RoomDir $script:roomDir -From "manager" -To "engineer" `

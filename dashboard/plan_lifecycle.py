@@ -12,9 +12,9 @@ The derived state is one of:
 
   * ``draft``      — plan exists but has never been launched.
   * ``running``    — runner PID is alive *and* heartbeat is fresh.
-  * ``stopped``    — runner PID is gone, no epics passed, work incomplete.
-  * ``completed``  — all rooms reached ``passed`` (whether or not the PID lives).
-  * ``failed``     — runner PID is gone and at least one room is ``failed-final``.
+  * ``stopped``    — runner PID is gone, no epics done, work incomplete.
+  * ``completed``  — all rooms reached ``done`` (whether or not the PID lives).
+  * ``failed``     — runner PID is gone and at least one room is ``failed``.
 
 Callers that need a fresh read just call :func:`derive_lifecycle`. There is no
 background daemon — derivation is cheap and runs on each request.
@@ -32,6 +32,7 @@ from typing import Any, Dict, Optional
 
 from dashboard.api_utils import (
     PLANS_DIR,
+    canonical_room_status,
     resolve_runtime_plan_warrooms_dir,
 )
 
@@ -169,14 +170,14 @@ def derive_lifecycle(plan_id: str) -> Dict[str, Any]:
     # failure, only draft/running/stopped.
     rooms = (progress or {}).get("rooms", []) or []
     total_rooms = len(rooms)
-    passed_rooms = sum(1 for r in rooms if r.get("status") == "passed")
-    failed_rooms = sum(1 for r in rooms if r.get("status") == "failed-final")
-    all_passed = total_rooms > 0 and passed_rooms == total_rooms
+    done_rooms = sum(1 for r in rooms if canonical_room_status(r.get("status")) == "done")
+    failed_rooms = sum(1 for r in rooms if canonical_room_status(r.get("status")) == "failed")
+    all_done = total_rooms > 0 and done_rooms == total_rooms
 
     if not launched_at and not runner_pid:
         state, reason = "draft", "never launched"
-    elif all_passed:
-        state, reason = "completed", f"all {total_rooms} room(s) passed"
+    elif all_done:
+        state, reason = "completed", f"all {total_rooms} room(s) done"
     elif alive and heartbeat_fresh:
         state, reason = "running", f"pid {runner_pid} alive, heartbeat {int(heartbeat_age or 0)}s old"
     elif alive and not heartbeat_fresh:
@@ -184,9 +185,9 @@ def derive_lifecycle(plan_id: str) -> Dict[str, Any]:
         # so we don't flap, but surface the stale heartbeat in the reason.
         state, reason = "running", f"pid {runner_pid} alive, heartbeat stale ({int(heartbeat_age or 0)}s)"
     elif failed_rooms > 0:
-        state, reason = "failed", f"pid {runner_pid or '?'} gone, {failed_rooms} room(s) failed-final"
+        state, reason = "failed", f"pid {runner_pid or '?'} gone, {failed_rooms} room(s) failed"
     else:
-        state, reason = "stopped", f"pid {runner_pid or '?'} gone, {passed_rooms}/{total_rooms} room(s) passed"
+        state, reason = "stopped", f"pid {runner_pid or '?'} gone, {done_rooms}/{total_rooms} room(s) done"
 
     return {
         "state": state,

@@ -261,6 +261,11 @@ class KnowledgeService:
         )
         return self._embedder
 
+    @property
+    def knowledge_embedder(self) -> Any:
+        """Compatibility alias for callers that need the shared embedder."""
+        return self._get_embedder()
+
     def _get_llm(self) -> Any:
         """Lazily construct (or return the injected) LLM, shared service-wide.
 
@@ -346,8 +351,15 @@ class KnowledgeService:
     def get_graph(self, namespace: str, limit: int = 200, actor: str = "anonymous") -> dict:
         """Alias for the graph visualisation route (EPIC-004).
         
-        Delegates to the cached per-namespace query engine's visualization method.
+        Prefer the cached Kuzu graph's visualization method when available,
+        then fall back to the cached per-namespace query engine.
         """
+        kg = self.get_kuzu_graph(namespace)
+        if hasattr(kg, "get_graph"):
+            try:
+                return kg.get_graph(limit=limit)
+            except TypeError:
+                return kg.get_graph()
         engine = self._get_query_engine(namespace)
         return engine.get_graph(limit=limit)
 
@@ -1526,10 +1538,27 @@ class KnowledgeService:
 
     def backup_namespace(self, namespace: str, dest_path: Optional[Path] = None) -> Path:
         """Create a backup archive for the namespace (EPIC-004)."""
-        # Ensure all handles are closed and flushed before backup
+        import tarfile  # noqa: WPS433
+
+        if self._nm.get(namespace) is None:
+            raise NamespaceNotFoundError(namespace)
+
+        # Ensure all handles are closed and flushed before backup.
         self._evict_namespace_caches(namespace)
-        from dashboard.knowledge.backup import backup_namespace  # noqa: WPS433
-        return backup_namespace(namespace, dest_path=dest_path, namespace_manager=self._nm)
+
+        source_dir = self._nm.namespace_dir(namespace)
+        if dest_path is None:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            archive_path = self._nm._base / f"{namespace}-{stamp}.tar.gz"  # noqa: SLF001
+        else:
+            archive_path = Path(dest_path)
+            if archive_path.exists() and archive_path.is_dir():
+                archive_path = archive_path / f"{namespace}.tar.gz"
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(source_dir, arcname=namespace)
+        return archive_path
 
     def restore_namespace(
         self,
@@ -1538,14 +1567,53 @@ class KnowledgeService:
         overwrite: bool = False
     ) -> NamespaceMeta:
         """Restore a namespace from a backup archive (EPIC-004)."""
-        from dashboard.knowledge.backup import restore_namespace  # noqa: WPS433
-        return restore_namespace(
-            Path(archive_path),
-            name=name,
-            namespace_manager=self._nm,
-            knowledge_service=self,
-            overwrite=overwrite
-        )
+        import shutil  # noqa: WPS433
+        import tarfile  # noqa: WPS433
+        import tempfile  # noqa: WPS433
+
+        archive = Path(archive_path)
+        if not archive.exists():
+            raise FileNotFoundError(str(archive))
+
+        restore_name = name
+        with tempfile.TemporaryDirectory(prefix="knowledge-restore-") as tmp:
+            tmp_dir = Path(tmp)
+            with tarfile.open(archive, "r:gz") as tf:
+                members = tf.getmembers()
+                if not members:
+                    raise ValueError("Backup archive is empty")
+                roots = {Path(m.name).parts[0] for m in members if Path(m.name).parts}
+                if not roots:
+                    raise ValueError("Backup archive has no namespace directory")
+                source_root = sorted(roots)[0]
+                if restore_name is None:
+                    restore_name = source_root
+                for member in members:
+                    target = (tmp_dir / member.name).resolve()
+                    if not str(target).startswith(str(tmp_dir.resolve())):
+                        raise ValueError(f"Unsafe backup archive member: {member.name}")
+                tf.extractall(tmp_dir)
+
+            assert restore_name is not None
+            target_dir = self._nm.namespace_dir(restore_name)
+            if target_dir.exists():
+                if not overwrite:
+                    raise NamespaceExistsError(f"Namespace {restore_name!r} already exists")
+                self.delete_namespace(restore_name, actor="restore")
+
+            restored_dir = tmp_dir / source_root
+            if not restored_dir.exists() or not restored_dir.is_dir():
+                raise ValueError("Backup archive does not contain a namespace directory")
+            shutil.move(str(restored_dir), str(target_dir))
+
+        meta = self._nm.get(restore_name)
+        if meta is None:
+            raise ValueError("Restored namespace manifest is missing or invalid")
+        if meta.name != restore_name:
+            meta.name = restore_name
+            meta.updated_at = datetime.now(timezone.utc)
+            self._nm.write_manifest(restore_name, meta)
+        return meta
 
 
 

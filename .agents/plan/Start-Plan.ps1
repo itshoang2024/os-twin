@@ -37,6 +37,8 @@ param(
 
     [string]$ProjectDir = (Get-Location).Path,
 
+    [switch]$IgnorePlanWorkingDir,
+
     [switch]$DryRun,
 
     [switch]$Resume,
@@ -49,7 +51,14 @@ param(
 
     [switch]$Unified,
 
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [switch]$EnablePlanning,
+
+    [ValidateSet('room-worktree','shared')]
+    [string]$WorkspaceIsolation = 'shared',
+
+    [string]$WorktreeRoot = ''
 )
 
 # --- Resolve paths ---
@@ -58,27 +67,35 @@ param(
 # .agents folder which might only contain .war-rooms or project-local config.
 #
 # Resolution order:
-#   1. $OSTWIN_HOME env var (explicit override)
-#   2. $ProjectDir/.agents — but ONLY if it contains the required scripts
-#   3. Fallback: derive from $PSScriptRoot (the script's own install location)
+#   1. $ProjectDir/.agents — but ONLY if it contains the required scripts
+#   2. Script's own installation tree (keeps Start-Plan and helper scripts in sync)
+#   3. $OSTWIN_HOME env var (installed global fallback)
 $installDir = $PSScriptRoot | Split-Path   # e.g. /Users/paulaan/.ostwin
 
-if ($env:OSTWIN_HOME -and (Test-Path $env:OSTWIN_HOME)) {
-    # OSTWIN_HOME is the install root (e.g. ~/.ostwin).
-    # Scripts live under .agents/ (e.g. ~/.ostwin/.agents/war-rooms/New-WarRoom.ps1)
+function Test-OstwinScriptTree {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    return (Test-Path (Join-Path $Path "war-rooms" "New-WarRoom.ps1")) -and
+           (Test-Path (Join-Path $Path "plan" "Build-DependencyGraph.ps1"))
+}
+
+$agentsDir = $null
+$projectAgentsDir = Join-Path $ProjectDir ".agents"
+if (Test-OstwinScriptTree -Path $projectAgentsDir) {
+    $agentsDir = $projectAgentsDir
+} elseif (Test-OstwinScriptTree -Path $installDir) {
+    $agentsDir = $installDir
+} elseif ($env:OSTWIN_HOME -and (Test-Path $env:OSTWIN_HOME)) {
     $candidate = Join-Path $env:OSTWIN_HOME ".agents"
-    if (Test-Path $candidate) {
+    if (Test-OstwinScriptTree -Path $candidate) {
         $agentsDir = $candidate
-    } else {
+    } elseif (Test-OstwinScriptTree -Path $env:OSTWIN_HOME) {
         $agentsDir = $env:OSTWIN_HOME
     }
-} else {
-    $agentsDir = Join-Path $ProjectDir ".agents"
-    $sentinel  = Join-Path $agentsDir "war-rooms" "New-WarRoom.ps1"
-    if (-not (Test-Path $sentinel)) {
-        # Project .agents dir is missing or doesn't contain Ostwin scripts — use installation
-        $agentsDir = $installDir
-    }
+}
+
+if (-not $agentsDir) {
+    $agentsDir = $installDir
 }
 
 $newWarRoom = Join-Path $agentsDir "war-rooms" "New-WarRoom.ps1"
@@ -108,6 +125,16 @@ $planParserModule = Join-Path $agentsDir "lib" "PlanParser.psm1"
 if (Test-Path $planParserModule) {
     $planParserModule = (Resolve-Path $planParserModule).Path
     Import-Module $planParserModule -Force
+}
+$eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+if (Test-Path $eventsModule) {
+    $eventsModule = (Resolve-Path $eventsModule).Path
+    Import-Module $eventsModule -Force
+}
+$workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
+if (Test-Path $workspaceModule) {
+    $workspaceModule = (Resolve-Path $workspaceModule).Path
+    Import-Module $workspaceModule -Force
 }
 
 # --- Helper Functions ---
@@ -167,6 +194,7 @@ $warRoomsDir = if ($env:WARROOMS_DIR) { $env:WARROOMS_DIR }
                else { Join-Path $ProjectDir ".war-rooms" }
 $env:WARROOMS_DIR = $warRoomsDir
 $warRoomsDirFromEnv = [bool]$env:WARROOMS_DIR -and -not ($env:WARROOMS_DIR -eq (Join-Path $ProjectDir ".war-rooms"))
+$skipPlanReview = $env:OSTWIN_SKIP_PLAN_REVIEW -and ($env:OSTWIN_SKIP_PLAN_REVIEW -match '^(1|true|yes)$')
 
 # --- Bootstrap room-000 for plan negotiation ---
 $room000Dir = Join-Path $warRoomsDir "room-000"
@@ -182,7 +210,12 @@ The project plan at '$PlanFile' requires review and potential refinement.
 4. Once the plan is ready for implementation, post a 'plan-approve' message to the channel.
 5. If you cannot proceed without more context, post 'plan-reject' with your feedback.
 "@
-if (-not $DryRun -and -not (Test-Path $room000Dir)) {
+if ($skipPlanReview) {
+    Write-Host "[PLAN] Skipping synthetic PLAN-REVIEW room (OSTWIN_SKIP_PLAN_REVIEW=true)." -ForegroundColor Yellow
+    if (-not $DryRun -and (Test-Path $room000Dir)) {
+        Remove-Item -Path $room000Dir -Recurse -Force
+    }
+} elseif (-not $DryRun -and -not (Test-Path $room000Dir)) {
     & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") -MaxRetries $defaultRoomMaxRetries -TimeoutSeconds $defaultRoomTimeoutSeconds | Out-Null
 } elseif (-not $DryRun -and (Test-Path $room000Dir)) {
     # --- Update room-000 if the plan file has changed ---
@@ -233,7 +266,7 @@ if ($isUnderspecified) {
 $expandPlanScript = Join-Path $agentsDir "plan" "Expand-Plan.ps1"
 $shouldExpand = $Expand -or ($isUnderspecified -and $config.manager.auto_expand_plan -eq $true)
 if ($shouldExpand -and (Test-Path $expandPlanScript)) {
-    Write-OstwinLog "Detected underspecified epics or forced expansion. Running Expand-Plan..."
+    Write-OstwinLog -Message "Detected underspecified epics or forced expansion. Running Expand-Plan..." -Level "INFO" -Caller "manager"
     $expandOutFile = $PlanFile -replace '\.md$', '.refined.md'
     if ($DryRun) {
         Write-Host "  [DRY RUN] Would expand epics (e.g. EPIC-001) in $PlanFile → $expandOutFile" -ForegroundColor Yellow
@@ -246,7 +279,7 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
             if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
                 $diff = "Expansion diff placeholder" 
                 if (Get-Command git -ErrorAction SilentlyContinue) { $diff = git diff --no-index $PlanFile $expandOutFile }
-                Write-OstwinLog -Message "Plan expansion diff:`n$diff`n" -Level "info" -Caller "manager"
+                Write-OstwinLog -Message "Plan expansion diff:`n$diff`n" -Level "INFO" -Caller "manager"
             }
 
             $PlanFile = $expandOutFile
@@ -257,15 +290,20 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 
 # --- Parse plan: extract ALL epics and tasks (Requirement 1) ---
 # Parse global working_dir from PLAN.md
-if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
+if (-not $IgnorePlanWorkingDir -and $planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            try {
-                Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
-                New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
-            } catch {
+            if ($WorkspaceIsolation -eq 'shared' -and -not $DryRun) {
+                try {
+                    Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+                    New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
+                } catch {
+                    Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
+                    $workingDirWarningShown = $true
+                }
+            } else {
                 Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
                 $workingDirWarningShown = $true
             }
@@ -406,9 +444,11 @@ depends_on: []
 }
 
 # --- Auto-inject PLAN-REVIEW as a dependency (Requirement 2) ---
-foreach ($item in $parsed) {
-    if ($item.DependsOn -notcontains "PLAN-REVIEW") {
-        $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+if (-not $skipPlanReview) {
+    foreach ($item in $parsed) {
+        if ($item.DependsOn -notcontains "PLAN-REVIEW") {
+            $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+        }
     }
 }
 
@@ -416,10 +456,14 @@ foreach ($item in $parsed) {
 $planDir = Split-Path $PlanFile
 if (-not $planDir) { $planDir = "." }
 $planningDagFile = Join-Path $planDir ".planning-DAG.json"
-if (-not $DryRun -and (Test-Path $buildPlanningDag)) {
+if ($EnablePlanning -and -not $DryRun -and (Test-Path $buildPlanningDag)) {
     if (-not (Test-Path $planningDagFile) -or $Expand) {
         Write-Host "[PLANNING-DAG] Generating advisory DAG from plan content..." -ForegroundColor Cyan
-        & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        if ($env:OSTWIN_AGENT_CMD) {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile -AgentCmd $env:OSTWIN_AGENT_CMD
+        } else {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        }
     }
     # Merge planning-DAG roles AND dependencies into parsed entries (advisory)
     if (Test-Path $planningDagFile) {
@@ -480,6 +524,110 @@ if ($planStem -match '^[0-9a-fA-F]{8,64}$') {
     }
 }
 
+# --- Establish orchestration event execution context ---
+$eventsPath = ''
+$env:OSTWIN_PLAN_ID = $planId
+$runId = "run_$([guid]::NewGuid().ToString('N'))"
+$env:OSTWIN_RUN_ID = $runId
+Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue
+
+# EPIC-003 resume rule: v1 refuses to append a contradictory continuation to
+# an event history that has already recorded plan.run.failed. A future archival
+# run-id flow may permit explicit resume into a fresh log.
+if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
+    try {
+        $hasFailedRun = $false
+        foreach ($line in (Get-Content $eventsPath -ErrorAction Stop)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try {
+                $evt = $line | ConvertFrom-Json
+                if ($evt.event_type -eq 'plan.run.failed') { $hasFailedRun = $true; break }
+            } catch { }
+        }
+        if ($hasFailedRun) {
+            Write-Error "Cannot resume plan '$planId': events.jsonl already contains plan.run.failed. Use an explicit retry/reset that creates a fresh event log."
+            exit 1
+        }
+    } catch {
+        Write-Error "Cannot verify resume safety for plan '$planId': $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+$workspaceManifest = $null
+if (-not $DryRun) {
+    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
+        exit 1
+    }
+
+    $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
+    if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
+        $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir
+        if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'run_id') -and $workspaceManifest.run_id) {
+            $runId = "$($workspaceManifest.run_id)"
+            $env:OSTWIN_RUN_ID = $runId
+        }
+    } elseif (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue) {
+        try {
+            $workspaceManifest = Initialize-PlanIntegrationWorkspace `
+                -WarRoomsDir $warRoomsDir `
+                -PlanId $planId `
+                -RunId $runId `
+                -SourceWorkingDir $ProjectDir `
+                -WorkspaceIsolation $WorkspaceIsolation `
+                -WorktreeRoot $WorktreeRoot
+        } catch {
+            Write-Error "Workspace initialization failed: $($_.Exception.Message)"
+            exit 1
+        }
+    } elseif ($WorkspaceIsolation -eq 'shared') {
+        $workspaceManifest = $null
+    }
+}
+
+# room-000 is created before the final plan_id is known. Reconcile its config so
+# negotiation, dashboard, and channel layers share the same execution context.
+$room000Config = Join-Path $room000Dir 'config.json'
+if (-not $DryRun -and (Test-Path $room000Config)) {
+    try {
+        $r0cfg = Get-Content $room000Config -Raw | ConvertFrom-Json
+        $r0cfg.plan_id = $planId
+        if ($r0cfg.PSObject.Properties.Name -contains 'events_path') {
+            $r0cfg.PSObject.Properties.Remove('events_path')
+        }
+        if ($r0cfg.PSObject.Properties.Name -contains 'run_id') {
+            $r0cfg.run_id = $runId
+        } else {
+            $r0cfg | Add-Member -NotePropertyName run_id -NotePropertyValue $runId
+        }
+        if ($r0cfg.PSObject.Properties.Name -contains 'workspace') {
+            $r0cfg.PSObject.Properties.Remove('workspace')
+        }
+        $r0cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath $room000Config -Encoding utf8
+    } catch {
+        Write-Warning "Failed to stamp room-000 config with orchestration event context: $_"
+    }
+}
+
+if (-not $DryRun -and (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) {
+    $startedEvent = [ordered]@{
+        event_type = 'plan.run.started'
+        plan_id    = $planId
+        run_id     = $runId
+        summary    = "Plan run started for $planId."
+        payload    = [ordered]@{
+            plan_file    = $PlanFile
+            project_dir  = $ProjectDir
+            warrooms_dir = $warRoomsDir
+            resume       = [bool]$Resume
+            run_id       = $runId
+            skip_loop    = [bool]$SkipLoop
+        }
+    }
+    Write-OrchestrationEvent -Event $startedEvent | Out-Null
+}
+
 # --- Register plan in the local registry so the dashboard can see it ---
 if (-not $DryRun) {
     try {
@@ -528,6 +676,7 @@ if (-not $DryRun) {
         }
 
         $meta["plan_id"] = $planId
+        $meta["run_id"] = $runId
         if ($title) { $meta["title"] = $title }
         if (-not $meta["created_at"]) { $meta["created_at"] = (Get-Date).ToUniversalTime().ToString("o") }
         if (-not $meta["status"] -or $meta["status"] -in @("draft","stored")) { $meta["status"] = "active" }
@@ -555,11 +704,12 @@ Write-Host ""
 Write-Host "  Plan: $PlanFile"
 Write-Host "  Plan ID: $planId"
 Write-Host "  Project: $ProjectDir"
+Write-Host "  Workspace isolation: $WorkspaceIsolation"
 
 if ($Resume) {
     Write-Host "  Mode: RESUME (using existing war-rooms)" -ForegroundColor Yellow
     
-    # --- RESET MECHANISM: Clear failed-final/blocked rooms ---
+    # --- RESUME NORMALIZATION: canonicalize legacy statuses and clear restartable blocked rooms ---
     $targetWarRoomsDir = Join-Path $ProjectDir ".war-rooms"
     if (Test-Path $targetWarRoomsDir) {
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
@@ -567,7 +717,20 @@ if ($Resume) {
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
-                if ($status -in @("failed", "failed-final", "blocked")) {
+                if ($status -eq "passed") {
+                    Write-Host "  → Normalizing $($rd.Name) from passed to done" -ForegroundColor Yellow
+                    "done" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "failed-final") {
+                    Write-Host "  → Normalizing $($rd.Name) from failed-final to failed" -ForegroundColor Yellow
+                    "failed" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -eq "fixing") {
+                    Write-Host "  → Normalizing $($rd.Name) from fixing to optimize" -ForegroundColor Yellow
+                    "optimize" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                    
+                    # Clear old PID files
+                    $pidDir = Join-Path $rd.FullName "pids"
+                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
+                } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                     
@@ -577,13 +740,6 @@ if ($Resume) {
                     $qaRetriesFile = Join-Path $rd.FullName "qa_retries"
                     if (Test-Path $qaRetriesFile) { Remove-Item $qaRetriesFile -Force -ErrorAction SilentlyContinue }
 
-                    # Clear old PID files
-                    $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
-                } elseif ($status -eq "fixing") {
-                    Write-Host "  → Moving $($rd.Name) from fixing to developing" -ForegroundColor Yellow
-                    "developing" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                    
                     # Clear old PID files
                     $pidDir = Join-Path $rd.FullName "pids"
                     if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
@@ -598,10 +754,13 @@ if ($Resume) {
         & $updateProgressScript -WarRoomsDir $warRoomsDir
     }
 } else {
-    Write-Host "  War-rooms to create: $($parsed.Count + 1)" # +1 for room-000
+    $syntheticRoomCount = if ($skipPlanReview) { 0 } else { 1 }
+    Write-Host "  War-rooms to create: $($parsed.Count + $syntheticRoomCount)"
 }
 Write-Host ""
-Write-Host "  room-000 → PLAN-REVIEW — Unified Plan Negotiation (Roles: architect)" -ForegroundColor White
+if (-not $skipPlanReview) {
+    Write-Host "  room-000 → PLAN-REVIEW — Unified Plan Negotiation (Roles: architect)" -ForegroundColor White
+}
 
     foreach ($entry in $parsed) {
         $dodCount = if ($entry.DoD) { $entry.DoD.Count } else { 0 }
@@ -617,7 +776,10 @@ Write-Host ""
 
 if ($DryRun) {
     # --- Show DAG structure in DryRun ---
-    $nodes = @(@{ Id = "PLAN-REVIEW"; DependsOn = @() })
+    $nodes = @()
+    if (-not $skipPlanReview) {
+        $nodes += @{ Id = "PLAN-REVIEW"; DependsOn = @() }
+    }
     foreach ($entry in $parsed) {
         $nodes += @{ Id = $entry.TaskRef; DependsOn = $entry.DependsOn }
     }
@@ -639,7 +801,7 @@ if ($DryRun) {
 
 # --- Room Creation Logic ---
 function New-PlanWarRooms {
-    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $maxRetries, $timeoutSeconds)
+    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $runId, $eventsPath, $maxRetries, $timeoutSeconds)
     
     # --- Re-parse plan in case it changed during negotiation (uses PlanParser module) ---
     $planContent = Get-Content $PlanFile -Raw
@@ -685,9 +847,11 @@ function New-PlanWarRooms {
     }
 
     # Auto-inject PLAN-REVIEW dependency (orchestration logic, not parsing)
-    foreach ($item in $parsed) {
-        if ($item.DependsOn -notcontains "PLAN-REVIEW") {
-            $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+    if (-not $skipPlanReview) {
+        foreach ($item in $parsed) {
+            if ($item.DependsOn -notcontains "PLAN-REVIEW") {
+                $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+            }
         }
     }
 
@@ -736,8 +900,11 @@ function New-PlanWarRooms {
                         Write-Host "    [RECONCILE] $($entry.RoomId): role $currentRole → $primaryRole (from plan Roles: directive)" -ForegroundColor Yellow
                         $existingConfig.assignment.assigned_role = $primaryRole
                         $existingConfig.assignment.candidate_roles = $candidateRoles
-                        $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                     }
+                    if ($existingConfig.PSObject.Properties.Name -contains 'workspace') {
+                        $existingConfig.PSObject.Properties.Remove('workspace')
+                    }
+                    $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                 } catch {
                     Write-Host "    [WARN] Failed to reconcile $($entry.RoomId): $($_.Exception.Message)" -ForegroundColor Yellow
                 }
@@ -757,8 +924,12 @@ function New-PlanWarRooms {
             }
         }
         if (-not (Test-Path $resolvedWorkingDir)) {
-            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            if ($WorkspaceIsolation -eq 'shared') {
+                Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+                New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            } else {
+                Write-Host "    Deferring working_dir creation to room worktree: $resolvedWorkingDir" -ForegroundColor DarkGray
+            }
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }
@@ -793,6 +964,7 @@ function New-PlanWarRooms {
             WorkingDir       = $resolvedWorkingDir
             WarRoomsDir      = $warRoomsDir
             PlanId           = $planId
+            RunId            = $runId
             AssignedRole     = $primaryRole
             CandidateRoles   = $candidateRoles
             MaxRetries       = $maxRetries
@@ -824,7 +996,8 @@ function New-PlanWarRooms {
         if ($entry.Assets) {
             $roomArgs['Assets'] = $entry.Assets
         }
-
+        # New-WarRoom appends the room.created source event before writing room,
+        # status, or role config projections. Keep Start-Plan from duplicating it.
         & $newWarRoom @roomArgs
     }
 
@@ -832,6 +1005,19 @@ function New-PlanWarRooms {
     Write-Host "[DAG] Building dependency graph..." -ForegroundColor Cyan
     $buildDag = Join-Path $agentsDir "plan" "Build-DependencyGraph.ps1"
     $null = & $buildDag -WarRoomsDir $warRoomsDir
+    if (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue) {
+        $dagEvent = [ordered]@{
+            event_type = 'plan.dag.built'
+            plan_id    = $planId
+            run_id     = $runId
+            summary    = "Dependency graph built for $planId."
+            payload    = [ordered]@{
+                warrooms_dir = $warRoomsDir
+                dag_path     = (Join-Path $warRoomsDir 'DAG.json')
+            }
+        }
+        Write-OrchestrationEvent -Event $dagEvent | Out-Null
+    }
 }
 
 # ===========================================================================
@@ -840,7 +1026,7 @@ function New-PlanWarRooms {
 # Always called — even in Resume mode. New-PlanWarRooms skips existing rooms
 # internally (reconcile only) but MUST rebuild DAG.json so the manager loop
 # sees all rooms, not just room-000.
-New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
+New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -runId $runId -eventsPath $eventsPath -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
 
 # ===========================================================================
 # Phase B: Dependency review (reads actual brief.md from each war-room)
@@ -871,8 +1057,8 @@ if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
 }
 
 # --- Auto-Pass room-000 if no review/expand needed ---
-if ($Unified -and -not ($Review -or $Expand) -and -not $Resume) {
-    "passed" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
+if ($Unified -and -not ($Review -or $Expand) -and -not $Resume -and -not $skipPlanReview) {
+    "done" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
 }
 
 # --- Legacy Negotiation Loop (blocking) ---

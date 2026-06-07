@@ -4,7 +4,7 @@
   "max_retries": 3,
   "states": {
     "developing": {
-      "role": "game-engineer",
+      "role": "engineer",
       "type": "work",
       "signals": {
         "done": {
@@ -13,7 +13,7 @@
       }
     },
     "optimize": {
-      "role": "game-engineer",
+      "role": "engineer",
       "type": "work",
       "signals": {
         "done": {
@@ -22,14 +22,14 @@
       }
     },
     "review": {
-      "role": "game-qa",
+      "role": "qa",
       "type": "review",
       "signals": {
         "done": {
-          "target": "passed"
+          "target": "done"
         },
         "pass": {
-          "target": "passed"
+          "target": "done"
         },
         "fail": {
           "target": "optimize",
@@ -61,29 +61,14 @@
           ]
         },
         "reject": {
-          "target": "failed-final"
+          "target": "failed"
         }
       }
     },
     "failed": {
-      "role": "manager",
-      "type": "decision",
-      "auto_transition": true,
-      "signals": {
-        "retry": {
-          "target": "developing",
-          "guard": "retries < max_retries"
-        },
-        "exhaust": {
-          "target": "failed-final",
-          "guard": "retries >= max_retries"
-        }
-      }
-    },
-    "passed": {
       "type": "terminal"
     },
-    "failed-final": {
+    "done": {
       "type": "terminal"
     }
   }

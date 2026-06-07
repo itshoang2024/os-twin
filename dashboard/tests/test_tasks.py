@@ -132,6 +132,23 @@ class TestStartupAll:
         assert global_state.tunnel_url is None
 
     @pytest.mark.asyncio
+    async def test_skips_ngrok_when_disabled(self, mock_dirs, monkeypatch):
+        """startup_all should skip ngrok when OSTWIN_NGROK_ENABLED=false."""
+        monkeypatch.setenv("NGROK_AUTHTOKEN", "fake-token")
+        monkeypatch.setenv("OSTWIN_NGROK_ENABLED", "false")
+        mock_start = AsyncMock(return_value="https://tunnel.ngrok.io")
+        mock_planning_cls = MagicMock(return_value=MagicMock())
+
+        with patch("dashboard.tasks.poll_war_rooms", new_callable=AsyncMock), \
+             patch("dashboard.planning_thread_store.PlanningThreadStore", mock_planning_cls), \
+             patch("dashboard.tasks.OSTwinStore", side_effect=RuntimeError("skip")), \
+             patch("dashboard.tunnel.start_tunnel", mock_start):
+            await tasks_module.startup_all()
+
+        mock_start.assert_not_awaited()
+        assert global_state.tunnel_url is None
+
+    @pytest.mark.asyncio
     async def test_creates_poll_war_rooms_task(self, mock_dirs):
         """startup_all should create the poll_war_rooms background task."""
         created_tasks = []

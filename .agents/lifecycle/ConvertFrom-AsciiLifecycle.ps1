@@ -5,9 +5,9 @@
 .DESCRIPTION
     Converts human-readable ASCII lifecycle text like:
 
-        pending → engineer → qa ─┬─► passed → signoff
+        pending → engineer → qa ─┬─► done
                      ▲           │
-                     └─ engineer ◄┘ (on fail → fixing)
+                     └─ engineer ◄┘ (on fail → optimize)
 
     into a structured lifecycle.json object that the manager loop can consume.
 
@@ -15,8 +15,8 @@
     - Main flow line: splits on arrow characters to get ordered stages
     - Fork pattern (─┬─►): detects the branch where done/pass goes forward, fail loops back
     - Review vs worker classification via name heuristics
-    - Fail/fixing loop wiring from secondary lines
-    - Terminal states: passed, signoff
+    - Fail/optimize loop wiring from secondary lines
+    - Terminal states: done, failed
 
 .PARAMETER Text
     The raw ASCII lifecycle text (multi-line string).
@@ -33,9 +33,9 @@
 
 .EXAMPLE
     $text = @"
-    pending → engineer → qa ─┬─► passed → signoff
+    pending → engineer → qa ─┬─► done
                  ▲           │
-                 └─ engineer ◄┘ (on fail → fixing)
+                 └─ engineer ◄┘ (on fail → optimize)
     "@
     $lifecycle = ConvertFrom-AsciiLifecycle -Text $text
     $lifecycle | ConvertTo-Json -Depth 10
@@ -59,7 +59,7 @@ function ConvertFrom-AsciiLifecycle {
     $mainLine = $lines[0]
 
     # Detect if there's a fork (─┬─► or ┬) — the stage before the fork is a reviewer
-    # It decides done/pass (forward) or fail (loop back to fixing)
+    # It decides done/pass (forward) or fail (loop back to optimize)
     $hasFork = $mainLine -match '[┬]'
 
     # Find which segment sits immediately before the fork character
@@ -91,7 +91,7 @@ function ConvertFrom-AsciiLifecycle {
     # STEP 2: Classify each segment
     # ──────────────────────────────────────────────────────────────────────
     # Remove meta-states from the processing list
-    $terminalStates = @('pending', 'passed', 'signoff', 'fixing')
+    $terminalStates = @('pending', 'done', 'passed', 'signoff', 'optimize', 'fixing')
     $reviewHeuristic = '(review|qa|audit|check|validate|verify|test|reviewer)'
 
     $stages = [System.Collections.Generic.List[PSObject]]::new()
@@ -101,8 +101,8 @@ function ConvertFrom-AsciiLifecycle {
         $segLower = $seg.ToLower()
 
         if ($segLower -eq 'pending') { continue }       # Entry point, not a real stage
-        if ($segLower -eq 'signoff') { $hasSignoff = $true; continue }  # Terminal
-        if ($segLower -eq 'passed')  { continue }       # Terminal target
+        if ($segLower -eq 'signoff') { $hasSignoff = $true; continue }  # Legacy terminal
+        if ($segLower -in @('done', 'passed')) { continue }       # Terminal target
 
         # Classify: review if it matches heuristic OR if it's the fork stage
         $isReview = ($segLower -match $reviewHeuristic) -or ($segLower -eq $forkSegmentName)
@@ -122,29 +122,29 @@ function ConvertFrom-AsciiLifecycle {
     # STEP 3: Detect the fail target from secondary lines
     # ──────────────────────────────────────────────────────────────────────
     # Look for patterns like:
-    #   └─ engineer ◄┘ (on fail → fixing)
-    #   └── ui-designer ◄───────────┘ (on fail → fixing)
-    # The role name between └─ and ◄ is the fixing role (who does the rework)
-    $fixingRole = $stages[0].Role  # Default: primary worker does the fixing
+    #   └─ engineer ◄┘ (on fail → optimize)
+    #   └── ui-designer ◄───────────┘ (on fail → optimize)
+    # The role name between └─ and ◄ is the optimize role (who does the rework)
+    $optimizeRole = $stages[0].Role  # Default: primary worker does the optimization pass
     $failTarget = $null
 
     for ($i = 1; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
         # Match: └─ <role> ◄  OR  └── <role> ◄
         if ($line -match '[└]─+\s*([a-zA-Z0-9_-]+)\s*[◄<]') {
-            $fixingRole = $Matches[1].ToLower()
+            $optimizeRole = $Matches[1].ToLower()
         }
         # Also look for explicit "on fail" annotation
         if ($line -match 'on\s+fail') {
             # The fail pattern confirms the fork loops back
-            $failTarget = 'fixing'
+            $failTarget = 'optimize'
         }
     }
 
     # If we detected a fork (┬) but no explicit fail annotation,
-    # the fork itself implies: done/pass → forward, fail → back to fixing
+    # the fork itself implies: done/pass → forward, fail → back to optimize
     if ($hasFork -and -not $failTarget) {
-        $failTarget = 'fixing'
+        $failTarget = 'optimize'
     }
 
     # ──────────────────────────────────────────────────────────────────────
@@ -160,17 +160,17 @@ function ConvertFrom-AsciiLifecycle {
         if ($i -lt ($stages.Count - 1)) {
             $nextState = $stages[$i + 1].StateName
         } else {
-            $nextState = 'passed'
+            $nextState = 'done'
         }
 
         $transitions = [ordered]@{}
         if ($stage.Type -eq 'review') {
-            # Review stages: done goes forward, fail goes to manager-triage.
+            # Review stages: done goes forward, fail goes through optimize.
             # pass remains accepted for legacy generated lifecycles.
             $transitions['done'] = $nextState
             $transitions['pass'] = $nextState
-            $transitions['fail'] = 'manager-triage'
-            $transitions['escalate'] = 'manager-triage'
+            $transitions['fail'] = if ($failTarget) { $failTarget } else { 'optimize' }
+            $transitions['escalate'] = 'triage'
         } else {
             # Worker stages: done goes to next; pass remains legacy-compatible.
             $transitions['done'] = $nextState
@@ -184,29 +184,26 @@ function ConvertFrom-AsciiLifecycle {
         }
     }
 
-    # --- Fixing state ---
+    # --- Optimize state ---
     # Routes back to the first review stage (matching the fork pattern:
-    # after fixing, the work goes back through review, not straight to passed)
+    # after optimizing, the work goes back through review, not straight to done)
     $firstReview = $stages | Where-Object { $_.Type -eq 'review' } | Select-Object -First 1
-    $fixReturnTarget = if ($firstReview) { $firstReview.StateName } else { 'passed' }
+    $fixReturnTarget = if ($firstReview) { $firstReview.StateName } else { 'done' }
 
-    $states['fixing'] = [ordered]@{
+    $states['optimize'] = [ordered]@{
         type        = 'agent'
-        role        = $fixingRole
+        role        = $optimizeRole
         transitions = [ordered]@{ done = $fixReturnTarget }
     }
 
     # --- Builtin states (always present) ---
-    $states['manager-triage'] = [ordered]@{
+    $states['triage'] = [ordered]@{
         type        = 'builtin'
         role        = 'manager'
         transitions = [ordered]@{}
     }
-    $states['plan-revision'] = [ordered]@{
-        type        = 'builtin'
-        role        = 'manager'
-        transitions = [ordered]@{}
-    }
+    $states['done'] = [ordered]@{ type = 'terminal' }
+    $states['failed'] = [ordered]@{ type = 'terminal' }
 
     # ──────────────────────────────────────────────────────────────────────
     # STEP 5: Return the lifecycle object

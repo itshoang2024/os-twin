@@ -7,7 +7,7 @@
   "prompt_file": "ROLE.md",
   "description": "Develop a search engine for videos and a recommendation system for the watch page and home feed.",
   "timeout": 600,
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "capabilities": [],
   "quality_gates": [],
   "name": "data-scientist"

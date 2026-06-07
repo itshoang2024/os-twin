@@ -717,7 +717,7 @@ export default function DAGViewer({ mode: modeProp }: DAGViewerProps) {
               <>
                 <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-text-faint">Change Status</div>
                 {[
-                  { value: 'passed', label: 'Passed', icon: 'check_circle', color: 'text-emerald-600', bg: 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20' },
+                  { value: 'done', label: 'Done', icon: 'check_circle', color: 'text-emerald-600', bg: 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20' },
                   { value: 'developing', label: 'Developing', icon: 'engineering', color: 'text-blue-600', bg: 'hover:bg-blue-50 dark:hover:bg-blue-900/20' },
                   { value: 'pending', label: 'Pending', icon: 'schedule', color: 'text-gray-500', bg: 'hover:bg-gray-50 dark:hover:bg-gray-900/20' },
                 ].map(opt => {
@@ -817,7 +817,7 @@ export default function DAGViewer({ mode: modeProp }: DAGViewerProps) {
           <span className="text-[10px] font-bold text-primary uppercase tracking-wider mr-1">🔥 Critical Path</span>
           {dag.critical_path.map((id, idx) => {
             const nodeStatus = statusMap.get(id);
-            const statusColor = nodeStatus === 'passed' ? '#10b981' : nodeStatus === 'failed-final' ? '#ef4444' : nodeStatus === 'engineering' ? '#3b82f6' : '#94a3b8';
+            const statusColor = nodeStatus === 'done' || nodeStatus === 'passed' ? '#10b981' : nodeStatus === 'failed' || nodeStatus === 'failed-final' ? '#ef4444' : nodeStatus === 'engineering' || nodeStatus === 'developing' ? '#3b82f6' : '#94a3b8';
             return (
               <React.Fragment key={id}>
                 <span 

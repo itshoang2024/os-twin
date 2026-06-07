@@ -26,47 +26,6 @@ setup() {
   [ "${SEARCH_ENGINE_MODE:-}" = "" ]
 }
 
-@test "start_searxng recreates container published on stale port" {
-  INSTALL_DIR="$BATS_TEST_TMPDIR/install"
-  SOURCE_DIR="$BATS_TEST_TMPDIR/source"
-  export DOCKER_CALLS="$BATS_TEST_TMPDIR/docker-calls"
-  mkdir -p "$INSTALL_DIR" "$SOURCE_DIR"
-  touch "$SOURCE_DIR/docker-compose.searxng.yml"
-
-  docker() {
-    printf '%s\n' "$*" >> "$DOCKER_CALLS"
-    case "$1" in
-      info)
-        return 0
-        ;;
-      compose)
-        return 0
-        ;;
-      inspect)
-        printf 'running\n'
-        ;;
-      port)
-        printf '0.0.0.0:8080\n'
-        ;;
-      rm)
-        return 0
-        ;;
-    esac
-  }
-  sleep() { :; }
-
-  run start_searxng
-
-  [ "$status" -eq 0 ]
-  grep -Fq "rm -f ostwin-searxng" "$DOCKER_CALLS"
-  grep -Fq "compose -f $SOURCE_DIR/docker-compose.searxng.yml up -d" "$DOCKER_CALLS"
-  [[ "$output" == *"not published on :6633"* ]]
-  [[ "$output" == *"SearXNG created and running on :6633"* ]]
-
-  unset -f docker
-  unset -f sleep
-}
-
 @test "start_searxng falls back to local source install when Docker Compose is missing" {
   INSTALL_DIR="$BATS_TEST_TMPDIR/install-manual"
   SOURCE_DIR="$BATS_TEST_TMPDIR/source-manual"

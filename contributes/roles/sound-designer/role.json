@@ -1,6 +1,6 @@
 {
   "name": "sound-designer",
-  "description": "Sound Designer \u2014 creates SFX, implements audio middleware, and integrates music for Unity mobile games",
+  "description": "Sound Designer — creates SFX, implements audio middleware, and integrates music for Unity mobile games",
   "capabilities": [
     "sfx-design",
     "music-integration",
@@ -17,7 +17,7 @@
     "compression-appropriate"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [],
   "instance_type": "worker"

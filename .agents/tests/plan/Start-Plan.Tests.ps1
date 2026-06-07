@@ -21,6 +21,19 @@ BeforeAll {
             manager = $manager
         }
     }
+
+    function global:Get-OstwinManagerRuntimeSettings {
+        param([object]$Config)
+        $manager = $Config.manager
+        return [PSCustomObject]@{
+            max_concurrent_rooms  = if ($manager.max_concurrent_rooms) { $manager.max_concurrent_rooms } else { 10 }
+            poll_interval_seconds = if ($manager.poll_interval_seconds) { $manager.poll_interval_seconds } else { 5 }
+            max_engineer_retries  = if ($null -ne $manager.max_engineer_retries) { $manager.max_engineer_retries } else { 3 }
+            state_timeout_seconds = if ($manager.state_timeout_seconds) { $manager.state_timeout_seconds } else { 900 }
+            auto_approve_tools    = if ($null -ne $manager.auto_approve_tools) { [bool]$manager.auto_approve_tools } else { $false }
+            dynamic_pipelines     = if ($null -ne $manager.dynamic_pipelines) { [bool]$manager.dynamic_pipelines } else { $true }
+        }
+    }
     
     function global:Test-Underspecified {
         param([string]$Content)
@@ -36,6 +49,7 @@ BeforeAll {
 
 AfterAll {
     Remove-Variable -Name MockManagerConfig -Scope Global -ErrorAction SilentlyContinue
+    Remove-Item function:\Get-OstwinManagerRuntimeSettings -Force -ErrorAction SilentlyContinue
 }
 
 Describe "Start-Plan" {
@@ -144,6 +158,19 @@ Describe "Start-Plan" {
             ($output -join "`n") | Should -Match "Project: $([regex]::Escape($targetDir))"
         }
 
+        It "keeps explicit ProjectDir when plan working_dir is ignored" {
+            $workingDirPlan = Join-Path $TestDrive "working-dir-override-plan.md"
+            $targetDir = Join-Path $TestDrive "target-project-override"
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+
+            $content = "# Plan: Test`n`n## Config`nworking_dir: $targetDir`n`n### EPIC-001 — Test`n"
+            $content | Out-File $workingDirPlan -Encoding utf8
+
+            $output = & $script:StartPlan -PlanFile $workingDirPlan -ProjectDir $script:projectDir -IgnorePlanWorkingDir -DryRun *>&1
+            ($output -join "`n") | Should -Match "Project: $([regex]::Escape($script:projectDir))"
+            ($output -join "`n") | Should -Not -Match "Project: $([regex]::Escape($targetDir))"
+        }
+
         It "warns when working_dir is invalid" {
             $badDirPlan = Join-Path $TestDrive "bad-dir-plan.md"
             $content = "# Plan: Test`n`n## Config`nworking_dir: /nonexistent/path/xyz`n`n### EPIC-001 — Test`n"
@@ -185,6 +212,67 @@ depends_on: ["EPIC-001"]
             $outputStr = $output -join "`n"
             $outputStr | Should -Match "Dependency Graph \(Topological Order\):"
             $outputStr | Should -Match "PLAN-REVIEW -> EPIC-001 -> EPIC-002"
+        }
+
+        It "uses the script-local .agents tree for event context even when OSTWIN_HOME points elsewhere" {
+            $smokeRoot = Join-Path $TestDrive "event-smoke-$(Get-Random)"
+            $smokeProject = Join-Path $smokeRoot "project"
+            New-Item -ItemType Directory -Path $smokeProject -Force | Out-Null
+            $smokePlan = Join-Path $smokeRoot "PLAN.md"
+            @"
+# PLAN: Event smoke
+
+working_dir: $smokeProject
+
+## EPIC-001 - Smoke event context
+
+Smoke event context body.
+
+#### Definition of Done
+- [ ] Room exists
+
+#### Acceptance Criteria
+- [ ] Event stream exists
+
+depends_on: []
+"@ | Out-File $smokePlan -Encoding utf8
+
+            # Avoid Build-PlanningDAG invoking an agent; Start-Plan should read this advisory file.
+            [ordered]@{
+                nodes = @(
+                    [ordered]@{
+                        task_ref = 'EPIC-001'
+                        role = 'engineer'
+                        candidate_roles = @('engineer', 'qa')
+                        depends_on = @()
+                    }
+                )
+            } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $smokeRoot '.planning-DAG.json') -Encoding utf8
+
+            $oldWarRooms = $env:WARROOMS_DIR
+            $oldOstwinHome = $env:OSTWIN_HOME
+            $fakeHome = Join-Path $TestDrive "fake-ostwin-$(Get-Random)"
+            New-Item -ItemType Directory -Path (Join-Path $fakeHome '.agents' 'war-rooms') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $fakeHome '.agents' 'plan') -Force | Out-Null
+            "param([string]`$RoomId,[string]`$TaskRef,[string]`$TaskDescription,[string]`$WarRoomsDir) throw 'old New-WarRoom should not be used'" |
+                Out-File (Join-Path $fakeHome '.agents' 'war-rooms' 'New-WarRoom.ps1') -Encoding utf8
+            "param()" | Out-File (Join-Path $fakeHome '.agents' 'plan' 'Build-DependencyGraph.ps1') -Encoding utf8
+
+            try {
+                $env:WARROOMS_DIR = Join-Path $smokeProject '.war-rooms'
+                $env:OSTWIN_HOME = $fakeHome
+                $output = & $script:StartPlan -PlanFile $smokePlan -ProjectDir $smokeProject -SkipLoop -NonInteractive *>&1
+
+                ($output -join "`n") | Should -Not -Match 'old New-WarRoom should not be used'
+                Test-Path (Join-Path $env:WARROOMS_DIR 'events.jsonl') | Should -BeFalse
+                $roomConfigPath = Join-Path $env:WARROOMS_DIR 'room-001' 'config.json'
+                Test-Path $roomConfigPath | Should -BeTrue
+                $roomConfig = Get-Content $roomConfigPath -Raw | ConvertFrom-Json
+                $roomConfig.PSObject.Properties.Name | Should -Not -Contain 'events_path'
+            } finally {
+                if ($oldWarRooms) { $env:WARROOMS_DIR = $oldWarRooms } else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+                if ($oldOstwinHome) { $env:OSTWIN_HOME = $oldOstwinHome } else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+            }
         }
     }
 
@@ -578,11 +666,15 @@ param(
     [string]$WorkingDir,
     [string]$WarRoomsDir,
     [string]$PlanId,
+    [string]$RunId,
+    [string]$EventsPath,
     [string]$AssignedRole,
     [string[]]$CandidateRoles = @(),
     [string[]]$DefinitionOfDone = @(),
     [string[]]$AcceptanceCriteria = @(),
     [string[]]$DependsOn = @(),
+    [int]$MaxRetries = 3,
+    [int]$TimeoutSeconds = 900,
     [string]$Pipeline,
     [string[]]$RequiredCapabilities = @(),
     [string]$Lifecycle,
@@ -678,6 +770,8 @@ param(
     [string]$WorkingDir,
     [string]$WarRoomsDir,
     [string]$PlanId,
+    [string]$RunId,
+    [string]$EventsPath,
     [string]$AssignedRole,
     [string[]]$CandidateRoles = @(),
     [string[]]$DefinitionOfDone = @(),
@@ -695,6 +789,7 @@ New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
     room_id = $RoomId
     task_ref = $TaskRef
     plan_id = $PlanId
+    run_id = $RunId
     assignment = @{ assigned_role = $AssignedRole }
     constraints = @{
         max_retries = $MaxRetries
@@ -703,6 +798,31 @@ New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
 } | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
 '@
                 $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+                @'
+function Get-OstwinConfig {
+    param([string]$ConfigPath = '')
+    return [PSCustomObject]@{
+        manager = [PSCustomObject]@{
+            auto_expand_plan      = $false
+            max_engineer_retries  = 7
+            state_timeout_seconds = 1800
+        }
+    }
+}
+
+function Get-OstwinManagerRuntimeSettings {
+    param([object]$Config)
+    return [PSCustomObject]@{
+        max_concurrent_rooms  = 10
+        poll_interval_seconds = 5
+        max_engineer_retries  = $Config.manager.max_engineer_retries
+        state_timeout_seconds = $Config.manager.state_timeout_seconds
+        auto_approve_tools    = $false
+        dynamic_pipelines     = $true
+    }
+}
+'@ | Out-File (Join-Path $script:projectDir ".agents/lib/Config.psm1") -Encoding utf8
 
                 $plan = Join-Path $TestDrive "runtime-settings-plan.md"
                 @"
@@ -824,41 +944,41 @@ working_dir: $script:projectDir
             "Write-Host 'Progress updated'" | Out-File (Join-Path $agentsPlanDir "Update-Progress.ps1") -Encoding utf8
         }
 
-        It "resets failed-final rooms to pending" {
+        It "normalizes failed-final rooms to failed" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
             $outputStr = $output -join "`n"
             
-            $outputStr | Should -Match "Resetting room-001 to pending"
+            $outputStr | Should -Match "Normalizing room-001 from failed-final to failed"
             
             $statusFile = Join-Path $absProjectDir ".war-rooms/room-001/status"
-            (Get-Content $statusFile -Raw) | Should -Be "pending"
+            (Get-Content $statusFile -Raw) | Should -Be "failed"
         }
 
-        It "moves fixing rooms to developing" {
+        It "normalizes fixing rooms to optimize" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
             $outputStr = $output -join "`n"
             
-            $outputStr | Should -Match "Moving room-002 from fixing to developing"
+            $outputStr | Should -Match "Normalizing room-002 from fixing to optimize"
             
             $statusFile = Join-Path $absProjectDir ".war-rooms/room-002/status"
-            (Get-Content $statusFile -Raw) | Should -Be "developing"
+            (Get-Content $statusFile -Raw) | Should -Be "optimize"
             
             $pidDir = Join-Path $absProjectDir ".war-rooms/room-002/pids"
             (Get-ChildItem $pidDir -Filter "*.pid").Count | Should -Be 0
         }
 
-        It "clears retry counters on resume" {
+        It "preserves failed-room retry counters on resume" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1 | Out-Null
             
             $retriesFile = Join-Path $absProjectDir ".war-rooms/room-001/retries"
             $content = (Get-Content $retriesFile -Raw).Trim()
-            $content | Should -Be "0"
+            $content | Should -Be "10"
             
             $qaRetriesFile = Join-Path $absProjectDir ".war-rooms/room-001/qa_retries"
-            (Test-Path $qaRetriesFile) | Should -Be $false
+            (Test-Path $qaRetriesFile) | Should -Be $true
         }
 
         It "triggers Update-Progress after resets" {

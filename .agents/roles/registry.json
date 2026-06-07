@@ -29,7 +29,7 @@
         "lint-clean",
         "no-hardcoded-secrets"
       ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "qa",
@@ -52,7 +52,7 @@
         "verdict-required",
         "evidence-based-review"
       ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "architect",
@@ -77,7 +77,7 @@
         "scalability-check",
         "security-review"
       ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "manager",
@@ -98,7 +98,7 @@
         "skill-install"
       ],
       "quality_gates": [],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "reporter",
@@ -121,7 +121,7 @@
         "report-renders",
         "no-empty-pages"
       ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "audit",
@@ -148,7 +148,7 @@
         "validation-complete",
         "risk-decision-recorded"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "macos-automation-engineer",
@@ -172,319 +172,10 @@
         "axbridge"
       ],
       "quality_gates": [],
-      "default_model": "google-vertex/gemini-3-flash-preview",
+      "default_model": "opencode/big-pickle",
       "platform": [
         "macos"
       ]
-    },
-    {
-      "name": "game-engineer",
-      "description": "Unity C# code generator — produces SceneBuilder and AnimCreator scripts, implements dev stories, and validates with tests",
-      "definition": "contributes/roles/game-engineer/role.json",
-      "prompt": "contributes/roles/game-engineer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "task",
-        "epic"
-      ],
-      "capabilities": [
-        "code-generation",
-        "unity-ui-development",
-        "scene-building",
-        "animation-creation",
-        "code-review",
-        "dev-story",
-        "quick-prototype",
-        "tdd",
-        "puzzle-level-generation",
-        "puzzle-solver-generation",
-        "puzzle-web-prototyping"
-      ],
-      "quality_gates": [
-        "compiles-in-unity",
-        "60fps-non-negotiable",
-        "story-acs-satisfied"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-qa",
-      "description": "Unity game QA specialist — playtest validation, code review, performance testing, and regression prevention",
-      "definition": "contributes/roles/game-qa/role.json",
-      "prompt": "contributes/roles/game-qa/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "review"
-      ],
-      "capabilities": [
-        "code-review",
-        "playtest-planning",
-        "performance-testing",
-        "automation-testing",
-        "regression-prevention",
-        "unity-code-review",
-        "puzzle-play-testing"
-      ],
-      "quality_gates": [
-        "tests-pass",
-        "60fps-verified",
-        "no-gc-spikes",
-        "acceptance-criteria-met",
-        "code-review-clean"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-architect",
-      "description": "Unity game architect — designs system architecture, generates project-context.md, reviews technical decisions, and writes ADRs",
-      "definition": "contributes/roles/game-architect/role.json",
-      "prompt": "contributes/roles/game-architect/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "design",
-        "review",
-        "epic"
-      ],
-      "capabilities": [
-        "architecture-design",
-        "project-context-generation",
-        "adr-writing",
-        "design-review",
-        "unity-architecture"
-      ],
-      "quality_gates": [
-        "no-dependency-cycles",
-        "60fps-constraints-covered",
-        "project-context-exists"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-designer",
-      "description": "Upstream design pipeline — game brief, GDD, UX design, epics, stories, and brainstorming for Unity mobile games",
-      "definition": "contributes/roles/game-designer/role.json",
-      "prompt": "contributes/roles/game-designer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "design",
-        "epic"
-      ],
-      "capabilities": [
-        "game-brief",
-        "gdd-creation",
-        "create-ux-design",
-        "epics-planning",
-        "create-story",
-        "quick-spec",
-        "brainstorm-game"
-      ],
-      "quality_gates": [
-        "brief-has-core-loop",
-        "gdd-validates-pillars",
-        "stories-have-acceptance-criteria"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-producer",
-      "description": "Game Producer — orchestrates sprint planning, milestone tracking, team coordination, and war-room management for game projects",
-      "definition": "contributes/roles/game-producer/role.json",
-      "prompt": "contributes/roles/game-producer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "orchestration",
-        "epic"
-      ],
-      "capabilities": [
-        "sprint-planning",
-        "milestone-tracking",
-        "team-coordination",
-        "risk-management",
-        "war-room-orchestration",
-        "stakeholder-reporting"
-      ],
-      "quality_gates": [
-        "sprint-scope-defined",
-        "milestones-trackable",
-        "risks-documented"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-devops",
-      "description": "Game DevOps Engineer — manages CI/CD pipelines, Unity Cloud Build, automated testing, and distribution for Unity mobile games",
-      "definition": "contributes/roles/game-devops/role.json",
-      "prompt": "contributes/roles/game-devops/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "task",
-        "epic"
-      ],
-      "capabilities": [
-        "ci-cd-pipelines",
-        "unity-cloud-build",
-        "automated-testing",
-        "build-distribution",
-        "version-management",
-        "platform-deployment"
-      ],
-      "quality_gates": [
-        "pipeline-green",
-        "build-reproducible",
-        "distribution-verified"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "game-ui-analyst",
-      "description": "UI Screen Analyst — detects UI elements from screenshots and extracts animation behaviour from video recordings, producing structured JSON specs (_detection.json, _anim.json) that drive Unity C# code generation by game-engineer",
-      "definition": "contributes/roles/game-ui-analyst/role.json",
-      "prompt": "contributes/roles/game-ui-analyst/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "task",
-        "epic"
-      ],
-      "capabilities": [
-        "ui-detection",
-        "motion-extraction",
-        "animation-analysis",
-        "screenshot-analysis",
-        "video-analysis",
-        "ui-screen-analysis",
-        "detect-ui",
-        "detect-anim"
-      ],
-      "quality_gates": [
-        "object-coverage-90pct",
-        "id-consistency",
-        "temporal-consistency"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "level-designer",
-      "description": "Level Designer — designs level layouts, difficulty curves, progression tuning, and encounter pacing for Unity mobile games",
-      "definition": "contributes/roles/level-designer/role.json",
-      "prompt": "contributes/roles/level-designer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "design",
-        "task"
-      ],
-      "capabilities": [
-        "level-layout",
-        "difficulty-tuning",
-        "progression-design",
-        "encounter-pacing",
-        "tutorial-flow",
-        "reward-scheduling",
-        "puzzle-difficulty-modeling"
-      ],
-      "quality_gates": [
-        "difficulty-curve-smooth",
-        "tutorial-teaches-all-mechanics",
-        "reward-pacing-validated"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "narrative-designer",
-      "description": "Narrative Designer — crafts dialogue, lore, story arcs, and localization-ready narrative content for Unity mobile games",
-      "definition": "contributes/roles/narrative-designer/role.json",
-      "prompt": "contributes/roles/narrative-designer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "design",
-        "task"
-      ],
-      "capabilities": [
-        "dialogue-writing",
-        "lore-creation",
-        "story-arc-design",
-        "localization-planning",
-        "character-voice",
-        "narrative-integration"
-      ],
-      "quality_gates": [
-        "narrative-supports-core-loop",
-        "dialogue-localization-ready",
-        "character-voices-consistent"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "sound-designer",
-      "description": "Sound Designer — creates SFX, implements audio middleware, and integrates music for Unity mobile games",
-      "definition": "contributes/roles/sound-designer/role.json",
-      "prompt": "contributes/roles/sound-designer/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "task"
-      ],
-      "capabilities": [
-        "sfx-design",
-        "music-integration",
-        "audio-middleware",
-        "spatial-audio",
-        "audio-mixing",
-        "compression-optimization"
-      ],
-      "quality_gates": [
-        "audio-memory-within-budget",
-        "no-clipping",
-        "compression-appropriate"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "tech-artist",
-      "description": "Technical Artist — bridges art and engineering with shaders, VFX, animation polish, and art pipeline optimization for Unity mobile",
-      "definition": "contributes/roles/tech-artist/role.json",
-      "prompt": "contributes/roles/tech-artist/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "task"
-      ],
-      "capabilities": [
-        "shader-development",
-        "vfx-creation",
-        "animation-polish",
-        "art-pipeline",
-        "texture-optimization",
-        "performance-profiling"
-      ],
-      "quality_gates": [
-        "shader-compiles-mobile",
-        "vfx-within-drawcall-budget",
-        "60fps-maintained"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
-    },
-    {
-      "name": "ux-researcher",
-      "description": "UX Researcher — conducts playtesting, user research, analytics interpretation, and usability audits for Unity mobile games",
-      "definition": "contributes/roles/ux-researcher/role.json",
-      "prompt": "contributes/roles/ux-researcher/ROLE.md",
-      "default_assignment": false,
-      "supported_task_types": [
-        "review",
-        "task"
-      ],
-      "capabilities": [
-        "playtest-facilitation",
-        "user-research",
-        "analytics-interpretation",
-        "usability-audit",
-        "a-b-testing",
-        "heuristic-evaluation"
-      ],
-      "quality_gates": [
-        "playtest-plan-documented",
-        "findings-actionable",
-        "recommendations-prioritized"
-      ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
     },
     {
       "name": "knowledge-curator",
@@ -508,7 +199,7 @@
         "retention-policy-documented",
         "no-unsafe-destructive-ops"
       ],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "technical-writer",
@@ -517,7 +208,8 @@
       "definition": "roles/technical-writer/role.json",
       "prompt": "roles/technical-writer/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "database-architect",
@@ -526,7 +218,8 @@
       "definition": "roles/database-architect/role.json",
       "prompt": "roles/database-architect/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "data-scientist",
@@ -535,7 +228,8 @@
       "definition": "roles/data-scientist/role.json",
       "prompt": "roles/data-scientist/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "staff-manager",
@@ -566,7 +260,7 @@
         "lesson-included",
         "evidence-cited"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "principal-engineer",
@@ -595,7 +289,7 @@
         "scalability-validated",
         "standards-documented"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "director-of-engineering",
@@ -623,7 +317,7 @@
         "escalations-resolved",
         "health-assessed"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "sre-lead",
@@ -652,7 +346,7 @@
         "alerts-actionable",
         "rca-documented"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "program-manager",
@@ -680,7 +374,7 @@
         "risks-registered",
         "stakeholders-informed"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "platform-engineer",
@@ -708,7 +402,7 @@
         "dx-measured",
         "iac-reviewed"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "security-engineer",
@@ -739,7 +433,7 @@
         "compliance-mapped",
         "no-critical-findings"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas",
+      "default_model": "opencode/big-pickle",
       "timeout": 3600
     },
     {
@@ -770,7 +464,7 @@
         "compliance-mapped",
         "no-critical-findings"
       ],
-      "default_model": "google-vertex/zai-org/glm-5-maas",
+      "default_model": "opencode/big-pickle",
       "timeout": 3600
     },
     {
@@ -791,7 +485,7 @@
         "shell-execution"
       ],
       "quality_gates": [],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "researcher",
@@ -811,7 +505,7 @@
         "shell-execution"
       ],
       "quality_gates": [],
-      "default_model": "google-vertex/gemini-3-flash-preview"
+      "default_model": "opencode/big-pickle"
     }
   ],
   "assignment_rules": {
@@ -1002,6 +696,30 @@
         "description": "Explore ontology namespaces in the knowledge base",
         "path": "skills/roles/knowledge-curator/ontology-knowledge/SKILL.md",
         "skills": "knowledge-curator, ontology"
+      },
+      {
+        "name": "set-retention",
+        "description": "Set namespace retention policies and deletion safeguards for knowledge data.",
+        "path": "skills/roles/knowledge-curator/set-retention/SKILL.md",
+        "skills": "knowledge-curator, retention, lifecycle"
+      },
+      {
+        "name": "schedule-refresh",
+        "description": "Plan and document recurring refresh schedules for knowledge namespaces.",
+        "path": "skills/roles/knowledge-curator/schedule-refresh/SKILL.md",
+        "skills": "knowledge-curator, refresh, scheduling"
+      },
+      {
+        "name": "audit-quality",
+        "description": "Audit knowledge namespace quality, coverage, extraction health, and query relevance.",
+        "path": "skills/roles/knowledge-curator/audit-quality/SKILL.md",
+        "skills": "knowledge-curator, quality, audit"
+      },
+      {
+        "name": "propose-rebuild",
+        "description": "Propose safe rebuild plans for stale or degraded knowledge namespaces.",
+        "path": "skills/roles/knowledge-curator/propose-rebuild/SKILL.md",
+        "skills": "knowledge-curator, rebuild, remediation"
       }
     ]
   }

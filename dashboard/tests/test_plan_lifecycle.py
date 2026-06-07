@@ -160,7 +160,7 @@ class TestDeriveLifecycle:
         result = plan_lifecycle.derive_lifecycle("p1")
         assert result["state"] == "draft"
 
-    def test_completed_when_all_rooms_passed(self, tmp_path, monkeypatch):
+    def test_completed_when_all_rooms_done(self, tmp_path, monkeypatch):
         plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
         _write_meta(plans_dir, "p1", {
             "plan_id": "p1",
@@ -170,16 +170,16 @@ class TestDeriveLifecycle:
         })
         _write_progress(warrooms, {
             "rooms": [
-                {"status": "passed"},
-                {"status": "passed"},
+                {"status": "done"},
+                {"status": "done"},
             ],
         })
         result = plan_lifecycle.derive_lifecycle("p1")
         assert result["state"] == "completed"
-        assert "2 room(s) passed" in result["reason"]
+        assert "all 2 room(s) done" in result["reason"]
 
     def test_completed_dominates_even_if_pid_alive(self, tmp_path, monkeypatch):
-        # All rooms passed — we don't care whether the runner is still up;
+        # All rooms done — we don't care whether the runner is still up;
         # the work is done.
         plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
         _write_meta(plans_dir, "p1", {
@@ -188,9 +188,22 @@ class TestDeriveLifecycle:
             "runner_pid": os.getpid(),
             "launched_at": "2026-05-16T10:00:00+00:00",
         })
+        _write_progress(warrooms, {"rooms": [{"status": "done"}]})
+        result = plan_lifecycle.derive_lifecycle("p1")
+        assert result["state"] == "completed"
+
+    def test_legacy_passed_alias_still_counts_as_done(self, tmp_path, monkeypatch):
+        plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
+        _write_meta(plans_dir, "p1", {
+            "plan_id": "p1",
+            "warrooms_dir": str(warrooms),
+            "runner_pid": 1,
+            "launched_at": "2026-05-16T10:00:00+00:00",
+        })
         _write_progress(warrooms, {"rooms": [{"status": "passed"}]})
         result = plan_lifecycle.derive_lifecycle("p1")
         assert result["state"] == "completed"
+        assert "done" in result["reason"]
 
     def test_running_when_pid_alive_and_heartbeat_fresh(self, tmp_path, monkeypatch):
         plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
@@ -223,7 +236,7 @@ class TestDeriveLifecycle:
         assert result["state"] == "running"
         assert "stale" in result["reason"]
 
-    def test_failed_when_pid_dead_and_a_room_failed_final(self, tmp_path, monkeypatch):
+    def test_failed_when_pid_dead_and_a_room_failed(self, tmp_path, monkeypatch):
         plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
         # Use a PID we know is gone — _pid_alive should report False via
         # the monkeypatched os.kill below.
@@ -236,13 +249,13 @@ class TestDeriveLifecycle:
         })
         _write_progress(warrooms, {
             "rooms": [
-                {"status": "passed"},
-                {"status": "failed-final"},
+                {"status": "done"},
+                {"status": "failed"},
             ],
         })
         result = plan_lifecycle.derive_lifecycle("p1")
         assert result["state"] == "failed"
-        assert "1 room(s) failed-final" in result["reason"]
+        assert "1 room(s) failed" in result["reason"]
 
     def test_stopped_when_pid_dead_and_no_failures(self, tmp_path, monkeypatch):
         plans_dir, warrooms = _isolate(monkeypatch, tmp_path)
@@ -255,7 +268,7 @@ class TestDeriveLifecycle:
         })
         _write_progress(warrooms, {
             "rooms": [
-                {"status": "passed"},
+                {"status": "done"},
                 {"status": "developing"},  # not done, not failed
             ],
         })

@@ -19,9 +19,62 @@ $ErrorActionPreference = "SilentlyContinue"
 $ScriptDir = Split-Path $PSCommandPath -Parent
 $AgentsDir = $ScriptDir
 $HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$OstwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $HomeDir ".ostwin" }
 $WarroomsDir = if ($env:WARROOMS_DIR) { $env:WARROOMS_DIR } else { Join-Path $AgentsDir "war-rooms" }
-$ConfigFile = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG } else { Join-Path $AgentsDir "config.json" }
 $ManagerPidFile = Join-Path $AgentsDir "manager.pid"
+
+$ConfigModule = Join-Path $AgentsDir "lib" "Config.psm1"
+if (Test-Path $ConfigModule) {
+    Import-Module $ConfigModule -Force
+}
+
+function Resolve-HealthConfigPath {
+    if (Get-Command Resolve-OstwinConfigPath -ErrorAction SilentlyContinue) {
+        try { return Resolve-OstwinConfigPath } catch { }
+    }
+
+    $globalConfig = Join-Path (Join-Path $OstwinHome ".agents") "config.json"
+    if ($env:AGENT_OS_CONFIG) { return $env:AGENT_OS_CONFIG }
+    if ($env:OSTWIN_CONFIG_PATH) { return $env:OSTWIN_CONFIG_PATH }
+    if ($env:OSTWIN_PROJECT_DIR) { return (Join-Path (Join-Path $env:OSTWIN_PROJECT_DIR ".agents") "config.json") }
+    if ($env:AGENTS_DIR) { return (Join-Path $env:AGENTS_DIR "config.json") }
+    if (Test-Path $globalConfig) { return $globalConfig }
+    return (Join-Path $AgentsDir "config.json")
+}
+
+function Test-ActiveRoomState {
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$Status
+    )
+
+    $canonicalStatus = switch ($Status) {
+        "passed"       { "done" }
+        "failed-final" { "failed" }
+        "fixing"       { "optimize" }
+        default        { $Status }
+    }
+
+    if ($canonicalStatus -in @("", "unknown", "pending", "done", "failed", "blocked", "paused", "signoff")) {
+        return $false
+    }
+
+    $lifecycleFile = Join-Path $RoomDir "lifecycle.json"
+    if (Test-Path $lifecycleFile) {
+        try {
+            $lifecycle = Get-Content $lifecycleFile -Raw | ConvertFrom-Json
+            $stateDef = $lifecycle.states.$canonicalStatus
+            if ($stateDef -and $stateDef.type) {
+                return ($stateDef.type -ne "terminal")
+            }
+        }
+        catch { }
+    }
+
+    return $true
+}
+
+$ConfigFile = Resolve-HealthConfigPath
 
 # ─── Resolve Python ──────────────────────────────────────────────────────────
 
@@ -56,11 +109,17 @@ if (Test-Path $ManagerPidFile) {
 # ─── Read state_timeout from config ──────────────────────────────────────────
 
 $StateTimeout = 900
-if ((Test-Path $ConfigFile) -and $PythonCmd) {
+if (Test-Path $ConfigFile) {
     try {
         $configData = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-        if ($configData.manager.state_timeout_seconds) {
+        if (Get-Command Get-OstwinManagerRuntimeSettings -ErrorAction SilentlyContinue) {
+            $StateTimeout = [int](Get-OstwinManagerRuntimeSettings -Config $configData).state_timeout_seconds
+        }
+        elseif ($null -ne $configData.manager -and $null -ne $configData.manager.state_timeout_seconds) {
             $StateTimeout = [int]$configData.manager.state_timeout_seconds
+        }
+        elseif ($null -ne $configData.runtime -and $null -ne $configData.runtime.state_timeout_seconds) {
+            $StateTimeout = [int]$configData.runtime.state_timeout_seconds
         }
     }
     catch { }
@@ -80,11 +139,17 @@ if (Test-Path $WarroomsDir) {
         $TotalRooms++
         $statusFile = Join-Path $roomDir.FullName "status"
         $status = if (Test-Path $statusFile) { (Get-Content $statusFile -Raw).Trim() } else { "unknown" }
+        $canonicalStatus = switch ($status) {
+            "passed"       { "done" }
+            "failed-final" { "failed" }
+            "fixing"       { "optimize" }
+            default        { $status }
+        }
 
-        switch ($status) {
-            "passed" { $PassedRooms++ }
-            "failed-final" { $FailedRooms++ }
-            { $_ -in @("engineering", "qa-review", "fixing") } {
+        switch ($canonicalStatus) {
+            "done" { $PassedRooms++ }
+            "failed" { $FailedRooms++ }
+            { Test-ActiveRoomState -RoomDir $roomDir.FullName -Status $_ } {
                 $ActiveRooms++
 
                 # Check if stuck (active but no PID alive)
@@ -120,7 +185,6 @@ if (Test-Path $WarroomsDir) {
 
 # ─── Check agent CLI availability ────────────────────────────────────────────
 
-$OstwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $env:HOME ".ostwin" }
 $defaultAgentBin = Join-Path $OstwinHome ".agents" "bin" "agent"
 $EngineerCmd = if ($env:ENGINEER_CMD) { $env:ENGINEER_CMD } else { $defaultAgentBin }
 $QaCmd = if ($env:QA_CMD) { $env:QA_CMD } else { $defaultAgentBin }
@@ -145,6 +209,7 @@ if ($JsonOutput) {
         }
         rooms   = [ordered]@{
             total  = $TotalRooms
+            done   = $PassedRooms
             passed = $PassedRooms
             failed = $FailedRooms
             active = $ActiveRooms
@@ -188,7 +253,7 @@ else {
 
     Write-Host "  War-Rooms:"
     Write-Host "    Total:   $TotalRooms"
-    Write-Host "    Passed:  $PassedRooms"
+    Write-Host "    Done:    $PassedRooms"
     Write-Host "    Failed:  $FailedRooms"
     Write-Host "    Active:  $ActiveRooms"
     if ($StuckRooms -gt 0) {

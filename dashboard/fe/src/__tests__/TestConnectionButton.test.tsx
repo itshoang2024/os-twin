@@ -107,11 +107,11 @@ describe('TestConnectionButton', () => {
     render(<TestConnectionButton version="claude-opus-4" />);
     fireEvent.click(screen.getByText('Test Connection'));
 
-    expect(screen.getByText('Testing...')).toBeInTheDocument();
+    expect(screen.getByText('Testing…')).toBeInTheDocument();
 
     resolvePromise!({ status: 'ok', latency_ms: 100 });
     await waitFor(() => {
-      expect(screen.queryByText('Testing...')).not.toBeInTheDocument();
+      expect(screen.queryByText('Testing…')).not.toBeInTheDocument();
     });
   });
 });

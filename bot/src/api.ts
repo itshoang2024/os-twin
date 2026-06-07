@@ -56,11 +56,14 @@ export interface RoomMessage {
 
 export interface RoomsSummary {
   total?: number;
+  done?: number;
+  failed?: number;
   passed?: number;
   failed_final?: number;
   pending?: number;
   developing?: number;
   review?: number;
+  optimize?: number;
   fixing?: number;
   // Legacy aliases — older deployments report these names; kept so we sum both.
   engineering?: number;
@@ -372,6 +375,26 @@ export async function getRoomChannel(roomId: string, limit = 1): Promise<any> {
   return fetchJSON(`/api/rooms/${roomId}/channel?limit=${limit}`);
 }
 
+export async function getPlanRoomChannel(planId: string, roomId: string, limit = 3): Promise<any> {
+  return fetchJSON(`/api/plans/${encodeURIComponent(planId)}/rooms/${encodeURIComponent(roomId)}/channel?limit=${limit}`);
+}
+
+export async function postPlanRoomFeedback(params: {
+  planId: string;
+  roomId: string;
+  content: string;
+  source?: string;
+  userId?: string;
+  runId?: string;
+}): Promise<any> {
+  return postJSON(`/api/plans/${encodeURIComponent(params.planId)}/rooms/${encodeURIComponent(params.roomId)}/feedback`, {
+    content: params.content,
+    source: params.source || 'bot',
+    user_id: params.userId || 'unknown',
+    run_id: params.runId || '',
+  });
+}
+
 // ── Stats & Search ────────────────────────────────────────────────
 
 export async function getStats(): Promise<Stats> {
@@ -604,6 +627,8 @@ const api = {
   roomAction,
   getRooms,
   getRoomChannel,
+  getPlanRoomChannel,
+  postPlanRoomFeedback,
   getStats,
   getSkills,
   searchSkillsClawhub,

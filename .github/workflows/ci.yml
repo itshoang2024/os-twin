@@ -289,27 +289,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 9
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: dashboard/fe/pnpm-lock.yaml
+          bun-version: latest
 
       - name: Install frontend dependencies
         working-directory: dashboard/fe
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Run dashboard frontend unit tests
         working-directory: dashboard/fe
         run: |
           mkdir -p ../test-results
-          pnpm exec vitest run --reporter=default --reporter=junit --outputFile=../test-results/dashboard-fe-vitest-results.xml
+          bunx vitest run --reporter=default --reporter=junit --outputFile=../test-results/dashboard-fe-vitest-results.xml
 
       - name: Upload dashboard frontend test results
         if: always()
@@ -342,29 +335,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: '22'
-
-      - name: Install pnpm
-        shell: bash
-        run: npm install -g pnpm
+          bun-version: latest
 
       - name: Install bot dependencies
         shell: bash
         working-directory: bot
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: bun install --frozen-lockfile
 
       - name: TypeScript compile check
         shell: bash
         working-directory: bot
-        run: npx tsc --noEmit
+        run: bunx tsc --noEmit
 
       - name: Run bot tests
         shell: bash
         working-directory: bot
-        run: pnpm test
+        run: bun --bun run test
 
   # ─────────────────────────────────────────────────────────────────────────
   # Job 5: Smoke test — install.sh (Linux only)
@@ -380,15 +369,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install smoke test system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rsync
+
       - name: Make installer executable
         run: chmod +x .agents/install.sh
 
-      - name: Run install.sh --yes --skip-optional (smoke test)
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run install.sh --yes --skip-optional --no-ollama (smoke test)
         shell: bash
         run: |
           SOURCE_DIR="$(pwd)"
           export SOURCE_DIR
-          .agents/install.sh --yes --skip-optional 2>&1 | tee install-output.log
+          .agents/install.sh --yes --skip-optional --no-ollama 2>&1 | tee install-output.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [[ $EXIT_CODE -ne 0 ]]; then
             echo "::error::install.sh exited with code $EXIT_CODE"
@@ -416,6 +416,84 @@ jobs:
             python3 -c 'import ast; ast.parse(open("dashboard/api.py").read()); print("dashboard/api.py parses OK")'
           fi
 
+      - name: Run minimal Ostwin plan (smoke test)
+        shell: bash
+        working-directory: .github/smoke-test-folder
+        run: |
+          set -euo pipefail
+          rm -rf .war-rooms .agents .opencode
+          rm -f index.html .planning-DAG.json ostwin-run-output.log
+          export OSTWIN_WORKSPACE_ISOLATION=shared
+          export OSTWIN_SKIP_PLAN_REVIEW=true
+          OSTWIN="$HOME/.ostwin/.agents/bin/ostwin"
+
+          plan_output="$($OSTWIN plan create that.plan.md 2>&1)"
+          printf '%s\n' "$plan_output"
+          plan_id="$(printf '%s\n' "$plan_output" | grep -Eo 'Plan created: [0-9a-fA-F]+' | grep -Eo '[0-9a-fA-F]+' | tail -1 || true)"
+          if [[ -z "$plan_id" ]]; then
+            echo "::error::Could not parse plan ID from ostwin plan create output"
+            exit 1
+          fi
+
+          roles_file="$HOME/.ostwin/.agents/plans/${plan_id}.roles.json"
+          if [[ ! -f "$roles_file" ]]; then
+            echo "::error::Plan roles file not found: $roles_file"
+            exit 1
+          fi
+          echo "Plan: $roles_file"
+          grep -nE '"(default_model|model)"' "$roles_file"
+          python3 - "$roles_file" <<'PY'
+          import json
+          import sys
+
+          roles_file = sys.argv[1]
+
+          def replace_default_model(value):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key in {"default_model", "model"}:
+                          value[key] = "opencode/big-pickle"
+                      else:
+                          replace_default_model(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      replace_default_model(child)
+
+          with open(roles_file, encoding="utf-8") as handle:
+              data = json.load(handle)
+          replace_default_model(data)
+          with open(roles_file, "w", encoding="utf-8") as handle:
+              json.dump(data, handle, indent=2)
+              handle.write("\n")
+          PY
+          grep -nE '"(default_model|model)"' "$roles_file"
+          if grep -nE '"(default_model|model)"' "$roles_file" | grep -vE '"(default_model|model)": "opencode/big-pickle"'; then
+            echo "::error::Not all plan role model/default_model values were rewritten to opencode/big-pickle"
+            exit 1
+          fi
+
+          if ! timeout 180s "$OSTWIN" run "$plan_id" 2>&1 | tee ostwin-run-output.log; then
+            echo "::error::ostwin run failed"
+            exit 1
+          fi
+          if grep -q 'Model=openai/gpt-5.5' ostwin-run-output.log; then
+            echo "::error::Smoke flow still launched an agent with Model=openai/gpt-5.5"
+            exit 1
+          fi
+          cat > .gitignore <<'EOF'
+          # Ostwin generated runtime artifacts
+          .agents/
+          .memory
+          .opencode/
+          .planning-DAG.json
+          .war-rooms/
+          index.html
+          ostwin-run-output.log
+          EOF
+          cat index.html
+          grep -q "Hello this is OsTwin" index.html
+          echo "::notice::Minimal Ostwin plan created, ran, QA passed, and generated index.html"
+
       - name: Upload install log
         if: always()
         uses: actions/upload-artifact@v4
@@ -437,6 +515,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Run install.ps1 -Yes -SkipOptional (smoke test)
         shell: pwsh
@@ -465,6 +548,148 @@ jobs:
             Write-Host "::warning::Venv not found — running fallback syntax check"
             python -c "import ast; ast.parse(open('dashboard/api.py').read()); print('dashboard/api.py parses OK')"
           }
+
+      - name: Run minimal Ostwin plan (smoke test, Windows)
+        shell: pwsh
+        working-directory: .github/smoke-test-folder
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Remove-Item -Recurse -Force .war-rooms, .agents, .opencode -ErrorAction SilentlyContinue
+          Remove-Item -Force index.html, .planning-DAG.json, ostwin-run-output.log -ErrorAction SilentlyContinue
+          $env:OSTWIN_WORKSPACE_ISOLATION = 'shared'
+          $env:OSTWIN_SKIP_PLAN_REVIEW = 'true'
+
+          $ostwin = Join-Path $HOME '.ostwin\.agents\bin\ostwin'
+          if (-not (Test-Path $ostwin)) {
+            Write-Host "::error::ostwin CLI not found: $ostwin"
+            exit 1
+          }
+          $ostwinScript = Join-Path $env:RUNNER_TEMP 'ostwin.ps1'
+          Copy-Item -Path $ostwin -Destination $ostwinScript -Force
+
+          $dashboardUrl = 'http://127.0.0.1:3366/api/status'
+          $dashboardReady = $false
+          for ($i = 0; $i -lt 10; $i++) {
+            try {
+              Invoke-RestMethod -Uri $dashboardUrl -TimeoutSec 2 | Out-Null
+              $dashboardReady = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if (-not $dashboardReady) {
+            $dashboard = Join-Path $HOME '.ostwin\.agents\dashboard.ps1'
+            if (-not (Test-Path $dashboard)) {
+              Write-Host "::error::dashboard.ps1 not found: $dashboard"
+              exit 1
+            }
+            & pwsh -NoProfile -File $dashboard -Background -Port 3366 -ProjectDir (Get-Location).Path
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                Invoke-RestMethod -Uri $dashboardUrl -TimeoutSec 2 | Out-Null
+                $dashboardReady = $true
+                break
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+          }
+
+          if (-not $dashboardReady) {
+            Write-Host '::error::Dashboard did not become ready for plan creation'
+            exit 1
+          }
+
+          $planOutput = & pwsh -NoProfile -File $ostwinScript plan create that.plan.md 2>&1 | Out-String
+          Write-Host $planOutput
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::ostwin plan create failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          $planMatch = [regex]::Match($planOutput, 'Plan created:\s*([0-9a-fA-F]+)')
+          if (-not $planMatch.Success) {
+            Write-Host '::error::Could not parse plan ID from ostwin plan create output'
+            exit 1
+          }
+          $planId = $planMatch.Groups[1].Value
+
+          $rolesFile = Join-Path $HOME ".ostwin\.agents\plans\$planId.roles.json"
+          if (-not (Test-Path $rolesFile)) {
+            Write-Host "::error::Plan roles file not found: $rolesFile"
+            exit 1
+          }
+          Write-Host "Plan: $rolesFile"
+          Select-String -Path $rolesFile -Pattern '"(default_model|model)"' | ForEach-Object { $_.Line }
+
+          function Set-SmokeModel {
+            param([object]$Value)
+            if ($null -eq $Value) { return }
+            if ($Value -is [System.Collections.IDictionary]) {
+              foreach ($key in @($Value.Keys)) {
+                if ($key -in @('default_model', 'model')) {
+                  $Value[$key] = 'opencode/big-pickle'
+                } else {
+                  Set-SmokeModel $Value[$key]
+                }
+              }
+              return
+            }
+            if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+              foreach ($item in $Value) { Set-SmokeModel $item }
+              return
+            }
+            if ($Value.PSObject -and $Value.PSObject.Properties) {
+              foreach ($prop in $Value.PSObject.Properties) {
+                if ($prop.Name -in @('default_model', 'model')) {
+                  $prop.Value = 'opencode/big-pickle'
+                } else {
+                  Set-SmokeModel $prop.Value
+                }
+              }
+            }
+          }
+
+          $roles = Get-Content $rolesFile -Raw | ConvertFrom-Json
+          Set-SmokeModel $roles
+          $roles | ConvertTo-Json -Depth 100 | Set-Content -Path $rolesFile -Encoding utf8
+          $modelLines = Select-String -Path $rolesFile -Pattern '"(default_model|model)"'
+          $modelLines | ForEach-Object { $_.Line }
+          $badModelLines = $modelLines | Where-Object { $_.Line -notmatch '"(default_model|model)":\s*"opencode/big-pickle"' }
+          if ($badModelLines) {
+            $badModelLines | ForEach-Object { Write-Host $_.Line }
+            Write-Host '::error::Not all plan role model/default_model values were rewritten to opencode/big-pickle'
+            exit 1
+          }
+
+          & pwsh -NoProfile -File $ostwinScript run $planId 2>&1 | Tee-Object -FilePath ostwin-run-output.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::ostwin run failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          if (Select-String -Path ostwin-run-output.log -Pattern 'Model=openai/gpt-5.5' -Quiet) {
+            Write-Host '::error::Smoke flow still launched an agent with Model=openai/gpt-5.5'
+            exit 1
+          }
+          @(
+            '# Ostwin generated runtime artifacts',
+            '.agents/',
+            '.memory',
+            '.opencode/',
+            '.planning-DAG.json',
+            '.war-rooms/',
+            'index.html',
+            'ostwin-run-output.log'
+          ) | Set-Content -Path .gitignore -Encoding utf8
+          Get-Content index.html
+          if (-not (Select-String -Path index.html -Pattern 'Hello this is OsTwin' -Quiet)) {
+            Write-Host '::error::index.html does not contain Hello this is OsTwin'
+            exit 1
+          }
+          Write-Host '::notice::Minimal Ostwin plan created, ran, QA passed, and generated index.html on Windows'
 
       - name: Upload install log
         if: always()

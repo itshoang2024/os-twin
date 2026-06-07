@@ -84,6 +84,18 @@ class KnowledgeEmbedder:
         """Embed a batch of texts. Returns a list of float lists."""
         if not texts:
             return []
+        if self.provider == "ollama":
+            return self._embed_ollama(texts)
+        return self._get_client().embed(texts)
+
+    def _embed_ollama(self, texts: list[str]) -> list[list[float]]:
+        """Backward-compatible Ollama embedding hook.
+
+        Older tests and integrations patch this method to verify that Ollama
+        embedding calls are made without passing an optional dimension
+        argument.  The implementation still delegates to the centralized
+        embedding client so production behavior remains unchanged.
+        """
         return self._get_client().embed(texts)
 
     def embed_one(self, text: str) -> list[float]:

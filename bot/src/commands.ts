@@ -10,6 +10,7 @@
 import api, { PlanAsset, ClawhubSkill, RoleInfo } from './api';
 import { registry } from './connectors/registry';
 import { connectorConversationId, draftConversationId } from './conversation-ids';
+import { bindConversation, telegramConversationId } from './conversation-bindings';
 import {
   getSession,
   clearSession,
@@ -20,6 +21,44 @@ import {
   setWorkingDir,
 } from './sessions';
 import { SlashCommandBuilder } from 'discord.js';
+
+const LEGACY_NOTIFICATION_EVENT_IDS: Record<string, string> = {
+  plan_started: 'plan.run.started',
+  plan_completed: 'plan.run.completed',
+  plan_failed: 'plan.run.failed',
+  epic_passed: 'epic.passed',
+  epic_failed: 'epic.failed',
+  epic_retry: 'epic.retrying',
+  room_created: 'room.created',
+  room_status_changed: 'room.status.changed',
+};
+
+function normalizeNotificationEvents(events: string[] = []): string[] {
+  return Array.from(new Set(events.map(event => LEGACY_NOTIFICATION_EVENT_IDS[event] || event)));
+}
+
+function normalizeRoomStatus(status = ''): string {
+  if (status === 'passed') return 'done';
+  if (status === 'failed-final') return 'failed';
+  if (status === 'fixing') return 'optimize';
+  return status;
+}
+
+function conversationIdForCommand(platform: string, userId: string, explicitConversationId?: string): string | null {
+  if (explicitConversationId) return explicitConversationId;
+  if (platform === 'telegram') return telegramConversationId(userId);
+  return null;
+}
+
+function bindPlanForConversation(userId: string, platform: string, planId: string, explicitConversationId?: string): void {
+  const conversationId = conversationIdForCommand(platform, userId, explicitConversationId);
+  if (!conversationId || (platform !== 'telegram' && platform !== 'slack')) return;
+  try {
+    bindConversation({ conversation_id: conversationId, platform: platform as 'telegram' | 'slack', plan_id: planId });
+  } catch (err: any) {
+    console.warn(`[BINDINGS] Failed to bind ${platform} conversation to ${planId}: ${err.message}`);
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -283,9 +322,9 @@ async function cmdDashboard(): Promise<BotResponse> {
   const active = (summary.pending || 0)
     + (summary.developing || 0) + (summary.engineering || 0)
     + (summary.review || 0) + (summary.qa_review || 0)
-    + (summary.fixing || 0);
-  const passed = summary.passed || 0;
-  const failed = summary.failed_final || 0;
+    + (summary.optimize || 0) + (summary.fixing || 0);
+  const done = summary.done ?? summary.passed ?? 0;
+  const failed = summary.failed ?? summary.failed_final ?? 0;
 
   const makeBar = (count: number, t: number, len = 12): string => {
     if (t === 0) return '░'.repeat(len);
@@ -293,7 +332,7 @@ async function cmdDashboard(): Promise<BotResponse> {
     return '█'.repeat(filled) + '░'.repeat(len - filled);
   };
 
-  const pctPass = total ? (passed / total * 100).toFixed(1) : '0.0';
+  const pctDone = total ? (done / total * 100).toFixed(1) : '0.0';
   const pctFail = total ? (failed / total * 100).toFixed(1) : '0.0';
   const pctAct = total ? (active / total * 100).toFixed(1) : '0.0';
 
@@ -304,13 +343,13 @@ _System Status:_ 🟢 *ONLINE*
 📊 *WAR-ROOMS OVERVIEW*
 \`─────────────────────────────\`
 🏃‍♂️ *Active:*   \`${String(active).padEnd(4)}\`
-✅ *Passed:*   \`${String(passed).padEnd(4)}\`
+✅ *Done:*     \`${String(done).padEnd(4)}\`
 ❌ *Failed:*   \`${String(failed).padEnd(4)}\`
 📦 *Total:*    \`${String(total).padEnd(4)}\`
 \`─────────────────────────────\`
 
 📈 *EXECUTION PROGRESS*
-✅ \`Passed:\` \`${makeBar(passed, total)}\` \`${pctPass.padStart(5)}%\`
+✅ \`Done:\`   \`${makeBar(done, total)}\` \`${pctDone.padStart(5)}%\`
 ❌ \`Failed:\` \`${makeBar(failed, total)}\` \`${pctFail.padStart(5)}%\`
 ��‍♂️ \`Active:\` \`${makeBar(active, total)}\` \`${pctAct.padStart(5)}%\``,
     buttons: baseUrl.startsWith('https')
@@ -324,11 +363,12 @@ async function cmdStatus(): Promise<BotResponse> {
   if (error) return text(`⚠️ ${error}`);
   if (!rooms.length) return text('ℹ️ No War-Rooms found.');
 
-  const emoji: Record<string, string> = { passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', developing: '🏃‍♂️', pending: '⏳', review: '👀', qa_review: '👀', fixing: '🔧', 'failed-final': '❌' };
+  const emoji: Record<string, string> = { done: '✅', passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', developing: '🏃‍♂️', pending: '⏳', review: '👀', qa_review: '👀', optimize: '🔧', fixing: '🔧', failed: '❌', 'failed-final': '❌' };
   const lines = ['📋 *War-Rooms Status:*', '`─────────────────────────────`'];
   for (const r of rooms) {
-    const e = r.status.includes('fail') ? '❌' : (emoji[r.status] || '❓');
-    lines.push(`${e} \`${r.room_id}\` : ${r.status.toUpperCase()} \`[${r.message_count} msgs]\``);
+    const status = normalizeRoomStatus(r.status);
+    const e = status.includes('fail') ? '❌' : (emoji[status] || '❓');
+    lines.push(`${e} \`${r.room_id}\` : ${status.toUpperCase()} \`[${r.message_count} msgs]\``);
   }
   lines.push('`─────────────────────────────`');
   return text(lines.join('\n'));
@@ -372,12 +412,14 @@ async function cmdResumeMenu(): Promise<BotResponse> {
   return menu('🔄 *Select a Plan to Resume:*', buttons);
 }
 
-async function cmdResumePlan(planId: string): Promise<BotResponse[]> {
+async function cmdResumePlan(userId: string, platform: string, planId: string, conversationId?: string): Promise<BotResponse[]> {
   const data = await api.getPlan(planId);
   if (data?._error) return [text(`❌ Plan \`${planId}\` not found.`)];
   const planContent = data.plan?.content || data.content || '';
   const result = await api.resumePlan(planId, planContent);
   if (result?._error) return [text(`❌ Failed to resume plan: ${result._error}`)];
+  setPlan(userId, platform, planId);
+  bindPlanForConversation(userId, platform, planId, conversationId);
   return [text(`🔄 *Plan Resumed!* \`${planId}\`\n\nExisting war-rooms will be continued. Use /dashboard or /status to monitor progress.`)];
 }
 
@@ -397,7 +439,8 @@ async function cmdLogs(args: string): Promise<BotResponse> {
     const { rooms } = await api.getRooms();
     if (!rooms.length) return text('ℹ️ No war-rooms found.');
     const buttons = rooms.slice(0, 10).map(r => {
-      const emoji = r.status.includes('fail') ? '❌' : r.status === 'passed' ? '✅' : '🏃‍♂️';
+      const status = normalizeRoomStatus(r.status);
+      const emoji = status.includes('fail') ? '❌' : status === 'done' ? '✅' : '🏃‍♂️';
       return [{ label: `${emoji} ${r.room_id}`, callbackData: `menu:logs:${r.room_id}` }];
     });
     return menu('📜 *Select a War-Room to view logs:*', buttons);
@@ -435,15 +478,15 @@ async function cmdHealth(): Promise<BotResponse> {
 
   const { rooms, summary } = await api.getRooms();
   const total = summary?.total || 0;
-  const passed = summary?.passed || 0;
-  const failed = summary?.failed_final || 0;
-  const active = total - passed - failed;
+  const done = summary?.done ?? summary?.passed ?? 0;
+  const failed = summary?.failed ?? summary?.failed_final ?? 0;
+  const active = total - done - failed;
 
   return text(`🏥 *System Health*
 \`─────────────────────────────\`
 ⚙️ *Manager:*     ${mgrRunning ? `🟢 Running (PID ${mgrPid})` : '🔴 Stopped'}
 🤖 *Bot:*          ${botRunning ? `🟢 Running (PID ${botPid})` : '🔴 Stopped'}${botAvail ? '' : ' ⚠️ Unavailable'}
-📦 *War-Rooms:*    \`${total}\` total, \`${active}\` active, \`${passed}\` passed, \`${failed}\` failed
+📦 *War-Rooms:*    \`${total}\` total, \`${active}\` active, \`${done}\` done, \`${failed}\` failed
 \`─────────────────────────────\``);
 }
 
@@ -817,8 +860,9 @@ async function cmdViewPlan(planId: string): Promise<BotResponse> {
   return text(`📄 *Plan: ${planId}*\n\`\`\`markdown\n${content}\n\`\`\``);
 }
 
-async function cmdStartEditing(userId: string, platform: string, planId: string): Promise<BotResponse> {
+async function cmdStartEditing(userId: string, platform: string, planId: string, conversationId?: string): Promise<BotResponse> {
   setPlan(userId, platform, planId);
+  bindPlanForConversation(userId, platform, planId, conversationId);
   setMode(userId, platform, 'editing');
 
   const convId = connectorConversationId(platform, userId);
@@ -837,6 +881,7 @@ async function cmdStartEditing(userId: string, platform: string, planId: string)
   for (const action of result.actions || []) {
     if (action.type === 'plan_created' && action.plan_id) {
       setPlan(userId, platform, action.plan_id);
+      bindPlanForConversation(userId, platform, action.plan_id, conversationId);
     }
   }
 
@@ -850,12 +895,14 @@ function cmdPromptLaunch(planId: string): BotResponse {
   ]);
 }
 
-async function cmdLaunchPlan(planId: string): Promise<BotResponse[]> {
+async function cmdLaunchPlan(userId: string, platform: string, planId: string, conversationId?: string): Promise<BotResponse[]> {
   const data = await api.getPlan(planId);
   if (data?._error) return [text(`❌ Plan \`${planId}\` not found.`)];
   const planContent = data.plan?.content || data.content || '';
   const result = await api.launchPlan(planId, planContent);
   if (result?._error) return [text(`❌ Failed to launch plan: ${result._error}`)];
+  setPlan(userId, platform, planId);
+  bindPlanForConversation(userId, platform, planId, conversationId);
   return [text(`🚀 *Plan Launched!* \`${planId}\`\n\nUse /dashboard or /status to monitor progress.`)];
 }
 
@@ -958,17 +1005,22 @@ async function cmdSubscriptions(_userId: string, platform: string): Promise<BotR
   if (!config) return [text('❌ Connector configuration not found.')];
 
   const prefs = config.notification_preferences || { events: [], enabled: true };
+  const subscribedEvents = normalizeNotificationEvents(prefs.events);
   const events: { id: string; label: string }[] = [
-    { id: 'plan_started', label: '🚀 Plan Started' },
-    { id: 'epic_passed', label: '✅ EPIC Passed' },
-    { id: 'epic_failed', label: '❌ EPIC Failed' },
-    { id: 'epic_retry', label: '🔄 EPIC Retry' },
+    { id: 'plan.run.started', label: '🚀 Plan Started' },
+    { id: 'plan.run.completed', label: '🏁 Plan Completed' },
+    { id: 'plan.run.failed', label: '🛑 Plan Failed' },
+    { id: 'epic.passed', label: '✅ EPIC Done' },
+    { id: 'epic.failed', label: '❌ EPIC Failed' },
+    { id: 'epic.retrying', label: '🔄 EPIC Retry' },
+    { id: 'room.created', label: '🏗️ Room Created' },
+    { id: 'room.status.changed', label: '🔁 Room Status Changed' },
     { id: 'feedback_needed', label: '🤔 Feedback Needed' },
     { id: 'error', label: '⚠️ Errors' },
   ];
 
   const buttons: Button[][] = events.map(e => {
-    const isSubscribed = prefs.events.includes(e.id);
+    const isSubscribed = subscribedEvents.includes(e.id);
     return [{
       label: `${isSubscribed ? '✅' : '⬜️'} ${e.label}`,
       callbackData: `prefs:toggle_event:${e.id}`
@@ -1011,7 +1063,7 @@ async function handleToggleEvent(userId: string, platform: string, eventId: stri
   if (!config) return [];
 
   const prefs = config.notification_preferences || { events: [], enabled: true };
-  let newEvents = [...prefs.events];
+  let newEvents = normalizeNotificationEvents(prefs.events);
   
   if (newEvents.includes(eventId)) {
     newEvents = newEvents.filter(e => e !== eventId);
@@ -1035,8 +1087,8 @@ async function handleToggleEvent(userId: string, platform: string, eventId: stri
 // the next askAgent() call and the model would see it as a duplicate.
 const OPENCODE_BACKED_COMMANDS = new Set(['draft', 'edit']);
 
-export async function routeCommand(userId: string, platform: string, command: string, args = ''): Promise<BotResponse[]> {
-  const responses = await _routeCommandInner(userId, platform, command, args);
+export async function routeCommand(userId: string, platform: string, command: string, args = '', conversationId?: string): Promise<BotResponse[]> {
+  const responses = await _routeCommandInner(userId, platform, command, args, conversationId);
 
   // Store result in pendingContext so the next askAgent() call can inject
   // it as context for the OpenCode session. Skip for OpenCode-backed
@@ -1056,7 +1108,7 @@ export async function routeCommand(userId: string, platform: string, command: st
   return responses;
 }
 
-async function _routeCommandInner(userId: string, platform: string, command: string, args = ''): Promise<BotResponse[]> {
+async function _routeCommandInner(userId: string, platform: string, command: string, args = '', conversationId?: string): Promise<BotResponse[]> {
   switch (command) {
     case 'menu':        return [cmdMenu()];
     case 'help':        return [cmdHelp()];
@@ -1117,6 +1169,7 @@ async function _routeCommandInner(userId: string, platform: string, command: str
       for (const action of result.actions || []) {
         if (action.type === 'plan_created' && action.plan_id) {
           setPlan(userId, platform, action.plan_id);
+          bindPlanForConversation(userId, platform, action.plan_id, conversationId);
         }
       }
       return [text(result.text || 'No response.')];
@@ -1148,7 +1201,7 @@ async function _routeCommandInner(userId: string, platform: string, command: str
   }
 }
 
-export async function routeCallback(userId: string, platform: string, callbackData: string): Promise<BotResponse[]> {
+export async function routeCallback(userId: string, platform: string, callbackData: string, conversationId?: string): Promise<BotResponse[]> {
   if (callbackData === 'menu:plans')             return [await cmdPlans()];
   if (callbackData === 'menu:cat:monitoring')     return [cmdSubmenuMonitoring()];
   if (callbackData === 'menu:cat:plans')          return [cmdSubmenuPlans()];
@@ -1165,11 +1218,12 @@ export async function routeCallback(userId: string, platform: string, callbackDa
 
   if (callbackData.startsWith('cmd:')) {
     const cmd = callbackData.slice(4);
-    return routeCommand(userId, platform, cmd);
+    return routeCommand(userId, platform, cmd, '', conversationId);
   }
 
   if (callbackData.startsWith('menu:view:')) {
     const planId = callbackData.split(':')[2];
+    bindPlanForConversation(userId, platform, planId, conversationId);
     return [await cmdViewPlan(planId)];
   }
   if (callbackData.startsWith('menu:assets:')) {
@@ -1178,7 +1232,7 @@ export async function routeCallback(userId: string, platform: string, callbackDa
   }
   if (callbackData.startsWith('menu:edit:')) {
     const planId = callbackData.split(':')[2];
-    return [await cmdStartEditing(userId, platform, planId)];
+    return [await cmdStartEditing(userId, platform, planId, conversationId)];
   }
   if (callbackData.startsWith('menu:launch_prompt:')) {
     const planId = callbackData.split(':')[2];
@@ -1186,7 +1240,7 @@ export async function routeCallback(userId: string, platform: string, callbackDa
   }
   if (callbackData.startsWith('menu:launch_confirm:')) {
     const planId = callbackData.split(':')[2];
-    return cmdLaunchPlan(planId);
+    return cmdLaunchPlan(userId, platform, planId, conversationId);
   }
 
   if (callbackData.startsWith('prefs:toggle_global:')) {
@@ -1256,7 +1310,7 @@ export async function routeCallback(userId: string, platform: string, callbackDa
   // ── Resume, Logs, Triage callbacks ──
   if (callbackData.startsWith('menu:resume_confirm:')) {
     const planId = callbackData.split(':')[2];
-    return cmdResumePlan(planId);
+    return cmdResumePlan(userId, platform, planId, conversationId);
   }
   if (callbackData.startsWith('menu:logs:')) {
     const roomId = callbackData.split(':')[2];

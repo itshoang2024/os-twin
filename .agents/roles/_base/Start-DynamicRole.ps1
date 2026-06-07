@@ -94,6 +94,39 @@ function Get-LastChannelItemBody {
     return $null
 }
 
+function Get-LatestManagerChannelMessage {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (-not (Test-Path $channelPath)) { return $null }
+
+    $latest = $null
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try {
+                $item = $line | ConvertFrom-Json
+                $from = if ($item.PSObject.Properties.Name -contains 'from') { [string]$item.from } else { '' }
+                $fromBase = $from -replace ':.*$', ''
+                if ($fromBase -eq 'manager') { $latest = $item }
+            } catch { }
+        }
+    } catch { return $null }
+
+    if (-not $latest) { return $null }
+
+    $type = if ($latest.PSObject.Properties.Name -contains 'type') { [string]$latest.type } elseif ($latest.PSObject.Properties.Name -contains 'msg_type') { [string]$latest.msg_type } else { 'message' }
+    $to = if ($latest.PSObject.Properties.Name -contains 'to') { [string]$latest.to } else { '' }
+    $body = if ($latest.PSObject.Properties.Name -contains 'body') { [string]$latest.body } else { '' }
+    if ($body.Length -gt 12000) { $body = $body.Substring(0, 12000) + "`n[TRUNCATED]" }
+
+    return [pscustomobject]@{
+        Type = $type
+        To   = $to
+        Body = $body
+    }
+}
+
 # --- Load room config ---
 $roomConfigFile = Join-Path $RoomDir "config.json"
 if (-not (Test-Path $roomConfigFile)) {
@@ -267,6 +300,25 @@ try {
     }
 } catch { }
 
+# --- Read latest manager handoff ---
+# Manager triage decisions are lifecycle signals (`done`, `fix`, `redesign`,
+# `reject`) and may not be `task`/`fix` messages. Always inject the latest
+# manager channel message so the next spawned agent sees the decision that
+# caused its state transition.
+$managerHandoffSection = ""
+$latestManagerMessage = Get-LatestManagerChannelMessage -RoomDir $RoomDir
+if ($latestManagerMessage -and $latestManagerMessage.Body) {
+    $managerHandoffSection = @"
+
+## Latest Manager Handoff
+
+Type: $($latestManagerMessage.Type)
+To: $($latestManagerMessage.To)
+
+$($latestManagerMessage.Body)
+"@
+}
+
 # --- Read full task description ---
 $taskDesc = if (Test-Path (Join-Path $RoomDir "brief.md")) {
     Get-Content (Join-Path $RoomDir "brief.md") -Raw
@@ -423,6 +475,7 @@ $rolePrompt
 ## Latest Instruction
 
 $latestBody
+$managerHandoffSection
 $triageSection
 ## War-Room
 

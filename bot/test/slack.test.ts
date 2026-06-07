@@ -38,8 +38,8 @@ describe('SlackConnector', () => {
     });
   });
 
-  it('isAuthorized returns true if no users configured', () => {
-    expect((connector as any).isAuthorized('u1')).to.be.true;
+  it('isAuthorized returns false if no users are explicitly paired', () => {
+    expect((connector as any).isAuthorized('u1')).to.be.false;
   });
 
   it('isAuthorized returns true if user is in authorized list', () => {
@@ -161,7 +161,7 @@ describe('SlackConnector', () => {
         if (!userId || !text) return;
         if (text.startsWith('/')) return;
         
-        // Mock isAuthorized
+        (connector as any).authorizedUsers = new Set(['u1']);
         if (!(connector as any).isAuthorized(userId)) return;
         
         // Mock getSession

@@ -44,6 +44,7 @@ type Options struct {
 	SearchEngine     bool
 	SearchEngineMode string
 	SkipOptional     bool
+	SyncSkills       bool
 	NoOpenCodeConfig bool
 	NoStart          bool
 }
@@ -253,6 +254,9 @@ func buildUnixInvocation(root string, opts Options) (Invocation, error) {
 	if opts.SkipOptional {
 		args = append(args, "--skip-optional")
 	}
+	if opts.SyncSkills {
+		args = append(args, "--sync-skills")
+	}
 	if opts.NoOpenCodeConfig {
 		args = append(args, "--no-opencode-config")
 	}
@@ -282,6 +286,9 @@ func buildWindowsInvocation(root string, opts Options) (Invocation, error) {
 	}
 	if opts.SkipOptional {
 		args = append(args, "-SkipOptional")
+	}
+	if opts.SyncSkills {
+		args = append(args, "-SyncSkills")
 	}
 	if opts.NoStart {
 		args = append(args, "-NoStart")

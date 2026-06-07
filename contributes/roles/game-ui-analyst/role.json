@@ -1,6 +1,6 @@
 {
   "name": "game-ui-analyst",
-  "description": "UI Screen Analyst \u2014 detects UI elements from screenshots and extracts animation behaviour from video recordings, producing structured JSON specs (_detection.json, _anim.json) that drive Unity C# code generation by game-engineer",
+  "description": "UI Screen Analyst — detects UI elements from screenshots and extracts animation behaviour from video recordings, producing structured JSON specs (_detection.json, _anim.json) that drive Unity C# code generation by game-engineer",
   "capabilities": [
     "ui-detection",
     "motion-extraction",
@@ -15,7 +15,7 @@
     "temporal-consistency"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 900,
   "skill_refs": [
     "detect-ui",

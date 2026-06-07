@@ -78,6 +78,35 @@ Describe "LifecycleSignal protocol compatibility" {
         Test-FreshLifecycleSignal -RoomDir $script:roomDir -FromRole "qa" -Type "done" -Ref "TASK-1" | Should -BeFalse
     }
 
+    It "emits lifecycle orchestration event before appending the channel signal" {
+        $priorFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+        $priorWsDisabled = $env:OSTWIN_EVENT_WS_DISABLED
+        $env:OSTWIN_EVENT_FILE_ENABLED = '1'
+        $env:OSTWIN_EVENT_WS_DISABLED = '1'
+        try {
+            $eventsPath = Join-Path $TestDrive "events-lifecycle.jsonl"
+            @{
+                room_id = 'room-001'
+                task_ref = 'EPIC-001'
+                plan_id = 'plan-test'
+                run_id = 'run-test'
+                events_path = $eventsPath
+            } | ConvertTo-Json -Depth 6 | Out-File (Join-Path $script:roomDir "config.json") -Encoding utf8
+
+            $msg = Write-LifecycleSignal -RoomDir $script:roomDir -FromRole "qa" -Type "done" -Ref "EPIC-001" -Body "VERDICT: DONE"
+            $events = Get-Content $eventsPath | ForEach-Object { $_ | ConvertFrom-Json }
+            $channel = Get-Content (Join-Path $script:roomDir "channel.jsonl") | ForEach-Object { $_ | ConvertFrom-Json }
+
+            $events.Count | Should -Be 1
+            $events[0].event_type | Should -Be 'lifecycle.signal.posted'
+            $events[0].payload.message_id | Should -Be $msg.id
+            $channel[0].event_id | Should -Be $events[0].event_id
+        } finally {
+            $env:OSTWIN_EVENT_FILE_ENABLED = $priorFileEnabled
+            $env:OSTWIN_EVENT_WS_DISABLED = $priorWsDisabled
+        }
+    }
+
     It "stamps role config status for manager-owned failure detection" {
         @{
             role = "qa"

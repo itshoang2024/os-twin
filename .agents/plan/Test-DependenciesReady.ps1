@@ -9,7 +9,7 @@
     given room. Returns a hashtable indicating readiness.
 
     Returns:
-      @{ Ready = $true }                                          — all deps passed
+      @{ Ready = $true }                                          — all deps done
       @{ Ready = $false; Reason = 'waiting'; WaitingOn = $ref }   — dep still in progress
       @{ Ready = $false; Reason = 'blocked'; BlockedBy = $ref }   — dep failed or blocked
 
@@ -89,11 +89,18 @@ foreach ($depRef in $depsOn) {
         (Get-Content $depStatusFile -Raw).Trim()
     } else { "pending" }
 
-    switch ($depStatus) {
-        'passed' {
+    $depCanonical = switch ($depStatus) {
+        'passed'       { 'done' }
+        'failed-final' { 'failed' }
+        'fixing'       { 'optimize' }
+        default        { $depStatus }
+    }
+
+    switch ($depCanonical) {
+        'done' {
             # This dependency is satisfied, continue checking others
         }
-        { $_ -in @('failed-final', 'blocked') } {
+        { $_ -in @('failed', 'blocked') } {
             return @{
                 Ready    = $false
                 Reason   = 'blocked'
@@ -101,7 +108,7 @@ foreach ($depRef in $depsOn) {
             }
         }
         default {
-            # pending, developing, optimize, review, fixing, triage — still in progress
+            # pending, developing, optimize, review, triage — still in progress
             return @{
                 Ready     = $false
                 Reason    = 'waiting'
@@ -111,5 +118,5 @@ foreach ($depRef in $depsOn) {
     }
 }
 
-# All dependencies passed
+# All dependencies done
 return @{ Ready = $true }

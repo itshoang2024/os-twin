@@ -11,6 +11,7 @@ from dashboard.api import app
 from unittest.mock import patch, MagicMock
 
 client = TestClient(app)
+HEADERS = {"X-API-Key": "test-key"}
 
 # Mock the get_current_user dependency
 def mock_get_current_user():
@@ -48,7 +49,7 @@ def test_get_epic_roles():
          patch("dashboard.routes.plans.Path.read_text", return_value=json.dumps({"roles": {"engineer": {"temperature": 0.9}}})), \
          patch("dashboard.routes.plans.build_roles_list", return_value=[{"name": "engineer", "temperature": 0.9}]):
         
-        response = client.get(f"/api/plans/{plan_id}/epics/{task_ref}/roles")
+        response = client.get(f"/api/plans/{plan_id}/epics/{task_ref}/roles", headers=HEADERS)
         assert response.status_code == 200
         data = response.json()
         assert "roles" in data
@@ -70,7 +71,7 @@ def test_update_epic_role_config():
             "temperature": 0.2,
             "skill_refs": ["new-skill"]
         }
-        response = client.put(f"/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/config", json=payload)
+        response = client.put(f"/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/config", json=payload, headers=HEADERS)
         
         assert response.status_code == 200
         assert mock_write.called
@@ -85,6 +86,6 @@ def test_preview_epic_role_prompt():
     role_name = "engineer"
     
     with patch("dashboard.epic_manager.EpicSkillsManager.generate_system_prompt", return_value="System Prompt Content"):
-        response = client.get(f"/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/preview")
+        response = client.get(f"/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/preview", headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["prompt"] == "System Prompt Content"

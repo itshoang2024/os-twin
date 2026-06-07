@@ -15,7 +15,7 @@
     "no-unsafe-destructive-ops"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [
     "curate-namespace",

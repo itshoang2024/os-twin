@@ -12,6 +12,7 @@ from dashboard.api import app
 from dashboard.auth import get_current_user
 
 client = TestClient(app)
+HEADERS = {"X-API-Key": "test-key"}
 
 # Mock the get_current_user dependency
 def mock_get_current_user():
@@ -58,7 +59,7 @@ def test_list_mcp_servers():
             {"mcp": {"home": {"type": "remote", "url": "http://test"}}}
         ]
 
-        response = client.get("/api/mcp/servers")
+        response = client.get("/api/mcp/servers", headers=HEADERS)
         assert response.status_code == 200
         data = response.json()
         assert "servers" in data
@@ -79,7 +80,7 @@ def test_add_mcp_server():
             "type": "local",
             "command": ["node", "index.js"]
         }
-        response = client.post("/api/mcp/servers", json=payload)
+        response = client.post("/api/mcp/servers", json=payload, headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
@@ -111,7 +112,7 @@ async def test_test_mcp_server_success():
          patch("dashboard.routes.mcp.stdio_client", return_value=mock_stdio), \
          patch("dashboard.routes.mcp.ClientSession", return_value=mock_client_session):
 
-        response = client.post("/api/mcp/servers/test/test")
+        response = client.post("/api/mcp/servers/test/test", headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
         assert "Connected" in response.json()["message"]
@@ -120,26 +121,26 @@ def test_set_server_credential():
     mock_vault = MagicMock()
     with patch("dashboard.routes.mcp.get_vault", return_value=mock_vault):
         payload = {"value": "secret"}
-        response = client.put("/api/mcp/servers/test-server/credentials/vault-serv/key1", json=payload)
+        response = client.put("/api/mcp/servers/test-server/credentials/vault-serv/key1", json=payload, headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
         mock_vault.set.assert_called_with("vault-serv", "key1", "secret")
 
         # Test simplified path (matching spec)
-        response = client.put("/api/mcp/servers/test-server/credentials/key2", json=payload)
+        response = client.put("/api/mcp/servers/test-server/credentials/key2", json=payload, headers=HEADERS)
         assert response.status_code == 200
         mock_vault.set.assert_called_with("test-server", "key2", "secret")
 
 def test_delete_server_credential():
     mock_vault = MagicMock()
     with patch("dashboard.routes.mcp.get_vault", return_value=mock_vault):
-        response = client.delete("/api/mcp/servers/test-server/credentials/vault-serv/key1")
+        response = client.delete("/api/mcp/servers/test-server/credentials/vault-serv/key1", headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
         mock_vault.delete.assert_called_with("vault-serv", "key1")
 
         # Test simplified path
-        response = client.delete("/api/mcp/servers/test-server/credentials/key2")
+        response = client.delete("/api/mcp/servers/test-server/credentials/key2", headers=HEADERS)
         assert response.status_code == 200
         mock_vault.delete.assert_called_with("test-server", "key2")
 
@@ -162,7 +163,7 @@ async def test_test_mcp_server_http():
          patch("dashboard.routes.mcp.sse_client", return_value=mock_sse), \
          patch("dashboard.routes.mcp.ClientSession", return_value=mock_client_session):
 
-        response = client.post("/api/mcp/servers/test/test")
+        response = client.post("/api/mcp/servers/test/test", headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
         assert "Connected" in response.json()["message"]
@@ -172,7 +173,7 @@ def test_remove_mcp_server():
          patch("dashboard.routes.mcp._read_json", return_value={"mcp": {"test": {}}}):
 
         mock_home_path.write_text = MagicMock()
-        response = client.delete("/api/mcp/servers/test")
+        response = client.delete("/api/mcp/servers/test", headers=HEADERS)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
@@ -254,7 +255,7 @@ def test_list_credentials():
          patch("dashboard.routes.mcp.BUILTIN_CONFIG_FILE", Path("/tmp/builtin.json")), \
          patch("dashboard.routes.mcp.HOME_CONFIG_FILE", Path("/tmp/home.json")):
 
-        response = client.get("/api/mcp/servers/test/credentials")
+        response = client.get("/api/mcp/servers/test/credentials", headers=HEADERS)
         assert response.status_code == 200
         data = response.json()
         assert "credentials" in data

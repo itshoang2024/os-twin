@@ -57,6 +57,9 @@ if (-not $RolePath -and $RoleName) {
 }
 
 if (-not $RolePath -or -not (Test-Path $RolePath)) {
+    # Emit a success-stream diagnostic as well as a PowerShell error so Pester
+    # tests that capture merged output see a stable, string-matchable message.
+    Write-Output "Role path not found: $RolePath"
     Write-Error "Role path not found: $RolePath"
     exit 1
 }

@@ -1,6 +1,6 @@
 {
   "name": "game-producer",
-  "description": "Game Producer \u2014 orchestrates sprint planning, milestone tracking, team coordination, and war-room management for game projects",
+  "description": "Game Producer — orchestrates sprint planning, milestone tracking, team coordination, and war-room management for game projects",
   "capabilities": [
     "sprint-planning",
     "milestone-tracking",
@@ -17,7 +17,7 @@
     "team-unblocked"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [],
   "instance_type": "worker"

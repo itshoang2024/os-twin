@@ -72,11 +72,18 @@ export function useForceSimulation(
     if (key === inputKeyRef.current) return;
     inputKeyRef.current = key;
 
-    nodesDataRef.current = input.nodes.map(n => ({ ...n }));
+    nodesDataRef.current = input.nodes.map((n, index) => ({
+      ...n,
+      x: n.x ?? Math.cos(index * 2.399963229728653) * (40 + index * 4),
+      y: n.y ?? Math.sin(index * 2.399963229728653) * (40 + index * 4),
+      z: n.z ?? 0,
+    }));
     linksDataRef.current = [...input.links];
 
     if (workerRef.current) {
       initWorker(workerRef.current, input, options, nodesDataRef);
+      isRunningRef.current = true;
+    } else {
       isRunningRef.current = true;
     }
   }, [input, options]);
@@ -86,6 +93,14 @@ export function useForceSimulation(
       if (pendingStepRef.current) return;
       pendingStepRef.current = true;
       workerRef.current.postMessage({ type: 'step' });
+    } else {
+      nodesDataRef.current = nodesDataRef.current.map((node, index) => ({
+        ...node,
+        x: (node.x ?? 0) + Math.cos(index + 1) * 0.1,
+        y: (node.y ?? 0) + Math.sin(index + 1) * 0.1,
+        z: node.z ?? 0,
+      }));
+      for (const fn of subscribersRef.current) fn();
     }
   }, []);
 

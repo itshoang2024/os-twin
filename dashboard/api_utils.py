@@ -1,3 +1,4 @@
+import errno
 import os
 import json
 import asyncio
@@ -6,6 +7,7 @@ import shutil
 import yaml
 import subprocess
 import logging
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Optional, Any, Dict
@@ -101,6 +103,47 @@ USE_NEXTJS = USE_FE
 
 # === Helper Functions ===
 
+_TRANSIENT_READ_ERRNOS = {
+    errno.EDEADLK,
+    errno.EAGAIN,
+    errno.EWOULDBLOCK,
+}
+
+
+def canonical_room_status(status: Optional[str]) -> str:
+    """Normalize legacy room status aliases to the canonical lifecycle names."""
+    value = (status or "unknown").strip()
+    return {
+        "passed": "done",
+        "failed-final": "failed",
+        "fixing": "optimize",
+    }.get(value, value)
+
+
+def _read_text_with_retry(
+    path: Path,
+    *,
+    default: Optional[str] = None,
+    strip: bool = False,
+    retries: int = 3,
+) -> Optional[str]:
+    """Read text from small state files, retrying transient filesystem stalls.
+
+    macOS can return EDEADLK while another process is replacing or locking a
+    file. Retrying avoids dropping an entire dashboard poll on that race.
+    """
+    for attempt in range(retries):
+        try:
+            text = path.read_text()
+            return text.strip() if strip else text
+        except FileNotFoundError:
+            return default
+        except OSError as exc:
+            if exc.errno not in _TRANSIENT_READ_ERRNOS or attempt == retries - 1:
+                raise
+            time.sleep(0.02 * (attempt + 1))
+    return default
+
 
 def read_room(
     room_dir: Path,
@@ -128,23 +171,22 @@ def read_room(
 
     room_id = room_dir.name
     status_file = room_dir / "status"
-    status = status_file.read_text().strip() if status_file.exists() else "unknown"
+    raw_status = _read_text_with_retry(status_file, default="unknown", strip=True)
+    status = canonical_room_status(raw_status)
 
     tr_file = room_dir / "task-ref"
-    task_ref = tr_file.read_text().strip() if tr_file.exists() else None
+    task_ref = _read_text_with_retry(tr_file, default=None, strip=True)
 
     retries_file = room_dir / "retries"
-    retries_str = retries_file.read_text().strip() if retries_file.exists() else "0"
+    retries_str = _read_text_with_retry(retries_file, default="0", strip=True)
     retries = int(retries_str) if retries_str.isdigit() else 0
 
     brief_file = room_dir / "brief.md"
-    task_md = brief_file.read_text() if brief_file.exists() else None
+    task_md = _read_text_with_retry(brief_file, default=None)
 
     # Fallback: extract ref from TASKS.md header
     tasks_file = room_dir / "TASKS.md"
-    tasks_content = None
-    if tasks_file.exists():
-        tasks_content = tasks_file.read_text()
+    tasks_content = _read_text_with_retry(tasks_file, default=None)
 
     if not task_ref and tasks_content:
         header = tasks_content.split("\n", 1)[0]
@@ -171,8 +213,8 @@ def read_room(
     message_count = 0
     last_activity = None
 
-    if channel_file.exists():
-        raw_content = channel_file.read_text()
+    raw_content = _read_text_with_retry(channel_file, default="")
+    if raw_content:
         lines = [l.strip() for l in raw_content.splitlines() if l.strip()]
         message_count = len(lines)
         if lines:
@@ -190,7 +232,7 @@ def read_room(
     config_file = room_dir / "config.json"
     if config_file.exists():
         try:
-            cfg = json.loads(config_file.read_text())
+            cfg = json.loads(_read_text_with_retry(config_file, default="{}") or "{}")
             pid = cfg.get("plan_id")
             if isinstance(pid, str) and pid:
                 plan_id = pid
@@ -203,6 +245,7 @@ def read_room(
         "epic_ref": task_ref,
         "plan_id": plan_id,
         "status": status,
+        "raw_status": raw_status,
         "retries": retries,
         "message_count": message_count,
         "last_activity": last_activity,
@@ -508,7 +551,7 @@ def get_active_epics_using_skill(skill_name: str) -> int:
             # Check status
             status_file = room_dir / "status"
             status = status_file.read_text().strip() if status_file.exists() else "unknown"
-            if status in ["passed", "failed", "signoff", "failed-final"]:
+            if canonical_room_status(status) in ["done", "failed", "signoff"]:
                 continue
 
             # Check if any role in this room uses the skill
@@ -626,13 +669,14 @@ def build_skills_list(
     query: Optional[str] = None,
     role: Optional[str] = None,
     tags: Optional[List[str]] = None,
-    limit: int = 1000,
+    limit: Optional[int] = None,
     include_drafts: bool = False,
     include_disabled: bool = False,
 ) -> List[Skill]:
     """Helper to build and filter skills list from zvec and disk."""
     if tags is None:
         tags = []
+    effective_limit = limit if limit is not None else (50 if query else 1000)
     from dashboard import global_state
 
     store = getattr(global_state, "store", None)
@@ -642,7 +686,7 @@ def build_skills_list(
     if store:
         try:
             if query:
-                results = store.search_skills(query, limit=limit)
+                results = store.search_skills(query, limit=effective_limit)
                 skills = [Skill(**res) for res in results]
             else:
                 results = store.get_all_skills(limit=1000)
@@ -737,7 +781,7 @@ def build_skills_list(
         filtered.sort(key=lambda x: x.name)
 
     # Apply limit
-    return filtered[:limit]
+    return filtered[:effective_limit]
 
 
 # Router helpers

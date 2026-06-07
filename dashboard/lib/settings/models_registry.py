@@ -199,6 +199,37 @@ def get_model_registry(
     except Exception as exc:
         logger.debug("Dynamic model registry unavailable: %s", exc)
 
+    def _dynamic_model_controls(model: dict) -> tuple[bool, Optional[List[str]]]:
+        provider_id = str(model.get("provider_id", "")).lower()
+        if provider_id in {"anthropic"}:
+            return anthropic_enabled, anthropic_models
+        if provider_id in {"openai"}:
+            return openai_enabled, openai_models
+        if provider_id in {"google", "gemini", "google-vertex", "google-vertex-anthropic"}:
+            return google_enabled, google_models
+        if provider_id in {"byteplus"}:
+            return byteplus_enabled, byteplus_models
+        return True, None
+
+    def _allowlisted(model: dict, allowlist: Optional[List[str]]) -> bool:
+        if not allowlist:
+            return True
+        model_id = str(model.get("id", ""))
+        short_id = model_id.split("/", 1)[1] if "/" in model_id else model_id
+        allowed = set(allowlist)
+        return model_id in allowed or short_id in allowed
+
+    filtered_dynamic: Dict[str, List[dict]] = {}
+    for provider_name, models in dynamic.items():
+        filtered_models: List[dict] = []
+        for model in models:
+            enabled, allowlist = _dynamic_model_controls(model)
+            if enabled and _allowlisted(model, allowlist):
+                filtered_models.append(model)
+        if filtered_models:
+            filtered_dynamic[provider_name] = filtered_models
+    dynamic = filtered_dynamic
+
     # 2. Build static fallback
     static = _get_static_registry(
         google_enabled=google_enabled,

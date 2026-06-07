@@ -14,22 +14,22 @@ interface EpicHeaderProps {
 
 const lifecycleStates = [
   'pending',
-  'engineering',
+  'developing',
   'review',
-  'fixing',
-  'manager-triage',
-  'passed',
-  'signoff',
+  'optimize',
+  'triage',
+  'done',
 ];
 
 export default function EpicHeader({ plan, epic }: EpicHeaderProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { updateState } = useEpic(epic.plan_id, epic.epic_ref);
+  const currentState = normalizeLifecycleState(epic.lifecycle_state || 'pending');
 
-  const currentStateIndex = lifecycleStates.indexOf(epic.lifecycle_state || 'pending');
+  const currentStateIndex = lifecycleStates.indexOf(currentState);
   const targetState = currentStateIndex < lifecycleStates.length - 1
     ? lifecycleStates[currentStateIndex + 1]
-    : (epic.lifecycle_state || 'pending');
+    : currentState;
 
   const handleAdvanceState = async () => {
     try {
@@ -61,12 +61,12 @@ export default function EpicHeader({ plan, epic }: EpicHeaderProps) {
           <h1 className="text-lg font-bold text-text-main flex items-center gap-2">
             {epic.epic_ref} — {epic.title}
             <Badge
-              variant={getBadgeVariant(epic.lifecycle_state || 'pending')}
-              aria-label={`Status: ${epic.lifecycle_state || 'pending'}`}
+              variant={getBadgeVariant(currentState)}
+              aria-label={`Status: ${currentState}`}
               className="gap-1.5"
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${getDotClass(epic.lifecycle_state || 'pending')}`} aria-hidden="true" />
-              {(epic.lifecycle_state || 'pending').toUpperCase().replace('-', ' ')}
+              <span className={`w-1.5 h-1.5 rounded-full ${getDotClass(currentState)}`} aria-hidden="true" />
+              {currentState.toUpperCase().replace('-', ' ')}
             </Badge>
           </h1>
         </div>
@@ -76,7 +76,7 @@ export default function EpicHeader({ plan, epic }: EpicHeaderProps) {
       <div className="flex items-center gap-2">
         <button
           onClick={() => setIsDialogOpen(true)}
-          disabled={epic.lifecycle_state === 'signoff'}
+          disabled={currentState === 'done' || currentState === 'failed'}
           className={`px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded hover:bg-primary-hover transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed`}
           aria-label="Advance epic to next state"
         >
@@ -110,7 +110,7 @@ export default function EpicHeader({ plan, epic }: EpicHeaderProps) {
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
         onConfirm={handleAdvanceState}
-        currentState={epic.lifecycle_state || 'pending'}
+        currentState={currentState}
         targetState={targetState}
         definitionOfDone={epic.definition_of_done || []}
       />
@@ -120,14 +120,19 @@ export default function EpicHeader({ plan, epic }: EpicHeaderProps) {
 
 function getBadgeVariant(status: string): "primary" | "secondary" | "outline" | "success" | "warning" | "danger" | "muted" {
   switch (status) {
+    case 'developing':
     case 'engineering':
       return 'primary';
     case 'review':
       return 'secondary';
-    case 'passed':
+    case 'done':
     case 'signoff':
       return 'success';
-    case 'failed-final':
+    case 'failed':
+      return 'danger';
+    case 'optimize':
+      return 'warning';
+    case 'triage':
       return 'danger';
     case 'pending':
     default:
@@ -137,11 +142,32 @@ function getBadgeVariant(status: string): "primary" | "secondary" | "outline" | 
 
 function getDotClass(status: string) {
   switch (status) {
+    case 'developing':
     case 'engineering':
     case 'review':
+    case 'optimize':
+    case 'triage':
     case 'pending':
       return 'bg-current animate-pulse';
     default:
       return 'bg-current';
+  }
+}
+
+function normalizeLifecycleState(status: string) {
+  switch (status) {
+    case 'engineering':
+      return 'developing';
+    case 'fixing':
+      return 'optimize';
+    case 'manager-triage':
+      return 'triage';
+    case 'passed':
+    case 'signoff':
+      return 'done';
+    case 'failed-final':
+      return 'failed';
+    default:
+      return status;
   }
 }

@@ -186,20 +186,42 @@ def test_get_settings_schema(client, temp_config):
 def test_patch_global_namespace(client, temp_config, mock_broadcaster):
     """PUT /api/settings/{namespace} updates config and broadcasts."""
     config_file, _, _, _ = temp_config
-    payload = {"max_concurrent_rooms": 100}
+    payload = {
+        "max_concurrent_rooms": 100,
+        "max_engineer_retries": 9,
+        "state_timeout_seconds": 2400,
+    }
     response = client.put("/api/settings/runtime", json=payload)
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     config = json.loads(config_file.read_text())
     assert config["manager"]["max_concurrent_rooms"] == 100
+    assert config["manager"]["max_engineer_retries"] == 9
+    assert config["manager"]["state_timeout_seconds"] == 2400
     assert "max_concurrent_rooms" not in config.get("runtime", {})
+    assert "max_engineer_retries" not in config.get("runtime", {})
+    assert "state_timeout_seconds" not in config.get("runtime", {})
 
     # Verify broadcast was called
     mock_broadcaster.assert_called_once()
     call_args = mock_broadcaster.call_args
     assert call_args[0][0] == "settings_updated"
     assert call_args[0][1]["namespace"] == "runtime"
+
+
+def test_patch_runtime_rejects_invalid_state_timeout(client, temp_config):
+    """Runtime state timeout must stay within the Pydantic bounds."""
+    response = client.put("/api/settings/runtime", json={"state_timeout_seconds": 0})
+
+    assert response.status_code == 422
+
+
+def test_patch_runtime_rejects_invalid_retry_count(client, temp_config):
+    """Runtime retry count must stay within the Pydantic bounds."""
+    response = client.put("/api/settings/runtime", json={"max_engineer_retries": 101})
+
+    assert response.status_code == 422
 
 
 def test_patch_runtime_master_model_updates_active_singleton(

@@ -209,7 +209,8 @@ def test_registry_enabled_models_filters_claude():
     reg = get_model_registry(anthropic_models=["claude-sonnet-4-6"])
     models = _get_provider(reg, "Claude", "Anthropic")
     ids = {m["id"] for m in models}
-    assert "claude-sonnet-4-6" in ids
+    assert any(mid == "claude-sonnet-4-6" or mid.endswith("/claude-sonnet-4-6") for mid in ids)
+    assert all(mid == "claude-sonnet-4-6" or mid.endswith("/claude-sonnet-4-6") for mid in ids)
 
 
 def test_registry_enabled_models_filters_gpt():

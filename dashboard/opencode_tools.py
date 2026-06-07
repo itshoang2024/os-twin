@@ -638,9 +638,9 @@ def _tool_get_health() -> str:
           const bot = botRes.bot || botRes
           const rooms = roomsRes.rooms || []
           const total = rooms.length
-          const passed = rooms.filter((r: any) => r.status === "passed").length
+          const done = rooms.filter((r: any) => r.status === "done" || r.status === "passed").length
           const failed = rooms.filter((r: any) => r.status === "failed-final" || r.status === "failed").length
-          const active = total - passed - failed
+          const active = total - done - failed
           let out = "=== Ostwin Health ===\\n\\n"
           out += "Manager:\\n"
           out += `  Running:  ${manager.running ?? "N/A"}\\n`
@@ -650,7 +650,7 @@ def _tool_get_health() -> str:
           out += `  PID:        ${bot.pid ?? "N/A"}\\n`
           out += `  Available:  ${bot.available ?? "N/A"}\\n`
           out += "\\nWar Rooms:\\n"
-          out += `  Total:   ${total}\\n  Passed:  ${passed}\\n  Failed:  ${failed}\\n  Active:  ${active}\\n`
+          out += `  Total:   ${total}\\n  Done:    ${done}\\n  Failed:  ${failed}\\n  Active:  ${active}\\n`
           return out
         } catch (e: any) {
           return `Error fetching health: ${e.message || e}`

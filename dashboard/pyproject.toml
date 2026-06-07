@@ -3,7 +3,7 @@ name = "ostwin-dashboard"
 version = "0.1.0"
 description = "OS Twin Dashboard — API server, knowledge graph, and management UI"
 requires-python = ">=3.11,<3.13"
-readme = "docs/README.md"
+readme = "README.md"
 
 dependencies = [
     # ── Core API ──────────────────────────────────────────────
@@ -58,6 +58,14 @@ dev = [
 [tool.uv]
 # Use the project .venv by default (matches ~/.ostwin/.venv for prod installs)
 python-preference = "managed"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.uv.pip]
 # Allow pre-release for fast-moving AI packages

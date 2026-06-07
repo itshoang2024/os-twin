@@ -5,7 +5,7 @@
  * - Node rendering and layout
  * - Dependency edges (Bezier curves)
  * - Critical path footer
- * - Status badges (PASSED/FAILED)
+ * - Status badges (DONE/FAILED)
  * - Warning badges ("No AC")
  * - EPIC Quick View panel on click
  * - Zoom in/out functionality
@@ -99,6 +99,7 @@ const mockDagData = {
 const mockProgressData = {
   updated_at: '2026-04-24T05:00:00Z',
   total: 6,
+  done: 4,
   passed: 4,
   failed: 1,
   blocked: 0,
@@ -107,12 +108,12 @@ const mockProgressData = {
   pct_complete: 83,
   critical_path: { completed: 3, total: 4 },
   rooms: [
-    { room_id: 'room-plan-review', task_ref: 'PLAN-REVIEW', status: 'passed' },
-    { room_id: 'room-001', task_ref: 'EPIC-001', status: 'passed' },
-    { room_id: 'room-002', task_ref: 'EPIC-002', status: 'passed' },
-    { room_id: 'room-003', task_ref: 'EPIC-003', status: 'passed' },
+    { room_id: 'room-plan-review', task_ref: 'PLAN-REVIEW', status: 'done' },
+    { room_id: 'room-001', task_ref: 'EPIC-001', status: 'done' },
+    { room_id: 'room-002', task_ref: 'EPIC-002', status: 'done' },
+    { room_id: 'room-003', task_ref: 'EPIC-003', status: 'done' },
     { room_id: 'room-004', task_ref: 'EPIC-004', status: 'developing' },
-    { room_id: 'room-005', task_ref: 'EPIC-005', status: 'failed-final' },
+    { room_id: 'room-005', task_ref: 'EPIC-005', status: 'failed' },
   ],
 };
 
@@ -254,11 +255,10 @@ vi.mock('../lib/epic-stats', () => ({
 vi.mock('../components/plan/EpicCard', () => ({
   stateColors: {
     pending: '#94a3b8',
-    passed: '#10b981',
+    done: '#10b981',
     developing: '#3b82f6',
     engineering: '#3b82f6',
     failed: '#ef4444',
-    'failed-final': '#ef4444',
   },
 }));
 
@@ -332,12 +332,12 @@ describe('DAGViewer', () => {
   });
 
   describe('T-004.3: Status and Warning Badges', () => {
-    it('shows PASSED status badge on passed nodes', async () => {
+    it('shows DONE status badge on done nodes', async () => {
       render(<DAGViewer mode="live" />);
       
       await waitFor(() => {
-        const passedBadges = screen.getAllByText('PASSED');
-        expect(passedBadges.length).toBeGreaterThan(0);
+        const doneBadges = screen.getAllByText('DONE');
+        expect(doneBadges.length).toBeGreaterThan(0);
       });
     });
 
