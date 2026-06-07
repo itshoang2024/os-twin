@@ -3,6 +3,16 @@
 
 BeforeAll {
     $script:NewWarRoom = Join-Path (Resolve-Path "$PSScriptRoot/../../war-rooms").Path "New-WarRoom.ps1"
+
+    function Assert-NoLifecycleErrorSignal {
+        param([Parameter(Mandatory)]$Lifecycle)
+
+        foreach ($stateEntry in $Lifecycle.states.PSObject.Properties) {
+            $signals = $stateEntry.Value.signals
+            if (-not $signals) { continue }
+            @($signals.PSObject.Properties.Name) | Should -Not -Contain "error" -Because "state '$($stateEntry.Name)' must not model runtime failures as lifecycle signals"
+        }
+    }
 }
 
 Describe "New-WarRoom lifecycle.json" {
@@ -80,7 +90,8 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "qa"
-            $lc.states.'review'.signals.pass.target | Should -Be "passed"
+            $lc.states.'review'.signals.done.target | Should -Be "passed"
+            $lc.states.'review'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
             $lc.states.'review'.signals.fail.target | Should -Be "optimize"
         }
 
@@ -107,9 +118,11 @@ Describe "New-WarRoom lifecycle.json" {
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-mc-04" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.developing.signals.done.target | Should -Be "review"
             $lc.states.'review'.role | Should -Be "architect"
-            $lc.states.'review'.signals.pass.target | Should -Be "review-2"
+            $lc.states.'review'.signals.done.target | Should -Be "review-2"
+            $lc.states.'review'.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
             $lc.states.'review-2'.role | Should -Be "qa"
-            $lc.states.'review-2'.signals.pass.target | Should -Be "passed"
+            $lc.states.'review-2'.signals.done.target | Should -Be "passed"
+            $lc.states.'review-2'.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
         }
     }
 
@@ -126,6 +139,16 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.failed.type | Should -Be "decision"
             $lc.states.passed.type | Should -Be "terminal"
             $lc.states.'failed-final'.type | Should -Be "terminal"
+        }
+
+        It "does not create error lifecycle signals in any generated state" {
+            & $script:NewWarRoom -RoomId "room-bi-02" -TaskRef "EPIC-021" `
+                                 -TaskDescription "No error signals" `
+                                 -WarRoomsDir $script:warRoomsDir `
+                                 -CandidateRoles @("engineer", "architect", "qa")
+
+            $lc = Get-Content (Join-Path $script:warRoomsDir "room-bi-02" "lifecycle.json") -Raw | ConvertFrom-Json
+            Assert-NoLifecycleErrorSignal $lc
         }
     }
 
@@ -196,9 +219,7 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.failed.type        | Should -Be "decision"
             $lc.states.passed.type        | Should -Be "terminal"
             $lc.states.'failed-final'.type | Should -Be "terminal"
-            # Review must have error signal to handle evaluator crashes
-            $lc.states.review.signals.error | Should -Not -BeNullOrEmpty
-            $lc.states.review.signals.error.target | Should -Be "failed"
+            Assert-NoLifecycleErrorSignal $lc
         }
     }
 
@@ -212,6 +233,7 @@ Describe "New-WarRoom lifecycle.json" {
 
             $lc = Get-Content (Join-Path $script:warRoomsDir "room-ur-01" "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.'review'.role | Should -Be "data-scientist"
+            $lc.states.'review'.signals.done | Should -Not -BeNullOrEmpty
             $lc.states.'review'.signals.pass | Should -Not -BeNullOrEmpty
         }
     }

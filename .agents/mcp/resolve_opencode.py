@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 
@@ -61,6 +62,32 @@ def resolve_env_refs(text, env_all):
     )
 
 
+def split_command_text(command):
+    """Split a shell-style command string into argv parts."""
+    if not isinstance(command, str):
+        return command
+    stripped = command.strip()
+    if not stripped:
+        return []
+    try:
+        return shlex.split(stripped)
+    except ValueError:
+        return stripped.split()
+
+
+def normalize_local_command(command):
+    """Normalize local MCP command values to argv-style arrays."""
+    if isinstance(command, str):
+        return split_command_text(command)
+    if (
+        isinstance(command, list)
+        and len(command) == 1
+        and isinstance(command[0], str)
+    ):
+        return split_command_text(command[0])
+    return command
+
+
 def resolve_mcp_servers(servers, env_all):
     """Resolve a dict of MCP server configs, returning cleaned configs.
 
@@ -75,16 +102,23 @@ def resolve_mcp_servers(servers, env_all):
 
     for name, cfg in servers.items():
         out = {}
+        is_local = cfg.get('type') == 'local' or (
+            'command' in cfg and cfg.get('type') != 'remote'
+        )
         for key, val in cfg.items():
-            if key == 'command' and isinstance(val, list):
+            if key == 'command' and is_local:
+                val = normalize_local_command(val)
                 resolved_cmd = []
-                for i, c in enumerate(val):
-                    if isinstance(c, str):
-                        c = resolve_env_refs(c, env_all)
-                        if i == 0 and c in ('python', 'python3'):
-                            c = python_abs
-                    resolved_cmd.append(c)
-                out[key] = resolved_cmd
+                if isinstance(val, list):
+                    for i, c in enumerate(val):
+                        if isinstance(c, str):
+                            c = resolve_env_refs(c, env_all)
+                            if i == 0 and c in ('python', 'python3'):
+                                c = python_abs
+                        resolved_cmd.append(c)
+                    out[key] = resolved_cmd
+                else:
+                    out[key] = val
             elif key == 'headers' and isinstance(val, dict):
                 # Resolve {env:*} in header values, then strip still-unresolved
                 resolved_headers = {}

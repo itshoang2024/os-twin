@@ -7,7 +7,8 @@ BeforeAll {
     $script:BuildPrompt = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path "Build-SystemPrompt.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path ".." "..")).Path
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:engineerRolePath = Join-Path $script:agentsDir "roles" "engineer"
 }
 
@@ -101,56 +102,30 @@ Describe "Engineer Prompt Compilation" {
 "@ | Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
         }
 
-        It "includes TASKS.md content exactly once" {
+        It "leaves TASKS.md content for Invoke-Agent to append" {
             $prompt = & $script:BuildPrompt -RolePath $script:engineerRolePath `
                 -RoomDir $script:roomDir -TaskRef "EPIC-001"
 
-            # TASKS.md should appear via Build-SystemPrompt Section 5
-            $prompt | Should -Match "Sub-Tasks"
-            $prompt | Should -Match "TASK-001"
-            $prompt | Should -Match "TASK-002"
+            # Build-SystemPrompt produces the role/template layer only.
+            # Invoke-Agent appends TASKS.md after the latest channel effort.
+            $prompt | Should -Not -Match "## Sub-Tasks \(TASKS\.md\)"
+            $prompt | Should -Not -Match "TASK-002 — Implement core JWT logic"
 
-            # Count occurrences — should be exactly 1
             $matches = [regex]::Matches($prompt, 'Sub-Tasks \(TASKS\.md\)')
-            $matches.Count | Should -Be 1
+            $matches.Count | Should -Be 0
         }
 
         It "does NOT duplicate TASKS.md in extra context" {
             # Simulate what the cleaned-up Start-Engineer.ps1 would pass
-            $instructions = "You are continuing work on an EPIC — TASKS.md already exists (see Sub-Tasks section above)."
+            $instructions = "You are continuing work on an EPIC — TASKS.md already exists and is included at the end of this prompt."
             $prompt = & $script:BuildPrompt -RolePath $script:engineerRolePath `
                 -RoomDir $script:roomDir -ExtraContext $instructions
 
-            # Instructions should reference TASKS.md but NOT contain a second copy
-            $prompt | Should -Match "see Sub-Tasks section above"
+            # Instructions should reference TASKS.md but NOT contain an inline copy
+            $prompt | Should -Match "included at the end of this prompt"
 
-            # The actual TASKS.md content should appear exactly once (from Section 5)
             $taskMatches = [regex]::Matches($prompt, 'TASK-002 — Implement core JWT logic')
-            $taskMatches.Count | Should -Be 1
-        }
-    }
-
-    Context "Fix cycle prompt (QA feedback)" {
-        It "includes QA failure feedback" {
-            & $script:PostMessage -RoomDir $script:roomDir -From "qa" -To "manager" `
-                -Type "fail" -Ref "TASK-E001" -Body "Missing input validation on /login endpoint"
-
-            $prompt = & $script:BuildPrompt -RolePath $script:engineerRolePath `
-                -RoomDir $script:roomDir
-
-            $prompt | Should -Match "Previous QA Feedback"
-            $prompt | Should -Match "Missing input validation"
-        }
-
-        It "includes fix instructions from manager" {
-            & $script:PostMessage -RoomDir $script:roomDir -From "manager" -To "engineer" `
-                -Type "fix" -Ref "TASK-E001" -Body "Add validation for email and password fields"
-
-            $prompt = & $script:BuildPrompt -RolePath $script:engineerRolePath `
-                -RoomDir $script:roomDir
-
-            $prompt | Should -Match "Fix Instructions"
-            $prompt | Should -Match "validation for email"
+            $taskMatches.Count | Should -Be 0
         }
     }
 

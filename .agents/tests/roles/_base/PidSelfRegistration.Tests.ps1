@@ -7,6 +7,12 @@
 
 BeforeAll {
     $script:InvokeAgent = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path "Invoke-Agent.ps1"
+
+    function script:New-PwshAgentCmd {
+        param([string]$ScriptPath)
+        $escapedPath = $ScriptPath -replace "'", "'\''"
+        return "pwsh -NoProfile -File '$escapedPath'"
+    }
 }
 
 Describe "PID Self-Registration" {
@@ -113,16 +119,20 @@ exit 0
                 Start-Sleep -Milliseconds 200
             }
 
-            # Read the wrapper script that Invoke-Agent generated (now .ps1)
-            $wrapperFile = Join-Path $script:roomDir "artifacts" "run-agent.ps1"
+            # Read the platform-specific wrapper script that Invoke-Agent generated.
+            $wrapperName = if ($IsWindows) { "run-agent.ps1" } else { "run-agent.sh" }
+            $wrapperFile = Join-Path $script:roomDir "artifacts" $wrapperName
             if (Test-Path $wrapperFile) {
                 $wrapperContent = Get-Content $wrapperFile -Raw
 
                 # Should set AGENT_OS_PID_FILE env var
                 $wrapperContent | Should -Match 'AGENT_OS_PID_FILE'
 
-                # Wrapper writes $PID to PID file as fallback
-                $wrapperContent | Should -Match '\$PID.*Out-File.*\.pid'
+                if ($IsWindows) {
+                    $wrapperContent | Should -Match '\$PID.*Out-File.*\.pid'
+                } else {
+                    $wrapperContent | Should -Match 'echo "\$\$" >'
+                }
             }
 
             $job | Wait-Job -Timeout 15 | Out-Null
@@ -155,7 +165,7 @@ exit 0
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $pidWriter -TimeoutSeconds 10
+                -AgentCmd (New-PwshAgentCmd $pidWriter) -TimeoutSeconds 10
 
             $result.ExitCode | Should -BeIn @(0)
 
@@ -178,7 +188,7 @@ exit 0
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "test" `
-                -AgentCmd $noPidAgent -TimeoutSeconds 10
+                -AgentCmd (New-PwshAgentCmd $noPidAgent) -TimeoutSeconds 10
 
             # Should still succeed even without PID self-registration
             $result | Should -Not -BeNullOrEmpty
@@ -197,7 +207,7 @@ Start-Sleep -Seconds 300
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "slow" `
-                -AgentCmd $slowPidAgent -TimeoutSeconds 3
+                -AgentCmd (New-PwshAgentCmd $slowPidAgent) -TimeoutSeconds 3
 
             $result.TimedOut | Should -BeTrue
             $result.ExitCode | Should -Be 124
@@ -240,7 +250,7 @@ exit 0
 
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "architect" -Prompt "review" `
-                -AgentCmd $fullChainAgent -TimeoutSeconds 10
+                -AgentCmd (New-PwshAgentCmd $fullChainAgent) -TimeoutSeconds 10
 
             $result.ExitCode | Should -Be 0
             $result.RoleName | Should -Be "architect"

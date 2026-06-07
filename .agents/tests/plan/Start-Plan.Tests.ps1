@@ -9,10 +9,16 @@ BeforeAll {
     $script:planParserModule = Join-Path $script:repoLibDir "PlanParser.psm1"
     
     function global:Get-OstwinConfig {
-        return [PSCustomObject]@{
-            manager = [PSCustomObject]@{
+        param([string]$ConfigPath = '')
+        $manager = if ($global:MockManagerConfig) {
+            $global:MockManagerConfig
+        } else {
+            [PSCustomObject]@{
                 auto_expand_plan = $false
             }
+        }
+        return [PSCustomObject]@{
+            manager = $manager
         }
     }
     
@@ -28,8 +34,15 @@ BeforeAll {
     }
 }
 
+AfterAll {
+    Remove-Variable -Name MockManagerConfig -Scope Global -ErrorAction SilentlyContinue
+}
+
 Describe "Start-Plan" {
     BeforeEach {
+        $global:MockManagerConfig = [PSCustomObject]@{
+            auto_expand_plan = $false
+        }
         $global:testLogs = @()
         $script:logs = @()
         $script:projectDir = Join-Path $TestDrive "project-$(Get-Random)"
@@ -47,7 +60,6 @@ Describe "Start-Plan" {
         "param([object[]]`$Nodes, [switch]`$Validate) if (`$Validate) { return `$Nodes | ForEach-Object { [PSCustomObject]@{ Id = `$_.Id } } } else { Write-Host 'Dummy BuildDag' }" | Out-File (Join-Path $agentsDir "plan/Build-DependencyGraph.ps1") -Encoding utf8
         "Write-Host 'Dummy NewWarRoom'" | Out-File (Join-Path $agentsDir "war-rooms/New-WarRoom.ps1") -Encoding utf8
         "Write-Host 'Dummy ManagerLoop'" | Out-File (Join-Path $agentsDir "roles/manager/Start-ManagerLoop.ps1") -Encoding utf8
-        "Write-Host 'Dummy PostMessage'" | Out-File (Join-Path $agentsDir "channel/Post-Message.ps1") -Encoding utf8
         "Write-Host 'Dummy WaitForMessage'" | Out-File (Join-Path $agentsDir "channel/Wait-ForMessage.ps1") -Encoding utf8
         "Write-Host 'Dummy ReadMessages'" | Out-File (Join-Path $agentsDir "channel/Read-Messages.ps1") -Encoding utf8
         "Write-Host 'Dummy ExpandPlan'" | Out-File (Join-Path $agentsDir "plan/Expand-Plan.ps1") -Encoding utf8
@@ -552,6 +564,177 @@ Build a real-time chat application with WebSocket support.
                 -ProjectDir $script:projectDir -DryRun *>&1
             ($output -join "`n") | Should -Match "EPIC-001"
             ($output -join "`n") | Should -Match "depends_on: PLAN-REVIEW"
+        }
+    }
+
+    Context "War-room description assembly" {
+        It "passes three-hash EPIC sections to New-WarRoom once" {
+            $capturePath = Join-Path $script:projectDir "new-warroom-calls.jsonl"
+            $mockNewWarRoom = @'
+param(
+    [string]$RoomId,
+    [string]$TaskRef,
+    [string]$TaskDescription,
+    [string]$WorkingDir,
+    [string]$WarRoomsDir,
+    [string]$PlanId,
+    [string]$AssignedRole,
+    [string[]]$CandidateRoles = @(),
+    [string[]]$DefinitionOfDone = @(),
+    [string[]]$AcceptanceCriteria = @(),
+    [string[]]$DependsOn = @(),
+    [string]$Pipeline,
+    [string[]]$RequiredCapabilities = @(),
+    [string]$Lifecycle,
+    [object[]]$Assets = @()
+)
+$call = [PSCustomObject]@{
+    RoomId = $RoomId
+    TaskRef = $TaskRef
+    TaskDescription = $TaskDescription
+    DefinitionOfDone = @($DefinitionOfDone)
+    AcceptanceCriteria = @($AcceptanceCriteria)
+    DependsOn = @($DependsOn)
+}
+$call | ConvertTo-Json -Compress -Depth 8 | Add-Content -Path '__CAPTURE_PATH__'
+if (-not (Test-Path $WarRoomsDir)) {
+    New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
+}
+$roomDir = Join-Path $WarRoomsDir $RoomId
+New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+@{ assignment = @{ assigned_role = $AssignedRole } } | ConvertTo-Json -Depth 4 |
+    Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
+'@ -replace '__CAPTURE_PATH__', ($capturePath -replace "'", "''")
+            $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+            $plan = Join-Path $TestDrive "sectioned-epic-plan.md"
+            @"
+# Plan: Sectioned Epic
+working_dir: $script:projectDir
+
+## EPIC-007: Foundation Workstream FW-1
+
+Roles: @principal-engineer, @engineer, @qa-automation-engineer
+
+### Context
+
+Lift reusable primitives into a lens-agnostic model.
+
+### Definition of Done
+- [ ] Workbench shell exists.
+- [ ] EnterpriseMapPanel renders through the shell.
+
+### Acceptance Criteria
+- [ ] Layout engine is a pure function.
+- [ ] GraphCanvas supports both render modes.
+
+### Tasks
+- [ ] Define model/workbenchModel.ts.
+- [ ] Extract shared components.
+
+### Other aspects
+- Keep public props stable.
+
+depends_on: [EPIC-001, EPIC-003]
+"@ | Out-File $plan -Encoding utf8
+
+            & $script:StartPlan -PlanFile $plan -ProjectDir $script:projectDir -SkipLoop *>&1 | Out-Null
+
+            $calls = Get-Content $capturePath | ForEach-Object { $_ | ConvertFrom-Json }
+            $epicCall = $calls | Where-Object { $_.TaskRef -eq "EPIC-007" } | Select-Object -First 1
+
+            $epicCall | Should -Not -BeNullOrEmpty
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Context\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Definition of Done\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Acceptance Criteria\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Tasks\s*$')).Count | Should -Be 1
+            ([regex]::Matches($epicCall.TaskDescription, '(?m)^#{3}\s+Other aspects\s*$')).Count | Should -Be 1
+            $epicCall.DefinitionOfDone.Count | Should -Be 2
+            $epicCall.AcceptanceCriteria.Count | Should -Be 2
+            $epicCall.DependsOn | Should -Contain "PLAN-REVIEW"
+            $epicCall.DependsOn | Should -Contain "EPIC-001"
+            $epicCall.DependsOn | Should -Contain "EPIC-003"
+        }
+    }
+
+    Context "Runtime settings propagation" {
+        It "creates plan rooms with configured retry and timeout settings" {
+            $savedWarRoomsDir = $env:WARROOMS_DIR
+            $savedOstwinHome = $env:OSTWIN_HOME
+            $global:MockManagerConfig = [PSCustomObject]@{
+                auto_expand_plan      = $false
+                max_engineer_retries  = 7
+                state_timeout_seconds = 1800
+            }
+            $env:WARROOMS_DIR = Join-Path $script:projectDir ".war-rooms"
+            Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue
+
+            try {
+                $mockNewWarRoom = @'
+param(
+    [string]$RoomId,
+    [string]$TaskRef,
+    [string]$TaskDescription,
+    [string]$WorkingDir,
+    [string]$WarRoomsDir,
+    [string]$PlanId,
+    [string]$AssignedRole,
+    [string[]]$CandidateRoles = @(),
+    [string[]]$DefinitionOfDone = @(),
+    [string[]]$AcceptanceCriteria = @(),
+    [string[]]$DependsOn = @(),
+    [int]$MaxRetries = 3,
+    [int]$TimeoutSeconds = 900
+)
+if (-not (Test-Path $WarRoomsDir)) {
+    New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
+}
+$roomDir = Join-Path $WarRoomsDir $RoomId
+New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+@{
+    room_id = $RoomId
+    task_ref = $TaskRef
+    plan_id = $PlanId
+    assignment = @{ assigned_role = $AssignedRole }
+    constraints = @{
+        max_retries = $MaxRetries
+        timeout_seconds = $TimeoutSeconds
+    }
+} | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
+'@
+                $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+                $plan = Join-Path $TestDrive "runtime-settings-plan.md"
+                @"
+# Plan: Runtime Settings
+working_dir: $script:projectDir
+
+## EPIC-001 - Configurable Room Contract
+- Build the configurable runtime contract.
+
+#### Definition of Done
+- [ ] Room config contains custom constraints.
+
+#### Acceptance Criteria
+- [ ] Retry count comes from manager settings.
+- [ ] Timeout comes from manager settings.
+"@ | Out-File $plan -Encoding utf8
+
+                & $script:StartPlan -PlanFile $plan -ProjectDir $script:projectDir -SkipLoop *>&1 | Out-Null
+
+                $roomConfigPath = Join-Path $script:projectDir ".war-rooms/room-001/config.json"
+                $roomConfig = Get-Content $roomConfigPath -Raw | ConvertFrom-Json
+
+                $roomConfig.constraints.max_retries | Should -Be 7
+                $roomConfig.constraints.timeout_seconds | Should -Be 1800
+            }
+            finally {
+                if ($savedWarRoomsDir) { $env:WARROOMS_DIR = $savedWarRoomsDir }
+                else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+
+                if ($savedOstwinHome) { $env:OSTWIN_HOME = $savedOstwinHome }
+                else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+            }
         }
     }
 

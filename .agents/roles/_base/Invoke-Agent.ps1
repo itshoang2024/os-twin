@@ -14,7 +14,9 @@
 .PARAMETER RoleName
     Role identifier (engineer, qa, architect, etc.). Passed as --agent.
 .PARAMETER Prompt
-    Full prompt text. Passed as a positional argument to opencode run.
+    Full role prompt text. prompt.txt is compiled as: role prompt, latest
+    channel.jsonl body, then TASKS.md. When omitted or blank, prompt.txt
+    falls back to brief.md for the role prompt layer.
 .PARAMETER Model
     Model to use (provider/model format). Passed as --model / -m.
 .PARAMETER TimeoutSeconds
@@ -64,6 +66,7 @@ param(
     [string]$RoleName,
 
     [Parameter(Mandatory)]
+    [AllowEmptyString()]
     [string]$Prompt,
 
     [string]$Model = '',
@@ -401,19 +404,96 @@ $exitCode = 0
 $stdinNull = if ($IsLinux -or $IsMacOS) { "/dev/null" }
 else { "NUL" }
 
-# Write prompt to a file to avoid shell escaping issues
+function Get-CompiledPromptText {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RoomDir,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$FallbackPrompt
+    )
+
+    $promptParts = [System.Collections.Generic.List[string]]::new()
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackPrompt)) {
+        $promptParts.Add($FallbackPrompt.TrimEnd())
+    }
+    else {
+        $briefPath = Join-Path $RoomDir "brief.md"
+        if (Test-Path $briefPath) {
+            $briefContent = Get-Content $briefPath -Raw -ErrorAction SilentlyContinue
+            if ($briefContent) {
+                $promptParts.Add($briefContent.TrimEnd())
+            }
+        }
+    }
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (Test-Path $channelPath) {
+        $lastChannelItem = $null
+        $lastChannelBody = $null
+        try {
+            foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) {
+                    $lastChannelItem = $line.TrimEnd()
+                }
+            }
+            if ($lastChannelItem) {
+                $parsedChannelItem = $lastChannelItem | ConvertFrom-Json
+                if ($parsedChannelItem.PSObject.Properties.Name -contains 'body') {
+                    $lastChannelBody = [string]$parsedChannelItem.body
+                }
+            }
+        }
+        catch { }
+
+        if (-not [string]::IsNullOrWhiteSpace($lastChannelBody)) {
+            $channelSection = @"
+## Last Effort
+
+$($lastChannelBody.TrimEnd())
+"@
+            $promptParts.Add($channelSection.TrimEnd())
+        }
+    }
+
+    $tasksPath = Join-Path $RoomDir "TASKS.md"
+    if (Test-Path $tasksPath) {
+        $tasksContent = Get-Content $tasksPath -Raw -ErrorAction SilentlyContinue
+        if (-not [string]::IsNullOrWhiteSpace($tasksContent)) {
+            $tasksSection = @"
+## Sub-Tasks (TASKS.md)
+
+$($tasksContent.TrimEnd())
+"@
+            $promptParts.Add($tasksSection.TrimEnd())
+        }
+    }
+
+    if ($promptParts.Count -gt 0) {
+        return ($promptParts -join "`n`n")
+    }
+
+    return $FallbackPrompt
+}
+
+# Write prompt to a file to avoid shell escaping issues. The caller-provided
+# role prompt is primary, latest current channel.jsonl body follows as context,
+# then TASKS.md is appended last to keep the agent focused on the checklist.
+$compiledPrompt = Get-CompiledPromptText -RoomDir $absRoomDir -FallbackPrompt $Prompt
 $promptFile = Join-Path $artifactsDir "prompt.txt"
-$Prompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force
+$compiledPrompt | Out-File -FilePath $promptFile -Encoding utf8 -NoNewline -Force
 # Resolve to absolute path for -f flag
 $promptFileAbsolute = (Resolve-Path $promptFile).Path
 
 # --- Debug: write a human-readable copy of the compiled prompt ---
 $debugPromptFile = Join-Path $artifactsDir "$RoleName-prompt-debug.md"
-$Prompt | Out-File -FilePath $debugPromptFile -Encoding utf8 -Force
+$compiledPrompt | Out-File -FilePath $debugPromptFile -Encoding utf8 -Force
 
 # Build non-prompt CLI args safely (opencode run flags)
-# Prompt is passed as --file <path> to avoid ARG_MAX limits with large prompts.
-# A short positional message is required by opencode run — the full prompt is in the file.
+# Compiled prompt is passed as --file <path> to avoid ARG_MAX limits.
+# A short positional message is required by opencode run — the room prompt is in the file.
 $extraCliArgs = @("...")
 if ($Model) { $extraCliArgs += "--model"; $extraCliArgs += $Model }
 if ($RoleName) { $extraCliArgs += "--agent"; $extraCliArgs += $RoleName }

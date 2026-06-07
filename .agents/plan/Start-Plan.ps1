@@ -86,7 +86,6 @@ $managerLoop = Join-Path $agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
 $buildDag = Join-Path $agentsDir "plan" "Build-DependencyGraph.ps1"
 $buildPlanningDag = Join-Path $agentsDir "plan" "Build-PlanningDAG.ps1"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $agentsDir "channel" "Post-Message.ps1"
 $waitForMessage = Join-Path $agentsDir "channel" "Wait-ForMessage.ps1"
 
 # --- Import modules ---
@@ -127,7 +126,29 @@ if (-not (Test-Path $ProjectDir -PathType Container)) {
 }
 
 # --- Resolve config ---
-$config = Get-OstwinConfig
+$configPath = if (Get-Command Resolve-OstwinConfigPath -ErrorAction SilentlyContinue) {
+    Resolve-OstwinConfigPath
+} elseif ($env:AGENT_OS_CONFIG) {
+    $env:AGENT_OS_CONFIG
+} else {
+    Join-Path $agentsDir "config.json"
+}
+$config = Get-OstwinConfig -ConfigPath $configPath
+
+$managerRuntime = if (Get-Command Get-OstwinManagerRuntimeSettings -ErrorAction SilentlyContinue) {
+    Get-OstwinManagerRuntimeSettings -Config $config
+} else {
+    [PSCustomObject]@{
+        max_concurrent_rooms  = if ($config.manager.max_concurrent_rooms) { $config.manager.max_concurrent_rooms } else { 10 }
+        poll_interval_seconds = if ($config.manager.poll_interval_seconds) { $config.manager.poll_interval_seconds } else { 5 }
+        max_engineer_retries  = if ($null -ne $config.manager.max_engineer_retries) { $config.manager.max_engineer_retries } else { 3 }
+        state_timeout_seconds = if ($config.manager.state_timeout_seconds) { $config.manager.state_timeout_seconds } else { 900 }
+        auto_approve_tools    = if ($null -ne $config.manager.auto_approve_tools) { [bool]$config.manager.auto_approve_tools } else { $false }
+        dynamic_pipelines     = if ($null -ne $config.manager.dynamic_pipelines) { [bool]$config.manager.dynamic_pipelines } else { $true }
+    }
+}
+$defaultRoomMaxRetries = [int]$managerRuntime.max_engineer_retries
+$defaultRoomTimeoutSeconds = [int]$managerRuntime.state_timeout_seconds
 
 if ($config.manager -and $config.manager.unified_plan_negotiation -eq $true) {
     $Unified = $true
@@ -162,7 +183,7 @@ The project plan at '$PlanFile' requires review and potential refinement.
 5. If you cannot proceed without more context, post 'plan-reject' with your feedback.
 "@
 if (-not $DryRun -and -not (Test-Path $room000Dir)) {
-    & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") | Out-Null
+    & $newWarRoom -RoomId "room-000" -TaskRef "PLAN-REVIEW" -TaskDescription $negotiationTask -WarRoomsDir $warRoomsDir -WorkingDir $ProjectDir -AssignedRole "architect" -CandidateRoles @("architect","manager") -MaxRetries $defaultRoomMaxRetries -TimeoutSeconds $defaultRoomTimeoutSeconds | Out-Null
 } elseif (-not $DryRun -and (Test-Path $room000Dir)) {
     # --- Update room-000 if the plan file has changed ---
     $room000Config = Join-Path $room000Dir "config.json"
@@ -184,9 +205,8 @@ if (-not $DryRun -and -not (Test-Path $room000Dir)) {
             if ($r0Status -in @('developing', 'optimize', 'review', 'triage', 'failed', 'failed-final')) {
                 Write-Host "  → Resetting room-000 to pending (was: $r0Status)" -ForegroundColor Yellow
                 "pending" | Out-File -FilePath (Join-Path $room000Dir "status") -Encoding utf8 -NoNewline
-                # Clear stale channel messages
-                $channelFile = Join-Path $room000Dir "channel.jsonl"
-                if (Test-Path $channelFile) { "" | Out-File -FilePath $channelFile -Encoding utf8 }
+                # Do not mutate channel.jsonl here. Channel content is owned by
+                # agents posting through the ostwin-channel MCP post_message tool.
                 # Clear old PID files
                 $pidDir = Join-Path $room000Dir "pids"
                 if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
@@ -240,17 +260,27 @@ if ($shouldExpand -and (Test-Path $expandPlanScript)) {
 if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
     $globalWorkingDir = $Matches[1].Trim()
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
+        $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $globalWorkingDir -Force | Out-Null
+            try {
+                Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+                New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
+                $workingDirWarningShown = $true
+            }
         }
-        $ProjectDir = (Resolve-Path $globalWorkingDir).Path
-        Write-Host "  Project: $ProjectDir" -ForegroundColor DarkGray
-        # Re-resolve war-rooms dir to follow the plan's working_dir (unless explicitly set via env)
-        if (-not $warRoomsDirFromEnv) {
-            $warRoomsDir = Join-Path $ProjectDir ".war-rooms"
-            $env:WARROOMS_DIR = $warRoomsDir
-            $room000Dir = Join-Path $warRoomsDir "room-000"
+        if (Test-Path $globalWorkingDir) {
+            $ProjectDir = (Resolve-Path $globalWorkingDir).Path
+            Write-Host "  Project: $ProjectDir" -ForegroundColor DarkGray
+            # Re-resolve war-rooms dir to follow the plan's working_dir (unless explicitly set via env)
+            if (-not $warRoomsDirFromEnv) {
+                $warRoomsDir = Join-Path $ProjectDir ".war-rooms"
+                $env:WARROOMS_DIR = $warRoomsDir
+                $room000Dir = Join-Path $warRoomsDir "room-000"
+            }
+        } elseif (-not $workingDirWarningShown) {
+            Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
         }
     }
 }
@@ -609,7 +639,7 @@ if ($DryRun) {
 
 # --- Room Creation Logic ---
 function New-PlanWarRooms {
-    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId)
+    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $maxRetries, $timeoutSeconds)
     
     # --- Re-parse plan in case it changed during negotiation (uses PlanParser module) ---
     $planContent = Get-Content $PlanFile -Raw
@@ -747,6 +777,8 @@ function New-PlanWarRooms {
             foreach ($sec in $entry.Sections) {
                 # Skip the EPIC/TASK title section re-captured by the parser
                 if ($sec.Heading -match "^(EPIC|TASK)-\d+") { continue }
+                $escapedHeading = [regex]::Escape($sec.Heading)
+                if ([regex]::IsMatch($fullDesc, "(?im)^#{3,4}\s+$escapedHeading\s*$")) { continue }
                 $hashes = '#' * $sec.HeadingLevel
                 $fullDesc = "$fullDesc`n`n$hashes $($sec.Heading)`n`n$($sec.Content)"
             }
@@ -763,6 +795,8 @@ function New-PlanWarRooms {
             PlanId           = $planId
             AssignedRole     = $primaryRole
             CandidateRoles   = $candidateRoles
+            MaxRetries       = $maxRetries
+            TimeoutSeconds   = $timeoutSeconds
         }
 
         if ($entry.DoD -and $entry.DoD.Count -gt 0) {
@@ -806,7 +840,7 @@ function New-PlanWarRooms {
 # Always called — even in Resume mode. New-PlanWarRooms skips existing rooms
 # internally (reconcile only) but MUST rebuild DAG.json so the manager loop
 # sees all rooms, not just room-000.
-New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId
+New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
 
 # ===========================================================================
 # Phase B: Dependency review (reads actual brief.md from each war-room)
@@ -832,7 +866,7 @@ if (-not $Resume -and -not $DryRun -and (Test-Path $reviewDeps)) {
 if ($Unified -and ($Review -or $Expand) -and -not $Resume) {
     Write-Host "[UNIFIED] Handing off plan negotiation to Manager Loop." -ForegroundColor Cyan
     $env:PLAN_FILE = $PlanFile
-    & $managerLoop -WarRoomsDir $warRoomsDir -Review -PlanFile $PlanFile
+    & $managerLoop -ConfigPath $configPath -WarRoomsDir $warRoomsDir -Review -PlanFile $PlanFile
     exit 0
 }
 
@@ -847,10 +881,9 @@ $shouldNegotiate = -not $Resume -and -not $Unified
 while ($shouldNegotiate) {
     if (-not $Review) { break }
 
-    $reviewMsgId = & $postMessage -RoomDir $room000Dir -From "manager" -To "architect" -Type "review" -Ref "PLAN-REVIEW" -Body $planContent
-    Write-Host "Plan posted to room-000 for review. Waiting for approval (timeout: ${planReviewTimeout}s)..." -ForegroundColor Cyan
+    Write-Host "Waiting for plan approval/update via MCP-authored channel message (timeout: ${planReviewTimeout}s)..." -ForegroundColor Cyan
 
-    $waitResultRaw = & $waitForMessage -RoomDir $room000Dir -WaitType "plan-approve", "plan-reject", "plan-update" -After $reviewMsgId -TimeoutSeconds $planReviewTimeout
+    $waitResultRaw = & $waitForMessage -RoomDir $room000Dir -WaitType "plan-approve", "plan-reject", "plan-update" -TimeoutSeconds $planReviewTimeout
     
     if ($LASTEXITCODE -ne 0 -or -not $waitResultRaw) {
         Write-Error "Plan negotiation timed out or failed."
@@ -897,7 +930,7 @@ while ($shouldNegotiate) {
 if (-not $SkipLoop) {
     Write-Host ""
     Write-Host "[STARTING] Manager loop..." -ForegroundColor Green
-    & $managerLoop -WarRoomsDir $warRoomsDir
+    & $managerLoop -ConfigPath $configPath -WarRoomsDir $warRoomsDir
 } else {
     Write-Host "[SKIPPED] Manager loop (SkipLoop requested)." -ForegroundColor Yellow
 }

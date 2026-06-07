@@ -32,6 +32,24 @@ def test_generated_helpers_bound_worker_wait_time():
     assert "finished without text" in helpers
 
 
+def test_generated_helpers_load_ostwin_api_key_from_env_files():
+    helpers = opencode_tools._api_helpers()
+
+    assert 'readFileSync(path, "utf8")' in helpers
+    assert 'envFileValue(readFileSync(path, "utf8"), "OSTWIN_API_KEY")' in helpers
+    assert 'join(ostwinHome, ".env")' in helpers
+    assert 'join(ostwinHome, ".env.sh")' in helpers
+    assert "function apiKeyCandidates" in helpers
+    assert "Dashboard rejected the available Ostwin API key(s)" in helpers
+
+
+def test_get_memories_tool_uses_shared_dashboard_auth_helper():
+    memories_tool = opencode_tools._tool_get_memories()
+
+    assert "api(`/api/amem/${args.plan_id}${path}`)" in memories_tool
+    assert "X-API-Key" not in memories_tool
+
+
 def test_create_plan_tool_returns_dashboard_route_metadata():
     create_tool = opencode_tools._tool_create_plan()
 

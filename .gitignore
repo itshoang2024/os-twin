@@ -17,6 +17,7 @@ gold-mining/
 .agents/stats_history.json
 .agents/conversations/
 .agents/RELEASE.md
+.agents/release/signoffs.json
 .agents/mcp/mcp-config.json
 .agents/mcp/config.json
 .agents/mcp/mcp-manifest.json

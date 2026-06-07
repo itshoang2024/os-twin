@@ -28,7 +28,7 @@ Build a factual timeline of what happened:
 |------|-------|-------|----------|
 | T-2d | Room-001 ships User model without `plan` field | Engineer | Memory: "User model — src/models/user.py" |
 | T-1d | Room-003 builds frontend assuming `plan` exists | Engineer | Memory: "Dashboard component" |
-| T+0h | QA passes Room-001 (no frontend to test against) | QA | Channel: pass message |
+| T+0h | QA marks Room-001 done (no frontend to test against) | QA | Channel: done message |
 | T+2h | Integration test fails — `plan` is undefined | CI | Build log #247 |
 | T+4h | Manager routes fix to Room-001 | Manager | Channel: fix message |
 ```

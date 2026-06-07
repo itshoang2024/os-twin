@@ -276,7 +276,7 @@ function Find-LatestSignal {
         Write-Log "DEBUG" "[Find-LatestSignal][$roomId] state='$StateName' has no signals defined in lifecycle"
         return $null
     }
-    $expectedSignals = @($stateDef.signals.PSObject.Properties.Name)
+    $expectedSignals = @($stateDef.signals.PSObject.Properties.Name | Where-Object { $_ -ne 'error' })
     $expectedRole    = if ($stateDef.role) { ($stateDef.role -replace ':.*$', '') } else { '' }
 
     $changedAt = 0
@@ -326,7 +326,7 @@ function Find-LatestSignal {
                     # the channel_post_message MCP tool than what the worker
                     # script parsed and re-posted. Prefer the agent's intent.
                     $outputSignal = Get-OutputSignal -RoomDir $RoomDir -Role $expectedRole
-                    if ($outputSignal -and $outputSignal -ne $sigType -and $outputSignal -in $expectedSignals) {
+                    if ($outputSignal -and $outputSignal -ne 'error' -and $outputSignal -ne $sigType -and $outputSignal -in $expectedSignals) {
                         Write-Log "WARN" "[Find-LatestSignal][$roomId] OUTPUT OVERRIDE: channel='$sigType' but agent output shows msg_type='$outputSignal'. Using '$outputSignal'."
                         return $outputSignal
                     }
@@ -376,7 +376,7 @@ function Get-OutputSignal {
                     }
                 } catch {
                     # JSON parse failed — try regex fallback
-                    if ($jsonStr -match '"msg_type"\s*:\s*"(pass|fail|done|error|escalate)"') {
+                    if ($jsonStr -match '"msg_type"\s*:\s*"(pass|fail|done|escalate)"') {
                         $lastMsgType = $Matches[1].ToLower()
                         break
                     }
@@ -395,7 +395,6 @@ function Get-OutputSignal {
 function Invoke-SignalActions {
     [CmdletBinding()]
     param([string]$RoomDir, [string[]]$Actions, [string]$TaskRef, [string]$BaseRole)
-    $postMessage  = _ctx 'postMessage'
     $readMessages = _ctx 'readMessages'
 
     foreach ($action in $Actions) {
@@ -406,12 +405,10 @@ function Invoke-SignalActions {
                 ($r + 1).ToString() | Out-File -FilePath $retriesFile -Encoding utf8 -NoNewline
             }
             'post_fix' {
-                $feedback = Get-LatestBody $RoomDir "fail"
-                if (-not $feedback) { $feedback = Get-LatestBody $RoomDir "escalate" }
-                if (-not $feedback) { $feedback = Get-LatestBody $RoomDir "error" }
-                if ($feedback) {
-                    & $postMessage -RoomDir $RoomDir -From "manager" -To $BaseRole -Type "fix" -Ref $TaskRef -Body $feedback
-                }
+                # No PowerShell channel synthesis. The worker prompt now receives
+                # current channel.jsonl context directly from Invoke-Agent; fixes
+                # must be posted by agents through the MCP channel tool.
+                Write-Log "DEBUG" "[$TaskRef] post_fix action skipped; channel writes are MCP-only."
             }
             'revise_brief' {
                 $briefFile   = Join-Path $RoomDir "brief.md"
@@ -470,6 +467,86 @@ function Test-SpawnLock {
     } catch {
         Write-Log "DEBUG" "[Test-SpawnLock] Error reading spawn lock for '$Role': $($_.Exception.Message)"
         return $false
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Set-RoleRunStatus / Get-FreshFailedRoleRun
+# Role wrappers update their per-role config when a process exits. The manager
+# consumes that status as orchestration state, not as a lifecycle signal.
+# ---------------------------------------------------------------------------
+function Set-RoleRunStatus {
+    [CmdletBinding()]
+    param(
+        [string]$RoomDir,
+        [string]$Role,
+        [ValidateSet("pending", "active", "completed", "failed")][string]$Status
+    )
+
+    $baseRole = $Role -replace ':.*$', ''
+    $roleConfigs = Get-ChildItem -Path $RoomDir -Filter "${baseRole}_*.json" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending
+    if (-not $roleConfigs) { return $null }
+
+    $targetFile = $roleConfigs[0].FullName
+    $cfg = Get-Content $targetFile -Raw | ConvertFrom-Json
+    $epoch = Get-UnixEpoch
+    $state = if (Test-Path (Join-Path $RoomDir "status")) {
+        (Get-Content (Join-Path $RoomDir "status") -Raw).Trim()
+    } else { "" }
+
+    $cfg.status = $Status
+    $cfg | Add-Member -NotePropertyName "status_updated_epoch" -NotePropertyValue $epoch -Force
+    $cfg | Add-Member -NotePropertyName "status_updated_at" -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) -Force
+    $cfg | Add-Member -NotePropertyName "status_state" -NotePropertyValue $state -Force
+    $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $targetFile -Encoding utf8
+    return $targetFile
+}
+
+function Get-FreshFailedRoleRun {
+    [CmdletBinding()]
+    param(
+        [string]$RoomDir,
+        [string]$Role
+    )
+
+    $baseRole = $Role -replace ':.*$', ''
+    $roleConfigs = Get-ChildItem -Path $RoomDir -Filter "${baseRole}_*.json" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending
+    if (-not $roleConfigs) { return $null }
+
+    $cfgFile = $roleConfigs[0].FullName
+    try {
+        $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-Log "DEBUG" "[Get-FreshFailedRoleRun] Error reading ${cfgFile}: $($_.Exception.Message)"
+        return $null
+    }
+
+    if ($cfg.status -ne 'failed') { return $null }
+
+    $changedAt = 0
+    $changedFile = Join-Path $RoomDir "state_changed_at"
+    if (Test-Path $changedFile) {
+        try { $changedAt = [long](Get-Content $changedFile -Raw).Trim() } catch { $changedAt = 0 }
+    }
+
+    $statusEpoch = 0
+    if ($cfg.PSObject.Properties['status_updated_epoch'] -and "$($cfg.status_updated_epoch)" -match '^\d+$') {
+        $statusEpoch = [long]"$($cfg.status_updated_epoch)"
+    } elseif ($cfg.PSObject.Properties['status_updated_at'] -and $cfg.status_updated_at) {
+        try {
+            $statusEpoch = [long]([DateTimeOffset]::new([datetime]::Parse("$($cfg.status_updated_at)").ToUniversalTime()).ToUnixTimeSeconds())
+        } catch { $statusEpoch = 0 }
+    }
+
+    if ($statusEpoch -le 0) { return $null }
+    if ($statusEpoch -lt $changedAt) { return $null }
+
+    return [pscustomobject]@{
+        Role               = $baseRole
+        ConfigFile         = $cfgFile
+        StatusUpdatedEpoch = $statusEpoch
     }
 }
 
@@ -578,6 +655,7 @@ function Start-WorkerJob {
     if ($TimeoutSeconds -gt 0) {
         Write-Log "DEBUG" "[$TaskRef] Spawning '$Role' with TimeoutSeconds=$TimeoutSeconds (passTimeout=$acceptsTimeout)"
     }
+    Set-RoleRunStatus -RoomDir $RoomDir -Role $Role -Status "active" | Out-Null
     $roomId = Split-Path $RoomDir -Leaf
     Start-Job -Name "ostwin-worker-$roomId-$Role" -ScriptBlock {
         param($s, $r, $rn, $passRn, $ts, $passTs)
@@ -826,6 +904,8 @@ Export-ModuleMember -Function @(
     'Write-Log',
     'Write-SpawnLock',
     'Test-SpawnLock',
+    'Set-RoleRunStatus',
+    'Get-FreshFailedRoleRun',
     'Resolve-RoleTimeout',
     'Start-WorkerJob',
     'Get-CachedDag',

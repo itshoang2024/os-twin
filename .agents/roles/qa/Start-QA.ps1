@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    QA role runner — reviews engineer output and posts pass/fail verdict.
+    QA role runner — reviews engineer output and posts done/fail verdict.
 
 .DESCRIPTION
     Reads the engineer's "done" message from the channel, builds a QA review
     prompt, runs the agent via Invoke-Agent.ps1, parses VERDICT from output,
-    and posts pass/fail/error back to the channel.
+    and posts lifecycle verdicts back to the channel.
 
     Replaces: roles/qa/run.sh
 
@@ -33,12 +33,42 @@ $scriptDir = $PSScriptRoot
 $agentsDir = (Resolve-Path (Join-Path $scriptDir ".." "..")).Path
 $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import logging ---
 $logModule = Join-Path $agentsDir "lib" "Log.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
+$lifecycleSignalModule = Join-Path $agentsDir "roles" "_base" "LifecycleSignal.psm1"
+if (Test-Path $lifecycleSignalModule) { Import-Module $lifecycleSignalModule -Force }
+
+function Get-LastChannelItemBody {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (-not (Test-Path $channelPath)) { return $null }
+
+    $lastLine = $null
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $lastLine = $line.TrimEnd()
+            }
+        }
+    }
+    catch { return $null }
+
+    if (-not $lastLine) { return $null }
+
+    try {
+        $lastItem = $lastLine | ConvertFrom-Json
+        if ($lastItem.PSObject.Properties.Name -contains 'body') {
+            return [string]$lastItem.body
+        }
+    }
+    catch { }
+
+    return $null
+}
 
 # --- Load config ---
 $configPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
@@ -56,10 +86,14 @@ if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = 300 }
 $qaConfigs = Get-ChildItem -Path $RoomDir -Filter "qa_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
 if ($qaConfigs) {
     # Existing QA config — update status to active
-    $qaRoleConfig = Get-Content $qaConfigs[0].FullName -Raw | ConvertFrom-Json
-    $qaRoleConfig.status = "active"
-    $qaRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaConfigs[0].FullName -Encoding utf8
     $qaRoleConfigFile = $qaConfigs[0].FullName
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status "active" -ConfigFile $qaRoleConfigFile | Out-Null
+    } else {
+        $qaRoleConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
+        $qaRoleConfig.status = "active"
+        $qaRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    }
 }
 else {
     # First QA assignment — create qa_001.json
@@ -80,6 +114,9 @@ else {
     }
     $qaRoleConfigFile = Join-Path $RoomDir "qa_001.json"
     $qaRoleConfigObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status "active" -ConfigFile $qaRoleConfigFile | Out-Null
+    }
 }
 
 # --- Read task ref ---
@@ -212,18 +249,15 @@ if (Test-Path $dagFile) {
     if ($myNode -and $myNode.depends_on -and $myNode.depends_on.Count -gt 0) {
         $sections = @()
         foreach ($depRef in $myNode.depends_on) {
+            if ($depRef -eq 'PLAN-REVIEW') { continue }
             $depNode = $dag.nodes.$depRef
             if (-not $depNode) { continue }
             $depRoomDir = Join-Path (Split-Path $RoomDir) $depNode.room_id
-            try {
-                $doneMsgs = & $readMessages -RoomDir $depRoomDir -FilterType "done" -Last 1 -AsObject
-                if ($doneMsgs -and $doneMsgs.Count -gt 0) {
-                    $body = $doneMsgs[-1].body
-                    if ($body.Length -gt 10240) { $body = $body.Substring(0, 10240) + "`n[TRUNCATED]" }
-                    $sections += "### $depRef`n$body"
-                }
+            $lastBody = Get-LastChannelItemBody -RoomDir $depRoomDir
+            if ($lastBody) {
+                if ($lastBody.Length -gt 10240) { $lastBody = $lastBody.Substring(0, 10240) + "`n[TRUNCATED]" }
+                $sections += "### $depRef`n$lastBody"
             }
-            catch { }
         }
         if ($sections.Count -gt 0) {
             $predecessorSection = "`n`n## Predecessor Outputs`n`n$($sections -join "`n`n")"
@@ -252,7 +286,7 @@ $engineerReport
 $reviewInstructions
 
 IMPORTANT: Your response MUST include exactly one of these lines:
-  VERDICT: PASS
+  VERDICT: DONE
   VERDICT: FAIL
 
 Use ESCALATE when the failure is NOT an implementation bug — e.g., the requirements
@@ -261,6 +295,12 @@ incomplete. Include a classification: DESIGN | SCOPE | REQUIREMENTS.
 
 Follow with detailed reasoning.
 "@
+if ($predecessorSection) {
+    $extraContext += $predecessorSection
+}
+if ($triageContext) {
+    $extraContext += "`n`n## Triage Context`n`n$triageContext"
+}
 
 $prompt = & $buildPrompt -RoleName "qa" -RolePath $scriptDir `
     -RoomDir $RoomDir -TaskRef $taskRef `
@@ -282,6 +322,11 @@ $result = & $invokeAgent -RoomDir $RoomDir -RoleName "qa" `
     -WorkingDir $instanceWorkingDir `
     -Prompt $prompt -TimeoutSeconds $TimeoutSeconds
 Write-Host "[QA] Agent returned: exitCode=$($result.ExitCode), timedOut=$($result.TimedOut), outputLen=$($result.Output.Length)"
+$outputArtifact = if ($result.PSObject.Properties.Name -contains "OutputFile" -and $result.OutputFile) {
+    "artifacts/$(Split-Path $result.OutputFile -Leaf)"
+} else {
+    "agent output"
+}
 
 # --- Parse verdict from output ---
 $rawOutput = $result.Output
@@ -322,83 +367,110 @@ if (-not $output) {
     $output = $rawOutput
 }
 
-$verdict = ""
-$outputLines = $output -split "`n"
-
-# --- Verdict parsing: scan from the END of output ---
-# The agent's output may contain channel_read_messages dumps with stale
-# VERDICT: FAIL from prior iterations. Parsing from the start would match
-# the stale verdict. Parsing from the end matches the agent's final verdict.
-
-# Strategy 1: Last line starting with VERDICT: (scan from end)
-for ($i = $outputLines.Count - 1; $i -ge 0; $i--) {
-    if ($outputLines[$i] -match '^\s*\*{0,2}VERDICT:?\s*(PASS|FAIL|ESCALATE)') {
-        $verdict = $Matches[1].ToUpper()
-        break
-    }
+$verdict = if (Get-Command Get-AgentVerdict -ErrorAction SilentlyContinue) {
+    Get-AgentVerdict -Output $output
+} else {
+    ""
 }
 
-# Strategy 2: Last VERDICT: in final 80 lines
+# Fallback for older installs without LifecycleSignal.psm1 loaded.
 if (-not $verdict) {
-    $last80 = ($outputLines | Select-Object -Last 80) -join "`n"
-    $allMatches = [regex]::Matches($last80, 'VERDICT:\s*(PASS|FAIL|ESCALATE)')
-    if ($allMatches.Count -gt 0) {
-        $verdict = $allMatches[$allMatches.Count - 1].Groups[1].Value.ToUpper()
+    $outputLines = $output -split "`n"
+
+    # Strategy 1: Last line starting with VERDICT: (scan from end)
+    for ($i = $outputLines.Count - 1; $i -ge 0; $i--) {
+        if ($outputLines[$i] -match '^\s*\*{0,2}VERDICT:?\s*(DONE|PASS|FAIL|ESCALATE)') {
+            $verdict = $Matches[1].ToUpper()
+            break
+        }
+    }
+
+    # Strategy 2: Last VERDICT: in final 80 lines
+    if (-not $verdict) {
+        $last80 = ($outputLines | Select-Object -Last 80) -join "`n"
+        $allMatches = [regex]::Matches($last80, 'VERDICT:\s*(DONE|PASS|FAIL|ESCALATE)', 'IgnoreCase')
+        if ($allMatches.Count -gt 0) {
+            $verdict = $allMatches[$allMatches.Count - 1].Groups[1].Value.ToUpper()
+        }
+    }
+
+    # Strategy 3: standalone DONE/FAIL/ESCALATE in last 20 lines. PASS is accepted only as legacy compatibility.
+    if (-not $verdict) {
+        $last20 = ($outputLines | Select-Object -Last 20) -join "`n"
+        $allBare = [regex]::Matches($last20, '\b(DONE|PASS|FAIL|ESCALATE)\b', 'IgnoreCase')
+        if ($allBare.Count -gt 0) {
+            $verdict = $allBare[$allBare.Count - 1].Groups[1].Value.ToUpper()
+        }
     }
 }
 
-# Strategy 3: standalone PASS/FAIL/ESCALATE in last 20 lines (not first 20)
-if (-not $verdict) {
-    $last20 = ($outputLines | Select-Object -Last 20) -join "`n"
-    $allBare = [regex]::Matches($last20, '\b(PASS|FAIL|ESCALATE)\b')
-    if ($allBare.Count -gt 0) {
-        $verdict = $allBare[$allBare.Count - 1].Groups[1].Value.ToUpper()
+$displayVerdict = if ($verdict -eq "PASS") { "DONE" } else { $verdict }
+$successSignal = if (Get-Command Get-PreferredLifecycleSuccessSignal -ErrorAction SilentlyContinue) {
+    Get-PreferredLifecycleSuccessSignal -RoomDir $RoomDir -DefaultSignal "done"
+} else { "done" }
+$signalType = if (Get-Command Convert-VerdictToLifecycleSignal -ErrorAction SilentlyContinue) {
+    Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal $successSignal
+} else {
+    switch ($verdict) {
+        "DONE" { $successSignal }
+        "PASS" { $successSignal }
+        "FAIL" { "fail" }
+        "ESCALATE" { "escalate" }
+        default { "" }
     }
 }
 
-# --- Post result to channel ---
+# --- Handle agent result ---
 if ($result.TimedOut) {
-    & $postMessage -RoomDir $RoomDir -From "qa" -To "manager" `
-        -Type "error" -Ref $taskRef -Body "QA timed out after ${TimeoutSeconds}s"
+    $signalType = ""
+    $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
 }
-elseif ($verdict -eq "PASS") {
-    & $postMessage -RoomDir $RoomDir -From "qa" -To "manager" `
-        -Type "pass" -Ref $taskRef -Body $output
+elseif ($result.ExitCode -ne 0) {
+    $signalType = ""
+    $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level INFO -Message "PASSED $taskRef."
+        Write-OstwinLog -Level ERROR -Message "QA agent failed on $taskRef with exit code $($result.ExitCode)."
     }
 }
-elseif ($verdict -eq "FAIL") {
-    & $postMessage -RoomDir $RoomDir -From "qa" -To "manager" `
-        -Type "fail" -Ref $taskRef -Body $output
+elseif ($signalType -in @("done", "pass")) {
+    if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
+        Write-OstwinLog -Level INFO -Message "DONE $taskRef."
+    }
+}
+elseif ($signalType -eq "fail") {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level INFO -Message "FAILED $taskRef."
     }
 }
-elseif ($verdict -eq "ESCALATE") {
-    & $postMessage -RoomDir $RoomDir -From "qa" -To "manager" `
-        -Type "escalate" -Ref $taskRef -Body $output
+elseif ($signalType -eq "escalate") {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level WARN -Message "ESCALATED $taskRef — design/scope issue."
     }
 }
 else {
-    & $postMessage -RoomDir $RoomDir -From "qa" -To "manager" `
-        -Type "error" -Ref $taskRef `
-        -Body "Could not parse QA verdict. Full output: $output"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — posting as error."
+        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — leaving lifecycle signal empty."
     }
+}
+
+if ($signalType -and (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue)) {
+    $body = "VERDICT: $displayVerdict`n`nqa completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
+    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "qa" -Type $signalType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
 }
 
 # --- Update per-role config status ---
 if (Test-Path $qaRoleConfigFile) {
-    $qaFinalConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
-    $qaFinalConfig.status = if ($verdict -eq "PASS") { "completed" } else { "failed" }
-    $qaFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    $finalStatus = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "qa" -Status $finalStatus -ConfigFile $qaRoleConfigFile | Out-Null
+    } else {
+        $qaFinalConfig = Get-Content $qaRoleConfigFile -Raw | ConvertFrom-Json
+        $qaFinalConfig.status = $finalStatus
+        $qaFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $qaRoleConfigFile -Encoding utf8
+    }
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---
@@ -406,7 +478,6 @@ if (Test-Path $qaRoleConfigFile) {
 # the room state. Removing PID here causes a race: manager polls, finds no PID,
 # and re-spawns before processing the channel signal.
 
-Write-Host "[QA] Finished $taskRef in $roomName — verdict: $(if ($verdict) { $verdict } else { 'UNPARSED' }), exitCode: $($result.ExitCode)"
+Write-Host "[QA] Finished $taskRef in $roomName — verdict: $(if ($displayVerdict) { $displayVerdict } else { 'UNPARSED' }), signal: $(if ($signalType) { $signalType } else { 'none' }), exitCode: $($result.ExitCode)"
 
 exit $result.ExitCode
-

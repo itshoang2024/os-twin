@@ -162,18 +162,7 @@ $briefContent
 "@)
     }
 
-    # TASKS.md for epics
-    $tasksFile = Join-Path $RoomDir "TASKS.md"
-    if (Test-Path $tasksFile) {
-        $tasksContent = Get-Content $tasksFile -Raw
-        $sections.Add(@"
-
-## Sub-Tasks (TASKS.md)
-
-$tasksContent
-"@)
-    }
-
+    # TASKS.md is appended by Invoke-Agent.ps1 after the latest channel context.
 }
 
 # Section 6: Overrides

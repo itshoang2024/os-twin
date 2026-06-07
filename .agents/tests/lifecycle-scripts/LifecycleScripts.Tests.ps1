@@ -8,6 +8,7 @@
 BeforeAll {
     $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." ".." "..")).Path
     $AgentsDir = Join-Path $ProjectRoot ".agents"
+    . (Join-Path $AgentsDir "tests" "TestChannelHelpers.ps1")
 }
 
 # ─── Parse validation: every .ps1 file must parse without errors ─────────────
@@ -223,12 +224,17 @@ Describe "logs.ps1" {
         $roomDir = Join-Path $tmpWarrooms "room-001"
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
 
-        # Create test channel.jsonl
-        $messages = @(
-            @{ v = 1; ts = "2026-04-11T10:00:00Z"; from = "manager"; to = "engineer"; type = "task"; ref = "TASK-001"; body = "Do the thing" }
-            @{ v = 1; ts = "2026-04-11T10:01:00Z"; from = "engineer"; to = "qa"; type = "done"; ref = "TASK-001"; body = "Done!" }
-        )
-        $messages | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -Path (Join-Path $roomDir "channel.jsonl")
+        $config = @{
+            assignment = @{
+                assigned_role = "engineer"
+                candidate_roles = @("engineer", "qa")
+            }
+        }
+        $config | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $roomDir "config.json") -Encoding utf8
+        Write-TestChannelMessage -RoomDir $roomDir -From "manager" -To "engineer" `
+            -Type "task" -Ref "TASK-001" -Body "Do the thing" | Out-Null
+        Write-TestChannelMessage -RoomDir $roomDir -From "engineer" -To "qa" `
+            -Type "done" -Ref "TASK-001" -Body "Done!" | Out-Null
     }
 
     AfterAll {

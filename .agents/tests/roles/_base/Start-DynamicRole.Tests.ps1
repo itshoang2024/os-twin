@@ -1,125 +1,109 @@
-# Agent OS — Start-DynamicRole Pester Tests
+# Agent OS - Start-DynamicRole Pester Tests
 
 BeforeAll {
     $script:StartDynamicRole = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path "Start-DynamicRole.ps1"
+    $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path ".." "..")).Path
 }
 
-Describe "Start-DynamicRole - Evaluator Logic" {
+Describe "Start-DynamicRole" {
     BeforeEach {
-        $script:tempDir = Join-Path $TestDrive "test-dynamic-$(Get-Random)"
-        New-Item -ItemType Directory -Path $script:tempDir -Force | Out-Null
-        
-        $script:mockInvokeAgent = Join-Path $script:tempDir "Mock-InvokeAgent.ps1"
-        $script:mockPostMessage = Join-Path $script:tempDir "Mock-PostMessage.ps1"
-        $script:mockGetRoleDef = Join-Path $script:tempDir "Mock-GetRoleDef.ps1"
-        $script:postMessageArgsFile = Join-Path $script:tempDir "postMessageArgs.json"
-
-        # Mock Post-Message
-        @"
-param(`$RoomDir, `$From, `$To, `$Type, `$Ref, `$Body)
-@{
-    RoomDir = `$RoomDir
-    From = `$From
-    To = `$To
-    Type = `$Type
-    Ref = `$Ref
-    Body = `$Body
-} | ConvertTo-Json -Depth 5 | Out-File `"$($script:postMessageArgsFile.Replace('\', '\\'))`"
-"@ | Out-File $script:mockPostMessage -Encoding utf8
-
-        # Mock Get-RoleDef (returns evaluator type)
-        @"
-param(`$RoleName, `$RolePath)
-return @{
-    InstanceType = 'evaluator'
-}
-"@ | Out-File $script:mockGetRoleDef -Encoding utf8
-        
-        # Setup Room
-        $script:roomDir = Join-Path $script:tempDir "room-001"
+        $script:roomDir = Join-Path $TestDrive "room-dynamic-$(Get-Random)"
         New-Item -ItemType Directory -Path $script:roomDir -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $script:roomDir "pids") -Force | Out-Null
-        
-        # Create mock evaluator-role directory so Build-SystemPrompt can find it
-        $agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../..").Path ".")).Path
-        $evalRoleDir = Join-Path $agentsDir "roles" "evaluator-role"
-        if (-not (Test-Path $evalRoleDir)) {
-            New-Item -ItemType Directory -Path $evalRoleDir -Force | Out-Null
-            @{ name = "evaluator-role"; instance_type = "evaluator"; skill_refs = @() } | ConvertTo-Json | Out-File (Join-Path $evalRoleDir "role.json") -Encoding utf8
-            "You are an evaluator role for testing." | Out-File (Join-Path $evalRoleDir "ROLE.md") -Encoding utf8
-            $script:createdEvalRole = $true
-        }
-        
+        New-Item -ItemType Directory -Path (Join-Path $script:roomDir "artifacts") -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $script:roomDir "channel.jsonl") -Force | Out-Null
+
+        "TASK-001" | Out-File (Join-Path $script:roomDir "task-ref") -Encoding utf8 -NoNewline
+        "developing" | Out-File (Join-Path $script:roomDir "status") -Encoding utf8 -NoNewline
         @"
-{ "assignment": { "assigned_role": "evaluator-role" } }
-"@ | Out-File (Join-Path $script:roomDir "config.json") -Encoding utf8
-        "TASK-001" | Out-File (Join-Path $script:roomDir "task-ref") -NoNewline
+# TASK-001
+
+Implement dynamic role behavior.
+
+## Working Directory
+$TestDrive
+"@ | Out-File (Join-Path $script:roomDir "brief.md") -Encoding utf8
+
+        @{
+            assignment = @{
+                assigned_role = "custom-role"
+            }
+            working_dir = $TestDrive
+        } | ConvertTo-Json -Depth 5 | Out-File (Join-Path $script:roomDir "config.json") -Encoding utf8
+
+        @{
+            role        = "custom-role"
+            instance_id = "001"
+            status      = "pending"
+        } | ConvertTo-Json -Depth 5 | Out-File (Join-Path $script:roomDir "custom-role_001.json") -Encoding utf8
+
+        $script:readMessages = Join-Path $TestDrive "read-empty.ps1"
+        @'
+[CmdletBinding()]
+param(
+    [string]$RoomDir,
+    $FilterType,
+    [int]$Last,
+    [switch]$AsObject
+)
+@()
+'@ | Out-File $script:readMessages -Encoding ascii
+
+        $script:roleDef = Join-Path $TestDrive "role-def.ps1"
+        @'
+[CmdletBinding()]
+param([string]$RolePath, [string]$RoleName)
+[pscustomobject]@{
+    Model = "test-model"
+    Timeout = 10
+    InstanceType = "worker"
+}
+'@ | Out-File $script:roleDef -Encoding ascii
+
+        $script:buildPrompt = Join-Path $TestDrive "build-prompt.ps1"
+        @'
+[CmdletBinding()]
+param([string]$RoomDir, [string]$RolePath, [string]$RoleName)
+"dynamic prompt"
+'@ | Out-File $script:buildPrompt -Encoding ascii
     }
 
-    It "Parses VERDICT: FAIL and strips noise" {
-        @"
+    It "marks role config failed without posting channel error when agent exits non-zero" {
+        $invokeAgent = Join-Path $TestDrive "invoke-failed.ps1"
+        @'
 [CmdletBinding()]
-param(`$RoomDir, `$RoleName, `$Prompt, `$TimeoutSeconds, `$InstanceId, `$WorkingDir, `$Model)
-return @{
-    ExitCode = 0
-    TimedOut = `$false
-    Output = "🔧 Calling tool: some tool`nVERDICT: FAIL`nThis failed because reasons.`n✓ Task completed"
+param(
+    [string]$RoomDir,
+    [string]$RoleName,
+    [string]$Prompt,
+    [int]$TimeoutSeconds,
+    [string]$WorkingDir
+)
+[pscustomobject]@{
+    ExitCode = 7
+    Output = "dynamic failed"
+    OutputFile = $null
+    PidFile = $null
+    TimedOut = $false
 }
-"@ | Out-File $script:mockInvokeAgent -Encoding utf8
+'@ | Out-File $invokeAgent -Encoding ascii
 
-        & $script:StartDynamicRole -RoomDir $script:roomDir `
-            -OverrideInvokeAgent $script:mockInvokeAgent `
-            -OverridePostMessage $script:mockPostMessage `
-            -OverrideGetRoleDef $script:mockGetRoleDef
+        & pwsh -NoProfile -File $script:StartDynamicRole `
+            -RoomDir $script:roomDir `
+            -RoleName "custom-role" `
+            -AgentsDir $script:agentsDir `
+            -OverrideInvokeAgent $invokeAgent `
+            -OverrideReadMessages $script:readMessages `
+            -OverrideGetRoleDef $script:roleDef `
+            -OverrideBuildSystemPrompt $script:buildPrompt `
+            -TimeoutSeconds 10 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 7
 
-        $args = Get-Content $script:postMessageArgsFile -Raw | ConvertFrom-Json
-        $args.Type | Should -Be "fail"
-        $args.Body | Should -Match "This failed because reasons."
-        $args.Body | Should -Not -Match "🔧 Calling tool"
-        $args.Body | Should -Not -Match "✓ Task completed"
-    }
-    
-    It "Parses VERDICT: DONE and preserves clean text" {
-        @"
-[CmdletBinding()]
-param(`$RoomDir, `$RoleName, `$Prompt, `$TimeoutSeconds, `$InstanceId, `$WorkingDir, `$Model)
-return @{
-    ExitCode = 0
-    TimedOut = `$false
-    Output = "Here is some text.`nVERDICT: DONE`nTests passed successfully."
-}
-"@ | Out-File $script:mockInvokeAgent -Encoding utf8
+        $roleConfig = Get-Content (Join-Path $script:roomDir "custom-role_001.json") -Raw | ConvertFrom-Json
+        $roleConfig.status | Should -Be "failed"
+        $roleConfig.status_updated_epoch | Should -Not -BeNullOrEmpty
 
-        & $script:StartDynamicRole -RoomDir $script:roomDir `
-            -OverrideInvokeAgent $script:mockInvokeAgent `
-            -OverridePostMessage $script:mockPostMessage `
-            -OverrideGetRoleDef $script:mockGetRoleDef
-
-        $args = Get-Content $script:postMessageArgsFile -Raw | ConvertFrom-Json
-        $args.Type | Should -Be "done"
-        $args.Body | Should -Match "Here is some text."
-        $args.Body | Should -Match "Tests passed successfully."
-        $args.Body | Should -Match "VERDICT: DONE"
-    }
-
-    It "Defaults to FAIL if VERDICT is not present" {
-        @"
-[CmdletBinding()]
-param(`$RoomDir, `$RoleName, `$Prompt, `$TimeoutSeconds, `$InstanceId, `$WorkingDir, `$Model)
-return @{
-    ExitCode = 0
-    TimedOut = `$false
-    Output = "Just some random output."
-}
-"@ | Out-File $script:mockInvokeAgent -Encoding utf8
-
-        & $script:StartDynamicRole -RoomDir $script:roomDir `
-            -OverrideInvokeAgent $script:mockInvokeAgent `
-            -OverridePostMessage $script:mockPostMessage `
-            -OverrideGetRoleDef $script:mockGetRoleDef
-
-        $args = Get-Content $script:postMessageArgsFile -Raw | ConvertFrom-Json
-        $args.Type | Should -Be "fail"
-        $args.Body | Should -Be "Just some random output."
+        $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
+        $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
     }
 }

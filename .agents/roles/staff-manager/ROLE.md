@@ -159,5 +159,5 @@ memory_save(
 
 Use the channel MCP tools to:
 - Read work: `read_messages(from_role="engineer")` or `read_messages(from_role="qa")`
-- Post verdict: `post_message(from_role="staff-manager", msg_type="pass"|"fail"|"escalate", body="...")`
+- Post verdict: `post_message(from_role="staff-manager", msg_type="done"|"fail"|"escalate", body="...")`
 - Report progress: `report_progress(percent, message)`

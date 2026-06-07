@@ -2,7 +2,8 @@
 
 BeforeAll {
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/manager").Path ".." "..")).Path
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
 
@@ -22,33 +23,30 @@ BeforeAll {
             initial_state = "developing"
             max_retries = 3
             states = @{
-                developing = @{
-                    role = "engineer"
-                    type = "work"
-                    signals = @{
-                        done = @{ target = "review" }
-                        error = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
-                optimize = @{
-                    role = "engineer"
-                    type = "work"
-                    signals = @{
-                        done = @{ target = "review" }
-                        error = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
-                review = @{
-                    role = "qa"
-                    type = "review"
-                    signals = @{
-                        pass     = @{ target = "passed" }
-                        done     = @{ target = "passed" }
-                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
-                        escalate = @{ target = "triage" }
-                        error    = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
+	                developing = @{
+	                    role = "engineer"
+	                    type = "work"
+	                    signals = @{
+	                        done = @{ target = "review" }
+	                    }
+	                }
+	                optimize = @{
+	                    role = "engineer"
+	                    type = "work"
+	                    signals = @{
+	                        done = @{ target = "review" }
+	                    }
+	                }
+	                review = @{
+	                    role = "qa"
+	                    type = "review"
+	                    signals = [ordered]@{
+	                        done     = @{ target = "passed" }
+		                        pass     = @{ target = "passed" }
+		                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
+	                        escalate = @{ target = "triage" }
+	                    }
+	                }
                 triage = @{
                     role = "manager"
                     type = "triage"
@@ -158,7 +156,7 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             $status | Should -Be "review"
         }
 
-        It "review → passed (pass signal)" {
+        It "review → passed (done signal)" {
             & $script:NewWarRoom -RoomId "room-012" -TaskRef "TASK-012" `
                                  -TaskDescription "Test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-012"
@@ -415,13 +413,12 @@ Classified as implementation bug. Engineer should fix.
             $roomDir = Join-Path $script:warRoomsDir "room-130"
             Write-V2Lifecycle -RoomDir $roomDir -Override @{
                 developing = @{
-                    role = "architect"; type = "work"
-                    signals = @{
-                        done = @{ target = "review" }
-                        error = @{ target = "failed"; actions = @("increment_retries") }
-                    }
-                }
-            }
+	                    role = "architect"; type = "work"
+	                    signals = @{
+	                        done = @{ target = "review" }
+	                    }
+	                }
+	            }
             & $script:PostMessage -RoomDir $roomDir -From "architect" -To "manager" `
                                   -Type "done" -Ref "EPIC-130" `
                                   -Body "RECOMMENDATION: FIX`n`nPlease install dependencies and configure design tokens."
@@ -451,10 +448,10 @@ Classified as implementation bug. Engineer should fix.
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.optimize | Should -Not -BeNullOrEmpty
-            $lc.states.optimize.role | Should -Be "engineer"
-            $lc.states.optimize.type | Should -Be "work"
-            $lc.states.optimize.signals.done.target | Should -Be "review"
-            $lc.states.optimize.signals.error.target | Should -Be "failed"
+	            $lc.states.optimize.role | Should -Be "engineer"
+	            $lc.states.optimize.type | Should -Be "work"
+	            $lc.states.optimize.signals.done.target | Should -Be "review"
+	            $lc.states.optimize.signals.PSObject.Properties.Name | Should -Not -Contain "error"
         }
 
         It "pipeline review.fail targets optimize (incremental fix)" {
@@ -469,20 +466,21 @@ Classified as implementation bug. Engineer should fix.
             $lc.states.triage.signals.fix.target  | Should -Be "optimize"
         }
 
-        It "review signals include pass/fail/escalate" {
+        It "review signals include done/pass/fail/escalate" {
             & $script:NewWarRoom -RoomId "room-132" -TaskRef "TASK-132" `
                                  -TaskDescription "Review signals" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-132"
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.review.signals.pass.target     | Should -Be "passed"
-            # review.fail → optimize (incremental fix cycle, NOT full developing restart)
-            $lc.states.review.signals.fail.target     | Should -Be "optimize"
-            $lc.states.review.signals.escalate.target | Should -Be "triage"
-            $lc.states.review.signals.error.target    | Should -Be "failed"
+            $lc.states.review.signals.done.target     | Should -Be "passed"
+            $lc.states.review.signals.pass.target     | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+	            # review.fail → optimize (incremental fix cycle, NOT full developing restart)
+	            $lc.states.review.signals.fail.target     | Should -Be "optimize"
+	            $lc.states.review.signals.escalate.target | Should -Be "triage"
+	            $lc.states.review.signals.PSObject.Properties.Name | Should -Not -Contain "error"
         }
 
-        It "fail signal includes increment_retries and post_fix actions" {
+        It "fail signal includes retry bookkeeping and post_fix compatibility action" {
             & $script:NewWarRoom -RoomId "room-133" -TaskRef "TASK-133" `
                                  -TaskDescription "Fail actions" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-133"
@@ -537,14 +535,13 @@ Classified as implementation bug. Engineer should fix.
             ($retries -ge $maxRetries) | Should -BeTrue
         }
 
-        It "failed-final with no fail/error messages stays terminal" {
+	        It "failed-final with no fail feedback stays terminal" {
             & $script:NewWarRoom -RoomId "room-122" -TaskRef "TASK-122" `
                                  -TaskDescription "No feedback" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-122"
             "failed-final" | Out-File -FilePath (Join-Path $roomDir "status") -NoNewline
             $failMsgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -AsObject
-            $errorMsgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "error" -AsObject
-            ($failMsgs.Count + $errorMsgs.Count) | Should -Be 0
+	            $failMsgs.Count | Should -Be 0
         }
     }
 
@@ -589,7 +586,7 @@ Classified as implementation bug. Engineer should fix.
             $roomDir = Join-Path $script:warRoomsDir "room-200"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
 
-            # Post a done message (Post-Message writes ISO-8601 ts)
+            # Seed a done message with an ISO-8601 timestamp.
             & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "TASK-200" -Body "Work complete"
 
@@ -846,9 +843,15 @@ Context "PLAN-REVIEW Verdict Logic" {
         $rejected | Should -BeTrue
     }
 
-    It "detects VERDICT: PASS from done body" {
+    It "detects VERDICT: DONE from done body" {
+        $doneBody = "I have reviewed this plan and my decision is:`n`nVERDICT: DONE"
+        $approved = ($doneBody -match 'VERDICT:\s*(DONE|PASS)|plan-approve|signoff|APPROVED')
+        $approved | Should -BeTrue
+    }
+
+    It "still detects legacy VERDICT: PASS from done body" {
         $doneBody = "I have reviewed this plan and my decision is:`n`nVERDICT: PASS"
-        $approved = ($doneBody -match 'VERDICT:\s*PASS|plan-approve|signoff|APPROVED')
+        $approved = ($doneBody -match 'VERDICT:\s*(DONE|PASS)|plan-approve|signoff|APPROVED')
         $approved | Should -BeTrue
     }
 }
@@ -948,7 +951,7 @@ Context "PLAN-REVIEW Verdict Logic" {
     }
 
     Context "Exploit — LEAK-8: failed-final rescue requires feedback message" {
-        It "rescue to triage only fires when fail/error message exists" {
+	        It "rescue to triage only fires when fail feedback exists" {
             & $script:NewWarRoom -RoomId "room-330" -TaskRef "TASK-330" `
                                  -TaskDescription "Rescue guard" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-330"
@@ -956,12 +959,10 @@ Context "PLAN-REVIEW Verdict Logic" {
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed-final"
             "1" | Out-File -FilePath (Join-Path $roomDir "retries") -NoNewline
 
-            # No fail/error messages — rescue should NOT fire
-            $failMsg = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -Last 1 -AsObject
-            $errorMsg = & $script:ReadMessages -RoomDir $roomDir -FilterType "error" -Last 1 -AsObject
-            $failMsg.Count | Should -Be 0
-            $errorMsg.Count | Should -Be 0
-            # Room should stay in failed-final (no rescue)
+	            # No fail message — rescue should NOT fire
+	            $failMsg = & $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -Last 1 -AsObject
+	            $failMsg.Count | Should -Be 0
+	            # Room should stay in failed-final (no rescue)
         }
 
         It "rescue to triage fires when fail message exists" {
@@ -1020,16 +1021,16 @@ Context "PLAN-REVIEW Verdict Logic" {
         }
     }
 
-    Context "PLAN-REVIEW shortcut detects pass signal (architect aligned with QA)" {
-        It "shortcut detects 'pass' message from architect and approves" {
+    Context "PLAN-REVIEW shortcut detects done and legacy pass signals" {
+        It "shortcut detects 'done' message from architect and approves" {
             & $script:NewWarRoom -RoomId "room-400" -TaskRef "PLAN-REVIEW" `
                                  -TaskDescription "Arch pass test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-400"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
 
-            # Architect posts a 'pass' signal (our new behavior — no 'done')
+            # Architect posts a current 'done' signal.
             & $script:PostMessage -RoomDir $roomDir -From "architect" -To "manager" `
-                                  -Type "pass" -Ref "PLAN-REVIEW" -Body "Plan looks good.`n`nVERDICT: PASS"
+                                  -Type "done" -Ref "PLAN-REVIEW" -Body "Plan looks good.`n`nVERDICT: DONE"
 
             # Simulate the PLAN-REVIEW shortcut logic from the manager
             $passCount    = (& $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -AsObject).Count
@@ -1041,11 +1042,11 @@ Context "PLAN-REVIEW Verdict Logic" {
                 $approved = $true
             } elseif ($doneCount -gt 0) {
                 $doneBody = (& $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject)[-1].body
-                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*PASS') { $approved = $true }
+                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*(DONE|PASS)') { $approved = $true }
             }
 
-            $passCount | Should -Be 1
-            $doneCount | Should -Be 0
+            $passCount | Should -Be 0
+            $doneCount | Should -Be 1
             $approved  | Should -BeTrue
         }
 
@@ -1067,7 +1068,7 @@ Context "PLAN-REVIEW Verdict Logic" {
                 $approved = $true
             } elseif ($doneCount -gt 0) {
                 $doneBody = (& $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject)[-1].body
-                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*PASS') { $approved = $true }
+                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*(DONE|PASS)') { $approved = $true }
             }
 
             $passCount | Should -Be 0
@@ -1123,11 +1124,11 @@ Context "PLAN-REVIEW Verdict Logic" {
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # Post signal now (will be > pastEpoch)
-            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-410" -Body "VERDICT: PASS"
+	            # Post signal now (will be > pastEpoch)
+	            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
+	                                  -Type "done" -Ref "TASK-410" -Body "VERDICT: DONE"
 
-            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -Last 1 -AsObject
+	            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $latest = $msgs[0]
             $msgTs = 0
             if ($latest.ts -is [datetime]) {
@@ -1144,15 +1145,15 @@ Context "PLAN-REVIEW Verdict Logic" {
                                  -TaskDescription "Stale signal rejection" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-411"
 
-            # Post signal first
-            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-411" -Body "VERDICT: PASS"
+	            # Post signal first
+	            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
+	                                  -Type "done" -Ref "TASK-411" -Body "VERDICT: DONE"
 
             # Set state_changed_at to future (simulates state reset after the message)
             $futureEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 60
             $futureEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -Last 1 -AsObject
+	            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $latest = $msgs[0]
             $msgTs = 0
             if ($latest.ts -is [datetime]) {
@@ -1169,12 +1170,12 @@ Context "PLAN-REVIEW Verdict Logic" {
                                  -TaskDescription "Same-second rejection" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-412"
 
-            # Post signal now
-            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-412" -Body "VERDICT: PASS"
+	            # Post signal now
+	            & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
+	                                  -Type "done" -Ref "TASK-412" -Body "VERDICT: DONE"
 
-            # Read the message ts and set state_changed_at to the SAME epoch
-            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -Last 1 -AsObject
+	            # Read the message ts and set state_changed_at to the SAME epoch
+	            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "done" -Last 1 -AsObject
             $latest = $msgs[0]
             $msgTs = 0
             if ($latest.ts -is [datetime]) {
@@ -1226,8 +1227,8 @@ Context "PLAN-REVIEW Verdict Logic" {
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-                    developing     = @{ role = "game-engineer";  type = "work"; signals = @{ done = @{ target = "game-designer" }; error = @{ target = "failed" } } }
-                    'game-designer' = @{ role = "game-designer"; type = "work"; signals = @{ done = @{ target = "review" }; error = @{ target = "failed" } } }
+	                    developing     = @{ role = "game-engineer";  type = "work"; signals = @{ done = @{ target = "game-designer" } } }
+	                    'game-designer' = @{ role = "game-designer"; type = "work"; signals = @{ done = @{ target = "review" } } }
                     review         = @{ role = "game-qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; fail = @{ target = "developing" } } }
                     passed         = @{ type = "terminal" }
                     failed         = @{ type = "terminal" }
@@ -1266,8 +1267,8 @@ Context "PLAN-REVIEW Verdict Logic" {
             @{
                 version = 2; initial_state = "developing"; max_retries = 3
                 states = @{
-                    developing      = @{ role = "game-engineer";  type = "work";   signals = @{ done = @{ target = "game-designer" }; error = @{ target = "failed" } } }
-                    'game-designer' = @{ role = "game-designer"; type = "work";   signals = @{ done = @{ target = "review" }; error = @{ target = "failed" } } }
+	                    developing      = @{ role = "game-engineer";  type = "work";   signals = @{ done = @{ target = "game-designer" } } }
+	                    'game-designer' = @{ role = "game-designer"; type = "work";   signals = @{ done = @{ target = "review" } } }
                     review          = @{ role = "game-qa";        type = "review"; signals = @{ pass = @{ target = "passed" }; done = @{ target = "passed" }; fail = @{ target = "developing" } } }
                     passed          = @{ type = "terminal" }
                     failed          = @{ type = "terminal" }
@@ -1400,9 +1401,9 @@ Context "PLAN-REVIEW Verdict Logic" {
     }
 
     Context "Full architect lifecycle: review → passed" {
-        It "architect pass signal transitions room to passed via Find-LatestSignal" {
+        It "architect done signal transitions room to passed via Find-LatestSignal" {
             & $script:NewWarRoom -RoomId "room-420" -TaskRef "TASK-420" `
-                                 -TaskDescription "Full pass lifecycle" -WarRoomsDir $script:warRoomsDir
+                                 -TaskDescription "Full done lifecycle" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-420"
 
             # Write architect-style lifecycle
@@ -1412,8 +1413,8 @@ Context "PLAN-REVIEW Verdict Logic" {
                     review = @{
                         role = "architect"; type = "review"
                         signals = @{
-                            pass = @{ target = "passed" }
-                            done = @{ target = "passed" }
+	                            done = @{ target = "passed" }
+	                            pass = @{ target = "passed" }
                             fail = @{ target = "failed"; actions = @("increment_retries") }
                         }
                     }
@@ -1428,9 +1429,9 @@ Context "PLAN-REVIEW Verdict Logic" {
             $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
             $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # Architect posts 'pass' signal
-            & $script:PostMessage -RoomDir $roomDir -From "architect" -To "manager" `
-                                  -Type "pass" -Ref "TASK-420" -Body "Architecture approved.`n`nVERDICT: PASS"
+	            # Architect posts current 'done' signal
+	            & $script:PostMessage -RoomDir $roomDir -From "architect" -To "manager" `
+	                                  -Type "done" -Ref "TASK-420" -Body "Architecture approved.`n`nVERDICT: DONE"
 
             # Simulate lifecycle-driven Find-LatestSignal
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
@@ -1459,7 +1460,7 @@ Context "PLAN-REVIEW Verdict Logic" {
                 }
             }
 
-            $matchedSignal | Should -Be "pass"
+	            $matchedSignal | Should -Be "done"
 
             # Apply transition
             $targetState = $lc.states.review.signals.$matchedSignal.target
@@ -1767,113 +1768,68 @@ Context "PLAN-REVIEW Verdict Logic" {
     }
 
     # ========================================================================
-    # Review state error signal (evaluator crash → failed lifecycle transition)
+    # Runtime failures are manager-owned orchestration events, not signals
     # ========================================================================
-    Context "Review state error signal — evaluator crash handling" {
-        It "review state lifecycle includes error signal targeting failed" {
+    Context "Runtime failure handling outside lifecycle signals" {
+        It "review state lifecycle does not include error as a signal" {
             & $script:NewWarRoom -RoomId "room-re-01" -TaskRef "TASK-RE01" `
-                                 -TaskDescription "Review error signal" -WarRoomsDir $script:warRoomsDir
+                                 -TaskDescription "Review runtime failure" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-re-01"
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.review.signals.error | Should -Not -BeNullOrEmpty
-            $lc.states.review.signals.error.target | Should -Be "failed"
-            $lc.states.review.signals.error.actions | Should -Contain "increment_retries"
+            $lc.states.review.signals.PSObject.Properties.Name | Should -Not -Contain "error"
         }
 
-        It "review → failed (error signal from crashed QA agent)" {
-            & $script:NewWarRoom -RoomId "room-re-02" -TaskRef "TASK-RE02" `
-                                 -TaskDescription "Review error transition" -WarRoomsDir $script:warRoomsDir
-            $roomDir = Join-Path $script:warRoomsDir "room-re-02"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
-            $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "failed"
-            $audit = Get-Content (Join-Path $roomDir "audit.log") -Raw
-            $audit | Should -Match "review -> failed"
-        }
+        It "legacy error channel messages are ignored by Find-LatestSignal" {
+            $helpersModule = Join-Path $script:agentsDir "roles" "manager" "ManagerLoop-Helpers.psm1"
+            Import-Module $helpersModule -Force
+            Set-ManagerLoopContext -Context @{ readMessages = $script:ReadMessages }
 
-        It "error signal from correct role (qa) is accepted by Find-LatestSignal" {
             & $script:NewWarRoom -RoomId "room-re-03" -TaskRef "TASK-RE03" `
-                                 -TaskDescription "Error sender match" -WarRoomsDir $script:warRoomsDir
+                                 -TaskDescription "Legacy error ignored" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-re-03"
             Write-V2Lifecycle -RoomDir $roomDir
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
+            ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10).ToString() |
+                Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            # Set state_changed_at to past
-            $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
-            $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
-
-            # QA agent crashes and posts error
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                   -Type "error" -Ref "TASK-RE03" -Body "qa exited with code 1: MCP schema error"
+                                   -Type "error" -Ref "TASK-RE03" -Body "legacy wrapper error"
 
-            # Verify error message is in the channel
-            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "error" -Last 1 -AsObject
-            $msgs.Count | Should -Be 1
-            $msgs[0].from | Should -Be "qa"
-
-            # Verify lifecycle-driven signal detection would match
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $expectedSignals = @($lc.states.review.signals.PSObject.Properties.Name)
-            $expectedSignals | Should -Contain "error"
+            Find-LatestSignal -RoomDir $roomDir -Lifecycle $lc -StateName "review" | Should -BeNull
 
-            # Verify sender matches expected role
-            $expectedRole = ($lc.states.review.role -replace ':.*$', '')
-            $expectedRole | Should -Be "qa"
-            ($msgs[0].from -replace ':.*$', '') | Should -Be $expectedRole
+            Remove-Module ManagerLoop-Helpers -ErrorAction SilentlyContinue
         }
 
-        It "error signal from wrong role (engineer) is rejected in review state" {
+        It "fresh failed role config is detected for manager failed-state routing" {
+            $helpersModule = Join-Path $script:agentsDir "roles" "manager" "ManagerLoop-Helpers.psm1"
+            Import-Module $helpersModule -Force
+
             & $script:NewWarRoom -RoomId "room-re-04" -TaskRef "TASK-RE04" `
-                                 -TaskDescription "Error sender mismatch" -WarRoomsDir $script:warRoomsDir
+                                 -TaskDescription "Failed role status" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-re-04"
             Write-V2Lifecycle -RoomDir $roomDir
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
+            $changedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 1
+            $changedAt.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
 
-            $pastEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 10
-            $pastEpoch.ToString() | Out-File -FilePath (Join-Path $roomDir "state_changed_at") -NoNewline
+            @{
+                role = "qa"
+                instance_id = "001"
+                status = "failed"
+                status_updated_epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $roomDir "qa_001.json") -Encoding utf8
 
-            # Engineer posts error (wrong sender for review state)
-            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
-                                   -Type "error" -Ref "TASK-RE04" -Body "engineer crashed"
+            $failedRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role "qa"
+            $failedRun | Should -Not -BeNullOrEmpty
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
+            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
 
-            $msgs = & $script:ReadMessages -RoomDir $roomDir -FilterType "error" -Last 1 -AsObject
-            $msgs.Count | Should -Be 1
-
-            # Verify sender validation would REJECT this signal
-            $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $expectedRole = ($lc.states.review.role -replace ':.*$', '')
-            $senderBase = ($msgs[0].from -replace ':.*$', '')
-            $senderBase | Should -Not -Be $expectedRole `
-                -Because "engineer error in review state must be rejected — only qa signals are valid"
+            Remove-Module ManagerLoop-Helpers -ErrorAction SilentlyContinue
         }
     }
 
-    # ========================================================================
-    # Ephemeral agent sender identity — error messages must use assigned role
-    # ========================================================================
-    Context "Ephemeral agent error sender identity" {
-        It "Start-EphemeralAgent.ps1 error messages use assigned role, not hardcoded 'engineer'" {
-            $ephemeralScript = Join-Path $script:agentsDir "roles" "_base" "Start-EphemeralAgent.ps1"
-            $content = Get-Content $ephemeralScript -Raw
-
-            # The Cleanup-And-Exit function must use $assignedRole in the From parameter
-            $content | Should -Match 'From \$assignedRole' `
-                -Because "error messages must use the actual role identity, not a hardcoded value"
-            $content | Should -Not -Match 'From "engineer".*-Type "error"' `
-                -Because "hardcoded 'engineer' sender causes Find-LatestSignal rejection for non-engineer roles"
-        }
-
-        It "Start-DynamicRole.ps1 error messages use baseRole variable" {
-            $dynamicRoleScript = Join-Path $script:agentsDir "roles" "_base" "Start-DynamicRole.ps1"
-            $content = Get-Content $dynamicRoleScript -Raw
-
-            # Both error paths (non-zero exit and timeout) must use $baseRole
-            $content | Should -Match 'From \$baseRole.*-Type "error"' `
-                -Because "dynamic role runner must identify itself correctly in error messages"
-        }
-    }
     # ========================================================================
     # Deadlock recovery risk fixes (Risk 2, 3, 4, 6)
     # ========================================================================
@@ -2763,40 +2719,8 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
         $rd = Copy-SampleRoom "lifecycle-routing"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         $lc.states.review.signals.fail.target | Should -Be "optimize" -Because "review.fail must route to optimize, not back to developing"
-        $lc.states.review.signals.fail.actions | Should -Contain "post_fix" -Because "review.fail must trigger post_fix to notify the fixer"
+        $lc.states.review.signals.fail.actions | Should -Contain "post_fix" -Because "review.fail keeps the compatibility action; manager treats channel writes as MCP-only"
         $lc.states.review.signals.fail.actions | Should -Contain "increment_retries"
-    }
-
-    # -----------------------------------------------------------------------
-    It "review.fail post_fix sends fix message to game-engineer (optimize role), NOT game-qa (review role)" {
-        # REGRESSION TEST for the post_fix role-routing bug:
-        # When game-qa posts 'fail' in review state, Invoke-SignalActions with post_fix
-        # must address the fix message to 'game-engineer' (the target optimize state's role),
-        # NOT back to 'game-qa' (the current review state's role).
-        $rd = Copy-SampleRoom "fix-routing-regression"
-        $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
-        Set-SampleContext -RoomsParent (Split-Path $rd -Parent)
-
-        # Reset state_changed_at so signals are accepted
-        "0" | Out-File (Join-Path $rd "state_changed_at") -Encoding utf8 -NoNewline
-
-        # game-qa posts fail (as happens in the review state)
-        & $script:PostMessage -RoomDir $rd -From "game-qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "Level boundaries fail: snake spawns outside grid"
-
-        # Simulate what the manager does on review.fail:
-        # 1. Resolves targetRole from lifecycle.states.optimize.role
-        $targetRole = $lc.states.optimize.role    # should be 'game-engineer'
-        $targetRole | Should -Be "game-engineer"
-
-        # 2. Calls Invoke-SignalActions with the TARGET role (not the current review role)
-        $failActions = @($lc.states.review.signals.fail.actions)
-        Invoke-SignalActions -RoomDir $rd -Actions $failActions -TaskRef "EPIC-001" -BaseRole $targetRole
-
-        # 3. Read back the fix message and assert recipient
-        $fixMsgs = & $script:ReadMessages -RoomDir $rd -FilterType "fix" -AsObject
-        $fixMsgs | Should -Not -BeNullOrEmpty -Because "post_fix must write a fix message to the channel"
-        $fixMsgs[-1].to   | Should -Be "game-engineer"  -Because "fix must go to the fixer (game-engineer), NOT the reviewer (game-qa)"
-        $fixMsgs[-1].body | Should -Be "Level boundaries fail: snake spawns outside grid"
     }
 
     # -----------------------------------------------------------------------
@@ -2807,7 +2731,14 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "review.pass routes to passed (terminal) per sample lifecycle" {
+    It "review.done routes to passed (terminal) per sample lifecycle" {
+        $rd = Copy-SampleRoom "lifecycle-review-done-routing"
+        $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
+        $lc.states.review.signals.done.target | Should -Be "passed"
+    }
+
+    # -----------------------------------------------------------------------
+    It "review.pass remains accepted as legacy success signal per sample lifecycle" {
         $rd = Copy-SampleRoom "lifecycle-pass-routing"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
         $lc.states.review.signals.pass.target | Should -Be "passed"

@@ -300,35 +300,6 @@ function Write-PidFile {
     }
 }
 
-function Write-ChannelLine {
-    <#
-    .SYNOPSIS
-        Appends a single JSON line to a channel.jsonl file under an exclusive file lock.
-    .DESCRIPTION
-        Uses Invoke-WithFileLock to ensure concurrent writers do not interleave
-        or corrupt JSONL lines in the channel file.
-    .PARAMETER ChannelFile
-        Path to the channel.jsonl file.
-    .PARAMETER JsonLine
-        The JSON string to append (should be a single line, no trailing newline).
-    .EXAMPLE
-        Write-ChannelLine -ChannelFile "/rooms/room-001/channel.jsonl" -JsonLine '{"type":"task","body":"hello"}'
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$ChannelFile,
-
-        [Parameter(Mandatory)]
-        [string]$JsonLine
-    )
-
-    $lockFile = "$ChannelFile.lock"
-    Invoke-WithFileLock -LockFile $lockFile -ScriptBlock {
-        $JsonLine | Out-File -Append -FilePath $ChannelFile -Encoding utf8
-    }
-}
-
 function Get-TruncatedText {
     <#
     .SYNOPSIS
@@ -408,4 +379,4 @@ function Get-OstwinApiHeaders {
     return @{}
 }
 
-Export-ModuleMember -Function Read-OstwinConfig, Set-WarRoomStatus, Test-PidAlive, Write-PidFile, Write-ChannelLine, Get-TruncatedText, Get-OstwinAgentsDir, Test-Underspecified, Test-SingleEpicUnderspecified, Get-OstwinApiHeaders
+Export-ModuleMember -Function Read-OstwinConfig, Set-WarRoomStatus, Test-PidAlive, Write-PidFile, Get-TruncatedText, Get-OstwinAgentsDir, Test-Underspecified, Test-SingleEpicUnderspecified, Get-OstwinApiHeaders

@@ -34,12 +34,13 @@ $scriptDir = $PSScriptRoot
 $agentsDir = (Resolve-Path (Join-Path $scriptDir ".." "..")).Path
 $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import logging ---
 $logModule = Join-Path $agentsDir "lib" "Log.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
+$lifecycleSignalModule = Join-Path $agentsDir "roles" "_base" "LifecycleSignal.psm1"
+if (Test-Path $lifecycleSignalModule) { Import-Module $lifecycleSignalModule -Force }
 
 # --- Load config ---
 $configPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
@@ -56,10 +57,14 @@ if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = 300 }
 # --- Read/Create per-role config file (architect_{id}.json) ---
 $archConfigs = Get-ChildItem -Path $RoomDir -Filter "architect_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
 if ($archConfigs) {
-    $archRoleConfig = Get-Content $archConfigs[0].FullName -Raw | ConvertFrom-Json
-    $archRoleConfig.status = "active"
-    $archRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archConfigs[0].FullName -Encoding utf8
     $archRoleConfigFile = $archConfigs[0].FullName
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status "active" -ConfigFile $archRoleConfigFile | Out-Null
+    } else {
+        $archRoleConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
+        $archRoleConfig.status = "active"
+        $archRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    }
 }
 else {
     $archModel = "google-vertex/gemini-3-flash-preview"
@@ -79,6 +84,9 @@ else {
     }
     $archRoleConfigFile = Join-Path $RoomDir "architect_001.json"
     $archRoleConfigObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status "active" -ConfigFile $archRoleConfigFile | Out-Null
+    }
 }
 
 # --- Read task ref ---
@@ -127,6 +135,18 @@ try {
 }
 catch { }
 
+# --- Read latest plan review/update body for PLAN-REVIEW rooms ---
+$planReviewBody = ""
+if ($taskRef -eq 'PLAN-REVIEW') {
+    try {
+        $planMsgs = & $readMessages -RoomDir $RoomDir -FilterFrom "manager" -FilterType @('review', 'plan-update') -Last 1 -AsObject
+        if ($planMsgs -and $planMsgs.Count -gt 0) {
+            $planReviewBody = $planMsgs[-1].body
+        }
+    }
+    catch { }
+}
+
 # --- Read role prompt (supports both ROLE.md and SKILL.md) ---
 $rolePrompt = ""
 foreach ($promptFile in @("ROLE.md", "SKILL.md")) {
@@ -155,9 +175,17 @@ If approving, call `memory_save` with the plan-review decision before posting `p
 Do NOT use `signoff` for plan review approval.
 
 IMPORTANT: Your response MUST conclude with exactly one of these lines:
-  VERDICT: PASS
+  VERDICT: DONE
   VERDICT: REJECT
 "@
+    if ($planReviewBody) {
+        $extraContext += @"
+
+## Current Plan Review Body
+
+$planReviewBody
+"@
+    }
 }
 else {
     $extraContext = @"
@@ -170,9 +198,17 @@ You have been called to provide architectural oversight.
 Provide detailed technical guidance and architectural advice for the current state.
 
 IMPORTANT: Your response MUST conclude with exactly one of these lines:
-  VERDICT: PASS
+  VERDICT: DONE
   VERDICT: REJECT
 "@
+    if ($managerRequest) {
+        $extraContext += @"
+
+## Manager Request
+
+$managerRequest
+"@
+    }
 }
 
 $prompt = & $buildPrompt -RoleName "architect" -RolePath $scriptDir `
@@ -192,6 +228,11 @@ $result = & $invokeAgent -RoomDir $RoomDir -RoleName "architect" `
                          -Prompt $prompt -TimeoutSeconds $TimeoutSeconds
 
 $rawOutput = $result.Output
+$outputArtifact = if ($result.PSObject.Properties.Name -contains "OutputFile" -and $result.OutputFile) {
+    "artifacts/$(Split-Path $result.OutputFile -Leaf)"
+} else {
+    "agent output"
+}
 
 # --- Strip tool-calling noise from agent output ---
 $cleanLines = ($rawOutput -split "`r?\n") | Where-Object {
@@ -219,62 +260,89 @@ if (-not $output) {
     $output = $rawOutput
 }
 
-$verdict = ""
-
-# Strategy 1: Line starts with VERDICT:
-if ($output -match '(?m)^VERDICT:\s*(PASS|REJECT)') {
-    $verdict = $Matches[1].ToUpper()
+$verdict = if (Get-Command Get-AgentVerdict -ErrorAction SilentlyContinue) {
+    Get-AgentVerdict -Output $output
+} else {
+    ""
 }
 
-# Strategy 2: VERDICT: anywhere in a line
-if (-not $verdict -and $output -match 'VERDICT:\s*(PASS|REJECT)') {
-    $verdict = $Matches[1].ToUpper()
-}
-
-# Strategy 3: standalone PASS/REJECT in first 20 lines
+# Fallback for older installs without LifecycleSignal.psm1 loaded.
 if (-not $verdict) {
-    $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
-    if ($first20 -match '\b(PASS|REJECT)\b') {
+    # Strategy 1: Line starts with VERDICT:
+    if ($output -match '(?m)^VERDICT:\s*(DONE|PASS|REJECT)') {
         $verdict = $Matches[1].ToUpper()
+    }
+
+    # Strategy 2: VERDICT: anywhere in a line
+    if (-not $verdict -and $output -match 'VERDICT:\s*(DONE|PASS|REJECT)') {
+        $verdict = $Matches[1].ToUpper()
+    }
+
+    # Strategy 3: standalone DONE/REJECT in first 20 lines. PASS is accepted only as legacy compatibility.
+    if (-not $verdict) {
+        $first20 = ($output -split "`n" | Select-Object -First 20) -join "`n"
+        if ($first20 -match '\b(DONE|PASS|REJECT)\b') {
+            $verdict = $Matches[1].ToUpper()
+        }
     }
 }
 
 # --- Default VERDICT injection for Evaluator consistency ---
-# If architect gave feedback but forgot the keyword, assume PASS for oversight roles
+# If architect gave feedback but forgot the keyword, assume DONE for oversight roles
 if (-not $verdict) {
-    $verdict = "PASS"
-    $output += "`n`nVERDICT: PASS"
+    $verdict = "DONE"
+    $output += "`n`nVERDICT: DONE"
 }
 
-# --- Post result to channel ---
+$displayVerdict = if ($verdict -eq "PASS") { "DONE" } else { $verdict }
+$successSignal = if (Get-Command Get-PreferredLifecycleSuccessSignal -ErrorAction SilentlyContinue) {
+    Get-PreferredLifecycleSuccessSignal -RoomDir $RoomDir -DefaultSignal "done"
+} else { "done" }
+$signalType = if (Get-Command Convert-VerdictToLifecycleSignal -ErrorAction SilentlyContinue) {
+    Convert-VerdictToLifecycleSignal -Verdict $verdict -DefaultSuccessSignal $successSignal
+} else {
+    switch ($verdict) {
+        "DONE"   { $successSignal }
+        "PASS"   { $successSignal }
+        "REJECT" { "fail" }
+        default  { "" }
+    }
+}
+
+# --- Handle agent result ---
 if ($result.TimedOut) {
-    & $postMessage -RoomDir $RoomDir -From "architect" -To "manager" `
-                   -Type "error" -Ref $taskRef -Body "Architect timed out after ${TimeoutSeconds}s"
+    $signalType = ""
+    $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level ERROR -Message "Timed out on $taskRef after ${TimeoutSeconds}s."
     }
 }
-elseif ($verdict -eq "PASS") {
-    & $postMessage -RoomDir $RoomDir -From "architect" -To "manager" `
-                   -Type "pass" -Ref $taskRef -Body $output
+elseif ($result.ExitCode -ne 0) {
+    $signalType = ""
+    $displayVerdict = "ERROR"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level INFO -Message "PASSED $taskRef."
+        Write-OstwinLog -Level ERROR -Message "Architect agent failed on $taskRef with exit code $($result.ExitCode)."
     }
 }
-elseif ($verdict -eq "REJECT") {
-    & $postMessage -RoomDir $RoomDir -From "architect" -To "manager" `
-                   -Type "fail" -Ref $taskRef -Body $output
+elseif ($signalType -in @("done", "pass")) {
+    if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
+        Write-OstwinLog -Level INFO -Message "DONE $taskRef."
+    }
+}
+elseif ($signalType -eq "fail") {
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
         Write-OstwinLog -Level INFO -Message "REJECTED $taskRef."
     }
 }
 else {
-    & $postMessage -RoomDir $RoomDir -From "architect" -To "manager" `
-                   -Type "error" -Ref $taskRef `
-                   -Body "Could not parse Architect verdict. Full output: $output"
     if (Get-Command Write-OstwinLog -ErrorAction SilentlyContinue) {
-        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — posting as error."
+        Write-OstwinLog -Level WARN -Message "Could not parse verdict for $taskRef — leaving lifecycle signal empty."
     }
+}
+
+if ($signalType -and (Get-Command Write-LifecycleSignal -ErrorAction SilentlyContinue)) {
+    $body = "VERDICT: $displayVerdict`n`narchitect completed $taskRef with lifecycle signal '$signalType'. Full output: $outputArtifact"
+    Write-LifecycleSignal -RoomDir $RoomDir -FromRole "architect" -Type $signalType -Ref $taskRef -Body $body -SkipIfFresh | Out-Null
 }
 
 # --- PID file is NOT removed here (manager-owned lifecycle) ---
@@ -284,9 +352,14 @@ else {
 
 # --- Update per-role config status ---
 if (Test-Path $archRoleConfigFile) {
-    $archFinalConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
-    $archFinalConfig.status = if ($result.ExitCode -eq 0) { "completed" } else { "failed" }
-    $archFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    $finalStatus = if ($signalType -in @("done", "pass")) { "completed" } else { "failed" }
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName "architect" -Status $finalStatus -ConfigFile $archRoleConfigFile | Out-Null
+    } else {
+        $archFinalConfig = Get-Content $archRoleConfigFile -Raw | ConvertFrom-Json
+        $archFinalConfig.status = $finalStatus
+        $archFinalConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $archRoleConfigFile -Encoding utf8
+    }
 }
 
 exit $result.ExitCode

@@ -1,7 +1,8 @@
 # Agent OS — Wait-ForMessage Pester Tests
 
 BeforeAll {
-    $script:PostMessage = Join-Path (Resolve-Path "$PSScriptRoot/../../channel").Path "Post-Message.ps1"
+    . (Join-Path (Resolve-Path "$PSScriptRoot/..").Path "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:WaitForMessage = Join-Path (Resolve-Path "$PSScriptRoot/../../channel").Path "Wait-ForMessage.ps1"
 }
 

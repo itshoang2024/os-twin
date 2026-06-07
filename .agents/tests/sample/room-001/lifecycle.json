@@ -9,12 +9,6 @@
       "signals": {
         "done": {
           "target": "review"
-        },
-        "error": {
-          "target": "failed",
-          "actions": [
-            "increment_retries"
-          ]
         }
       }
     },
@@ -24,12 +18,6 @@
       "signals": {
         "done": {
           "target": "review"
-        },
-        "error": {
-          "target": "failed",
-          "actions": [
-            "increment_retries"
-          ]
         }
       }
     },
@@ -37,10 +25,10 @@
       "role": "game-qa",
       "type": "review",
       "signals": {
-        "pass": {
+        "done": {
           "target": "passed"
         },
-        "done": {
+        "pass": {
           "target": "passed"
         },
         "fail": {
@@ -52,12 +40,6 @@
         },
         "escalate": {
           "target": "triage"
-        },
-        "error": {
-          "target": "failed",
-          "actions": [
-            "increment_retries"
-          ]
         }
       }
     },

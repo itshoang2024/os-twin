@@ -117,9 +117,10 @@ if ($Assets -and $Assets.Count -gt 0) {
     $assetManifest += "`n"
 }
 
-# --- Initialize channel ---
-# NOTE: All subsequent writes to channel.jsonl MUST go through Write-ChannelLine
-# (from Utils.psm1) which uses Invoke-WithFileLock to prevent concurrent-append corruption.
+# --- Initialize channel file only ---
+# Channel data is authored exclusively through the ostwin-channel MCP
+# post_message tool. PowerShell wrappers may create the empty file but must not
+# append, truncate, or synthesize messages.
 New-Item -ItemType File -Path (Join-Path $roomDir "channel.jsonl") -Force | Out-Null
 
 # --- Detect Epic vs Task ---
@@ -303,9 +304,21 @@ if ($TaskDescription -match '(?sm)(^#{2,4} Tasks\s*\n.*?)(?=^#{2,4} |\z)') {
     Write-Verbose "[$RoomId / $TaskRef] brief.md body: $descCharsBefore chars (unchanged)"
 }
 
+function Test-MarkdownHeading {
+    param(
+        [string]$Content,
+        [string]$Heading
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $false }
+
+    $escapedHeading = [regex]::Escape($Heading)
+    return [regex]::IsMatch($Content, "(?im)^#{2,6}\s+$escapedHeading\s*$")
+}
+
 # --- Write assignment brief (includes DoD + AC, EXCLUDES Tasks block) ---
 $dodSection = ""
-if ($DefinitionOfDone -and $DefinitionOfDone.Count -gt 0) {
+if ($DefinitionOfDone -and $DefinitionOfDone.Count -gt 0 -and -not (Test-MarkdownHeading -Content $briefDescription -Heading "Definition of Done")) {
     $dodLines = ($DefinitionOfDone | ForEach-Object { "- [ ] $_" }) -join "`n"
     $dodSection = @"
 
@@ -316,7 +329,7 @@ $dodLines
 }
 
 $acSection = ""
-if ($AcceptanceCriteria -and $AcceptanceCriteria.Count -gt 0) {
+if ($AcceptanceCriteria -and $AcceptanceCriteria.Count -gt 0 -and -not (Test-MarkdownHeading -Content $briefDescription -Heading "Acceptance Criteria")) {
     $acLines = ($AcceptanceCriteria | ForEach-Object { "- [ ] $_" }) -join "`n"
     $acSection = @"
 
@@ -418,16 +431,14 @@ if (-not (Test-Path $lifecyclePath)) {
                     role    = $primaryRole
                     type    = 'work'
                     signals = [ordered]@{
-                        done  = [ordered]@{ target = 'review' }
-                        error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+                        done = [ordered]@{ target = 'review' }
                     }
                 }
                 optimize = [ordered]@{
                     role    = $primaryRole
                     type    = 'work'
                     signals = [ordered]@{
-                        done  = [ordered]@{ target = 'review' }
-                        error = [ordered]@{ target = 'failed'; actions = @('increment_retries') }
+                        done = [ordered]@{ target = 'review' }
                     }
                 }
                 review = [ordered]@{
@@ -480,12 +491,9 @@ if ($Lifecycle) {
 # --- Store task ref for quick lookup ---
 $TaskRef | Out-File -FilePath (Join-Path $roomDir "task-ref") -Encoding utf8 -NoNewline
 
-# --- Post initial task message to channel ---
-$PostMessage = Join-Path $PSScriptRoot ".." "channel" "Post-Message.ps1"
-if (Test-Path $PostMessage) {
-    & $PostMessage -RoomDir $roomDir -From "manager" -To $baseRole `
-                   -Type "task" -Ref $TaskRef -Body $TaskDescription
-}
+# Initial task channel messages are no longer synthesized by this wrapper.
+# The manager/epic member must post them from its agent session via MCP
+# post_message so channel.jsonl reflects actual agent behavior.
 
 # --- Output ---
 Write-Output ""
@@ -508,4 +516,3 @@ if ($assignmentType -eq 'epic') {
     Write-Output "  │  TASKS.md    → not created (type: $assignmentType)"
 }
 Write-Output "  └───────────────────────────────────────────────────────────────"
-

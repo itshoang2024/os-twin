@@ -4,7 +4,8 @@ BeforeAll {
     $script:BuildPrompt = Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path "Build-SystemPrompt.ps1"
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../../../roles/_base").Path ".." "..")).Path
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
 }
 
 Describe "Build-SystemPrompt" {
@@ -123,13 +124,13 @@ Describe "Build-SystemPrompt" {
             $prompt | Should -Not -Match "Fix Instructions"
         }
 
-        It "includes TASKS.md for epics" {
+        It "does not include TASKS.md directly" {
             "- [x] TASK-001 — Design`n- [ ] TASK-002 — Implement" |
                 Out-File (Join-Path $script:roomDir "TASKS.md") -Encoding utf8
 
             $prompt = & $script:BuildPrompt -RolePath $script:rolePath -RoomDir $script:roomDir
-            $prompt | Should -Match "Sub-Tasks"
-            $prompt | Should -Match "TASK-001"
+            $prompt | Should -Not -Match "Sub-Tasks"
+            $prompt | Should -Not -Match "TASK-001 — Design"
         }
     }
 

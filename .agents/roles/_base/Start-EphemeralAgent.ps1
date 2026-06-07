@@ -25,7 +25,6 @@ $scriptDir = $PSScriptRoot
 $agentsDir = (Resolve-Path (Join-Path $scriptDir ".." "..")).Path
 $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import logging ---
@@ -77,7 +76,6 @@ function Cleanup-And-Exit {
     param([int]$ExitCode, [string]$ErrorMsg = "")
     if ($ErrorMsg) {
         Write-Log "ERROR" "Agent Error: $ErrorMsg"
-        & $postMessage -RoomDir $RoomDir -From $assignedRole -To "manager" -Type "error" -Ref $TaskRef -Body $ErrorMsg
     }
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
     $lockFile = Join-Path $pidDir "$assignedRole.spawned_at"

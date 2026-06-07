@@ -40,7 +40,6 @@ $channelDir = Join-Path $agentsDir "channel"
 $invokeAgent = Join-Path $agentsDir "roles" "_base" "Invoke-Agent.ps1"
 $buildSystemPrompt = Join-Path $agentsDir "roles" "_base" "Build-SystemPrompt.ps1"
 $getRoleDef = Join-Path $agentsDir "roles" "_base" "Get-RoleDefinition.ps1"
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 $RoleName = "reporter"
@@ -57,6 +56,35 @@ function Write-Log {
     } else {
         Write-Host "[$Level] $Message"
     }
+}
+
+function Get-LastChannelItemBody {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $channelPath = Join-Path $RoomDir "channel.jsonl"
+    if (-not (Test-Path $channelPath)) { return $null }
+
+    $lastLine = $null
+    try {
+        foreach ($line in [System.IO.File]::ReadLines($channelPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $lastLine = $line.TrimEnd()
+            }
+        }
+    }
+    catch { return $null }
+
+    if (-not $lastLine) { return $null }
+
+    try {
+        $lastItem = $lastLine | ConvertFrom-Json
+        if ($lastItem.PSObject.Properties.Name -contains 'body') {
+            return [string]$lastItem.body
+        }
+    }
+    catch { }
+
+    return $null
 }
 
 # --- Load room config ---
@@ -86,7 +114,6 @@ function Cleanup-And-Exit {
     param([int]$ExitCode, [string]$ErrorMsg = "")
     if ($ErrorMsg) {
         Write-Log "ERROR" "[reporter] Error: $ErrorMsg"
-        & $postMessage -RoomDir $RoomDir -From $RoleName -To "manager" -Type "error" -Ref $taskRef -Body $ErrorMsg
     }
     # PID file is NOT removed here — manager-owned lifecycle
     exit $ExitCode
@@ -157,14 +184,9 @@ $isEpic = $taskRef -match '^EPIC-'
 # --- Read latest task or fix message ---
 $latestBody = ""
 try {
-    $msgs = & $readMessages -RoomDir $RoomDir -Last 1 -AsObject
-    if ($msgs) {
-        foreach ($m in ($msgs | Sort-Object { $_.ts } -Descending)) {
-            if ($m.type -in @('task', 'fix')) {
-                $latestBody = $m.body
-                break
-            }
-        }
+    $msgs = & $readMessages -RoomDir $RoomDir -FilterType @('task', 'fix') -Last 1 -AsObject
+    if ($msgs -and $msgs.Count -gt 0) {
+        $latestBody = $msgs[-1].body
     }
 } catch { }
 
@@ -191,17 +213,15 @@ if (Test-Path $dagFile) {
     if ($myNode -and $myNode.depends_on -and $myNode.depends_on.Count -gt 0) {
         $sections = @()
         foreach ($depRef in $myNode.depends_on) {
+            if ($depRef -eq 'PLAN-REVIEW') { continue }
             $depNode = $dag.nodes.$depRef
             if (-not $depNode) { continue }
             $depRoomDir = Join-Path (Split-Path $RoomDir) $depNode.room_id
-            try {
-                $doneMsgs = & $readMessages -RoomDir $depRoomDir -FilterType "done" -Last 1 -AsObject
-                if ($doneMsgs -and $doneMsgs.Count -gt 0) {
-                    $body = $doneMsgs[-1].body
-                    if ($body.Length -gt 10240) { $body = $body.Substring(0, 10240) + "`n[TRUNCATED]" }
-                    $sections += "### $depRef`n$body"
-                }
-            } catch { }
+            $lastBody = Get-LastChannelItemBody -RoomDir $depRoomDir
+            if ($lastBody) {
+                if ($lastBody.Length -gt 10240) { $lastBody = $lastBody.Substring(0, 10240) + "`n[TRUNCATED]" }
+                $sections += "### $depRef`n$lastBody"
+            }
         }
         if ($sections.Count -gt 0) {
             $predecessorSection = "`n`n## Predecessor Outputs`n`n$($sections -join "`n`n")"
@@ -375,19 +395,12 @@ if ($result.ExitCode -eq 0) {
     if (Test-Path $pdfOutputPath) {
         $body += "`n`nPDF: $pdfOutputPath"
     }
-    & $postMessage -RoomDir $RoomDir -From $RoleName -To "manager" `
-                   -Type "done" -Ref $taskRef -Body $body
     Write-Log "INFO" "[reporter] Completed $taskRef successfully."
 }
 elseif ($result.TimedOut) {
-    & $postMessage -RoomDir $RoomDir -From $RoleName -To "manager" `
-                   -Type "error" -Ref $taskRef -Body "Reporter timed out after ${TimeoutSeconds}s"
     Write-Log "ERROR" "[reporter] Timed out on $taskRef after ${TimeoutSeconds}s."
 }
 else {
-    & $postMessage -RoomDir $RoomDir -From $RoleName -To "manager" `
-                   -Type "error" -Ref $taskRef `
-                   -Body "Reporter exited with code $($result.ExitCode): $($result.Output)"
     Write-Log "ERROR" "[reporter] Failed on $taskRef with exit code $($result.ExitCode)."
 }
 

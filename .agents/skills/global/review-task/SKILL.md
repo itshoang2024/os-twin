@@ -61,9 +61,9 @@ Check each acceptance criterion from the original task:
 
 ### 5. Post Verdict
 
-**On PASS:**
+**On DONE:**
 ```markdown
-## QA Verdict — TASK-XXX: PASS ✅
+## QA Verdict — TASK-XXX: DONE ✅
 - All acceptance criteria met
 - Tests: <N> run, <N> passed
 - Suggestions: <non-blocking improvements, if any>

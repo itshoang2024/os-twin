@@ -251,11 +251,8 @@ if ($missingSkills.Count -gt 0) {
         $report += "- [ ] $ms`n"
     }
 
-    # Post to channel if Post-Message and RoomDir are available
-    $postMessage = Join-Path $agentsDir "channel" "Post-Message.ps1"
-    if ($RoomDir -and (Test-Path $postMessage)) {
-        & $postMessage -RoomDir $RoomDir -From "manager" -To "architect" -Type "error" -Ref "PRE-FLIGHT" -Body $report | Out-Null
-    }
+    # Channel messages are agent-authored via MCP only; wrapper pre-flight does
+    # not synthesize channel entries. The report is emitted as warnings/errors.
 
     if ($mode -eq "halt") {
         Write-Error "Pre-flight skill check failed. Halting execution."

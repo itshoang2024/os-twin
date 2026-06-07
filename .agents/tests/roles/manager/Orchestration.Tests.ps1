@@ -10,7 +10,8 @@
 
 BeforeAll {
     $script:agentsDir = (Resolve-Path (Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "..")).Path
-    $script:PostMessage = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:PostMessage = New-TestChannelWriter
     $script:ReadMessages = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
     $script:NewWarRoom = Join-Path $script:agentsDir "war-rooms" "New-WarRoom.ps1"
 
@@ -57,21 +58,13 @@ AfterAll {
 
 Describe "Message Protocol" {
 
-    Context "Room creation → initial task message" {
-        It "New-WarRoom posts manager→engineer task message" {
+    Context "Room creation" {
+        It "New-WarRoom does not synthesize PowerShell channel messages" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-01" -TaskRef "TASK-101" `
                                        -Description "Implement login"
 
             $msgs = @(& $script:ReadMessages -RoomDir $roomDir -AsObject)
-            $msgs.Count | Should -BeGreaterOrEqual 1
-
-            $taskMsg = $msgs | Where-Object { $_.type -eq "task" } | Select-Object -First 1
-            $taskMsg | Should -Not -BeNullOrEmpty
-            $taskMsg.from | Should -Be "manager"
-            $taskMsg.to | Should -Be "engineer"
-            $taskMsg.type | Should -Be "task"
-            $taskMsg.ref | Should -Be "TASK-101"
-            $taskMsg.body | Should -Match "Implement login"
+            $msgs.Count | Should -Be 0
         }
     }
 
@@ -90,17 +83,17 @@ Describe "Message Protocol" {
         }
     }
 
-    Context "QA → Manager pass message" {
-        It "pass message has correct from/to/type" {
+    Context "QA → Manager done message" {
+        It "done message has correct from/to/type" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-03" -TaskRef "TASK-103"
 
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-103" -Body "VERDICT: PASS"
+                                  -Type "done" -Ref "TASK-103" -Body "VERDICT: DONE"
 
-            $passMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -AsObject)
-            $passMsgs.Count | Should -Be 1
-            $passMsgs[0].from | Should -Be "qa"
-            $passMsgs[0].to | Should -Be "manager"
+            $doneMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "done" -AsObject)
+            $doneMsgs.Count | Should -Be 1
+            $doneMsgs[0].from | Should -Be "qa"
+            $doneMsgs[0].to | Should -Be "manager"
         }
     }
 
@@ -133,27 +126,23 @@ Describe "Message Protocol" {
         }
     }
 
-    Context "Error messages" {
-        It "engineer→manager error has correct protocol" {
+    Context "Runtime failure state" {
+        It "engineer runtime failure is represented by failed room status" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-06" -TaskRef "TASK-106"
 
-            & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
-                                  -Type "error" -Ref "TASK-106" -Body "Timeout after 600s"
-
-            $errMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "error" -AsObject)
-            $errMsgs.Count | Should -Be 1
-            $errMsgs[0].from | Should -Be "engineer"
+            "failed" | Out-File -FilePath (Join-Path $roomDir "status") -Encoding utf8 -NoNewline
+            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
         }
 
-        It "qa→manager error has correct protocol" {
+        It "QA implementation rejection uses fail feedback, not error" {
             $roomDir = New-OrcTestRoom -RoomId "room-proto-07" -TaskRef "TASK-107"
 
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "error" -Ref "TASK-107" -Body "Could not parse verdict"
+                                  -Type "fail" -Ref "TASK-107" -Body "Could not parse verdict"
 
-            $errMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "error" -AsObject)
-            $errMsgs.Count | Should -Be 1
-            $errMsgs[0].from | Should -Be "qa"
+            $failMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "fail" -AsObject)
+            $failMsgs.Count | Should -Be 1
+            $failMsgs[0].from | Should -Be "qa"
         }
     }
 }
@@ -216,16 +205,16 @@ Describe "Manager State Machine — Routing Decisions" {
         }
     }
 
-    Context "review → passed (QA PASS verdict)" {
-        It "pass message triggers passed status" {
+    Context "review → passed (QA DONE verdict)" {
+        It "done message triggers passed status" {
             $roomDir = New-OrcTestRoom -RoomId "room-sm-04" -TaskRef "TASK-204"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
 
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-204" -Body "VERDICT: PASS"
+                                  -Type "done" -Ref "TASK-204" -Body "VERDICT: DONE"
 
-            $passMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "pass" -AsObject)
-            $passMsgs.Count | Should -BeGreaterThan 0
+            $doneMsgs = @(& $script:ReadMessages -RoomDir $roomDir -FilterType "done" -AsObject)
+            $doneMsgs.Count | Should -BeGreaterThan 0
 
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
@@ -294,35 +283,28 @@ Describe "Full Room Lifecycle" {
             $roomDir = New-OrcTestRoom -RoomId "room-life-01" -TaskRef "TASK-301" `
                                        -Description "Build auth system"
 
-            # Step 1: Room created — initial task message exists
-            $msgs = @(& $script:ReadMessages -RoomDir $roomDir -AsObject)
-            $initialTask = $msgs | Where-Object { $_.type -eq "task" }
-            $initialTask | Should -Not -BeNullOrEmpty
-            $initialTask.from | Should -Be "manager"
-
-            # Step 2: Manager picks up → developing
+            # Step 1: Manager picks up → developing
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
 
-            # Step 3: Engineer completes → posts done
+            # Step 2: Engineer completes → posts done
             & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "TASK-301" -Body "Auth system implemented with JWT"
 
-            # Step 4: Manager routes to QA → review
+            # Step 3: Manager routes to QA → review
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
 
-            # Step 5: QA reviews → posts pass
+            # Step 4: QA reviews → posts done
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-301" -Body "VERDICT: PASS - all tests green"
+                                  -Type "done" -Ref "TASK-301" -Body "VERDICT: DONE - all tests green"
 
-            # Step 6: Manager reads pass → status passed
+            # Step 5: Manager reads done → status passed
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
 
             # VERIFICATION: Full message history
             $allMsgs = @(& $script:ReadMessages -RoomDir $roomDir -AsObject)
-            $allMsgs.Count | Should -Be 3  # task + done + pass
-            ($allMsgs | Where-Object { $_.type -eq "task" }).Count | Should -Be 1
-            ($allMsgs | Where-Object { $_.type -eq "done" }).Count | Should -Be 1
-            ($allMsgs | Where-Object { $_.type -eq "pass" }).Count | Should -Be 1
+            $allMsgs.Count | Should -Be 2  # engineer done + QA done
+            ($allMsgs | Where-Object { $_.type -eq "done" }).Count | Should -Be 2
+            ($allMsgs | Where-Object { $_.type -eq "pass" }).Count | Should -Be 0
 
             # VERIFICATION: Status trail
             $audit = Get-Content (Join-Path $roomDir "audit.log")
@@ -331,8 +313,8 @@ Describe "Full Room Lifecycle" {
         }
     }
 
-    Context "Retry path: task → done → fail → fix → done → pass" {
-        It "walks through fail-retry-pass lifecycle" {
+    Context "Retry path: task → done → fail → fix → done → done" {
+        It "walks through fail-retry-done lifecycle" {
             $roomDir = New-OrcTestRoom -RoomId "room-life-02" -TaskRef "TASK-302" `
                                        -Description "Implement API endpoint"
 
@@ -356,21 +338,21 @@ Describe "Full Room Lifecycle" {
             & $script:PostMessage -RoomDir $roomDir -From "engineer" -To "manager" `
                                   -Type "done" -Ref "TASK-302" -Body "Added validation, all tests pass"
 
-            # Phase 5: QA passes on retry
+            # Phase 5: QA marks done on retry
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                                  -Type "pass" -Ref "TASK-302" -Body "VERDICT: PASS"
+                                  -Type "done" -Ref "TASK-302" -Body "VERDICT: DONE"
 
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "passed"
 
             # VERIFICATION
             $allMsgs = @(& $script:ReadMessages -RoomDir $roomDir -AsObject)
-            $allMsgs.Count | Should -Be 6  # task + done + fail + fix + done + pass
+            $allMsgs.Count | Should -Be 5  # done + fail + fix + done + done
 
-            ($allMsgs | Where-Object { $_.type -eq "done" }).Count | Should -Be 2
+            ($allMsgs | Where-Object { $_.type -eq "done" }).Count | Should -Be 3
             ($allMsgs | Where-Object { $_.type -eq "fail" }).Count | Should -Be 1
             ($allMsgs | Where-Object { $_.type -eq "fix" }).Count | Should -Be 1
-            ($allMsgs | Where-Object { $_.type -eq "pass" }).Count | Should -Be 1
+            ($allMsgs | Where-Object { $_.type -eq "pass" }).Count | Should -Be 0
 
             $retries = [int](Get-Content (Join-Path $roomDir "retries") -Raw).Trim()
             $retries | Should -Be 1
@@ -774,19 +756,18 @@ Describe "Audit Trail" {
                 -Type "done" -Ref "TASK-AUD2" -Body "Fixed"
             Start-Sleep -Milliseconds 10
             & $script:PostMessage -RoomDir $roomDir -From "qa" -To "manager" `
-                -Type "pass" -Ref "TASK-AUD2" -Body "VERDICT: PASS"
+                -Type "done" -Ref "TASK-AUD2" -Body "VERDICT: DONE"
 
             $allMsgs = @(& $script:ReadMessages -RoomDir $roomDir -AsObject)
-            $allMsgs.Count | Should -Be 6  # task + done + fail + fix + done + pass
+            $allMsgs.Count | Should -Be 5  # done + fail + fix + done + done
 
             # Verify ordering by type sequence
             $types = $allMsgs | ForEach-Object { $_.type }
-            $types[0] | Should -Be "task"
-            $types[1] | Should -Be "done"
-            $types[2] | Should -Be "fail"
-            $types[3] | Should -Be "fix"
+            $types[0] | Should -Be "done"
+            $types[1] | Should -Be "fail"
+            $types[2] | Should -Be "fix"
+            $types[3] | Should -Be "done"
             $types[4] | Should -Be "done"
-            $types[5] | Should -Be "pass"
         }
     }
 }

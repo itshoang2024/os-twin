@@ -40,6 +40,7 @@ Knowledge tells you the canonical standards your implementation must align with.
      - AC: End-to-end workflow completes without errors
    ```
 4. Save TASKS.md before proceeding
+5. When You start a new epic, make sure you review use tool codegraph to explore codebase based on the brief and tasks. explore codebase over there. avoid grep/glob as much as possible
 
 ### Phase 2 — Implementation
 1. Work through each sub-task sequentially

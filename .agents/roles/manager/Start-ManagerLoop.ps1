@@ -9,11 +9,11 @@
 
     Replaces: roles/manager/loop.sh
 
-    V2 signal-based state-machine per room (lifecycle.json):
-        pending → developing → review → passed
-                  ↓ error        ↓ fail
-                failed → triage → developing (retry)
-                (retries exhausted → failed-final)
+	    V2 signal-based state-machine per room (lifecycle.json):
+	        pending → developing → review → passed
+	                                 ↓ fail
+	                failed → developing (retry)
+	                (retries exhausted → failed-final)
 
 .PARAMETER ConfigPath
     Path to config.json. Default: AGENT_OS_CONFIG env var or .agents/config.json.
@@ -39,7 +39,6 @@ $channelDir = Join-Path $agentsDir "channel"
 $releaseDir = Join-Path $agentsDir "release"
 $managerPidFile = Join-Path $agentsDir "manager.pid"
 
-$postMessage = Join-Path $channelDir "Post-Message.ps1"
 $readMessages = Join-Path $channelDir "Read-Messages.ps1"
 
 # --- Import modules ---
@@ -136,7 +135,6 @@ if (Get-Command Set-ManagerLoopContext -ErrorAction SilentlyContinue) {
         config           = $config
         stateTimeout     = $stateTimeout
         maxRetries       = $maxRetries
-        postMessage      = $postMessage
         readMessages     = $readMessages
         dashboardBaseUrl = $dashboardBaseUrl
     }
@@ -398,7 +396,6 @@ while (-not $script:shuttingDown) {
                         } elseif ($status -eq 'failed-final') {
                             if ($retries -lt $v2MaxRetries) {
                                 $failFeedback = Get-LatestBody $roomDir "fail"
-                                if (-not $failFeedback) { $failFeedback = Get-LatestBody $roomDir "error" }
                                 if ($failFeedback) {
                                     Write-Log "WARN" "[$taskRef] failed-final with retries=$retries < max=$v2MaxRetries. Rescuing to triage."
                                     Write-RoomStatus $roomDir "triage"
@@ -469,7 +466,6 @@ while (-not $script:shuttingDown) {
                             Stop-RoomProcesses $roomDir
                             if ($retries -lt $v2MaxRetries) {
                                 ($retries + 1).ToString() | Out-File -FilePath (Join-Path $roomDir "retries") -Encoding utf8 -NoNewline
-                                & $postMessage -RoomDir $roomDir -From "manager" -To $baseRole -Type "fix" -Ref $taskRef -Body "State '$status' timed out. Please try again."
                                 $restartState = if ($lifecycle.initial_state) { $lifecycle.initial_state } else { 'developing' }
                                 Write-RoomStatus $roomDir $restartState
                                 # LEAK-6 fix: re-resolve role from the restart state, not the timed-out state
@@ -496,9 +492,8 @@ while (-not $script:shuttingDown) {
                             $approveCount = Get-MsgCount $roomDir "plan-approve"
                             $doneCount    = Get-MsgCount $roomDir "done"
                             $failCount    = Get-MsgCount $roomDir "fail"
-                            $errorCount   = Get-MsgCount $roomDir "error"
 
-                            Write-Log "DEBUG" "[$taskRef] PLAN-REVIEW shortcut: pass=$passCount approve=$approveCount done=$doneCount fail=$failCount error=$errorCount"
+                            Write-Log "DEBUG" "[$taskRef] PLAN-REVIEW shortcut: pass=$passCount approve=$approveCount done=$doneCount fail=$failCount"
 
                             # Log latest message bodies for debugging
                             if ($passCount -gt 0) {
@@ -516,12 +511,6 @@ while (-not $script:shuttingDown) {
                                 $donePreview = if ($doneBody.Length -gt 200) { $doneBody.Substring(0, 200) + '...' } else { $doneBody }
                                 Write-Log "DEBUG" "[$taskRef] Latest done body: $donePreview"
                             }
-                            if ($errorCount -gt 0) {
-                                $errBody = Get-LatestBody $roomDir "error"
-                                $errPreview = if ($errBody.Length -gt 200) { $errBody.Substring(0, 200) + '...' } else { $errBody }
-                                Write-Log "DEBUG" "[$taskRef] Latest error body: $errPreview"
-                            }
-
                             # Check for approval: pass signal, plan-approve signal, or done with approval keyword
                             $approved = $false
                             if ($passCount -gt 0 -or $approveCount -gt 0) {
@@ -529,7 +518,7 @@ while (-not $script:shuttingDown) {
                                 Write-Log "DEBUG" "[$taskRef] Approved via pass/plan-approve signal"
                             } elseif ($doneCount -gt 0) {
                                 $doneBody = Get-LatestBody $roomDir "done"
-                                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*PASS') {
+                                if ($doneBody -match 'plan-approve|signoff|APPROVED|VERDICT:\s*(DONE|PASS)') {
                                     $approved = $true
                                     Write-Log "DEBUG" "[$taskRef] Approved via done body keyword match"
                                 } else {
@@ -554,14 +543,10 @@ while (-not $script:shuttingDown) {
                             if ($failCount -gt 0) {
                                 $rejectBody = Get-LatestBody $roomDir "fail"
                                 Write-Log "WARN" "[$taskRef] Plan REJECTED by architect."
-                                & $postMessage -RoomDir $roomDir -From "manager" -To "architect" `
-                                               -Type "plan-reject" -Ref $taskRef -Body $rejectBody
                             } elseif ($doneCount -gt 0) {
                                 $rejectBody = Get-LatestBody $roomDir "done"
                                 if ($rejectBody -match 'VERDICT:\s*REJECT') {
                                     Write-Log "WARN" "[$taskRef] Plan REJECTED by architect."
-                                    & $postMessage -RoomDir $roomDir -From "manager" -To "architect" `
-                                                   -Type "plan-reject" -Ref $taskRef -Body $rejectBody
                                 }
                             }
                         }
@@ -638,6 +623,16 @@ while (-not $script:shuttingDown) {
                                 $pidAlive = Test-PidAlive $statePidFile
                                 $spawnLocked = Test-SpawnLock -RoomDir $roomDir -Role $stateBaseRole
                                 Write-Log "INFO" "[$taskRef] No signal matched. role='$stateBaseRole' pidAlive=$pidAlive spawnLocked=$spawnLocked status='$status'"
+
+                                $failedRoleRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role $stateBaseRole
+                                if ($failedRoleRun) {
+                                    Write-Log "ERROR" "[$taskRef] Role '$stateBaseRole' reported failed in '$status'. Marking room as failed for manager decision handling."
+                                    Stop-RoomProcesses $roomDir
+                                    Remove-Item (Join-Path $roomDir "crash_respawns") -Force -ErrorAction SilentlyContinue
+                                    Write-RoomStatus $roomDir "failed"
+                                    continue
+                                }
+
                                 if (-not $pidAlive -and -not $spawnLocked) {
                                     # Guard: check if a signal is pending but hasn't been processed yet.
                                     $pendingSignalCheck = Find-LatestSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName $status
@@ -758,7 +753,6 @@ while (-not $script:shuttingDown) {
                     $dlRestartRole = if ($restartStateDef -and $restartStateDef.role) { ($restartStateDef.role -replace ':.*$', '') } else { $dlRole }
 
                     Write-Log "WARN" "[$lt] Deadlock recovery ($($dlCount+1)/3): restarting $dlRestartRole via $restartState."
-                    & $postMessage -RoomDir $rd -From "manager" -To $dlRestartRole -Type "fix" -Ref $lt -Body "Deadlock recovery: restarting $dlRestartRole."
                     Write-RoomStatus $rd $restartState
 
                     # Risk 2 fix: Spawn worker immediately (don't rely on next iteration's respawn branch)

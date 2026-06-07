@@ -14,7 +14,8 @@ BeforeAll {
     $utilsModule = Join-Path $script:agentsDir "lib" "Utils.psm1"
     if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 
-    $script:postMsg  = Join-Path $script:agentsDir "channel" "Post-Message.ps1"
+    . (Join-Path $script:agentsDir "tests" "TestChannelHelpers.ps1")
+    $script:postMsg  = New-TestChannelWriter
     $script:readMsg  = Join-Path $script:agentsDir "channel" "Read-Messages.ps1"
 
     # --- Helper: create a standard room with lifecycle.json ---
@@ -37,12 +38,12 @@ BeforeAll {
                 initial_state = "developing"
                 max_retries   = 3
                 states        = @{
-                    developing = @{ role = "engineer"; type = "work";
-                        signals = @{ done = @{ target = "review" }; error = @{ target = "failed"; actions = @("increment_retries") } }
-                    }
-                    review = @{ role = "qa"; type = "review";
-                        signals = @{ pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
-                    }
+	                    developing = @{ role = "engineer"; type = "work";
+	                        signals = @{ done = @{ target = "review" } }
+		                    }
+		            review = @{ role = "qa"; type = "review";
+		                signals = [ordered]@{ done = @{ target = "passed" }; pass = @{ target = "passed" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
+		            }
                     optimize = @{ role = "engineer"; type = "work";
                         signals = @{ done = @{ target = "review" } }
                     }
@@ -358,6 +359,15 @@ Describe "Find-LatestSignal" {
         $sig | Should -Be "done"
     }
 
+    It "ignores legacy error entries even when lifecycle.json still contains them" {
+        $script:lc.states.developing.signals |
+            Add-Member -NotePropertyName "error" -NotePropertyValue @{ target = "failed" } -Force
+        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        & $script:postMsg -RoomDir $script:rd -From "engineer" -To "manager" -Type "error" -Ref "TASK-TEST" -Body "wrapper failed"
+
+        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "developing" | Should -BeNull
+    }
+
     It "rejects signal from wrong sender role" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
         # 'developing' state expects role=engineer; post as QA instead
@@ -375,11 +385,17 @@ Describe "Find-LatestSignal" {
         $sig | Should -BeNull
     }
 
-    It "returns 'pass' for review state from QA" {
-        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
-        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "pass" -Ref "TASK-TEST" -Body "lgtm"
-        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
-    }
+	    It "returns 'done' for review state from QA" {
+	        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+	        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "done" -Ref "TASK-TEST" -Body "VERDICT: DONE"
+	        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "done"
+	    }
+
+	    It "still returns legacy 'pass' for review state from QA" {
+	        "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+	        & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "pass" -Ref "TASK-TEST" -Body "lgtm"
+	        Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "review" | Should -Be "pass"
+	    }
 
     It "returns 'fail' for review state from QA" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
@@ -397,6 +413,65 @@ Describe "Find-LatestSignal" {
         "0" | Out-File (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
         & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "please fix"
         Find-LatestSignal -RoomDir $script:rd -Lifecycle $script:lc -StateName "triage" | Should -Be "fix"
+    }
+}
+
+# ===========================================================================
+# Role run status
+# ===========================================================================
+Describe "Role run status orchestration failure detection" {
+    BeforeEach {
+        $script:wd = Join-Path $TestDrive "rrs-$(Get-Random)"
+        New-Item -ItemType Directory -Path $script:wd -Force | Out-Null
+        Set-TestContext -RoomsDir $script:wd
+        $script:rd = New-TestRoom -Base $script:wd -Status "review"
+        "review" | Out-File -FilePath (Join-Path $script:rd "status") -Encoding utf8 -NoNewline
+        [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString() |
+            Out-File -FilePath (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "active"
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+    }
+
+    It "stamps role configs when manager marks a run active" {
+        Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "active" | Should -Not -BeNullOrEmpty
+        $cfg = Get-Content (Join-Path $script:rd "qa_001.json") -Raw | ConvertFrom-Json
+        $cfg.status | Should -Be "active"
+        $cfg.status_updated_epoch | Should -Not -BeNullOrEmpty
+        $cfg.status_state | Should -Be "review"
+    }
+
+    It "detects fresh failed role config for manager-owned failed routing" {
+        Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "failed" | Out-Null
+        $failedRun = Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa"
+        $failedRun | Should -Not -BeNullOrEmpty
+        $failedRun.Role | Should -Be "qa"
+    }
+
+    It "ignores stale failed role config from a previous state attempt" {
+        $oldEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 120
+        $newEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "failed"
+            status_updated_epoch = $oldEpoch
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+        $newEpoch.ToString() | Out-File -FilePath (Join-Path $script:rd "state_changed_at") -Encoding utf8 -NoNewline
+
+        Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa" | Should -BeNull
+    }
+
+    It "ignores failed role config without wrapper freshness timestamp" {
+        @{
+            role = "qa"
+            instance_id = "001"
+            status = "failed"
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd "qa_001.json") -Encoding utf8
+
+        Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa" | Should -BeNull
     }
 }
 
@@ -422,29 +497,11 @@ Describe "Invoke-SignalActions" {
         [int](Get-Content (Join-Path $script:rd "retries") -Raw).Trim() | Should -Be 3
     }
 
-    It "post_fix: posts fix message using fail body" {
+    It "post_fix: does not synthesize PowerShell channel messages" {
         & $script:postMsg -RoomDir $script:rd -From "qa" -To "manager" -Type "fail" -Ref "TASK-TEST" -Body "fix this bug"
-        Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer"
-        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
-        $msgs[-1].body | Should -Be "fix this bug"
-        # CRITICAL: fix message must be addressed to the BaseRole passed in (the TARGET role)
-        $msgs[-1].to | Should -Be "engineer"
-    }
-
-    It "post_fix: routes fix to the role provided as BaseRole — not the sender of the fail" {
-        # Simulates review.fail → optimize: post_fix must go to 'game-engineer' (optimize role),
-        # NOT 'game-qa' (the current review role that posted the fail).
-        & $script:postMsg -RoomDir $script:rd -From "game-qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "login tests fail"
-        Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "EPIC-001" -BaseRole "game-engineer"
-        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
-        $msgs[-1].to   | Should -Be "game-engineer" -Because "post_fix must address the TARGET role (fixer), not game-qa (the reviewer)"
-        $msgs[-1].body | Should -Be "login tests fail"
-    }
-
-    It "post_fix: does nothing when no fail/escalate/error messages" {
         { Invoke-SignalActions -RoomDir $script:rd -Actions @('post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer" } | Should -Not -Throw
+        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
+        $msgs.Count | Should -Be 0
     }
 
     It "revise_brief: appends triage context to brief.md" {
@@ -471,7 +528,7 @@ Describe "Invoke-SignalActions" {
         Invoke-SignalActions -RoomDir $script:rd -Actions @('increment_retries','post_fix') -TaskRef "TASK-TEST" -BaseRole "engineer"
         [int](Get-Content (Join-Path $script:rd "retries") -Raw).Trim() | Should -Be 1
         $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fix" -AsObject
-        $msgs.Count | Should -BeGreaterThan 0
+        $msgs.Count | Should -Be 0
     }
 }
 

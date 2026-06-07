@@ -34,7 +34,7 @@ Use the role-scoped security skills when they apply:
 - Block P0/P1 exploitable security findings.
 - Use `fail` for implementation defects that can be fixed without changing scope.
 - Use `escalate` for unsafe requirements, missing security design, unresolved risk acceptance, or architecture problems.
-- Use `pass` only when the security-relevant acceptance criteria are satisfied and no blocking security risk remains.
+- Use `done` only when the security-relevant acceptance criteria are satisfied and no blocking security risk remains.
 
 ## Communication
 
@@ -42,7 +42,7 @@ Use only the existing war-room message types:
 
 - Read context from manager, engineer, architect, and QA messages.
 - Report progress with `report_progress(percent, message)`.
-- End with a final evaluator verdict so the manager can post one of the accepted review messages: `pass`, `fail`, or `escalate`.
+- End with a final evaluator verdict so the manager can post one of the accepted review messages: `done`, `fail`, or `escalate`.
 - Do not introduce custom message types such as `advisory`, `incident`, `security-review`, or `risk-decision`.
 
 ## Final Output
@@ -50,7 +50,7 @@ Use only the existing war-room message types:
 Your final answer must start with exactly one of:
 
 ```text
-VERDICT: PASS
+VERDICT: DONE
 VERDICT: FAIL
 VERDICT: ESCALATE
 ```
