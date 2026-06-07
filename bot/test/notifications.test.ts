@@ -64,18 +64,18 @@ describe('NotificationRouter', () => {
     expect(mockConnector.sendMessage.firstCall.args[1].text).to.include('room-1');
   });
 
-  it('maps room_updated with status passed to epic_passed', async () => {
+  it('maps room_updated with status done to epic_passed', async () => {
     bindConversation({ conversation_id: 'telegram:chat:u1', plan_id: 'plan-legacy' });
     const handleEvent = (router as any).handleDashboardEvent.bind(router);
     handleEvent({
       type: 'room_updated',
-      data: { room: { room_id: 'room-1', status: 'passed', plan_id: 'plan-legacy' } },
+      data: { room: { room_id: 'room-1', status: 'done', plan_id: 'plan-legacy' } },
     });
 
     await new Promise(resolve => setTimeout(resolve, 10));
 
     expect(mockConnector.sendMessage.calledOnce).to.be.true;
-    expect(mockConnector.sendMessage.firstCall.args[1].text).to.include('EPIC Passed');
+    expect(mockConnector.sendMessage.firstCall.args[1].text).to.include('EPIC Done');
   });
 
   it('maps room_updated with status failed to epic_failed', async () => {
@@ -89,12 +89,12 @@ describe('NotificationRouter', () => {
     expect(mockConnector.sendMessage.firstCall.args[1].text).to.include('EPIC Failed');
   });
 
-  it('maps room_updated with status fixing to epic_retry', async () => {
+  it('maps room_updated with status optimize to epic_retry', async () => {
     bindConversation({ conversation_id: 'telegram:chat:u1', plan_id: 'plan-legacy' });
     const handleEvent = (router as any).handleDashboardEvent.bind(router);
     handleEvent({
       type: 'room_updated',
-      data: { room: { room_id: 'room-1', status: 'fixing', plan_id: 'plan-legacy' } },
+      data: { room: { room_id: 'room-1', status: 'optimize', plan_id: 'plan-legacy' } },
     });
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(mockConnector.sendMessage.firstCall.args[1].text).to.include('EPIC Retrying');
@@ -508,7 +508,7 @@ describe('NotificationRouter', () => {
     // This should be filtered out
     handleEvent({
       type: 'room_updated',
-      data: { room: { room_id: 'room-1', status: 'passed', plan_id: 'plan-legacy' } },
+      data: { room: { room_id: 'room-1', status: 'done', plan_id: 'plan-legacy' } },
     });
 
     // This should be delivered

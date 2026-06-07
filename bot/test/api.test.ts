@@ -112,10 +112,10 @@ describe('api', () => {
     it('returns rooms and summary', async () => {
       const data = {
         rooms: [
-          { room_id: 'room-1', status: 'passed', message_count: 10 },
+          { room_id: 'room-1', status: 'done', message_count: 10 },
           { room_id: 'room-2', status: 'engineering', message_count: 5 },
         ],
-        summary: { total: 2, passed: 1, engineering: 1 },
+        summary: { total: 2, done: 1, passed: 1, engineering: 1 },
       };
       mockFetch(data);
 
@@ -131,8 +131,8 @@ describe('api', () => {
       mockFetch({
         rooms: [],
         summary: {
-          total: 6, passed: 1, failed_final: 0, pending: 1,
-          developing: 1, review: 1, engineering: 1, qa_review: 1, fixing: 0,
+          total: 6, done: 1, passed: 1, failed: 0, failed_final: 0, pending: 1,
+          developing: 1, review: 1, engineering: 1, qa_review: 1, optimize: 0, fixing: 0,
         },
       });
 

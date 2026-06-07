@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://ostwin.igot.ai',
+  site: 'https://twin.igot.ai',
   integrations: [
     starlight({
       title: 'OSTwin',
@@ -22,11 +22,11 @@ export default defineConfig({
       head: [
         {
           tag: 'meta',
-          attrs: { property: 'og:url', content: 'https://ostwin.igot.ai' },
+          attrs: { property: 'og:url', content: 'https://twin.igot.ai' },
         },
         {
           tag: 'link',
-          attrs: { rel: 'canonical', href: 'https://ostwin.igot.ai' },
+          attrs: { rel: 'canonical', href: 'https://twin.igot.ai' },
         },
       ],
       sidebar: [
@@ -97,6 +97,7 @@ export default defineConfig({
           badge: { text: 'Advanced', variant: 'caution' },
           items: [
             { label: 'Developer Context', slug: 'internals/developer-context' },
+            { label: 'Installer Release Flow', slug: 'internals/installer-release-flow' },
             { label: 'Testing', slug: 'internals/testing' },
             { label: 'Debugging', slug: 'internals/debugging' },
           ],

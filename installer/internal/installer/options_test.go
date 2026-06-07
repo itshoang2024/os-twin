@@ -90,6 +90,7 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 		SearchEngine:     true,
 		SearchEngineMode: "local",
 		SkipOptional:     true,
+		SyncSkills:       true,
 		NoOpenCodeConfig: true,
 		NoStart:          true,
 	}
@@ -103,7 +104,7 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 		if invocation.Command != "pwsh" {
 			t.Fatalf("Command = %q, want pwsh", invocation.Command)
 		}
-		for _, token := range []string{"-Yes", "-Dir", "/tmp/ostwin", "-SourceDir", root, "-Port", "8080", "-DashboardOnly", "-Channel", "-SkipOptional", "-NoStart"} {
+		for _, token := range []string{"-Yes", "-Dir", "/tmp/ostwin", "-SourceDir", root, "-Port", "8080", "-DashboardOnly", "-Channel", "-SkipOptional", "-SyncSkills", "-NoStart"} {
 			if !strings.Contains(joined, token) {
 				t.Fatalf("Windows args missing %q in %q", token, joined)
 			}
@@ -117,7 +118,7 @@ func TestBuildInvocationUsesNativeInstaller(t *testing.T) {
 	if invocation.Command != "bash" {
 		t.Fatalf("Command = %q, want bash", invocation.Command)
 	}
-	for _, token := range []string{"--yes", "--dir", "/tmp/ostwin", "--source-dir", root, "--port", "8080", "--dashboard-only", "--channel", "--search-engine", "--search-engine-mode", "local", "--skip-optional", "--no-opencode-config", "--no-start"} {
+	for _, token := range []string{"--yes", "--dir", "/tmp/ostwin", "--source-dir", root, "--port", "8080", "--dashboard-only", "--channel", "--search-engine", "--search-engine-mode", "local", "--skip-optional", "--sync-skills", "--no-opencode-config", "--no-start"} {
 		if !strings.Contains(joined, token) {
 			t.Fatalf("Unix args missing %q in %q", token, joined)
 		}
