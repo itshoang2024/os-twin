@@ -516,6 +516,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Run install.ps1 -Yes -SkipOptional (smoke test)
         shell: pwsh
         run: |
@@ -543,6 +548,146 @@ jobs:
             Write-Host "::warning::Venv not found — running fallback syntax check"
             python -c "import ast; ast.parse(open('dashboard/api.py').read()); print('dashboard/api.py parses OK')"
           }
+
+      - name: Run minimal Ostwin plan (smoke test, Windows)
+        shell: pwsh
+        working-directory: .github/smoke-test-folder
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Remove-Item -Recurse -Force .war-rooms, .agents, .opencode -ErrorAction SilentlyContinue
+          Remove-Item -Force index.html, .planning-DAG.json, ostwin-run-output.log -ErrorAction SilentlyContinue
+          $env:OSTWIN_WORKSPACE_ISOLATION = 'shared'
+          $env:OSTWIN_SKIP_PLAN_REVIEW = 'true'
+
+          $ostwin = Join-Path $HOME '.ostwin\.agents\bin\ostwin'
+          if (-not (Test-Path $ostwin)) {
+            Write-Host "::error::ostwin CLI not found: $ostwin"
+            exit 1
+          }
+
+          $dashboardUrl = 'http://127.0.0.1:3366/api/status'
+          $dashboardReady = $false
+          for ($i = 0; $i -lt 10; $i++) {
+            try {
+              Invoke-RestMethod -Uri $dashboardUrl -TimeoutSec 2 | Out-Null
+              $dashboardReady = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if (-not $dashboardReady) {
+            $dashboard = Join-Path $HOME '.ostwin\.agents\dashboard.ps1'
+            if (-not (Test-Path $dashboard)) {
+              Write-Host "::error::dashboard.ps1 not found: $dashboard"
+              exit 1
+            }
+            & pwsh -NoProfile -File $dashboard -Background -Port 3366 -ProjectDir (Get-Location).Path
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                Invoke-RestMethod -Uri $dashboardUrl -TimeoutSec 2 | Out-Null
+                $dashboardReady = $true
+                break
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+          }
+
+          if (-not $dashboardReady) {
+            Write-Host '::error::Dashboard did not become ready for plan creation'
+            exit 1
+          }
+
+          $planOutput = & pwsh -NoProfile -File $ostwin plan create that.plan.md 2>&1 | Out-String
+          Write-Host $planOutput
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::ostwin plan create failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          $planMatch = [regex]::Match($planOutput, 'Plan created:\s*([0-9a-fA-F]+)')
+          if (-not $planMatch.Success) {
+            Write-Host '::error::Could not parse plan ID from ostwin plan create output'
+            exit 1
+          }
+          $planId = $planMatch.Groups[1].Value
+
+          $rolesFile = Join-Path $HOME ".ostwin\.agents\plans\$planId.roles.json"
+          if (-not (Test-Path $rolesFile)) {
+            Write-Host "::error::Plan roles file not found: $rolesFile"
+            exit 1
+          }
+          Write-Host "Plan: $rolesFile"
+          Select-String -Path $rolesFile -Pattern '"(default_model|model)"' | ForEach-Object { $_.Line }
+
+          function Set-SmokeModel {
+            param([object]$Value)
+            if ($null -eq $Value) { return }
+            if ($Value -is [System.Collections.IDictionary]) {
+              foreach ($key in @($Value.Keys)) {
+                if ($key -in @('default_model', 'model')) {
+                  $Value[$key] = 'opencode/big-pickle'
+                } else {
+                  Set-SmokeModel $Value[$key]
+                }
+              }
+              return
+            }
+            if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+              foreach ($item in $Value) { Set-SmokeModel $item }
+              return
+            }
+            if ($Value.PSObject -and $Value.PSObject.Properties) {
+              foreach ($prop in $Value.PSObject.Properties) {
+                if ($prop.Name -in @('default_model', 'model')) {
+                  $prop.Value = 'opencode/big-pickle'
+                } else {
+                  Set-SmokeModel $prop.Value
+                }
+              }
+            }
+          }
+
+          $roles = Get-Content $rolesFile -Raw | ConvertFrom-Json
+          Set-SmokeModel $roles
+          $roles | ConvertTo-Json -Depth 100 | Set-Content -Path $rolesFile -Encoding utf8
+          $modelLines = Select-String -Path $rolesFile -Pattern '"(default_model|model)"'
+          $modelLines | ForEach-Object { $_.Line }
+          $badModelLines = $modelLines | Where-Object { $_.Line -notmatch '"(default_model|model)":\s*"opencode/big-pickle"' }
+          if ($badModelLines) {
+            $badModelLines | ForEach-Object { Write-Host $_.Line }
+            Write-Host '::error::Not all plan role model/default_model values were rewritten to opencode/big-pickle'
+            exit 1
+          }
+
+          & pwsh -NoProfile -File $ostwin run $planId 2>&1 | Tee-Object -FilePath ostwin-run-output.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::ostwin run failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          if (Select-String -Path ostwin-run-output.log -Pattern 'Model=openai/gpt-5.5' -Quiet) {
+            Write-Host '::error::Smoke flow still launched an agent with Model=openai/gpt-5.5'
+            exit 1
+          }
+          @(
+            '# Ostwin generated runtime artifacts',
+            '.agents/',
+            '.memory',
+            '.opencode/',
+            '.planning-DAG.json',
+            '.war-rooms/',
+            'index.html',
+            'ostwin-run-output.log'
+          ) | Set-Content -Path .gitignore -Encoding utf8
+          Get-Content index.html
+          if (-not (Select-String -Path index.html -Pattern 'Hello this is OsTwin' -Quiet)) {
+            Write-Host '::error::index.html does not contain Hello this is OsTwin'
+            exit 1
+          }
+          Write-Host '::notice::Minimal Ostwin plan created, ran, QA passed, and generated index.html on Windows'
 
       - name: Upload install log
         if: always()

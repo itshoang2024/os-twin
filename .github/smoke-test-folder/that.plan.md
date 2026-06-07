@@ -4,7 +4,7 @@
 
 ## Goal
 
-Verify the Linux installer can create and run a minimal Ostwin plan with one epic,
+Verify the installer can create and run a minimal Ostwin plan with one epic,
 one engineer role, and one QA role.
 
 ## EPIC-001 - Build a static Hello site
@@ -26,7 +26,7 @@ HTML document and visibly include the text `Hello this is OsTwin`.
 
 ### Acceptance Criteria
 
-- [ ] Running `grep -q "Hello this is OsTwin" index.html` succeeds.
+- [ ] Checking `index.html` confirms it contains `Hello this is OsTwin`.
 - [ ] The plan has exactly one epic.
 - [ ] The epic uses only the engineer and QA roles.
 

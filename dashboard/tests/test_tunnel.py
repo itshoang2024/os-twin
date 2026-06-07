@@ -2,7 +2,7 @@
 
 import os
 
-os.environ["OSTWIN_API_KEY"] = "DEBUG"
+os.environ["OSTWIN_API_KEY"] = "test-key"
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -214,7 +214,7 @@ class TestTunnelRoutes:
         with patch.object(tunnel_mod, "get_tunnel_status", return_value={
             "active": False, "url": None, "started_at": None, "error": None,
         }):
-            resp = test_client.get("/api/tunnel/status", headers={"X-API-Key": "DEBUG"})
+            resp = test_client.get("/api/tunnel/status", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 200
             data = resp.json()
             assert "active" in data
@@ -222,7 +222,7 @@ class TestTunnelRoutes:
 
     def test_restart_without_ngrok_authtoken(self, test_client, monkeypatch):
         monkeypatch.delenv("NGROK_AUTHTOKEN", raising=False)
-        resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "DEBUG"})
+        resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "test-key"})
         assert resp.status_code == 400
         assert "NGROK_AUTHTOKEN" in resp.json()["detail"]
 
@@ -234,7 +234,7 @@ class TestTunnelRoutes:
         with patch.object(tunnel_mod, "stop_tunnel") as mock_stop, \
              patch.object(tunnel_mod, "start_tunnel", new_callable=AsyncMock,
                           return_value="https://restarted.ngrok.io") as mock_start:
-            resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "DEBUG"})
+            resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 200
             data = resp.json()
             assert data["url"] == "https://restarted.ngrok.io"
@@ -250,12 +250,12 @@ class TestTunnelRoutes:
         with patch.object(tunnel_mod, "stop_tunnel"), \
              patch.object(tunnel_mod, "start_tunnel", new_callable=AsyncMock,
                           side_effect=RuntimeError("ngrok boom")):
-            resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "DEBUG"})
+            resp = test_client.post("/api/tunnel/restart", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 500
             assert "ngrok boom" in resp.json()["detail"]
 
     def test_share_without_active_tunnel(self, test_client):
         with patch.object(tunnel_mod, "get_tunnel_url", return_value=None):
-            resp = test_client.post("/api/tunnel/share", headers={"X-API-Key": "DEBUG"})
+            resp = test_client.post("/api/tunnel/share", headers={"X-API-Key": "test-key"})
             assert resp.status_code == 400
             assert "No active tunnel" in resp.json()["detail"]
