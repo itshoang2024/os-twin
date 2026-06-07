@@ -3,7 +3,7 @@ name: Write Technical Tests
 description: Write unit and integration tests across multiple frameworks (pytest, jest, pester) with coverage targets.
 version: 1.0.0
 category: Quality Assurance
-applicable_roles: [engineer, game-engineer, qa]
+applicable_roles: [engineer, qa]
 tags: [engineer, implementation, testing, qa, coverage]
 
 source: project

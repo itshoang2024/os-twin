@@ -34,9 +34,9 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # RoleOverrides kept for backward compat — InstanceType is ignored,
         # only Name and position matter.
         $roles = @(
-            [PSCustomObject]@{ Name = 'game-architect'; InstanceType = 'worker' },
-            [PSCustomObject]@{ Name = 'game-engineer'; InstanceType = 'worker' },
-            [PSCustomObject]@{ Name = 'game-qa'; InstanceType = 'evaluator' }
+            [PSCustomObject]@{ Name = 'architect'; InstanceType = 'worker' },
+            [PSCustomObject]@{ Name = 'engineer'; InstanceType = 'worker' },
+            [PSCustomObject]@{ Name = 'qa'; InstanceType = 'evaluator' }
         )
 
         . $script:ResolvePipeline -PipelineString "just_to_source_functions" -ErrorAction SilentlyContinue
@@ -45,19 +45,19 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         # State check — position-based: [0]=worker, [1..N]=evaluators
         $lc.initial_state | Should -Be "developing"
-        $lc.states.developing.role | Should -Be "game-architect"
+        $lc.states.developing.role | Should -Be "architect"
         $lc.states.developing.type | Should -Be "work"
         $lc.states.developing.signals.done.target | Should -Be "review"
 
         # Position [1] is first evaluator → "review"
-        $lc.states.review.role | Should -Be "game-engineer"
+        $lc.states.review.role | Should -Be "engineer"
         $lc.states.review.type | Should -Be "review"
         $lc.states.review.signals.done.target | Should -Be "review-2"
         $lc.states.review.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
         @($lc.states.review.signals.Keys)[0] | Should -Be "done"
 
         # Position [2] is second evaluator → "review-2" (final gate)
-        $lc.states."review-2".role | Should -Be "game-qa"
+        $lc.states."review-2".role | Should -Be "qa"
         $lc.states."review-2".type | Should -Be "review"
         $lc.states."review-2".signals.done.target | Should -Be "passed"
         $lc.states."review-2".signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
@@ -66,8 +66,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc.states."review-2".signals.fail.target | Should -Be "optimize"
 
         # Optimize and fixing states carry the worker role
-        $lc.states.optimize.role | Should -Be "game-architect"
-        $lc.states.fixing.role | Should -Be "game-architect"
+        $lc.states.optimize.role | Should -Be "architect"
+        $lc.states.fixing.role | Should -Be "architect"
         $lc.states.fixing.type | Should -Be "work"
         $lc.states.fixing.signals.done.target | Should -Be "review"
         Assert-NoLifecycleErrorSignal $lc
@@ -75,7 +75,7 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
     It "Builds lifecycle with single candidate — QA review injected" {
         $roles = @(
-            [PSCustomObject]@{ Name = 'game-ui-analyst'; InstanceType = 'worker' }
+            [PSCustomObject]@{ Name = 'analyst'; InstanceType = 'worker' }
         )
 
         . $script:ResolvePipeline -PipelineString "just_to_source_functions" -ErrorAction SilentlyContinue
@@ -83,11 +83,11 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $lc = Build-LifecycleV2 -RoleOverrides $roles -MaxRetries 3
 
         $lc.initial_state | Should -Be "developing"
-        $lc.states.developing.role | Should -Be "game-ui-analyst"
+        $lc.states.developing.role | Should -Be "analyst"
         # Single candidate → QA review injected as final gate
         $lc.states.developing.signals.done.target | Should -Be "review"
 
-        $lc.states.optimize.role | Should -Be "game-ui-analyst"
+        $lc.states.optimize.role | Should -Be "analyst"
         $lc.states.optimize.signals.done.target | Should -Be "review"
 
         # Injected QA review state
@@ -101,11 +101,11 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
     It "Single candidate via -Roles string array also works" {
         . $script:ResolvePipeline -PipelineString "just_to_source_functions" -ErrorAction SilentlyContinue
 
-        $lc = Build-LifecycleV2 -Roles @('game-qa') -MaxRetries 3
+        $lc = Build-LifecycleV2 -Roles @('qa') -MaxRetries 3
 
         # Position [0] is always the worker regardless of role name
         $lc.initial_state | Should -Be "developing"
-        $lc.states.developing.role | Should -Be "game-qa"
+        $lc.states.developing.role | Should -Be "qa"
 
         # Single candidate → QA review injected
         $lc.states.review.role | Should -Be "qa"
@@ -118,8 +118,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
     It "JSON output is valid and contains version 2" {
         $roles = @(
-            [PSCustomObject]@{ Name = 'game-architect'; InstanceType = 'worker' },
-            [PSCustomObject]@{ Name = 'game-qa'; InstanceType = 'evaluator' }
+            [PSCustomObject]@{ Name = 'architect'; InstanceType = 'worker' },
+            [PSCustomObject]@{ Name = 'qa'; InstanceType = 'evaluator' }
         )
 
         . $script:ResolvePipeline -PipelineString "just_to_source_functions" -ErrorAction SilentlyContinue

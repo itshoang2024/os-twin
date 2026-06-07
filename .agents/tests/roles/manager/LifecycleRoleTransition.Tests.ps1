@@ -1,6 +1,6 @@
 # Agent OS — Lifecycle Role Transition Tests
-# Covers: the bug where Invoke-Agent received 'game-engineer' when the
-# lifecycle state required 'game-qa'. Regression tests for the role
+# Covers: the bug where Invoke-Agent received 'engineer' when the
+# lifecycle state required 'qa'. Regression tests for the role
 # resolution fix in Start-DynamicRole.ps1 and Start-ManagerLoop.ps1.
 
 # ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ BeforeAll {
     $utilsModule = Join-Path $script:agentsDir "lib" "Utils.psm1"
     if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 
-    # --- Write the room-001-style lifecycle (game-engineer -> game-qa) ---
+    # --- Write the room-001-style lifecycle (engineer -> qa) ---
     function Write-GameLifecycle {
         param([string]$RoomDir)
         @{
@@ -27,21 +27,21 @@ BeforeAll {
             max_retries   = 3
             states        = @{
 	                developing   = @{
-	                    role    = "game-engineer"
+	                    role    = "engineer"
 	                    type    = "work"
 	                    signals = @{
 	                        done = @{ target = "review" }
 	                    }
 	                }
 	                optimize     = @{
-	                    role    = "game-engineer"
+	                    role    = "engineer"
 	                    type    = "work"
 	                    signals = @{
 	                        done = @{ target = "review" }
 	                    }
 	                }
 	                review       = @{
-	                    role    = "game-qa"
+	                    role    = "qa"
 	                    type    = "review"
 	                    signals = @{
 	                        done     = @{ target = "passed" }
@@ -112,34 +112,34 @@ AfterAll {
 }
 
 # ===========================================================================
-Describe "Lifecycle Role Transition — game-engineer to game-qa" {
+Describe "Lifecycle Role Transition — engineer to qa" {
 # ===========================================================================
 
     # -------------------------------------------------------------------
     Context "Lifecycle schema — room-001 lifecycle.json structure" {
     # -------------------------------------------------------------------
-        It "review state uses game-qa role" {
+        It "review state uses qa role" {
             $d = Join-Path $TestDrive "room-schema-$(Get-Random)"
             New-Item -ItemType Directory -Path $d -Force | Out-Null
             Write-GameLifecycle -RoomDir $d
             $lc = Get-Content (Join-Path $d "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.review.role | Should -Be "game-qa"
+            $lc.states.review.role | Should -Be "qa"
         }
 
-        It "developing state uses game-engineer role" {
+        It "developing state uses engineer role" {
             $d = Join-Path $TestDrive "room-schema2-$(Get-Random)"
             New-Item -ItemType Directory -Path $d -Force | Out-Null
             Write-GameLifecycle -RoomDir $d
             $lc = Get-Content (Join-Path $d "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.developing.role | Should -Be "game-engineer"
+            $lc.states.developing.role | Should -Be "engineer"
         }
 
-        It "optimize state uses game-engineer role (same as developing)" {
+        It "optimize state uses engineer role (same as developing)" {
             $d = Join-Path $TestDrive "room-schema3-$(Get-Random)"
             New-Item -ItemType Directory -Path $d -Force | Out-Null
             Write-GameLifecycle -RoomDir $d
             $lc = Get-Content (Join-Path $d "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.optimize.role | Should -Be "game-engineer"
+            $lc.states.optimize.role | Should -Be "engineer"
         }
 
         It "review.done signal targets 'passed'" {
@@ -169,7 +169,7 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             New-Item -ItemType Directory -Path $script:warRoomsDir -Force | Out-Null
         }
 
-        It "accepts 'done' from game-engineer when state=developing" {
+        It "accepts 'done' from engineer when state=developing" {
             & $script:NewWarRoom -RoomId "room-lc001" -TaskRef "EPIC-LC001" `
                                  -TaskDescription "Signal test" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-lc001"
@@ -178,19 +178,19 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             ([int][double]::Parse((Get-Date -UFormat %s)) - 10).ToString() |
                 Out-File (Join-Path $rd "state_changed_at") -NoNewline
 
-            & $script:PostMessage -RoomDir $rd -From "game-engineer" -To "manager" `
+            & $script:PostMessage -RoomDir $rd -From "engineer" -To "manager" `
                                   -Type "done" -Ref "EPIC-LC001" -Body "Feature implemented"
 
             $lc          = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
             $expectedRole = ($lc.states.developing.role -replace ':.*$', '')
-            $expectedRole | Should -Be "game-engineer"
+            $expectedRole | Should -Be "engineer"
 
             $msgs        = & $script:ReadMessages -RoomDir $rd -FilterType "done" -Last 1 -AsObject
             $msgs.Count  | Should -Be 1
             ($msgs[0].from -replace ':.*$', '') | Should -Be $expectedRole
         }
 
-        It "rejects 'done' from game-engineer when state=review (wrong sender)" {
+        It "rejects 'done' from engineer when state=review (wrong sender)" {
             & $script:NewWarRoom -RoomId "room-lc002" -TaskRef "EPIC-LC002" `
                                  -TaskDescription "Sender filter" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-lc002"
@@ -199,21 +199,21 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             ([int][double]::Parse((Get-Date -UFormat %s)) - 10).ToString() |
                 Out-File (Join-Path $rd "state_changed_at") -NoNewline
 
-            & $script:PostMessage -RoomDir $rd -From "game-engineer" -To "manager" `
+            & $script:PostMessage -RoomDir $rd -From "engineer" -To "manager" `
                                   -Type "done" -Ref "EPIC-LC002" -Body "Already done"
 
             $lc          = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
             $expectedRole = ($lc.states.review.role -replace ':.*$', '')
-            $expectedRole | Should -Be "game-qa"
+            $expectedRole | Should -Be "qa"
 
             $msgs        = & $script:ReadMessages -RoomDir $rd -FilterType "done" -Last 1 -AsObject
             $msgs.Count  | Should -Be 1
             $senderBase   = ($msgs[0].from -replace ':.*$', '')
-            # game-engineer != game-qa => sender should NOT match review's expected role
+            # engineer != qa => sender should NOT match review's expected role
             ($senderBase -ne $expectedRole) | Should -BeTrue
         }
 
-        It "accepts 'pass' from game-qa when state=review" {
+        It "accepts 'pass' from qa when state=review" {
             & $script:NewWarRoom -RoomId "room-lc003" -TaskRef "EPIC-LC003" `
                                  -TaskDescription "QA pass" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-lc003"
@@ -222,7 +222,7 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             ([int][double]::Parse((Get-Date -UFormat %s)) - 10).ToString() |
                 Out-File (Join-Path $rd "state_changed_at") -NoNewline
 
-            & $script:PostMessage -RoomDir $rd -From "game-qa" -To "manager" `
+            & $script:PostMessage -RoomDir $rd -From "qa" -To "manager" `
                                   -Type "pass" -Ref "EPIC-LC003" -Body "All tests pass"
 
             $lc          = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
@@ -254,11 +254,11 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             New-Item -ItemType Directory -Path (Join-Path $script:roomDir "artifacts") -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $script:roomDir "pids")      -Force | Out-Null
 
-            # Config carries the ORIGINAL room-creation role (game-engineer)
+            # Config carries the ORIGINAL room-creation role (engineer)
             @{
                 task_ref   = "EPIC-TEST"
                 assignment = @{
-                    assigned_role = "game-engineer"
+                    assigned_role = "engineer"
                     title         = "Build grid system"
                     description   = "Build the grid"
                 }
@@ -273,11 +273,11 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             Set-Content  -Path $script:mockPrompt -Encoding utf8 `
                 -Value 'param([string]$RoomDir="",[string]$RoleName="",[string]$RolePath=""); return "MOCK PROMPT"'
 
-            # --- Mock: GetRoleDef returns evaluator for game-qa, worker otherwise ---
+            # --- Mock: GetRoleDef returns evaluator for qa, worker otherwise ---
             $script:mockGetRole = Join-Path $TestDrive "Mock-GetRole-$(Get-Random).ps1"
             Set-Content  -Path $script:mockGetRole -Encoding utf8 -Value 'param([string]$RoleName="",[string]$RolePath="")'
             Add-Content  -Path $script:mockGetRole `
-                -Value 'return [PSCustomObject]@{ Name=$RoleName; InstanceType=if($RoleName -eq "game-qa"){"evaluator"}else{"worker"}; Model="test"; Timeout=60 }'
+                -Value 'return [PSCustomObject]@{ Name=$RoleName; InstanceType=if($RoleName -eq "qa"){"evaluator"}else{"worker"}; Model="test"; Timeout=60 }'
 
             # --- Mock: InvokeAgent records RoleName, writes run-agent.ps1 ---
             $script:mockInvoke = Join-Path $TestDrive "Mock-Invoke-$(Get-Random).ps1"
@@ -290,34 +290,34 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             }
         }
 
-        It "uses game-qa (not game-engineer) for invocation when -RoleName game-qa is passed" {
+        It "uses qa (not engineer) for invocation when -RoleName qa is passed" {
             & $script:StartDynamicRole -RoomDir $script:roomDir `
-                                       -RoleName "game-qa" `
+                                       -RoleName "qa" `
                                        -AgentsDir $script:agentsDir `
                                        -TimeoutSeconds 10 `
                                        @script:overrides
 
             $invokedRole = (Get-Content (Join-Path $script:roomDir "mock_invoked_role.txt") -Raw).Trim()
-            $invokedRole | Should -Be "game-qa"
+            $invokedRole | Should -Be "qa"
         }
 
-        It "generates run-agent.ps1 with AGENT_OS_ROLE=game-qa (not game-engineer) in review state" {
+        It "generates run-agent.ps1 with AGENT_OS_ROLE=qa (not engineer) in review state" {
             & $script:StartDynamicRole -RoomDir $script:roomDir `
-                                       -RoleName "game-qa" `
+                                       -RoleName "qa" `
                                        -AgentsDir $script:agentsDir `
                                        -TimeoutSeconds 10 `
                                        @script:overrides
 
             $runPs1 = Get-Content (Join-Path $script:roomDir "artifacts" "run-agent.ps1") -Raw
-            $runPs1 | Should -Match "AGENT_OS_ROLE.*=.*'game-qa'"
-            $runPs1 | Should -Not -Match "AGENT_OS_ROLE.*=.*'game-engineer'"
+            $runPs1 | Should -Match "AGENT_OS_ROLE.*=.*'qa'"
+            $runPs1 | Should -Not -Match "AGENT_OS_ROLE.*=.*'engineer'"
         }
 
         It "maps legacy evaluator VERDICT: PASS to done when lifecycle accepts done" {
             Write-GameLifecycle -RoomDir $script:roomDir
 
             & $script:StartDynamicRole -RoomDir $script:roomDir `
-                                       -RoleName "game-qa" `
+                                       -RoleName "qa" `
                                        -AgentsDir $script:agentsDir `
                                        -TimeoutSeconds 10 `
                                        @script:overrides
@@ -326,19 +326,19 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $passMsgs = & $script:ReadMessages -RoomDir $script:roomDir -FilterType "pass" -Last 1 -AsObject
 
             $doneMsgs.Count | Should -Be 1
-            $doneMsgs[-1].from | Should -Be "game-qa"
+            $doneMsgs[-1].from | Should -Be "qa"
             $doneMsgs[-1].body | Should -Match "VERDICT: DONE"
             $passMsgs.Count | Should -Be 0
         }
 
-        It "falls back to game-engineer from config.json when -RoleName is not passed" {
+        It "falls back to engineer from config.json when -RoleName is not passed" {
             & $script:StartDynamicRole -RoomDir $script:roomDir `
                                        -AgentsDir $script:agentsDir `
                                        -TimeoutSeconds 10 `
                                        @script:overrides
 
             $invokedRole = (Get-Content (Join-Path $script:roomDir "mock_invoked_role.txt") -Raw).Trim()
-            $invokedRole | Should -Be "game-engineer"
+            $invokedRole | Should -Be "engineer"
         }
     }
 
@@ -358,9 +358,9 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
 
             $expected = @{
-                "developing" = "game-engineer"
-                "optimize"   = "game-engineer"
-                "review"     = "game-qa"
+                "developing" = "engineer"
+                "optimize"   = "engineer"
+                "review"     = "qa"
                 "triage"     = "manager"
                 "failed"     = "manager"
             }
@@ -370,7 +370,7 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             }
         }
 
-        It "developing→review transition changes expected role from game-engineer to game-qa" {
+        It "developing→review transition changes expected role from engineer to qa" {
             & $script:NewWarRoom -RoomId "room-flc002" -TaskRef "EPIC-FLC2" `
                                  -TaskDescription "Transition roles" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-flc002"
@@ -378,52 +378,52 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
 
             $developingRole = $lc.states.developing.role
-            $developingRole  | Should -Be "game-engineer"
+            $developingRole  | Should -Be "engineer"
 
             $targetState    = $lc.states.developing.signals.done.target
             $targetState     | Should -Be "review"
 
             $reviewRole     = $lc.states.$targetState.role
-            $reviewRole      | Should -Be "game-qa"
+            $reviewRole      | Should -Be "qa"
 
             # Critical assertion: the role changes across the transition
             $reviewRole | Should -Not -Be $developingRole
         }
 
-        It "game-engineer signal is valid in developing, but NOT in review" {
+        It "engineer signal is valid in developing, but NOT in review" {
             & $script:NewWarRoom -RoomId "room-flc003" -TaskRef "EPIC-FLC3" `
                                  -TaskDescription "Cross-role signal" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-flc003"
             Write-GameLifecycle -RoomDir $rd
             $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
 
-            ($lc.states.developing.role -replace ':.*$', '') | Should -Be "game-engineer"
-            ($lc.states.review.role     -replace ':.*$', '') | Should -Not -Be "game-engineer"
-            ($lc.states.review.role     -replace ':.*$', '') | Should -Be "game-qa"
+            ($lc.states.developing.role -replace ':.*$', '') | Should -Be "engineer"
+            ($lc.states.review.role     -replace ':.*$', '') | Should -Not -Be "engineer"
+            ($lc.states.review.role     -replace ':.*$', '') | Should -Be "qa"
         }
 
-        It "optimize → review transition changes expected role from game-engineer to game-qa" {
+        It "optimize → review transition changes expected role from engineer to qa" {
             & $script:NewWarRoom -RoomId "room-flc004" -TaskRef "EPIC-FLC4" `
                                  -TaskDescription "Optimize to review" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-flc004"
             Write-GameLifecycle -RoomDir $rd
             $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
 
-            # optimize state is serviced by game-engineer
+            # optimize state is serviced by engineer
             $optimizeRole = $lc.states.optimize.role
-            $optimizeRole | Should -Be "game-engineer"
+            $optimizeRole | Should -Be "engineer"
 
             # optimize.done targets review
             $targetState  = $lc.states.optimize.signals.done.target
             $targetState  | Should -Be "review"
 
-            # review is serviced by game-qa — role changes across the transition
+            # review is serviced by qa — role changes across the transition
             $reviewRole   = $lc.states.$targetState.role
-            $reviewRole   | Should -Be "game-qa"
+            $reviewRole   | Should -Be "qa"
             $reviewRole   | Should -Not -Be $optimizeRole
         }
 
-        It "triage → optimize (fix signal) routes to game-engineer, not manager" {
+        It "triage → optimize (fix signal) routes to engineer, not manager" {
             & $script:NewWarRoom -RoomId "room-flc005" -TaskRef "EPIC-FLC5" `
                                  -TaskDescription "Triage fix to optimize" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-flc005"
@@ -438,13 +438,13 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $targetState = $lc.states.triage.signals.fix.target
             $targetState | Should -Be "optimize"
 
-            # optimize is serviced by game-engineer — role changes
+            # optimize is serviced by engineer — role changes
             $optimizeRole = $lc.states.$targetState.role
-            $optimizeRole | Should -Be "game-engineer"
+            $optimizeRole | Should -Be "engineer"
             $optimizeRole | Should -Not -Be $triageRole
         }
 
-        It "triage → developing (redesign signal) routes to game-engineer for full restart" {
+        It "triage → developing (redesign signal) routes to engineer for full restart" {
             & $script:NewWarRoom -RoomId "room-flc006" -TaskRef "EPIC-FLC6" `
                                  -TaskDescription "Triage redesign" -WarRoomsDir $script:warRoomsDir
             $rd = Join-Path $script:warRoomsDir "room-flc006"
@@ -455,8 +455,8 @@ Describe "Lifecycle Role Transition — game-engineer to game-qa" {
             $targetState = $lc.states.triage.signals.redesign.target
             $targetState | Should -Be "developing"
 
-            # developing uses game-engineer
-            $lc.states.$targetState.role | Should -Be "game-engineer"
+            # developing uses engineer
+            $lc.states.$targetState.role | Should -Be "engineer"
 
             # redesign actions include revise_brief
             $lc.states.triage.signals.redesign.actions | Should -Contain "revise_brief"

@@ -67,6 +67,9 @@ patch_mcp_config() {
   fi
   # Add ostwin bin directories
   mcp_path="$mcp_path:$INSTALL_DIR/.agents/bin:$HOME/.local/bin:$HOME/.opencode/bin"
+  if [[ -d "$HOME/.bun/bin" ]]; then
+    mcp_path="$mcp_path:$HOME/.bun/bin"
+  fi
   # Add homebrew paths (macOS)
   if [[ -d "/opt/homebrew/bin" ]]; then
     mcp_path="$mcp_path:/opt/homebrew/bin:/opt/homebrew/sbin"

@@ -623,12 +623,12 @@ depends_on: [EPIC-001, EPIC-003]
             $script:origHome = $env:HOME
             $script:fakeHome = Join-Path $TestDrive "fakehome-rolejson-$(Get-Random)"
 
-            # Create role.json with skill_refs for game-engineer
-            $roleDir = Join-Path $script:fakeHome ".ostwin" "roles" "game-engineer"
+            # Create role.json with skill_refs for engineer
+            $roleDir = Join-Path $script:fakeHome ".ostwin" "roles" "engineer"
             New-Item -ItemType Directory -Path $roleDir -Force | Out-Null
             @{
-                name       = "game-engineer"
-                skill_refs = @("build-ui", "detect-ui", "unity-dev-principles")
+                name       = "engineer"
+                skill_refs = @("build-ui", "detect-ui", "dev-principles")
                 model      = "test-model"
             } | ConvertTo-Json | Out-File -FilePath (Join-Path $roleDir "role.json") -Encoding utf8
 
@@ -645,24 +645,24 @@ depends_on: [EPIC-001, EPIC-003]
         It "populates skill_refs from role.json when plan roles.json is missing" {
             & $script:NewWarRoom -RoomId "room-rolejson-01" -TaskRef "EPIC-020" `
                                  -TaskDescription "Game feature" -WarRoomsDir $script:warRoomsDir `
-                                 -AssignedRole "game-engineer" `
+                                 -AssignedRole "engineer" `
                                  -PlanId "nonexistent-plan-id"
 
-            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-01") -Filter "game-engineer_*.json" | Select-Object -First 1
+            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-01") -Filter "engineer_*.json" | Select-Object -First 1
             $roleFile | Should -Not -BeNullOrEmpty
             $roleConfig = Get-Content $roleFile.FullName -Raw | ConvertFrom-Json
             $roleConfig.skill_refs | Should -Not -BeNullOrEmpty
             $roleConfig.skill_refs | Should -Contain "build-ui"
             $roleConfig.skill_refs | Should -Contain "detect-ui"
-            $roleConfig.skill_refs | Should -Contain "unity-dev-principles"
+            $roleConfig.skill_refs | Should -Contain "dev-principles"
         }
 
         It "populates skill_refs from role.json when PlanId is empty" {
             & $script:NewWarRoom -RoomId "room-rolejson-02" -TaskRef "EPIC-021" `
                                  -TaskDescription "Another game feature" -WarRoomsDir $script:warRoomsDir `
-                                 -AssignedRole "game-engineer"
+                                 -AssignedRole "engineer"
 
-            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-02") -Filter "game-engineer_*.json" | Select-Object -First 1
+            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-02") -Filter "engineer_*.json" | Select-Object -First 1
             $roleFile | Should -Not -BeNullOrEmpty
             $roleConfig = Get-Content $roleFile.FullName -Raw | ConvertFrom-Json
             $roleConfig.skill_refs | Should -Not -BeNullOrEmpty
@@ -674,17 +674,17 @@ depends_on: [EPIC-001, EPIC-003]
             $planId = "plan-override-$(Get-Random)"
             $planRolesFile = Join-Path $script:fakeHome ".ostwin" ".agents" "plans" "$planId.roles.json"
             @{
-                "game-engineer" = @{
+                "engineer" = @{
                     skill_refs = @("custom-plan-skill-a", "custom-plan-skill-b")
                 }
             } | ConvertTo-Json -Depth 5 | Out-File -FilePath $planRolesFile -Encoding utf8
 
             & $script:NewWarRoom -RoomId "room-rolejson-03" -TaskRef "EPIC-022" `
                                  -TaskDescription "Plan override test" -WarRoomsDir $script:warRoomsDir `
-                                 -AssignedRole "game-engineer" `
+                                 -AssignedRole "engineer" `
                                  -PlanId $planId
 
-            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-03") -Filter "game-engineer_*.json" | Select-Object -First 1
+            $roleFile = Get-ChildItem (Join-Path $script:warRoomsDir "room-rolejson-03") -Filter "engineer_*.json" | Select-Object -First 1
             $roleConfig = Get-Content $roleFile.FullName -Raw | ConvertFrom-Json
             # Should use plan's skills, NOT role.json's
             $roleConfig.skill_refs | Should -Contain "custom-plan-skill-a"

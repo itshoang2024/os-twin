@@ -19,6 +19,11 @@
 [[ -n "${_SETUP_AUTOSTART_SH_LOADED:-}" ]] && return 0
 _SETUP_AUTOSTART_SH_LOADED=1
 
+_is_wsl() {
+  grep -qiE "microsoft|wsl" /proc/sys/kernel/osrelease 2>/dev/null \
+    || [[ -n "${WSL_INTEROP:-}" || -n "${WSL_DISTRO_NAME:-}" ]]
+}
+
 setup_autostart() {
   local daemon_install_script=""
 
@@ -45,9 +50,19 @@ setup_autostart() {
   # Ensure the daemon scripts are executable
   local daemon_dir
   daemon_dir="$(dirname "$daemon_install_script")"
-  find "$daemon_dir" -name "*.sh" -exec chmod +f {} \; 2>/dev/null || true
+  find "$daemon_dir" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
   step "Registering dashboard auto-start for $OS..."
+
+  if [[ "$OS" == "linux" ]] && _is_wsl; then
+    local systemd_status=""
+    systemd_status=$(systemctl --user status 2>&1 || true)
+    if echo "$systemd_status" | grep -qiE "failed to connect|no such file|transport endpoint|bus"; then
+      info "Skipping dashboard auto-start: WSL user systemd session is not available"
+      info "Start manually: ostwin dashboard start"
+      return
+    fi
+  fi
 
   # Run the platform-specific installer
   # These scripts handle their own idempotency (unload before load, etc.)

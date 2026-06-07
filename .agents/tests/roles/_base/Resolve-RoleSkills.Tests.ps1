@@ -344,10 +344,10 @@ Describe "Resolve-RoleSkills" {
 
     Context "Hierarchical resolution: own-role path" {
         It "resolves from skills/roles/<role>/<ref>/SKILL.md" {
-            New-TestSkill -Name "build-ui" -Location "roles/game-engineer"
-            New-PlanRoles -PlanId "p2" -Roles @{ "game-engineer" = @{ skill_refs = @("build-ui") } }
+            New-TestSkill -Name "build-ui" -Location "roles/engineer"
+            New-PlanRoles -PlanId "p2" -Roles @{ "engineer" = @{ skill_refs = @("build-ui") } }
             $roomDir = New-TestRoom -PlanId "p2"
-            $skills = & $script:resolveScript -RoleName "game-engineer" -RolePath $script:testRolePath `
+            $skills = & $script:resolveScript -RoleName "engineer" -RolePath $script:testRolePath `
                 -SkillsBaseDir $script:baseDir -RoomDir $roomDir
             ($skills | Where-Object { $_.Name -eq "build-ui" }) | Should -Not -BeNullOrEmpty
         }
@@ -465,10 +465,10 @@ Describe "Resolve-RoleSkills" {
     # === INSTANCE SUFFIX HANDLING ===
     Context "Instance suffix (role:variant) handling" {
         It "strips instance suffix when resolving plan-roles config" {
-            New-TestSkill -Name "build-ui" -Location "roles/game-engineer"
-            New-PlanRoles -PlanId "p11" -Roles @{ "game-engineer" = @{ skill_refs = @("build-ui") } }
+            New-TestSkill -Name "build-ui" -Location "roles/engineer"
+            New-PlanRoles -PlanId "p11" -Roles @{ "engineer" = @{ skill_refs = @("build-ui") } }
             $roomDir = New-TestRoom -PlanId "p11"
-            $skills = & $script:resolveScript -RoleName "game-engineer:ui" -RolePath $script:testRolePath `
+            $skills = & $script:resolveScript -RoleName "engineer:ui" -RolePath $script:testRolePath `
                 -SkillsBaseDir $script:baseDir -RoomDir $roomDir
             ($skills | Where-Object { $_.Name -eq "build-ui" }) | Should -Not -BeNullOrEmpty
         }

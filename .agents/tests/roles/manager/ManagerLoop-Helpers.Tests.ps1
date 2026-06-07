@@ -969,7 +969,7 @@ Describe "Start-WorkerJob" {
     }
 
     It "uses -RoleName as effective role name when provided" {
-        $result = Start-WorkerJob -RoomDir $script:rd -Role "engineer" -Script $script:workerScript -TaskRef "T1" -RoleName "game-engineer" -SkipLockCheck
+        $result = Start-WorkerJob -RoomDir $script:rd -Role "engineer" -Script $script:workerScript -TaskRef "T1" -RoleName "engineer" -SkipLockCheck
         $result | Should -BeTrue
     }
 
