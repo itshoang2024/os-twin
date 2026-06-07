@@ -440,9 +440,10 @@ def test_schema_v1_migrates_to_v2(namespace_manager: NamespaceManager, tmp_path:
     meta = namespace_manager.get(ns_name)
     
     assert meta is not None
-    assert meta.schema_version == 2
+    assert meta.schema_version == 3
     assert meta.retention is not None
     assert meta.retention.policy == "manual"
+    assert meta.ontology_profile_version is None
 
 
 def test_schema_missing_version_migrates(namespace_manager: NamespaceManager, tmp_path: Path):
@@ -477,5 +478,6 @@ def test_schema_missing_version_migrates(namespace_manager: NamespaceManager, tm
     meta = namespace_manager.get(ns_name)
     
     assert meta is not None
-    assert meta.schema_version == 2
+    assert meta.schema_version == 3
     assert meta.retention is not None
+    assert meta.ontology_profile_version is None

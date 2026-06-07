@@ -49,7 +49,12 @@ param(
 
     [switch]$Unified,
 
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+
+    [ValidateSet('room-worktree','shared')]
+    [string]$WorkspaceIsolation = 'room-worktree',
+
+    [string]$WorktreeRoot = ''
 )
 
 # --- Resolve paths ---
@@ -121,6 +126,11 @@ $eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
 if (Test-Path $eventsModule) {
     $eventsModule = (Resolve-Path $eventsModule).Path
     Import-Module $eventsModule -Force
+}
+$workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
+if (Test-Path $workspaceModule) {
+    $workspaceModule = (Resolve-Path $workspaceModule).Path
+    Import-Module $workspaceModule -Force
 }
 
 # --- Helper Functions ---
@@ -275,10 +285,15 @@ if ($planContent -match '(?m)^working_dir:\s*(.+)$') {
     if ($globalWorkingDir -and $globalWorkingDir -ne '...') {
         $workingDirWarningShown = $false
         if (-not (Test-Path $globalWorkingDir)) {
-            try {
-                Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
-                New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
-            } catch {
+            if ($WorkspaceIsolation -eq 'shared') {
+                try {
+                    Write-Host "  Creating working_dir: $globalWorkingDir" -ForegroundColor DarkGray
+                    New-Item -ItemType Directory -Path $globalWorkingDir -Force -ErrorAction Stop | Out-Null
+                } catch {
+                    Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
+                    $workingDirWarningShown = $true
+                }
+            } else {
                 Write-Host "  working_dir not found: $globalWorkingDir" -ForegroundColor Yellow
                 $workingDirWarningShown = $true
             }
@@ -523,6 +538,38 @@ if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
     }
 }
 
+$workspaceManifest = $null
+if (-not $DryRun) {
+    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
+        exit 1
+    }
+
+    $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
+    if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
+        $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir
+        if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'run_id') -and $workspaceManifest.run_id) {
+            $runId = "$($workspaceManifest.run_id)"
+            $env:OSTWIN_RUN_ID = $runId
+        }
+    } elseif (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue) {
+        try {
+            $workspaceManifest = Initialize-PlanIntegrationWorkspace `
+                -WarRoomsDir $warRoomsDir `
+                -PlanId $planId `
+                -RunId $runId `
+                -SourceWorkingDir $ProjectDir `
+                -WorkspaceIsolation $WorkspaceIsolation `
+                -WorktreeRoot $WorktreeRoot
+        } catch {
+            Write-Error "Workspace initialization failed: $($_.Exception.Message)"
+            exit 1
+        }
+    } elseif ($WorkspaceIsolation -eq 'shared') {
+        $workspaceManifest = $null
+    }
+}
+
 # room-000 is created before the final plan_id is known. Reconcile its config so
 # negotiation, dashboard, and channel layers share the same execution context.
 $room000Config = Join-Path $room000Dir 'config.json'
@@ -537,6 +584,16 @@ if (-not $DryRun -and (Test-Path $room000Config)) {
             $r0cfg.run_id = $runId
         } else {
             $r0cfg | Add-Member -NotePropertyName run_id -NotePropertyValue $runId
+        }
+        $room000Workspace = [ordered]@{
+            mode       = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
+            status     = 'not_applicable'
+            updated_at = (Get-Date).ToUniversalTime().ToString('o')
+        }
+        if ($r0cfg.PSObject.Properties.Name -contains 'workspace') {
+            $r0cfg.workspace = $room000Workspace
+        } else {
+            $r0cfg | Add-Member -NotePropertyName workspace -NotePropertyValue $room000Workspace
         }
         $r0cfg | ConvertTo-Json -Depth 10 | Out-File -FilePath $room000Config -Encoding utf8
     } catch {
@@ -557,6 +614,13 @@ if (-not $DryRun -and (Get-Command Write-OrchestrationEvent -ErrorAction Silentl
             resume       = [bool]$Resume
             run_id       = $runId
             skip_loop    = [bool]$SkipLoop
+            workspace    = [ordered]@{
+                isolation             = $WorkspaceIsolation
+                worktree_root         = $WorktreeRoot
+                integration_branch    = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'integration_branch')) { $workspaceManifest.integration_branch } else { '' }
+                integration_worktree  = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'integration_worktree_dir')) { $workspaceManifest.integration_worktree_dir } else { '' }
+                base_ref              = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'base_ref')) { $workspaceManifest.base_ref } else { '' }
+            }
         }
     }
     Write-OrchestrationEvent -Event $startedEvent | Out-Null
@@ -616,6 +680,16 @@ if (-not $DryRun) {
         if (-not $meta["status"] -or $meta["status"] -in @("draft","stored")) { $meta["status"] = "active" }
         if ($ProjectDir) { $meta["working_dir"] = $ProjectDir }
         if ($ProjectDir) { $meta["warrooms_dir"] = (Join-Path $ProjectDir ".war-rooms") }
+        $meta["workspace_isolation"] = $WorkspaceIsolation
+        if ($workspaceManifest) {
+            $meta["workspace"] = [ordered]@{
+                isolation             = $WorkspaceIsolation
+                base_ref              = if ($workspaceManifest.PSObject.Properties.Name -contains 'base_ref') { $workspaceManifest.base_ref } else { '' }
+                integration_branch    = if ($workspaceManifest.PSObject.Properties.Name -contains 'integration_branch') { $workspaceManifest.integration_branch } else { '' }
+                integration_worktree  = if ($workspaceManifest.PSObject.Properties.Name -contains 'integration_worktree_dir') { $workspaceManifest.integration_worktree_dir } else { '' }
+                worktree_root         = if ($workspaceManifest.PSObject.Properties.Name -contains 'worktree_root') { $workspaceManifest.worktree_root } else { '' }
+            }
+        }
         $meta["launched_at"] = (Get-Date).ToUniversalTime().ToString("o")
         $meta["source_plan_file"] = $PlanFile
 
@@ -638,6 +712,7 @@ Write-Host ""
 Write-Host "  Plan: $PlanFile"
 Write-Host "  Plan ID: $planId"
 Write-Host "  Project: $ProjectDir"
+Write-Host "  Workspace isolation: $WorkspaceIsolation"
 
 if ($Resume) {
     Write-Host "  Mode: RESUME (using existing war-rooms)" -ForegroundColor Yellow
@@ -819,8 +894,17 @@ function New-PlanWarRooms {
                         Write-Host "    [RECONCILE] $($entry.RoomId): role $currentRole → $primaryRole (from plan Roles: directive)" -ForegroundColor Yellow
                         $existingConfig.assignment.assigned_role = $primaryRole
                         $existingConfig.assignment.candidate_roles = $candidateRoles
-                        $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                     }
+                    if (-not ($existingConfig.PSObject.Properties.Name -contains 'workspace')) {
+                        $existingWorkspace = [ordered]@{
+                            mode               = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
+                            status             = if ($WorkspaceIsolation -eq 'room-worktree') { 'pending' } else { 'not_applicable' }
+                            isolation          = $WorkspaceIsolation
+                            source_working_dir = if ($existingConfig.PSObject.Properties.Name -contains 'working_dir') { $existingConfig.working_dir } else { $ProjectDir }
+                        }
+                        $existingConfig | Add-Member -NotePropertyName workspace -NotePropertyValue $existingWorkspace
+                    }
+                    $existingConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $existingConfigPath -Encoding utf8
                 } catch {
                     Write-Host "    [WARN] Failed to reconcile $($entry.RoomId): $($_.Exception.Message)" -ForegroundColor Yellow
                 }
@@ -840,8 +924,12 @@ function New-PlanWarRooms {
             }
         }
         if (-not (Test-Path $resolvedWorkingDir)) {
-            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            if ($WorkspaceIsolation -eq 'shared') {
+                Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+                New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            } else {
+                Write-Host "    Deferring working_dir creation to room worktree: $resolvedWorkingDir" -ForegroundColor DarkGray
+            }
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }
@@ -869,6 +957,22 @@ function New-PlanWarRooms {
 
 
         $candidateRoles = @(if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles } else { @("engineer", "qa") })
+        $sourceRelativeDir = ''
+        if ($WorkspaceIsolation -eq 'room-worktree' -and $workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'source_git_root') -and $workspaceManifest.source_git_root) {
+            try {
+                $sourceRelativeDir = [System.IO.Path]::GetRelativePath("$($workspaceManifest.source_git_root)", $resolvedWorkingDir) -replace '\\', '/'
+            } catch {
+                $sourceRelativeDir = if ($workspaceManifest.PSObject.Properties.Name -contains 'source_relative_dir') { "$($workspaceManifest.source_relative_dir)" } else { '.' }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($sourceRelativeDir)) { $sourceRelativeDir = '.' }
+        $workspaceIntent = [ordered]@{
+            mode                = if ($WorkspaceIsolation -eq 'room-worktree') { 'git-worktree' } else { 'shared' }
+            status              = if ($WorkspaceIsolation -eq 'room-worktree') { 'pending' } else { 'not_applicable' }
+            isolation           = $WorkspaceIsolation
+            source_working_dir  = $resolvedWorkingDir
+            source_relative_dir = $sourceRelativeDir
+        }
         $roomArgs = @{
             RoomId           = $entry.RoomId
             TaskRef          = $entry.TaskRef
@@ -881,6 +985,7 @@ function New-PlanWarRooms {
             CandidateRoles   = $candidateRoles
             MaxRetries       = $maxRetries
             TimeoutSeconds   = $timeoutSeconds
+            Workspace        = $workspaceIntent
         }
 
         if ($entry.DoD -and $entry.DoD.Count -gt 0) {

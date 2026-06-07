@@ -418,17 +418,16 @@ class TestRoundTripAcrossRestart:
         assert body["model"]["providerID"] != "google-vertex"
 
     @pytest.mark.asyncio
-    async def test_stale_google_vertex_runtime_is_normalised_for_chat(
+    async def test_explicit_google_vertex_runtime_is_preserved_for_chat(
         self, tmp_config_resolver
     ):
-        """Regression: if a previously persisted value still has the legacy
-        ``google-vertex`` prefix (e.g. from before this fix), the chat body
-        sent to OpenCode must still use ``google``."""
+        """Explicit Vertex selections should continue to target OpenCode's
+        ``google-vertex`` provider while fresh defaults use ``google``."""
         from dashboard import master_agent as ma
         from dashboard.llm_client import ChatMessage
 
         ma._master_config.model = "gemini-3.1-pro-preview"
-        ma._master_config.provider = "google-vertex"  # stale legacy value
+        ma._master_config.provider = "google-vertex"
         ma._master_config.is_explicit = True
 
         mock_client = MagicMock()
@@ -445,11 +444,11 @@ class TestRoundTripAcrossRestart:
         ):
             await ma.master_chat(
                 [ChatMessage(role="user", content="hello")],
-                conversation_id="legacy-vertex-chat",
+                conversation_id="vertex-chat",
             )
 
         body = mock_client.post.call_args.kwargs["body"]
-        assert body["model"]["providerID"] == "google"
+        assert body["model"]["providerID"] == "google-vertex"
 
 
 # ── 4. Lifespan startup hydrates before background tasks ───────────────────

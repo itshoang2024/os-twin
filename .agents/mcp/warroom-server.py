@@ -13,6 +13,7 @@ Transport: stdio (invoked via deepagents --mcp-config)
 import json
 import os
 import pathlib
+import tempfile
 from datetime import datetime, timezone
 from typing import Annotated, get_args, Literal
 
@@ -57,6 +58,22 @@ def _resolve_room_dir(room_dir: str) -> str:
 
 
 mcp = FastMCP("agent-os-warroom", log_level="CRITICAL")
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """Atomically replace a small war-room state file."""
+    directory = os.path.dirname(path) or "."
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=directory, delete=False) as tmp:
+            tmp_path = tmp.name
+            tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _get_lifecycle(room_dir: str) -> dict | None:
@@ -107,13 +124,11 @@ def update_status(
             old_status = f.read().strip()
 
     # Write new status
-    with open(status_file, "w") as f:
-        f.write(status)
+    _atomic_write_text(status_file, status)
 
     # Write state_changed_at (epoch seconds)
     epoch = int(datetime.now(timezone.utc).timestamp())
-    with open(os.path.join(room_dir, "state_changed_at"), "w") as f:
-        f.write(str(epoch))
+    _atomic_write_text(os.path.join(room_dir, "state_changed_at"), str(epoch))
 
     # Append audit log
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

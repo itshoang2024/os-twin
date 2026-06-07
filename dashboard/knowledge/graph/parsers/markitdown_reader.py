@@ -41,6 +41,25 @@ _CHUNK_OVERLAP = 200
 _SLIDING_WINDOW_THRESHOLD = _CHUNK_SIZE * 10
 
 
+def _chunk_text(text: str | None, chunk_size: int = _CHUNK_SIZE, overlap: int = _CHUNK_OVERLAP) -> list[str]:
+    """Backward-compatible fixed-window chunk helper used by legacy tests."""
+    if not text:
+        return []
+    if len(text) <= chunk_size:
+        return [text]
+    step = max(1, chunk_size - overlap)
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        chunk = text[start:start + chunk_size]
+        if chunk:
+            chunks.append(chunk)
+        if start + chunk_size >= len(text):
+            break
+        start += step
+    return chunks
+
+
 class MarkitdownReader(DocParser):
     """Read a file from disk and return chunked Document objects."""
 
@@ -58,6 +77,31 @@ class MarkitdownReader(DocParser):
         self.include_metadata = include_metadata
         self.supported_extensions = SUPPORTED_DOCUMENT_EXTENSIONS
         self._converter: Any | None = None  # cached MarkItDown instance
+
+    @staticmethod
+    def _create_sliding_windows(total_pages: int, window_size: int, overlap: int) -> list[tuple[int, list[int]]]:
+        """Return overlapping page windows as ``(start_page, page_indexes)`` tuples."""
+        if window_size < 1:
+            raise ValueError("window_size must be at least 1")
+        if overlap < 0:
+            raise ValueError("overlap must be non-negative")
+        if overlap >= window_size:
+            raise ValueError("overlap must be less than window_size")
+        if total_pages <= 0:
+            return []
+        if total_pages <= window_size:
+            return [(0, list(range(total_pages)))]
+
+        step = window_size - overlap
+        windows: list[tuple[int, list[int]]] = []
+        start = 0
+        while start < total_pages:
+            end = min(total_pages, start + window_size)
+            windows.append((start, list(range(start, end))))
+            if end >= total_pages:
+                break
+            start += step
+        return windows
 
     # -- Internals ------------------------------------------------------
 
@@ -89,9 +133,37 @@ class MarkitdownReader(DocParser):
             return MarkItDown()
 
         try:
-            from dashboard.llm_client import create_openai_sync_client  # noqa: WPS433
+            from dashboard.llm_client import (  # noqa: WPS433
+                _detect_provider_from_model,
+                create_client,
+                create_openai_sync_client,
+            )
 
-            sync_client = create_openai_sync_client(model=LLM_MODEL)
+            provider = _detect_provider_from_model(LLM_MODEL)
+            env_by_provider = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY",
+                "google": "GEMINI_API_KEY",
+                "google-vertex": "GOOGLE_API_KEY",
+                "mistral": "MISTRAL_API_KEY",
+                "openai": "OPENAI_API_KEY",
+            }
+            env_name = env_by_provider.get(provider)
+            explicit_key = os.environ.get(env_name) if env_name else None
+            if provider == "google" and not explicit_key:
+                explicit_key = os.environ.get("GOOGLE_API_KEY")
+            if provider != "ollama" and not explicit_key:
+                logger.debug(
+                    "No environment API key resolved for %s; MarkItDown vision disabled.",
+                    LLM_MODEL,
+                )
+                return MarkItDown()
+
+            # Keep the async LLM client factory as the observable integration
+            # point used elsewhere in the knowledge stack, then create the
+            # sync OpenAI-compatible client required by MarkItDown.
+            create_client(model=LLM_MODEL, api_key=explicit_key)
+            sync_client = create_openai_sync_client(model=LLM_MODEL, api_key=explicit_key)
 
             if sync_client is None:
                 logger.debug(

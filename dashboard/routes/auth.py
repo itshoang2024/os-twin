@@ -1,6 +1,9 @@
 import os
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+from dashboard.auth import _is_local_dev_frontend_request, get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -11,6 +14,15 @@ def _get_api_key() -> str:
 AUTH_COOKIE_NAME = "ostwin_auth_key"
 
 
+def _dev_auth_response() -> JSONResponse:
+    return JSONResponse(content={
+        "access_token": "dev-mode",
+        "token_type": "dev",
+        "username": "dev-mode-user",
+        "auth_mode": "dev",
+    })
+
+
 @router.post("/token")
 async def login_for_access_token(request: Request):
     """Authenticate with API key and set cookie.
@@ -18,6 +30,9 @@ async def login_for_access_token(request: Request):
     Accepts JSON body: {"key": "ostwin_..."} or form data.
     Sets the auth cookie on success.
     """
+    if _is_local_dev_frontend_request(request):
+        return _dev_auth_response()
+
     # Try JSON body
     key = None
     try:
@@ -67,8 +82,7 @@ async def login_for_access_token(request: Request):
 @router.get("/me")
 async def read_users_me(request: Request):
     """Return current user info — validates the API key from header or cookie."""
-    from dashboard.auth import get_current_user as _get_user
-    user = await _get_user(request)
+    user = await get_current_user(request)
     return user
 
 

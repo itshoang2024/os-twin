@@ -26,6 +26,7 @@ without paying the import cost.
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import time
 from datetime import datetime, timezone
@@ -1294,6 +1295,10 @@ class TestPathRespectsBaseDir:
         """
         from dashboard.knowledge.config import KNOWLEDGE_DIR
 
+        global_ns_dir = KNOWLEDGE_DIR / "zvec-leak-test"
+        if global_ns_dir.exists():
+            shutil.rmtree(global_ns_dir)
+
         nm = NamespaceManager(base_dir=tmp_path)
         nm.create("zvec-leak-test")
         ing = Ingestor(
@@ -1425,6 +1430,10 @@ class TestRealE2E:
 
         nm = NamespaceManager(base_dir=tmp_path)
         embedder = KnowledgeEmbedder()
+        try:
+            embedder.embed(["availability probe"])
+        except Exception as exc:
+            pytest.skip(f"Real embedding provider unavailable for e2e test: {exc}")
         # No LLM — graceful entity-extraction skip.
         no_llm_real = MagicMock()
         no_llm_real.is_available.return_value = False

@@ -406,7 +406,7 @@ class TestFindNotesByKnowledgeLink:
     mocking only the BridgeIndex dependency.
     """
 
-    def test_find_notes_returns_matching_ids(self, tmp_path):
+    async def test_find_notes_returns_matching_ids(self, tmp_path):
         """find_notes_by_knowledge_link returns matching note IDs."""
         import os
         from unittest.mock import patch, MagicMock
@@ -427,7 +427,7 @@ class TestFindNotesByKnowledgeLink:
                 # Import and call the actual MCP tool
                 from dashboard.knowledge.mcp_server import find_notes_by_knowledge_link
                 
-                result = find_notes_by_knowledge_link("docs", "abc123", 0)
+                result = await find_notes_by_knowledge_link("docs", "abc123", 0)
                 
                 # Verify the result structure
                 assert "note_ids" in result
@@ -444,7 +444,7 @@ class TestFindNotesByKnowledgeLink:
             os.environ.pop("OSTWIN_BRIDGE_DB_PATH", None)
             os.environ.pop("MEMORY_PERSIST_DIR", None)
 
-    def test_find_notes_without_chunk_idx(self, tmp_path):
+    async def test_find_notes_without_chunk_idx(self, tmp_path):
         """find_notes_by_knowledge_link works without chunk_idx (returns all notes for file)."""
         import os
         from unittest.mock import patch, MagicMock
@@ -463,7 +463,7 @@ class TestFindNotesByKnowledgeLink:
                 from dashboard.knowledge.mcp_server import find_notes_by_knowledge_link
                 
                 # Call without chunk_idx
-                result = find_notes_by_knowledge_link("docs", "abc123")
+                result = await find_notes_by_knowledge_link("docs", "abc123")
                 
                 assert result["count"] == 3
                 
@@ -474,7 +474,7 @@ class TestFindNotesByKnowledgeLink:
             os.environ.pop("OSTWIN_BRIDGE_DB_PATH", None)
             os.environ.pop("MEMORY_PERSIST_DIR", None)
 
-    def test_find_notes_bridge_disabled(self, tmp_path):
+    async def test_find_notes_bridge_disabled(self, tmp_path):
         """find_notes_by_knowledge_link returns error when bridge is disabled."""
         import os
         
@@ -484,7 +484,7 @@ class TestFindNotesByKnowledgeLink:
         try:
             from dashboard.knowledge.mcp_server import find_notes_by_knowledge_link
             
-            result = find_notes_by_knowledge_link("docs", "abc123", 0)
+            result = await find_notes_by_knowledge_link("docs", "abc123", 0)
             
             # Should return an error
             assert "error" in result
@@ -493,7 +493,7 @@ class TestFindNotesByKnowledgeLink:
         finally:
             os.environ.pop("OSTWIN_KNOWLEDGE_MEMORY_BRIDGE", None)
 
-    def test_find_notes_no_matches(self, tmp_path):
+    async def test_find_notes_no_matches(self, tmp_path):
         """find_notes_by_knowledge_link returns empty list when no matches."""
         import os
         from unittest.mock import patch, MagicMock
@@ -511,7 +511,7 @@ class TestFindNotesByKnowledgeLink:
                 
                 from dashboard.knowledge.mcp_server import find_notes_by_knowledge_link
                 
-                result = find_notes_by_knowledge_link("other", "xyz", 0)
+                result = await find_notes_by_knowledge_link("other", "xyz", 0)
                 
                 assert result["count"] == 0
                 assert result["note_ids"] == []
@@ -520,7 +520,7 @@ class TestFindNotesByKnowledgeLink:
             os.environ.pop("OSTWIN_BRIDGE_DB_PATH", None)
             os.environ.pop("MEMORY_PERSIST_DIR", None)
 
-    def test_find_notes_handles_exception(self, tmp_path):
+    async def test_find_notes_handles_exception(self, tmp_path):
         """find_notes_by_knowledge_link handles exceptions gracefully."""
         import os
         from unittest.mock import patch
@@ -536,7 +536,7 @@ class TestFindNotesByKnowledgeLink:
                 
                 from dashboard.knowledge.mcp_server import find_notes_by_knowledge_link
                 
-                result = find_notes_by_knowledge_link("docs", "abc123", 0)
+                result = await find_notes_by_knowledge_link("docs", "abc123", 0)
                 
                 # Should return an error
                 assert "error" in result

@@ -8,7 +8,13 @@ from dashboard.auth import get_current_user
 async def mock_get_current_user():
     return {"user_id": "test_user"}
 
-app.dependency_overrides[get_current_user] = mock_get_current_user
+
+@pytest.fixture(autouse=True)
+def override_auth_dependency():
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
 
 @pytest.fixture
 def test_workspace(tmp_path):

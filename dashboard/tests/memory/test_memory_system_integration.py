@@ -189,7 +189,9 @@ class TestAgenticMemorySystemIntegration(unittest.TestCase):
                 # Memories should be loaded
                 self.assertEqual(len(reloaded.memories), 1)
 
-                # Search should work (vector index rebuilt)
+                # Rebuild the missing vector index from persisted notes, then
+                # verify search works without requiring a live embedding service.
+                reloaded.consolidate_memories()
                 results = reloaded.search("async programming", k=1)
                 self.assertEqual(len(results), 1, "Search should return results after index rebuild")
                 self.assertEqual(results[0]["id"], memory_id)

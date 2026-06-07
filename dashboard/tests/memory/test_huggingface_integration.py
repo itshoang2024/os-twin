@@ -18,6 +18,11 @@ import time
 MODEL_ID = "LiquidAI/LFM2-1.2B-Extract"
 SEPARATOR = "-" * 70
 
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_HUGGINGFACE_INTEGRATION") != "1",
+    reason="HuggingFace integration loads a large local model; set RUN_HUGGINGFACE_INTEGRATION=1 to run manually.",
+)
+
 
 def _print_header(title: str):
     print(f"\n{SEPARATOR}")

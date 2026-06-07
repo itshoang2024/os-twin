@@ -27,6 +27,8 @@ class Message(BaseModel):
 class RunRequest(BaseModel):
     plan: str
     plan_id: str
+    workspace_isolation: Optional[str] = None
+    worktree_root: Optional[str] = None
 
 
 class ReactionRequest(BaseModel):

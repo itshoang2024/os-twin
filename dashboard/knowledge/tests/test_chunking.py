@@ -547,7 +547,8 @@ class TestKnowledgeLLMVisionOCR:
     def test_create_vision_client_unavailable(self):
         from dashboard.knowledge.llm import KnowledgeLLM
         llm = KnowledgeLLM(model="", provider=None)
-        assert llm.create_vision_client() is None
+        with patch.object(llm, "is_available", return_value=False):
+            assert llm.create_vision_client() is None
 
     def test_create_vision_client_returns_client(self):
         from dashboard.llm_client import LLMClient
@@ -909,24 +910,31 @@ class TestVisionConverterDocxPptx:
         assert "Extracted PPTX content" in result.markdown
 
     def test_convert_docx_conversion_failure_returns_empty(self):
-        """When DOCX-to-PDF conversion fails, convert returns empty markdown."""
+        """When DOCX-to-PDF conversion fails, convert raises for fallback."""
+        try:
+            import pymupdf  # noqa: F401
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
+
         converter = VisionSlidingWindowConverter(window_size=3, overlap=1, dpi=72)
         stream_info = MockStreamInfo(extension=".docx")
-        # Pass invalid DOCX bytes
-        result = converter.convert(
-            io.BytesIO(b"not a docx"), stream_info,
-            llm_client=MagicMock(), llm_model="test-model"
-        )
-        # Should gracefully return empty markdown
-        assert result.markdown == ""
+        with pytest.raises(RuntimeError, match="could not convert"):
+            converter.convert(
+                io.BytesIO(b"not a docx"), stream_info,
+                llm_client=MagicMock(), llm_model="test-model"
+            )
 
     def test_convert_pptx_conversion_failure_returns_empty(self):
-        """When PPTX-to-PDF conversion fails, convert returns empty markdown."""
+        """When PPTX-to-PDF conversion fails, convert raises for fallback."""
+        try:
+            import pymupdf  # noqa: F401
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
+
         converter = VisionSlidingWindowConverter(window_size=3, overlap=1, dpi=72)
         stream_info = MockStreamInfo(extension=".pptx")
-        # Pass invalid PPTX bytes
-        result = converter.convert(
-            io.BytesIO(b"not a pptx"), stream_info,
-            llm_client=MagicMock(), llm_model="test-model"
-        )
-        assert result.markdown == ""
+        with pytest.raises(RuntimeError, match="could not convert"):
+            converter.convert(
+                io.BytesIO(b"not a pptx"), stream_info,
+                llm_client=MagicMock(), llm_model="test-model"
+            )

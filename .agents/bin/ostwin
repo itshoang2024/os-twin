@@ -159,7 +159,8 @@ if ($OstwinApiKey) {
 
 # Default WARROOMS_DIR
 if (-not $env:WARROOMS_DIR) {
-    $env:WARROOMS_DIR = Join-Path $cwd ".war-rooms"
+    $defaultWarRoomsBase = if ((Split-Path $cwd -Leaf) -eq '.agents') { Split-Path $cwd -Parent } else { $cwd }
+    $env:WARROOMS_DIR = Join-Path $defaultWarRoomsBase ".war-rooms"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -352,6 +353,48 @@ function Resolve-PlanId {
     return [PSCustomObject]@{ PlanFile = $Arg; WorkingDir = "" }
 }
 
+function Resolve-OstwinRunWorkingDir {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$WorkingDir)
+
+    $effective = $WorkingDir
+    if ([string]::IsNullOrWhiteSpace($effective) -or $effective -eq '.') {
+        $effective = (Get-Location).Path
+        if ((Split-Path $effective -Leaf) -eq '.agents') {
+            $effective = Split-Path $effective -Parent
+        }
+    } elseif (-not [System.IO.Path]::IsPathRooted($effective)) {
+        $effective = Join-Path (Get-Location).Path $effective
+    }
+
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($effective)
+}
+
+function Invoke-OstwinRunGitPreflight {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WorkingDir,
+        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree'
+    )
+
+    if ($WorkspaceIsolation -eq 'shared') { return }
+    $workspaceModule = Join-Path $AgentsDir "workspace/GitWorkspace.psm1"
+    if (-not (Test-Path $workspaceModule)) {
+        Write-Error "Workspace isolation requires GitWorkspace.psm1, but it was not found at $workspaceModule"
+        exit 1
+    }
+    Import-Module (Resolve-Path $workspaceModule).Path -Force
+
+    $ready = Test-GitReady -WorkingDir $WorkingDir -AllowRuntimeState
+    if (-not $ready.Ready) {
+        Write-Error "Git preflight failed for '$WorkingDir': $($ready.Message)"
+        Write-Host "  Worktree isolation needs an existing Git work tree with a HEAD commit and no dirty tracked files." -ForegroundColor Yellow
+        Write-Host "  Commit or stash tracked changes, finish any merge/rebase/cherry-pick/revert, then rerun." -ForegroundColor Yellow
+        Write-Host "  For non-Git experiments only, rerun with --workspace-isolation shared." -ForegroundColor Yellow
+        exit 1
+    }
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 7. Help text
 # ──────────────────────────────────────────────────────────────────────────────
@@ -365,7 +408,9 @@ Usage:
 
 Commands:
   run <plan_id|file> Execute a plan by ID or file path
-                     Options: --dry-run, --resume, --expand, --working-dir PATH
+                     Options: --dry-run, --resume, --expand, --working-dir PATH,
+                              --workspace-isolation room-worktree|shared,
+                              --worktree-root PATH
   plan <sub>        Plan management (AI-assisted)
                      Subcommands: create [Title|file.md] [--file FILE], start, list
   init [directory]  Scaffold Agent OS into a project
@@ -438,18 +483,39 @@ switch ($Command) {
         $planArgResolved = $false
         $resolvedPlanFile = ""
         $resolvedWorkingDir = ""
+        $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
+        $worktreeRoot = ""
+        $expectingValueFor = ""
 
         foreach ($a in $Arguments) {
+            if ($expectingValueFor) {
+                $null = $runArgs.Add($a)
+                switch ($expectingValueFor) {
+                    '--workspace-isolation' { $workspaceIsolation = $a }
+                    '--worktree-root' { $worktreeRoot = $a }
+                    '--working-dir' { $resolvedWorkingDir = $a }
+                    '--plan-file' { $resolvedPlanFile = $a; $planArgResolved = $true }
+                }
+                $expectingValueFor = ""
+                continue
+            }
+            if ($a -in @('--workspace-isolation', '--worktree-root', '--working-dir', '--plan-file', '--max-rooms')) {
+                $null = $runArgs.Add($a)
+                $expectingValueFor = $a
+                continue
+            }
             if ((-not $planArgResolved) -and ($a -notmatch '^--')) {
                 $resolved = Resolve-PlanId -Arg $a
                 if (-not $resolved) { exit 1 }
                 $resolvedPlanFile = $resolved.PlanFile
-                $resolvedWorkingDir = $resolved.WorkingDir
+                if ($resolved.WorkingDir -and -not $resolvedWorkingDir) {
+                    $resolvedWorkingDir = $resolved.WorkingDir
+                }
                 $null = $runArgs.Add("--plan-file")
                 $null = $runArgs.Add($resolvedPlanFile)
-                if ($resolvedWorkingDir) {
+                if ($resolved.WorkingDir -and $resolvedWorkingDir -eq $resolved.WorkingDir) {
                     $null = $runArgs.Add("--working-dir")
-                    $null = $runArgs.Add($resolvedWorkingDir)
+                    $null = $runArgs.Add($resolved.WorkingDir)
                 }
                 $planArgResolved = $true
             }
@@ -566,8 +632,26 @@ switch ($Command) {
             }
         }
 
+        if ($workspaceIsolation -notin @('room-worktree', 'shared')) {
+            Write-Error "Invalid --workspace-isolation '$workspaceIsolation'. Expected room-worktree or shared."
+            exit 1
+        }
+
+        $effectiveWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir $resolvedWorkingDir
+        if ($workspaceIsolation -eq 'room-worktree') {
+            Invoke-OstwinRunGitPreflight -WorkingDir $effectiveWorkingDir -WorkspaceIsolation $workspaceIsolation
+            if (-not (Test-Path (Join-Path $effectiveWorkingDir ".opencode/opencode.json"))) {
+                Write-Error "Ostwin runtime is not initialized in '$effectiveWorkingDir' (.opencode/opencode.json missing). Run 'ostwin init' first, review/commit any tracked changes, then rerun."
+                exit 1
+            }
+        }
+
         if ($resolvedWorkingDir -and $resolvedWorkingDir -ne ".") {
             if (-not (Test-Path $resolvedWorkingDir -PathType Container)) {
+                if ($workspaceIsolation -eq 'room-worktree') {
+                    Write-Error "working_dir does not exist for worktree isolation: $resolvedWorkingDir"
+                    exit 1
+                }
                 Write-Host ([char]::ConvertFromUtf32(0x1F4C1) + " Creating project directory: $resolvedWorkingDir")
                 New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
             }
@@ -575,9 +659,11 @@ switch ($Command) {
         # Ensure project env is initialized (.agents/ + .opencode/opencode.json)
         # Uses the same pattern as `ostwin init`, plus -PlanId for memory binding.
         # init.ps1 handles idempotency — fast-exits when already set up.
-        $initTarget = if ($resolvedWorkingDir -and $resolvedWorkingDir -ne ".") { $resolvedWorkingDir } else { (Get-Location).Path }
+        $initTarget = if ($resolvedWorkingDir -and $resolvedWorkingDir -ne ".") { $resolvedWorkingDir } else { $effectiveWorkingDir }
         $initPs1 = Join-Path $AgentsDir "init.ps1"
-        if (Test-Path $initPs1) {
+        if ($workspaceIsolation -eq 'room-worktree') {
+            Write-Host "  [init] Skipped: worktree isolation uses pre-existing runtime files." -ForegroundColor DarkGray
+        } elseif (Test-Path $initPs1) {
             $psArgs = [System.Collections.ArrayList]::new()
             $null = $psArgs.Add($initTarget)
             $null = $psArgs.Add('-Yes')   # non-interactive during run
@@ -608,6 +694,11 @@ switch ($Command) {
         } else {
             Write-Error "[ERROR] init.ps1 not found at $initPs1"
         }
+
+        if (-not ($runArgs -contains '--working-dir')) {
+            $null = $runArgs.Add('--working-dir')
+            $null = $runArgs.Add($effectiveWorkingDir)
+        }
         # Dispatch to Start-Plan.ps1
         $startPlan = Join-Path $AgentsDir "plan/Start-Plan.ps1"
         if (Test-Path $startPlan) {
@@ -623,6 +714,8 @@ switch ($Command) {
                     '--max-rooms' { $null = $psArgs.Add('-MaxConcurrent'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
                     '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
                     '--plan-file' { $null = $psArgs.Add('-PlanFile'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--worktree-root' { $null = $psArgs.Add('-WorktreeRoot'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
                     '--non-interactive' { $null = $psArgs.Add('-NonInteractive'); $i++ }
                     '-n' { $null = $psArgs.Add('-NonInteractive'); $i++ }
                     default { $null = $psArgs.Add($runArgs[$i]); $i++ }
@@ -747,13 +840,31 @@ switch ($Command) {
             "start" {
                 $startArgs = [System.Collections.ArrayList]::new()
                 $startResolved = $false
+                $startWorkspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
+                $startWorkingDir = ""
+                $startExpectingValueFor = ""
 
                 foreach ($a in $planArgs) {
+                    if ($startExpectingValueFor) {
+                        $null = $startArgs.Add($a)
+                        switch ($startExpectingValueFor) {
+                            '--workspace-isolation' { $startWorkspaceIsolation = $a }
+                            '--working-dir' { $startWorkingDir = $a }
+                        }
+                        $startExpectingValueFor = ""
+                        continue
+                    }
+                    if ($a -in @('--workspace-isolation', '--worktree-root', '--working-dir')) {
+                        $null = $startArgs.Add($a)
+                        $startExpectingValueFor = $a
+                        continue
+                    }
                     if ((-not $startResolved) -and ($a -notmatch '^--')) {
                         $resolved = Resolve-PlanId -Arg $a
                         if (-not $resolved) { exit 1 }
                         $null = $startArgs.Add($resolved.PlanFile)
-                        if ($resolved.WorkingDir) {
+                        if ($resolved.WorkingDir -and -not $startWorkingDir) {
+                            $startWorkingDir = $resolved.WorkingDir
                             $null = $startArgs.Add("--working-dir")
                             $null = $startArgs.Add($resolved.WorkingDir)
                         }
@@ -768,6 +879,16 @@ switch ($Command) {
                 if (Test-Path $startPlan) {
                     # Translate flags
                     $psArgs = [System.Collections.ArrayList]::new()
+                    if ($startWorkspaceIsolation -notin @('room-worktree', 'shared')) {
+                        Write-Error "Invalid --workspace-isolation '$startWorkspaceIsolation'. Expected room-worktree or shared."
+                        exit 1
+                    }
+                    $effectiveStartWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir $startWorkingDir
+                    Invoke-OstwinRunGitPreflight -WorkingDir $effectiveStartWorkingDir -WorkspaceIsolation $startWorkspaceIsolation
+                    if (-not ($startArgs -contains '--working-dir')) {
+                        $null = $startArgs.Add('--working-dir')
+                        $null = $startArgs.Add($effectiveStartWorkingDir)
+                    }
                     $si = 0
                     while ($si -lt $startArgs.Count) {
                         switch ($startArgs[$si]) {
@@ -776,6 +897,8 @@ switch ($Command) {
                             '--expand' { $null = $psArgs.Add('-Expand'); $si++ }
                             '--review' { $null = $psArgs.Add('-Review'); $si++ }
                             '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
+                            '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
+                            '--worktree-root' { $null = $psArgs.Add('-WorktreeRoot'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
                             default { $null = $psArgs.Add($startArgs[$si]); $si++ }
                         }
                     }
@@ -907,7 +1030,7 @@ switch ($Command) {
             default {
                 Write-Error "Unknown plan subcommand: $planSub"
                 Write-Host "  Usage: ostwin plan create [Title] [--file FILE]"
-                Write-Host "         ostwin plan start [plan-file]"
+                Write-Host "         ostwin plan start [plan-file] [--workspace-isolation room-worktree|shared] [--worktree-root PATH]"
                 Write-Host "         ostwin plan list"
                 Write-Host "         ostwin plan clear [--force]"
                 exit 1

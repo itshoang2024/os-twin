@@ -82,6 +82,39 @@ Describe 'OrchestrationEvents' {
         }) } | Should -Throw '*room_id*epic_ref*'
     }
 
+    It 'accepts plan-scoped workspace preflight events' {
+        $event = Write-OrchestrationEvent -EventsPath $script:eventsPath -Event ([ordered]@{
+            event_type = 'workspace.git.preflight.passed'
+            plan_id    = 'pt-test'
+            run_id     = 'run-test'
+            summary    = 'Git preflight passed'
+            payload    = @{ source_git_root = '/repo'; base_ref = 'abc123' }
+        })
+
+        $event.event_type | Should -Be 'workspace.git.preflight.passed'
+    }
+
+    It 'requires room fields for room-scoped workspace events' {
+        { Write-OrchestrationEvent -EventsPath $script:eventsPath -Event ([ordered]@{
+            event_type = 'workspace.worktree.ready'
+            plan_id    = 'pt-test'
+            run_id     = 'run-test'
+            summary    = 'Worktree ready'
+            payload    = @{}
+        }) } | Should -Throw '*room_id*epic_ref*'
+
+        $event = Write-OrchestrationEvent -EventsPath $script:eventsPath -Event ([ordered]@{
+            event_type = 'workspace.worktree.ready'
+            plan_id    = 'pt-test'
+            run_id     = 'run-test'
+            room_id    = 'room-001'
+            epic_ref   = 'EPIC-001'
+            summary    = 'Worktree ready'
+            payload    = @{ working_dir = '/tmp/worktree' }
+        })
+        $event.event_type | Should -Be 'workspace.worktree.ready'
+    }
+
     It 'returns existing event for idempotent duplicate append' {
         $eventId = New-OrchestrationEventId
         $input = [ordered]@{

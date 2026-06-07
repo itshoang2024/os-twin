@@ -49,10 +49,14 @@ $configModule = Join-Path $agentsDir "lib" "Config.psm1"
 $utilsModule = Join-Path $agentsDir "lib" "Utils.psm1"
 $helpersModule = Join-Path $scriptDir "ManagerLoop-Helpers.psm1"
 $eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+$workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
+$mergeQueueModule = Join-Path $agentsDir "workspace" "MergeQueue.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
 if (Test-Path $configModule) { Import-Module $configModule -Force }
 if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 if (Test-Path $eventsModule) { Import-Module $eventsModule -Force }
+if (Test-Path $workspaceModule) { Import-Module $workspaceModule -Force }
+if (Test-Path $mergeQueueModule) { Import-Module $mergeQueueModule -Force }
 if (Test-Path $helpersModule) { Import-Module $helpersModule -Force }
 
 # --- Helper functions ---
@@ -296,6 +300,14 @@ while (-not $script:shuttingDown) {
                     }
                 }
 
+                if (Get-Command Get-WorkspaceDependencyState -ErrorAction SilentlyContinue) {
+                    $workspaceDeps = Get-WorkspaceDependencyState -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
+                    if (-not $workspaceDeps.Ready) {
+                        Write-Log "INFO" "[$taskRef] Waiting for workspace integration: $($workspaceDeps.BlockedBy -join ', ')"
+                        continue
+                    }
+                }
+
                 # --- ON-THE-FLY PIPELINE GENERATION ---
                 $roomLifecycleCheck = Join-Path $roomDir "lifecycle.json"
                 $smartAssignment = $false
@@ -335,6 +347,20 @@ while (-not $script:shuttingDown) {
                     # via Resolve-RoleSkills.ps1 using config-driven skill_refs.
                     $nextState = if ($lifecycle -and $lifecycle.initial_state) { $lifecycle.initial_state } else { "developing" }
                     Write-Log "INFO" "[$taskRef] Dependencies met. Transitioning to $nextState in $roomId..."
+                    if (Get-Command Ensure-RoomWorktree -ErrorAction SilentlyContinue) {
+                        try {
+                            $workspaceReady = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $WarRoomsDir -AgentsDir $agentsDir
+                            if (-not $workspaceReady.Ready) {
+                                Write-Log "WARN" "[$taskRef] Workspace is not ready; keeping room pending."
+                                continue
+                            }
+                        } catch {
+                            Write-Log "ERROR" "[$taskRef] Workspace creation failed: $($_.Exception.Message)"
+                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'workspace_worktree_failed' -Role $baseRole -State $status -Summary "$taskRef workspace creation failed."
+                            $script:shuttingDown = $true
+                            continue
+                        }
+                    }
                     Write-RoomStatus $roomDir $nextState
                     # Sync config.json assigned_role with the initial state's role
                     $initDef = if ($lifecycle -and $lifecycle.states -and $lifecycle.states.$nextState) { $lifecycle.states.$nextState } else { $null }
@@ -412,6 +438,20 @@ while (-not $script:shuttingDown) {
                             if ($taskRef -eq 'PLAN-REVIEW' -and -not (Test-Path $planApprovedFlag)) {
                                 Complete-PlanApproval -TaskRef $taskRef
                                 "1" | Out-File -FilePath $planApprovedFlag -Encoding utf8 -NoNewline
+                            }
+                            if (Get-Command Invoke-RoomWorkspaceMerge -ErrorAction SilentlyContinue) {
+                                try {
+                                    $mergeResult = Invoke-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
+                                    if (-not $mergeResult.Integrated) {
+                                        Write-Log "WARN" "[$taskRef] Workspace not integrated yet: $($mergeResult.Status)"
+                                        $allPassed = $false
+                                        $allTerminal = $false
+                                    }
+                                } catch {
+                                    Write-Log "ERROR" "[$taskRef] Workspace merge failed: $($_.Exception.Message)"
+                                    $allPassed = $false
+                                    $allTerminal = $false
+                                }
                             }
                         } elseif ($status -eq 'failed-final') {
                             if ($retries -lt $v2MaxRetries) {

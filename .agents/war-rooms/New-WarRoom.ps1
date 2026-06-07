@@ -77,7 +77,9 @@ param(
 
     [string]$Lifecycle = '',
 
-    [PSCustomObject[]]$Assets = @()
+    [PSCustomObject[]]$Assets = @(),
+
+    [object]$Workspace = $null
 )
 
 # --- Resolve war-rooms directory ---
@@ -160,6 +162,9 @@ if ($PlanId) {
             working_dir     = $resolvedWorkingDir
         }
     }
+    if ($Workspace) {
+        $roomCreatedEvent.payload['workspace'] = $Workspace
+    }
     Write-OrchestrationEvent -EventsPath $EventsPath -Event $roomCreatedEvent | Out-Null
 }
 
@@ -212,6 +217,7 @@ $config = [ordered]@{
 }
 
 if ($EventsPath) { $config['events_path'] = $EventsPath }
+if ($Workspace) { $config['workspace'] = $Workspace }
 
 $config | ConvertTo-Json -Depth 10 | Out-File -FilePath (Join-Path $roomDir "config.json") -Encoding utf8
 

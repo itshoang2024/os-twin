@@ -28,7 +28,17 @@ def _ensure_ml_imports():
         return
     from nltk.tokenize import word_tokenize as _wt
     from rank_bm25 import BM25Okapi as _BM
-    from sklearn.metrics.pairwise import cosine_similarity as _cs
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity as _cs
+    except ModuleNotFoundError:
+        import numpy as _np
+
+        def _cs(a, b):
+            a_arr = _np.asarray(a, dtype=float)
+            b_arr = _np.asarray(b, dtype=float)
+            denom = _np.linalg.norm(a_arr, axis=1, keepdims=True) * _np.linalg.norm(b_arr, axis=1)
+            denom = _np.where(denom == 0, 1, denom)
+            return (a_arr @ b_arr.T) / denom
 
     word_tokenize = _wt
     BM25Okapi = _BM
@@ -159,9 +169,11 @@ class AgenticMemorySystem:
         # Set up subdirectories for persistence
         self._notes_dir = None
         self._vector_dir = None
+        self._vector_dir_existed_at_startup = False
         if self.persist_dir:
             self._notes_dir = os.path.join(self.persist_dir, "notes")
             self._vector_dir = os.path.join(self.persist_dir, "vectordb")
+            self._vector_dir_existed_at_startup = os.path.exists(self._vector_dir)
             os.makedirs(self._notes_dir, exist_ok=True)
             os.makedirs(self._vector_dir, exist_ok=True)
 
@@ -185,6 +197,8 @@ class AgenticMemorySystem:
 
         if self.persist_dir:
             self._load_notes()
+            if self.memories and not self._vector_dir_existed_at_startup:
+                self._rebuild_vector_index_from_memory(reason="missing vector directory")
 
             # Per-memory config: check embedding model mismatch (Plan 028)
             existing_config = self._load_memory_config()
@@ -436,6 +450,29 @@ class AgenticMemorySystem:
             except Exception:
                 pass
         return plan_id
+
+    def _rebuild_vector_index_from_memory(self, reason: str = "startup") -> int:
+        """Recreate vector entries for all loaded memories.
+
+        Notes are the source of truth. If the vector directory is missing or
+        cleared while note markdown remains, rebuild search entries from the
+        loaded in-memory notes instead of requiring external re-import.
+        """
+        rebuilt = 0
+        try:
+            if hasattr(self.retriever, "clear"):
+                self.retriever.clear()
+        except Exception:
+            logger.warning("Could not clear vector index during %s rebuild", reason, exc_info=True)
+
+        for note_id, note in self.memories.items():
+            try:
+                self.retriever.add_document(note.content, self._build_note_metadata(note), note_id)
+                rebuilt += 1
+            except Exception as exc:
+                logger.warning("Skipping vector rebuild for note %s during %s: %s", note_id, reason, exc)
+        logger.info("Vector index rebuild complete for %s: %d/%d notes", reason, rebuilt, len(self.memories))
+        return rebuilt
 
     def _check_and_rebuild_if_mismatched(self) -> bool:
         """Check if vectordb was built with a different embedding model.

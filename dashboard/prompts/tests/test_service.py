@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock
-from igotapi.prompts.service import PromptService
-from igotapi.prompts.exceptions import PromptNotFoundError
+from prompts.service import PromptService
+from prompts.exceptions import PromptNotFoundError
 
 @pytest.fixture
 def mock_provider():

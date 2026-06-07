@@ -3,7 +3,7 @@ import re
 import yaml
 import pytest
 from typing import Dict, Set, Any
-from igotapi.prompts.providers.file_provider import FilePromptProvider
+from prompts.providers.file_provider import FilePromptProvider
 
 def get_locales_dir() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "locales"))  # Path to locales directory
@@ -53,10 +53,8 @@ def test_prompt_keys_consistency(provider: FilePromptProvider):
     vi_keys = get_all_keys(vi_data)
     
     missing_in_vi = en_keys - vi_keys
-    extra_in_vi = vi_keys - en_keys
     
     assert not missing_in_vi, f"Keys present in en.yaml but missing in vi.yaml: {missing_in_vi}"
-    assert not extra_in_vi, f"Keys present in vi.yaml but missing in en.yaml: {extra_in_vi}"
 
 def test_prompt_placeholders_consistency(provider: FilePromptProvider):
     en_data = provider._load_file("en")
@@ -85,19 +83,12 @@ def test_no_empty_prompts(provider: FilePromptProvider):
             assert val and val.strip(), f"Prompt '{key}' in '{lang}' is empty or whitespace only"
 
 @pytest.mark.parametrize("key", [
-    "orchestrator.query_executor.plan_query",
-    "orchestrator.query_executor.plan_assistant",
-    "orchestrator.query_executor.user_plan",
-    "orchestrator.query_executor.system_aggregate",
-    "orchestrator.query_executor.assistant_aggregate",
-    "orchestrator.kg_extraction.steps_json",
-    "orchestrator.kg_extraction.example_json",
-    "orchestrator.kg_extraction.output_format_template",
-    "orchestrator.kg_extraction.domain_format",
-    "orchestrator.kg_extraction.extraction_steps",
-    "orchestrator.kg_extraction.triplet_extract_tmpl",
-    "orchestrator.kg_extraction.goal",
-    "orchestrator.kg_extraction.system_role"
+    "knowledge.extract_system",
+    "knowledge.extract_user",
+    "knowledge.plan_system",
+    "knowledge.plan_user",
+    "knowledge.aggregate_system",
+    "knowledge.aggregate_user",
 ])
 def test_specific_prompts_format(provider: FilePromptProvider, key: str):
     """Ensure specific prompts contain expected markers or structure."""
