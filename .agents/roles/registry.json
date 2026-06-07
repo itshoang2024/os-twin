@@ -29,7 +29,7 @@
         "lint-clean",
         "no-hardcoded-secrets"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "qa",
@@ -52,7 +52,7 @@
         "verdict-required",
         "evidence-based-review"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "architect",
@@ -77,7 +77,7 @@
         "scalability-check",
         "security-review"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "manager",
@@ -98,7 +98,7 @@
         "skill-install"
       ],
       "quality_gates": [],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "reporter",
@@ -121,7 +121,7 @@
         "report-renders",
         "no-empty-pages"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "audit",
@@ -148,7 +148,7 @@
         "validation-complete",
         "risk-decision-recorded"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "macos-automation-engineer",
@@ -172,7 +172,7 @@
         "axbridge"
       ],
       "quality_gates": [],
-      "default_model": "opencode/nemotron-3-ultra-free",
+      "default_model": "opencode/big-pickle",
       "platform": [
         "macos"
       ]
@@ -199,7 +199,7 @@
         "retention-policy-documented",
         "no-unsafe-destructive-ops"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "technical-writer",
@@ -208,7 +208,8 @@
       "definition": "roles/technical-writer/role.json",
       "prompt": "roles/technical-writer/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "database-architect",
@@ -217,7 +218,8 @@
       "definition": "roles/database-architect/role.json",
       "prompt": "roles/database-architect/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "data-scientist",
@@ -226,7 +228,8 @@
       "definition": "roles/data-scientist/role.json",
       "prompt": "roles/data-scientist/ROLE.md",
       "default_assignment": false,
-      "capabilities": []
+      "capabilities": [],
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "staff-manager",
@@ -257,7 +260,7 @@
         "lesson-included",
         "evidence-cited"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "principal-engineer",
@@ -286,7 +289,7 @@
         "scalability-validated",
         "standards-documented"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "director-of-engineering",
@@ -314,7 +317,7 @@
         "escalations-resolved",
         "health-assessed"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "sre-lead",
@@ -343,7 +346,7 @@
         "alerts-actionable",
         "rca-documented"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "program-manager",
@@ -371,7 +374,7 @@
         "risks-registered",
         "stakeholders-informed"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "platform-engineer",
@@ -399,7 +402,7 @@
         "dx-measured",
         "iac-reviewed"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "security-engineer",
@@ -430,7 +433,7 @@
         "compliance-mapped",
         "no-critical-findings"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free",
+      "default_model": "opencode/big-pickle",
       "timeout": 3600
     },
     {
@@ -461,7 +464,7 @@
         "compliance-mapped",
         "no-critical-findings"
       ],
-      "default_model": "opencode/nemotron-3-ultra-free",
+      "default_model": "opencode/big-pickle",
       "timeout": 3600
     },
     {
@@ -482,7 +485,7 @@
         "shell-execution"
       ],
       "quality_gates": [],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     },
     {
       "name": "researcher",
@@ -502,7 +505,7 @@
         "shell-execution"
       ],
       "quality_gates": [],
-      "default_model": "opencode/nemotron-3-ultra-free"
+      "default_model": "opencode/big-pickle"
     }
   ],
   "assignment_rules": {

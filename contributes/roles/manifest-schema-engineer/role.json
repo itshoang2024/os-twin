@@ -14,7 +14,7 @@
     "global"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "instance_type": "worker"
 }

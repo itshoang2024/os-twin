@@ -9,7 +9,7 @@ interface AuthState {
   apiKey: string | null;
   username: string | null;
   error: string | null;
-  login: (key: string) => Promise<boolean>;
+  login: (key: string, username: string) => Promise<boolean>;
   logout: () => void;
 }
 
@@ -32,14 +32,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const doLogin = useCallback(async (key: string): Promise<boolean> => {
+  const doLogin = useCallback(async (key: string, username: string): Promise<boolean> => {
     try {
       setError(null);
       const API_BASE = getApiBaseUrl();
       const res = await fetch(`${API_BASE}/auth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ key, username }),
         credentials: 'include',
       });
 
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const data = await res.json();
       setApiKey(key);
-      setUsername(data.username || 'user');
+      setUsername(data.username || username || 'user');
       setIsAuthenticated(true);
       setError(null);
       return true;
@@ -83,8 +83,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootstrap();
   }, [doLogin]);
 
-  const login = useCallback(async (key: string) => {
-    return doLogin(key);
+  const login = useCallback(async (key: string, username: string) => {
+    return doLogin(key, username);
   }, [doLogin]);
 
   const logout = useCallback(async () => {

@@ -53,6 +53,8 @@ param(
 
     [switch]$NonInteractive,
 
+    [switch]$EnablePlanning,
+
     [ValidateSet('room-worktree','shared')]
     [string]$WorkspaceIsolation = 'shared',
 
@@ -446,10 +448,14 @@ foreach ($item in $parsed) {
 $planDir = Split-Path $PlanFile
 if (-not $planDir) { $planDir = "." }
 $planningDagFile = Join-Path $planDir ".planning-DAG.json"
-if (-not $DryRun -and (Test-Path $buildPlanningDag)) {
+if ($EnablePlanning -and -not $DryRun -and (Test-Path $buildPlanningDag)) {
     if (-not (Test-Path $planningDagFile) -or $Expand) {
         Write-Host "[PLANNING-DAG] Generating advisory DAG from plan content..." -ForegroundColor Cyan
-        & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        if ($env:OSTWIN_AGENT_CMD) {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile -AgentCmd $env:OSTWIN_AGENT_CMD
+        } else {
+            & $buildPlanningDag -PlanFile $PlanFile -OutFile $planningDagFile
+        }
     }
     # Merge planning-DAG roles AND dependencies into parsed entries (advisory)
     if (Test-Path $planningDagFile) {

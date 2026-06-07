@@ -1,6 +1,6 @@
 {
   "name": "game-engineer",
-  "description": "Unity C# code generator \u2014 produces SceneBuilder and AnimCreator scripts, implements dev stories, and validates with tests",
+  "description": "Unity C# code generator — produces SceneBuilder and AnimCreator scripts, implements dev stories, and validates with tests",
   "capabilities": [
     "code-generation",
     "unity-ui-development",
@@ -22,7 +22,7 @@
     "story-acs-satisfied"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [
     "build-ui",

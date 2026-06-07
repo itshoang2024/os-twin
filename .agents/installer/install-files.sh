@@ -26,7 +26,9 @@ install_files() {
   # with whatever happens to be in the source repo's plans/ directory.
   # PLAN.template.md is seeded separately below if missing.
   # NEVER sync: docs/, node_modules/
-  # Skip if already exists (don't override): config.json, roles/config.json
+  # Skip if already exists (don't override): config.json.
+  # Role definitions are source-controlled and must always be refreshed by a
+  # local build; _sync_builtin_roles below force-syncs roles/* into ostwin home.
   local _rsync_excludes=(
     --exclude='.venv/' --exclude='*.pid' --exclude='dashboard.pid'
     --exclude='logs/' --exclude='__pycache__/' --exclude='*.pyc'
@@ -41,22 +43,11 @@ install_files() {
     _rsync_excludes+=(--exclude='/config.json')
     _find_excludes+=(-not -name 'config.json')
   fi
-  if [[ -f "$INSTALL_DIR/.agents/roles/config.json" ]]; then
-    _rsync_excludes+=(--exclude='/roles/config.json')
-    _find_excludes+=(-not -path '*/roles/config.json')
-  fi
-
   rsync -a "${_rsync_excludes[@]}" \
     "$SCRIPT_DIR/" "$INSTALL_DIR/.agents/" 2>/dev/null || {
       # rsync fallback to cp (exclude mcp/ and plans/ manually)
-      if [[ -f "$INSTALL_DIR/.agents/roles/config.json" ]]; then
-        cp "$INSTALL_DIR/.agents/roles/config.json" "/tmp/ostwin_roles_config_backup.json"
-      fi
       find "$SCRIPT_DIR" -maxdepth 1 "${_find_excludes[@]}" \
         -exec cp -r {} "$INSTALL_DIR/.agents/" \; 2>/dev/null || true
-      if [[ -f "/tmp/ostwin_roles_config_backup.json" ]]; then
-        mv "/tmp/ostwin_roles_config_backup.json" "$INSTALL_DIR/.agents/roles/config.json"
-      fi
     }
 
   # Seed plans/ on first install (or if PLAN.template.md is missing) — never overwrite
@@ -80,6 +71,9 @@ install_files() {
 
   # ── Bot: sync channel connector bot ───────────────────────────────────────
   _sync_bot
+
+  # ── Built-in roles: always override from this checkout ────────────────────
+  _sync_builtin_roles
 
   # ── Contributed roles ─────────────────────────────────────────────────────
   _load_contributed_roles
@@ -261,6 +255,27 @@ _sync_bot() {
   fi
 }
 
+_sync_builtin_roles() {
+  local roles_src="$SCRIPT_DIR/roles"
+  local roles_dst="$INSTALL_DIR/.agents/roles"
+
+  if [[ ! -d "$roles_src" ]]; then
+    warn "Built-in roles source not found — roles/ not synced"
+    return 0
+  fi
+
+  step "Syncing built-in roles to $roles_dst (override)..."
+  mkdir -p "$roles_dst"
+  rsync -a --delete \
+    --exclude='__pycache__/' --exclude='*.pyc' --exclude='.DS_Store' \
+    "$roles_src/" "$roles_dst/" 2>/dev/null || {
+      rm -rf "$roles_dst"
+      mkdir -p "$roles_dst"
+      cp -R "$roles_src"/. "$roles_dst/"
+    }
+  ok "Built-in roles → $roles_dst/"
+}
+
 _load_contributed_roles() {
   local contributes_roles=""
   for candidate in \
@@ -272,20 +287,25 @@ _load_contributed_roles() {
     fi
   done
   if [[ -n "$contributes_roles" ]]; then
-    step "Loading contributed roles..."
+    step "Syncing contributed roles..."
     mkdir -p "$INSTALL_DIR/.agents/roles"
-    local loaded=0
+    local synced=0
     for role_dir in "$contributes_roles"/*/; do
       [[ -d "$role_dir" ]] || continue
       local role_name
       role_name="$(basename "$role_dir")"
       local target_role="$INSTALL_DIR/.agents/roles/$role_name"
-      if [[ ! -d "$target_role" ]]; then
-        cp -r "$role_dir" "$target_role"
-        loaded=$((loaded + 1))
-      fi
+      mkdir -p "$target_role"
+      rsync -a --delete \
+        --exclude='__pycache__/' --exclude='*.pyc' --exclude='.DS_Store' \
+        "$role_dir" "$target_role/" 2>/dev/null || {
+          rm -rf "$target_role"
+          mkdir -p "$target_role"
+          cp -R "$role_dir". "$target_role/"
+        }
+      synced=$((synced + 1))
     done
-    ok "$loaded contributed role(s) loaded"
+    ok "$synced contributed role(s) synced"
   fi
 }
 

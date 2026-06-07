@@ -3,9 +3,21 @@
 import { useUIStore } from '@/lib/stores/uiStore';
 import NotificationBell from './NotificationBell';
 import { ConnectionStatus } from './ConnectionStatus';
+import { useAuth } from '@/components/auth/AuthProvider';
+
+function getInitials(name: string | null): string {
+  const parts = (name || 'User')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return 'U';
+  return parts.slice(0, 2).map(part => part[0]?.toUpperCase()).join('');
+}
 
 export default function TopBar({ ...props }: React.ComponentPropsWithoutRef<'header'>) {
   const { theme, toggleTheme, setSearchModalOpen } = useUIStore();
+  const { username, logout } = useAuth();
+  const displayName = username || 'User';
 
   return (
     <header
@@ -70,15 +82,23 @@ export default function TopBar({ ...props }: React.ComponentPropsWithoutRef<'hea
         {/* Divider */}
         <div className="w-px h-6 mx-1" style={{ background: 'var(--color-border)' }} />
 
-        {/* User avatar dropdown placeholder */}
-        <button className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        {/* User identity */}
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 rounded-full pl-1 pr-2 py-1 hover:bg-surface-hover transition-colors"
+          title="Sign out"
+          aria-label={`Signed in as ${displayName}. Sign out`}
+        >
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm"
             style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
           >
-            PA
+            {getInitials(displayName)}
           </div>
-          <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-text-faint)' }}>expand_more</span>
+          <span className="hidden sm:inline max-w-32 truncate text-xs font-bold" style={{ color: 'var(--color-text-main)' }}>
+            {displayName}
+          </span>
+          <span className="material-symbols-outlined text-sm" style={{ color: 'var(--color-text-faint)' }}>logout</span>
         </button>
       </div>
     </header>

@@ -369,15 +369,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install smoke test system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rsync
+
       - name: Make installer executable
         run: chmod +x .agents/install.sh
 
-      - name: Run install.sh --yes --skip-optional (smoke test)
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run install.sh --yes --skip-optional --no-ollama (smoke test)
         shell: bash
         run: |
           SOURCE_DIR="$(pwd)"
           export SOURCE_DIR
-          .agents/install.sh --yes --skip-optional 2>&1 | tee install-output.log
+          .agents/install.sh --yes --skip-optional --no-ollama 2>&1 | tee install-output.log
           EXIT_CODE=${PIPESTATUS[0]}
           if [[ $EXIT_CODE -ne 0 ]]; then
             echo "::error::install.sh exited with code $EXIT_CODE"
@@ -404,6 +415,73 @@ jobs:
             echo "::warning::Venv not found at $VENV_PYTHON — running fallback syntax check"
             python3 -c 'import ast; ast.parse(open("dashboard/api.py").read()); print("dashboard/api.py parses OK")'
           fi
+
+      - name: Run minimal Ostwin plan (smoke test)
+        shell: bash
+        working-directory: .github/smoke-test-folder
+        run: |
+          set -euo pipefail
+          chmod +x mock-agent.sh
+          rm -f index.html .planning-DAG.json
+          export OSTWIN_AGENT_CMD="$PWD/mock-agent.sh"
+          export OSTWIN_WORKSPACE_ISOLATION=shared
+          OSTWIN="$HOME/.ostwin/.agents/bin/ostwin"
+
+          plan_output="$($OSTWIN plan create that.plan.md 2>&1)"
+          printf '%s\n' "$plan_output"
+          plan_id="$(printf '%s\n' "$plan_output" | grep -Eo 'Plan created: [0-9a-fA-F]+' | grep -Eo '[0-9a-fA-F]+' | tail -1 || true)"
+          if [[ -z "$plan_id" ]]; then
+            echo "::error::Could not parse plan ID from ostwin plan create output"
+            exit 1
+          fi
+
+          roles_file="$HOME/.ostwin/.agents/plans/${plan_id}.roles.json"
+          if [[ ! -f "$roles_file" ]]; then
+            echo "::error::Plan roles file not found: $roles_file"
+            exit 1
+          fi
+          echo "Plan: $roles_file"
+          grep -nE '"(default_model|model)"' "$roles_file"
+          python3 - "$roles_file" <<'PY'
+          import json
+          import sys
+
+          roles_file = sys.argv[1]
+
+          def replace_default_model(value):
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key in {"default_model", "model"}:
+                          value[key] = "opencode/big-pickle"
+                      else:
+                          replace_default_model(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      replace_default_model(child)
+
+          with open(roles_file, encoding="utf-8") as handle:
+              data = json.load(handle)
+          replace_default_model(data)
+          with open(roles_file, "w", encoding="utf-8") as handle:
+              json.dump(data, handle, indent=2)
+              handle.write("\n")
+          PY
+          grep -nE '"(default_model|model)"' "$roles_file"
+          if grep -nE '"(default_model|model)"' "$roles_file" | grep -vE '"(default_model|model)": "opencode/big-pickle"'; then
+            echo "::error::Not all plan role model/default_model values were rewritten to opencode/big-pickle"
+            exit 1
+          fi
+
+          if ! timeout 180s "$OSTWIN" run "$plan_id" --workspace-isolation shared --non-interactive 2>&1 | tee ostwin-run-output.log; then
+            echo "::error::ostwin run failed"
+            exit 1
+          fi
+          if grep -q 'Model=openai/gpt-5.5' ostwin-run-output.log; then
+            echo "::error::Smoke flow still launched an agent with Model=openai/gpt-5.5"
+            exit 1
+          fi
+          grep -q "Hello this is OsTwin" index.html
+          echo "::notice::Minimal Ostwin plan created, ran, QA passed, and generated index.html"
 
       - name: Upload install log
         if: always()

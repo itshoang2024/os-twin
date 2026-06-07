@@ -410,7 +410,8 @@ Usage:
 
 Commands:
   run <plan_id|file> Execute a plan by ID or file path
-                     Options: --dry-run, --resume, --expand, --working-dir PATH,
+                     Options: --dry-run, --resume, --expand, --enable-planning,
+                              --working-dir PATH,
                               --workspace-isolation room-worktree|shared,
                               --worktree-root PATH
   plan <sub>        Plan management (AI-assisted)
@@ -457,7 +458,7 @@ Commands:
 Examples:
   ostwin run plans/my-feature.md
   ostwin run plans/my-feature.md --dry-run
-  ostwin run plans/my-feature.md --resume --expand
+  ostwin run plans/my-feature.md --resume --expand --enable-planning
   ostwin status --watch
   ostwin logs room-001 --follow
   ostwin stop
@@ -741,6 +742,7 @@ switch ($Command) {
                     '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
                     '--worktree-root' { $null = $psArgs.Add('-WorktreeRoot'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
                     '--non-interactive' { $null = $psArgs.Add('-NonInteractive'); $i++ }
+                    '--enable-planning' { $null = $psArgs.Add('-EnablePlanning'); $i++ }
                     '-n' { $null = $psArgs.Add('-NonInteractive'); $i++ }
                     default { $null = $psArgs.Add($runArgs[$i]); $i++ }
                 }
@@ -930,6 +932,7 @@ switch ($Command) {
                             '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
                             '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
                             '--worktree-root' { $null = $psArgs.Add('-WorktreeRoot'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
+                            '--enable-planning' { $null = $psArgs.Add('-EnablePlanning'); $si++ }
                             default { $null = $psArgs.Add($startArgs[$si]); $si++ }
                         }
                     }
@@ -1061,7 +1064,7 @@ switch ($Command) {
             default {
                 Write-Error "Unknown plan subcommand: $planSub"
                 Write-Host "  Usage: ostwin plan create [Title] [--file FILE]"
-                Write-Host "         ostwin plan start [plan-file] [--workspace-isolation room-worktree|shared] [--worktree-root PATH]"
+                Write-Host "         ostwin plan start [plan-file] [--enable-planning] [--workspace-isolation room-worktree|shared] [--worktree-root PATH]"
                 Write-Host "         ostwin plan list"
                 Write-Host "         ostwin plan clear [--force]"
                 exit 1

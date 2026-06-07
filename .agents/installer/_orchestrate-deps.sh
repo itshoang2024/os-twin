@@ -40,6 +40,8 @@ install_clawhub_cli() {
   else
     warn "clawhub bun install failed"
   fi
+
+  return 0
 }
 
 if $DASHBOARD_ONLY; then
@@ -156,6 +158,8 @@ fi
 if check_ollama; then
   OLLAMA_VER=$(ollama --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "installed")
   ok "Ollama $OLLAMA_VER"
+elif $SKIP_OPTIONAL || ${SKIP_OLLAMA:-false}; then
+  warn "Ollama not found (skipped)"
 else
   warn "Ollama not found (local LLM host — optional, needed for local models)"
   if ask "Install Ollama? (recommended for running local LLMs)"; then

@@ -1,6 +1,6 @@
 {
   "name": "tech-artist",
-  "description": "Technical Artist \u2014 bridges art and engineering with shaders, VFX, animation polish, and art pipeline optimization for Unity mobile",
+  "description": "Technical Artist — bridges art and engineering with shaders, VFX, animation polish, and art pipeline optimization for Unity mobile",
   "capabilities": [
     "shader-development",
     "vfx-creation",
@@ -17,7 +17,7 @@
     "60fps-maintained"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [
     "unity-dev-principles"

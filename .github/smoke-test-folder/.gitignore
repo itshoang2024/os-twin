@@ -1,0 +1,8 @@
+# Ostwin generated runtime artifacts
+.agents/
+.memory
+.opencode/
+.planning-DAG.json
+.war-rooms/
+index.html
+ostwin-run-output.log

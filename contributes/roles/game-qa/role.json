@@ -1,6 +1,6 @@
 {
   "name": "game-qa",
-  "description": "Unity game QA specialist \u2014 playtest validation, code review, performance testing, and regression prevention",
+  "description": "Unity game QA specialist — playtest validation, code review, performance testing, and regression prevention",
   "capabilities": [
     "code-review",
     "playtest-planning",
@@ -18,7 +18,7 @@
     "code-review-clean"
   ],
   "cli": "agent",
-  "model": "google-vertex/gemini-3-flash-preview",
+  "model": "opencode/big-pickle",
   "timeout": 600,
   "skill_refs": [
     "unity-code-review",

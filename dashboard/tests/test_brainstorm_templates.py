@@ -14,8 +14,6 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
 from dashboard.api import app
 from dashboard.plan_agent import build_messages, BRAINSTORM_SYSTEM_PROMPT
 from dashboard.planning_thread_store import PlanningThreadStore
@@ -86,7 +84,7 @@ class TestBuildMessagesWithTemplate:
 
         assert len(messages) == 1
         human = messages[0]
-        assert isinstance(human, HumanMessage)
+        assert human.role == "user"
 
         content = human.content if isinstance(human.content, str) else human.content[0]["text"]
         assert "<template>" in content
@@ -113,7 +111,7 @@ class TestBuildMessagesWithTemplate:
     def test_no_plan_content_means_no_system_message(self):
         """When plan_content is empty, no SystemMessage is injected."""
         messages = build_messages(user_message="test", plan_content="")
-        assert not any(isinstance(m, SystemMessage) for m in messages)
+        assert not any(m.role == "system" for m in messages)
 
     def test_plan_content_injects_system_message(self):
         """When plan_content is provided, a SystemMessage appears first."""
@@ -122,7 +120,7 @@ class TestBuildMessagesWithTemplate:
             plan_content="# My Plan\n\n## Goal\nBuild a thing",
         )
         assert len(messages) == 2
-        assert isinstance(messages[0], SystemMessage)
+        assert messages[0].role == "system"
         assert "My Plan" in messages[0].content
 
     def test_chat_history_plus_template_message(self):
@@ -135,9 +133,9 @@ class TestBuildMessagesWithTemplate:
         messages = build_messages(user_message=msg, chat_history=history)
 
         assert len(messages) == 3
-        assert isinstance(messages[0], HumanMessage)
-        assert isinstance(messages[1], AIMessage)
-        assert isinstance(messages[2], HumanMessage)
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+        assert messages[2].role == "user"
 
         # The last message is the template message
         last_content = messages[2].content if isinstance(messages[2].content, str) else messages[2].content[0]["text"]
@@ -238,7 +236,7 @@ class TestThreadCreationWithTemplate:
 class TestStreamWithTemplate:
     """Verify the stream endpoint passes the full template message to brainstorm_stream."""
 
-    @patch("dashboard.routes.threads.brainstorm_stream")
+    @patch("dashboard.plan_agent.brainstorm_stream")
     def test_stream_receives_full_template_content(self, mock_stream, client):
         """brainstorm_stream must receive the full message including <template>."""
         captured_args = {}
@@ -267,7 +265,7 @@ class TestStreamWithTemplate:
         assert "{{product name}}" in received
         assert SAMPLE_USER_BRIEF in received
 
-    @patch("dashboard.routes.threads.brainstorm_stream")
+    @patch("dashboard.plan_agent.brainstorm_stream")
     def test_stream_dedup_does_not_lose_content(self, mock_stream, client):
         """When auto-trigger re-sends the same message, dedup should keep the full content."""
         async def mock_gen(*args, **kwargs):
