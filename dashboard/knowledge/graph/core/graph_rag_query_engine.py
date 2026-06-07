@@ -94,6 +94,21 @@ class GraphRAGQueryEngine(CustomQueryEngine):
         """
         return build_citation_dict(metadata, self.index)
 
+    def _create_citation(self, metadata: dict, uuid_fallback: str = "") -> str:
+        """Backward-compatible citation string builder used by older tests.
+
+        ``create_citation`` returns the newer structured citation dictionary;
+        older call sites expected a human-readable string containing file/page
+        information plus a uuid trace. Keep that private helper as a thin
+        wrapper around the shared formatter.
+        """
+        metadata = metadata or {}
+        citation = format_citation(metadata, uuid_fallback=uuid_fallback)
+        has_file_identifier = bool(metadata.get("filename") or metadata.get("file_path"))
+        if has_file_identifier and uuid_fallback and "uuid:" not in citation:
+            return f"{citation}{{uuid:{uuid_fallback}}}"
+        return citation
+
     @staticmethod
     def _is_uuid_node(value: str) -> bool:
         """Backward-compat wrapper around :func:`is_uuid`."""
@@ -112,7 +127,7 @@ class GraphRAGQueryEngine(CustomQueryEngine):
             try:
                 score = node_data.get("score", 0.0)
                 properties = node_data.get("properties", {})
-                citation = format_citation(properties, uuid_fallback=node_id)
+                citation = self._create_citation(properties, node_id)
                 nodes.append(
                     {
                         "id": node_id,

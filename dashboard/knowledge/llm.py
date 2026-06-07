@@ -33,6 +33,7 @@ from typing import Any, Optional
 from dashboard.knowledge.config import LLM_MODEL, LLM_PROVIDER
 from dashboard.knowledge.audit import LLM_TIMEOUT  # noqa: WPS433
 from dashboard.knowledge.metrics import get_metrics_registry  # noqa: WPS433
+from dashboard.llm_client import _detect_provider_from_model
 from dashboard.llm_wrapper import BaseLLMWrapper
 
 logger = logging.getLogger(__name__)
@@ -220,7 +221,17 @@ class KnowledgeLLM(BaseLLMWrapper):
             master_provider = ""
 
         self.model = model or master_model or LLM_MODEL or ""
-        self.provider = provider or master_provider or LLM_PROVIDER or None
+
+        # Knowledge graph extraction/planning must route by the model family so
+        # stale dashboard/env provider settings (for example, an Ollama backend)
+        # cannot accidentally send a native OpenAI/Gemini/Claude model to the
+        # wrong transport. This preserves the citation-refactor contract that
+        # `_effective_provider()` is derived from the model identifier whenever
+        # a model is explicitly configured.
+        if self.model:
+            self.provider = _detect_provider_from_model(self.model)
+        else:
+            self.provider = provider or master_provider or LLM_PROVIDER or None
 
     def _complete(self, system: str, user: str, max_tokens: int = 2048) -> str:
         """Run a single LLM chat call with metrics instrumentation."""

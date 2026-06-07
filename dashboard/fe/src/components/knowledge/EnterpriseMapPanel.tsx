@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars -- Retired legacy map helpers remain temporarily for snapshot/parity reference while the live path renders through GraphCanvas. */
 
 import React from 'react';
 import {
@@ -8,10 +9,11 @@ import {
   type EnterpriseMapProjectionData,
   type ExplorerEdge,
   type ExplorerNode,
+  type ExplorerOntologyFilters,
 } from '@/hooks/use-knowledge-explorer';
 import { useOntologyObservation, useOntologyProfile, type ObservationEvent, type OntologyProfile, type TimeSeries } from '@/hooks/use-ontology';
 import { ENTERPRISE_MAP_MODULES } from './ontology/enterprise-map';
-import { WorkbenchShell, mapLensAdapter } from './workbench';
+import { GraphCanvas, WorkbenchShell, mapLensAdapter } from './workbench';
 
 type ViewName = 'map' | 'layers' | 'objects' | 'relations' | 'quality' | 'simulation';
 export type MapState = 'live' | 'example' | 'empty';
@@ -594,6 +596,20 @@ function buildInitialFilters(data: OntologyMapData): ActiveFilters {
   return Object.fromEntries(FILTER_KEYS.map((key) => [key, filterValues(data, key)])) as ActiveFilters;
 }
 
+
+function facetToContractFilter(facet: string): keyof ExplorerOntologyFilters | null {
+  if (facet === 'object_type') return 'concept_type';
+  if (facet === 'layer') return 'layer';
+  if (facet === 'lifecycle') return 'lifecycle_state';
+  if (facet === 'pack') return 'pack_id';
+  if (facet === 'relationshipFamily') return 'relationship_family';
+  return null;
+}
+
+function filterDirectiveLabel(facet: string, bucket: string, mode: 'include' | 'exclude') {
+  return `${facet}:${mode}:${bucket}`;
+}
+
 function objectVisible(object: OntologyObject, filters: ActiveFilters) {
   return (
     filters.layer.includes(object.layerId)
@@ -713,7 +729,11 @@ export default function EnterpriseMapPanel({
   onCreateSampleData,
 }: EnterpriseMapPanelProps) {
   const hookNamespace = fixtureMap ? null : selectedNamespace;
-  const enterpriseMap = useEnterpriseMap(hookNamespace, 200);
+  const [requestFilters, setRequestFilters] = React.useState<ExplorerOntologyFilters>(() => conceptTypeFilter ? { concept_type: { values: [conceptTypeFilter], mode: 'include' } } : {});
+  const [requestFilterChips, setRequestFilterChips] = React.useState<string[]>(() => conceptTypeFilter ? [filterDirectiveLabel('concept_type', conceptTypeFilter, 'include')] : []);
+  const [requestGroupBy, setRequestGroupBy] = React.useState('');
+  const [explorationTrail, setExplorationTrail] = React.useState<string[]>([]);
+  const enterpriseMap = useEnterpriseMap(hookNamespace, 200, requestFilters, requestGroupBy || null);
   const explorer = useKnowledgeExplorer(hookNamespace);
   const { isSeeded, seed } = explorer;
   const { profile } = useOntologyProfile(hookNamespace);
@@ -784,6 +804,8 @@ export default function EnterpriseMapPanel({
 
   React.useEffect(() => {
     if (!conceptTypeFilter) return;
+    setRequestFilters((current) => ({ ...current, concept_type: { values: [conceptTypeFilter], mode: 'include' } }));
+    setRequestFilterChips([filterDirectiveLabel('concept_type', conceptTypeFilter, 'include')]);
     setFilters((current) => ({
       ...current,
       objectType: data.objects.some((object) => object.objectType === conceptTypeFilter) ? [conceptTypeFilter] : current.objectType,
@@ -815,7 +837,18 @@ export default function EnterpriseMapPanel({
     [rawTimeSeries, timeMode, observationEvents, selectedObject, data.profileVersion],
   );
   const connected = React.useMemo(() => connectedObjectIds(data, selectedId), [data, selectedId]);
-  const workbenchModel = React.useMemo(() => mapLensAdapter(effectiveMap, selectedNamespace ?? undefined, mapState), [effectiveMap, mapState, selectedNamespace]);
+  const adaptedWorkbenchModel = React.useMemo(() => mapLensAdapter(effectiveMap, selectedNamespace ?? undefined, mapState), [effectiveMap, mapState, selectedNamespace]);
+  const workbenchModel = React.useMemo(() => {
+    const visibleIds = new Set(visibleObjects.map((object) => object.id));
+    const selected = selectedObject ? { kind: 'node', id: selectedObject.id, title: selectedObject.name, source: mapSourceKind, properties: { concept_type: selectedObject.objectType } } : null;
+    return {
+      ...adaptedWorkbenchModel,
+      nodes: adaptedWorkbenchModel.nodes.filter((node) => visibleIds.has(node.id)),
+      edges: adaptedWorkbenchModel.edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)),
+      selection: selected,
+      metadata: { ...adaptedWorkbenchModel.metadata, applied_group_by: requestGroupBy || undefined, explorationTrail },
+    };
+  }, [adaptedWorkbenchModel, explorationTrail, mapSourceKind, requestGroupBy, selectedObject, visibleObjects]);
   const graphEdges = React.useMemo(() => {
     const seenTypes = new Set<string>();
     return visibleRelations.flatMap<GraphEdge>((relation) => {
@@ -851,8 +884,30 @@ export default function EnterpriseMapPanel({
     if (object) onInstanceSelect?.({ id: object.id, title: object.name, concept_type: object.objectType, source: mapSourceKind });
   }, [data.objects, mapSourceKind, onInstanceSelect]);
 
+  const applyWorkbenchFilter = React.useCallback((facet: string, bucket: string, mode: 'include' | 'exclude') => {
+    if (!facet) {
+      setRequestFilters({});
+      setRequestFilterChips([]);
+      return;
+    }
+    const contractKey = facetToContractFilter(facet);
+    if (!contractKey) return;
+    setRequestFilters((current) => ({ ...current, [contractKey]: { values: [bucket], mode } }));
+    setRequestFilterChips([filterDirectiveLabel(facet, bucket, mode)]);
+    setPage(0);
+  }, []);
+
+  const handleSearchAround = React.useCallback(() => {
+    if (!selectedId) return;
+    const rawDepth = typeof window !== 'undefined' ? window.prompt('Search around hops (1-3)', '1') : '1';
+    const parsed = Number(rawDepth ?? 1);
+    const depth = Math.max(1, Math.min(3, Number.isFinite(parsed) ? parsed : 1));
+    void explorer.expand([selectedId], depth, requestFilters);
+    setExplorationTrail((current) => [`${selectedId}:${depth}-hop`, ...current].slice(0, 5));
+  }, [explorer, requestFilters, selectedId]);
+
   return (
-    <WorkbenchShell model={workbenchModel} passthrough>
+    <WorkbenchShell model={workbenchModel} groupBy={requestGroupBy} filters={requestFilterChips} searchAroundEnabled={Boolean(selectedId)} onGroupByChange={(field) => { setRequestGroupBy(field); setPage(0); }} onFilterDirectiveChange={applyWorkbenchFilter} onSearchAround={handleSearchAround} rightRail={<DetailSidebar data={data} selectedObject={selectedObject} onSelectObject={selectObject} />} bottomRail={<SeriesTimePanel selectedObject={selectedObject} mode={timeMode} events={observationEvents} series={observationSeries} isLoading={fixtureMap ? false : hookObservation.isLoading} error={fixtureMap ? null : hookObservation.error} />}>
     <div className="enterprise-map-shell" data-testid="enterprise-map-panel" data-modules={ENTERPRISE_MAP_MODULES.join(',')}>
       <style>{MAP_PANEL_CSS}</style>
       <EnterpriseMapHeader data={data} activeView={activeView} onViewChange={setActiveView} />
@@ -887,27 +942,20 @@ export default function EnterpriseMapPanel({
       <MapObjectSelectionRail objects={visibleObjects} onSelectObject={selectObject} />
 
       <div className="emp-layout">
-        <FiltersSidebar data={data} filters={filters} onToggle={toggleFilter} />
-
         <main className="emp-main">
           <TimeSelectionControls mode={timeMode} onModeChange={(nextMode) => setTimeMode(nextMode)} />
-          <EnterpriseMapViews
+          <MapLensViewSet
             activeView={activeView}
             data={data}
-            layout={layout}
-            graphEdges={graphEdges}
             selectedId={selectedId}
             connected={connected}
-            svgUid={svgUid}
             graphHostRef={graphHostRef}
-            onSelectObject={(id) => { setSelectedId(id); if (id) { setSavedFocusId(id); const object = data.objects.find((item) => item.id === id); if (object) onInstanceSelect?.({ id: object.id, title: object.name, concept_type: object.objectType, source: mapSourceKind }); } }}
             onClearFocus={() => setSelectedId(null)}
             onInspectObject={selectObject}
-          />
-          <SeriesTimePanel selectedObject={selectedObject} mode={timeMode} events={observationEvents} series={observationSeries} isLoading={fixtureMap ? false : hookObservation.isLoading} error={fixtureMap ? null : hookObservation.error} />
+          >
+            <GraphCanvas model={workbenchModel} renderMode={density === 'compact' ? 'compact' : 'extended'} layoutMode={requestGroupBy ? 'layered' : 'auto'} onSelectNode={selectObject} onSelectEdge={() => undefined} />
+          </MapLensViewSet>
         </main>
-
-        <DetailSidebar data={data} selectedObject={selectedObject} onSelectObject={selectObject} />
       </div>
       </>) : null}
     </div>
@@ -969,50 +1017,29 @@ function EnterpriseMapHeader({ data, activeView, onViewChange }: { data: Ontolog
   );
 }
 
-function EnterpriseMapViews({
+function MapLensViewSet({
   activeView,
   data,
-  layout,
-  graphEdges,
   selectedId,
-  connected,
-  svgUid,
   graphHostRef,
-  onSelectObject,
   onClearFocus,
   onInspectObject,
+  children,
 }: {
   activeView: ViewName;
   data: OntologyMapData;
-  layout: LayoutResult;
-  graphEdges: GraphEdge[];
   selectedId: string | null;
   connected: Set<string>;
-  svgUid: string;
   graphHostRef: React.RefObject<HTMLDivElement | null>;
-  onSelectObject: (id: string | null) => void;
   onClearFocus: () => void;
   onInspectObject: (id: string) => void;
+  children: React.ReactNode;
 }) {
   return (
     <>
       <section className={`emp-main-view ${activeView === 'map' ? 'active' : ''}`}>
-        <div className="emp-graph-host" ref={graphHostRef}>
-          <GraphSvg
-            data={data}
-            layout={layout}
-            graphEdges={graphEdges}
-            selectedId={selectedId}
-            connected={connected}
-            svgUid={svgUid}
-            onSelectObject={onSelectObject}
-          />
-          <NodeHitOverlay
-            objects={data.objects}
-            layout={layout}
-            onSelectObject={onSelectObject}
-          />
-          <FlowStateOverlay data={data} selectedId={selectedId} onSelectObject={onSelectObject} />
+        <div className="emp-graph-host" ref={graphHostRef} data-testid="enterprise-map-graph-host">
+          {children}
         </div>
         <button
           className={`emp-focus-hint ${selectedId ? 'show' : ''}`}

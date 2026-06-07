@@ -331,6 +331,58 @@ class OntologyReleaseObservabilityResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TimeRangeResponse(BaseModel):
+    """Optional observation time range attached to projected map objects."""
+
+    model_config = {"extra": "forbid"}
+
+    start: str | None = None
+    end: str | None = None
+
+
+class ExplorerFilterClause(BaseModel):
+    """Include/exclude clause for an ontology explorer facet."""
+
+    model_config = {"extra": "forbid"}
+
+    values: list[str] = Field(default_factory=list)
+    mode: Literal["include", "exclude"] = "include"
+
+
+ExplorerFilterValue = list[str] | ExplorerFilterClause
+
+
+class ExplorerOntologyFilters(BaseModel):
+    """Strict ontology-aware filters shared by explorer and enterprise-map reads."""
+
+    model_config = {"extra": "forbid"}
+
+    layer: ExplorerFilterValue | None = Field(default=None, description="Ontology layer IDs")
+    abstraction_level: ExplorerFilterValue | None = Field(default=None, description="Abstraction level IDs")
+    concept_type: ExplorerFilterValue | None = Field(default=None, description="Canonical concept type IDs")
+    relationship_family: ExplorerFilterValue | None = Field(default=None, description="Relationship families")
+    relationship_type: ExplorerFilterValue | None = Field(default=None, description="Canonical relationship type IDs")
+    pack_id: ExplorerFilterValue | None = Field(default=None, description="Pack IDs")
+    lifecycle_state: ExplorerFilterValue | None = Field(default=None, description="Lifecycle states")
+    owner: ExplorerFilterValue | None = Field(default=None, description="Owners")
+    metadata: dict[str, str | int | float | bool | None] | None = Field(default=None, description="Exact-match metadata filters")
+
+    def to_filter_dict(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json", exclude_none=True)
+        return {key: value for key, value in payload.items() if value not in ([], {})}
+
+
+class EnterpriseMapQueryRequest(BaseModel):
+    """Rich enterprise-map query body for filtered/projection-directed reads."""
+
+    model_config = {"extra": "forbid"}
+
+    limit: int = Field(default=200, ge=1, le=500)
+    filters: ExplorerOntologyFilters | None = None
+    group_by: list[str] | None = None
+    color_by: str | None = None
+
+
 class EnterpriseMapOntologyPathResponse(BaseModel):
     """Ontology coordinates attached to an enterprise map node."""
 
@@ -372,22 +424,22 @@ class EnterpriseMapNodeResponse(BaseModel):
     sync_mode: Optional[str] = None
     quality_state: Optional[str] = None
     candidate_state: Optional[str] = None
-    event_count: Optional[Any] = None
-    active_event_count: Optional[Any] = None
-    time_range: Optional[Any] = None
-    series_refs: Optional[Any] = None
-    flow_refs: Optional[Any] = None
-    state: Optional[Any] = None
-    simulation_state: Optional[Any] = None
-    simulation_refs: Optional[Any] = None
-    state_machine_ref: Optional[Any] = None
-    state_color: Optional[Any] = None
-    phase: Optional[Any] = None
-    track: Optional[Any] = None
-    priority: Optional[Any] = None
-    effort: Optional[Any] = None
-    prerequisites: Optional[Any] = None
-    acceptance: Optional[Any] = None
+    event_count: Optional[int] = None
+    active_event_count: Optional[int] = None
+    time_range: Optional[TimeRangeResponse] = None
+    series_refs: list[str] = Field(default_factory=list)
+    flow_refs: list[str] = Field(default_factory=list)
+    state: Optional[str] = None
+    simulation_state: Optional[str] = None
+    simulation_refs: list[str] = Field(default_factory=list)
+    state_machine_ref: Optional[str] = None
+    state_color: Optional[str] = None
+    phase: Optional[str] = None
+    track: Optional[str] = None
+    priority: str | int | None = None
+    effort: str | int | None = None
+    prerequisites: list[str] = Field(default_factory=list)
+    acceptance: list[str] | str | None = None
     ontology_path: EnterpriseMapOntologyPathResponse = Field(default_factory=EnterpriseMapOntologyPathResponse)
     validation_issues: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -417,22 +469,22 @@ class EnterpriseMapEdgeResponse(BaseModel):
     provenance_refs: list[str] = Field(default_factory=list)
     external_ref: Optional[dict[str, Any]] = None
     candidate_state: Optional[str] = None
-    event_count: Optional[Any] = None
-    active_event_count: Optional[Any] = None
-    time_range: Optional[Any] = None
-    series_refs: Optional[Any] = None
-    flow_refs: Optional[Any] = None
-    state: Optional[Any] = None
-    simulation_state: Optional[Any] = None
-    simulation_refs: Optional[Any] = None
-    state_machine_ref: Optional[Any] = None
-    state_color: Optional[Any] = None
-    phase: Optional[Any] = None
-    track: Optional[Any] = None
-    priority: Optional[Any] = None
-    effort: Optional[Any] = None
-    prerequisites: Optional[Any] = None
-    acceptance: Optional[Any] = None
+    event_count: Optional[int] = None
+    active_event_count: Optional[int] = None
+    time_range: Optional[TimeRangeResponse] = None
+    series_refs: list[str] = Field(default_factory=list)
+    flow_refs: list[str] = Field(default_factory=list)
+    state: Optional[str] = None
+    simulation_state: Optional[str] = None
+    simulation_refs: list[str] = Field(default_factory=list)
+    state_machine_ref: Optional[str] = None
+    state_color: Optional[str] = None
+    phase: Optional[str] = None
+    track: Optional[str] = None
+    priority: str | int | None = None
+    effort: str | int | None = None
+    prerequisites: list[str] = Field(default_factory=list)
+    acceptance: list[str] | str | None = None
     is_candidate: bool = False
     validation_issues: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -467,9 +519,9 @@ class EnterpriseMapStatsResponse(BaseModel):
     relationship_type_count: int = 0
     candidate_edge_count: int = 0
     validation_issue_count: int = 0
-    source_node_count: Optional[int] = None
-    source_edge_count: Optional[int] = None
-    ontology_candidate_count: Optional[int] = None
+    source_node_count: int = 0
+    source_edge_count: int = 0
+    ontology_candidate_count: int = 0
     event_count: int = 0
     active_event_count: int = 0
     flow_count: int = 0
@@ -477,6 +529,10 @@ class EnterpriseMapStatsResponse(BaseModel):
     simulation_scenario_count: int = 0
     limit: Optional[int] = None
     filtered: bool = False
+    truncated: bool = False
+    node_cap: Optional[int] = None
+    depth_requested: Optional[int] = None
+    depth_effective: Optional[int] = None
 
 
 class EnterpriseMapMetaResponse(BaseModel):
@@ -489,6 +545,13 @@ class EnterpriseMapMetaResponse(BaseModel):
     time_window: dict[str, Any] = Field(default_factory=dict)
     observation_series_backend: str = "inline-json-mvp"
     analysis: dict[str, Any] = Field(default_factory=dict)
+    map_state: Literal["live", "empty"] = "empty"
+    map_source_kind: Literal["knowledge_graph", "none"] = "none"
+    source_node_count: int = 0
+    source_edge_count: int = 0
+    applied_filters: dict[str, Any] = Field(default_factory=dict)
+    applied_group_by: list[str] = Field(default_factory=list)
+    applied_color_by: str = "type"
 
 
 class EnterpriseMapProjectionResponse(BaseModel):

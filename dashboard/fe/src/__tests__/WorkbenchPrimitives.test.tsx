@@ -44,6 +44,33 @@ describe('GraphCanvas', () => {
     expect(screen.getByText('Risk object')).toBeInTheDocument();
     expect(screen.getByText('active')).toBeInTheDocument();
   });
+
+  it('renders map-grade node card metadata, validation, and event badges', () => {
+    const cardModel: WorkbenchModel = { id: 'flight', title: 'Flight map', nodes: [{ id: 'flight-1', label: 'AA 101', type: 'flight', subtitle: 'Departure JFK · Arrival LAX', color: '#123456', lifecycleState: 'active', reviewState: 'approved', qualityState: 'watch', eventCount: 1, validationIssueCount: 1, properties: { delayed: true } }], edges: [] };
+    render(<GraphCanvas model={cardModel} renderMode="extended" layoutMode="grid" />);
+    expect(screen.getByText('Departure JFK · Arrival LAX')).toBeInTheDocument();
+    expect(screen.getByText('active')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-flight-1-event-count')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-flight-1-validation')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-flight-1').querySelector('rect')).toHaveAttribute('stroke', '#123456');
+  });
+
+  it('honors edge style, weight, color, and label pills', () => {
+    const edgeModel: WorkbenchModel = { id: 'edges', title: 'Edges', nodes: [{ id: 'a', label: 'A', type: 'thing' }, { id: 'b', label: 'B', type: 'thing' }], edges: [{ id: 'a-b', source: 'a', target: 'b', label: 'Depends on', style: 'dotted', color: '#dc2626', weight: 2.4 }] };
+    const { container } = render(<GraphCanvas model={edgeModel} renderMode="extended" layoutMode="grid" />);
+    const line = container.querySelector('[data-testid="graph-edge-a-b"] line');
+    expect(line).toHaveAttribute('stroke', '#dc2626');
+    expect(line).toHaveAttribute('stroke-dasharray', '2 4');
+    expect(Number(line?.getAttribute('stroke-width'))).toBeGreaterThan(2);
+    expect(screen.getByText('Depends on')).toBeInTheDocument();
+  });
+
+  it('recolors by property with a categorical legend', () => {
+    render(<GraphCanvas model={{ ...model, nodes: nodes.map((node, index) => ({ ...node, properties: { delayed: index === 0 ? 'true' : 'false' } })) }} renderMode="extended" layoutMode="grid" colorBy="property" propertyName="delayed" />);
+    expect(screen.getByTestId('graph-color-legend')).toHaveTextContent('true');
+    expect(screen.getByTestId('graph-color-legend')).toHaveTextContent('false');
+  });
+
 });
 
 describe('HistogramPanel', () => {
@@ -92,7 +119,7 @@ describe('mapLensAdapter', () => {
     const adapted = mapLensAdapter(projection, 'demo');
 
     expect(adapted.id).toBe('demo');
-    expect(adapted.nodes[0]).toMatchObject({ id: 'risk-1', label: 'Vendor risk', type: 'risk', layerId: 'governance' });
+    expect(adapted.nodes[0]).toMatchObject({ id: 'risk-1', label: 'Vendor risk', type: 'risk', layerId: 'governance', lifecycleState: 'active', reviewState: 'approved' });
     expect(adapted.edges[0]).toMatchObject({ source: 'risk-1', target: 'control-1', type: 'mitigates', style: 'dashed' });
     expect(adapted.facets?.find((facet) => facet.id === 'object_type')?.buckets[0]).toMatchObject({ id: 'risk', count: 1 });
     expect(adapted.metadata?.mapState).toBe('live');

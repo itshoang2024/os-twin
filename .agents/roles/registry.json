@@ -1002,6 +1002,30 @@
         "description": "Explore ontology namespaces in the knowledge base",
         "path": "skills/roles/knowledge-curator/ontology-knowledge/SKILL.md",
         "skills": "knowledge-curator, ontology"
+      },
+      {
+        "name": "set-retention",
+        "description": "Set namespace retention policies and deletion safeguards for knowledge data.",
+        "path": "skills/roles/knowledge-curator/set-retention/SKILL.md",
+        "skills": "knowledge-curator, retention, lifecycle"
+      },
+      {
+        "name": "schedule-refresh",
+        "description": "Plan and document recurring refresh schedules for knowledge namespaces.",
+        "path": "skills/roles/knowledge-curator/schedule-refresh/SKILL.md",
+        "skills": "knowledge-curator, refresh, scheduling"
+      },
+      {
+        "name": "audit-quality",
+        "description": "Audit knowledge namespace quality, coverage, extraction health, and query relevance.",
+        "path": "skills/roles/knowledge-curator/audit-quality/SKILL.md",
+        "skills": "knowledge-curator, quality, audit"
+      },
+      {
+        "name": "propose-rebuild",
+        "description": "Propose safe rebuild plans for stale or degraded knowledge namespaces.",
+        "path": "skills/roles/knowledge-curator/propose-rebuild/SKILL.md",
+        "skills": "knowledge-curator, rebuild, remediation"
       }
     ]
   }

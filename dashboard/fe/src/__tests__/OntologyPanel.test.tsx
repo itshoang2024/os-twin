@@ -84,6 +84,10 @@ function openModelConfig(): void {
   fireEvent.click(screen.getByRole('button', { name: /Model Config/i }));
 }
 
+function openInfo(): void {
+  fireEvent.click(screen.getByRole('button', { name: /Info/i }));
+}
+
 function openGovernance(): void {
   fireEvent.click(screen.getByRole('button', { name: /Governance/i }));
 }
@@ -124,6 +128,30 @@ describe('OntologyPanel', () => {
     enterpriseMapState.map = null;
     enterpriseMapState.explorerNodes = [];
     enterpriseMapState.explorerEdges = [];
+  });
+
+  it('renders ontology unit identity in the Info dock tab', () => {
+    ontologyUnit = {
+      namespace: 'demo',
+      active_profile_id: null,
+      name: 'Audit Legal Process Ontology',
+      purpose: 'Govern legal operations workflows',
+      domain: 'legal operations',
+      expected_users: ['auditors', 'counsel'],
+      source_material: ['policies', 'interviews'],
+      governance_mode: 'strict',
+    };
+
+    render(<OntologyPanel selectedNamespace="demo" />);
+    openInfo();
+
+    const info = screen.getByTestId('ontology-info-tab');
+    expect(within(info).getByText(/Unit identity/i)).toBeInTheDocument();
+    expect(within(info).getByText(/^legal operations$/i)).toBeInTheDocument();
+    expect(within(info).getByText(/Govern legal operations workflows/i)).toBeInTheDocument();
+    expect(within(info).getByText(/auditors, counsel/i)).toBeInTheDocument();
+    expect(within(info).getByText(/policies, interviews/i)).toBeInTheDocument();
+    expect(within(info).getByText(/None yet/i)).toBeInTheDocument();
   });
 
   it('starts cold namespaces in the Ontology Unit launcher instead of rendering the seed graph', () => {
@@ -177,12 +205,35 @@ describe('OntologyPanel', () => {
     expect(resetDefault).not.toHaveBeenCalled();
   });
 
-  it('asks AI from the launcher as a staged proposal with candidate evidence context only', async () => {
+  it('summarizes imported candidates and evidence before creating a local knowledge draft', async () => {
     profileExists = false;
     defaultSuggested = true;
     profile = null;
     suggestedProfile = makeProfile();
     candidates = [makeCandidate()];
+    render(<OntologyPanel selectedNamespace="demo" />);
+
+    const importedSummary = screen.getByTestId('imported-knowledge-summary');
+    expect(importedSummary).toHaveTextContent(/Blocks → anchor-blocks/i);
+
+    fireEvent.click(screen.getByText(/Build from imported knowledge/i));
+
+    expect(await screen.findByTestId('ontology-schema-canvas')).toBeInTheDocument();
+    expect(String((screen.getByLabelText(/Ask ontology co-builder/i) as HTMLTextAreaElement).value)).toMatch(/pending candidates/i);
+    expect(saveUnit).toHaveBeenCalledWith(expect.objectContaining({ namespace: 'demo', lifecycle: 'draft', active_profile_id: null }));
+    expect(askAssistant).not.toHaveBeenCalled();
+    expect(saveProfile).not.toHaveBeenCalled();
+    expect(resetDefault).not.toHaveBeenCalled();
+  });
+
+  it('asks AI from the launcher as a staged proposal with candidate evidence context only', async () => {
+    profileExists = false;
+    defaultSuggested = true;
+    profile = null;
+    suggestedProfile = makeProfile();
+    const candidate = makeCandidate();
+    candidate.source_evidence_ref = null;
+    candidates = [candidate];
     askAssistant.mockResolvedValueOnce({ text: 'Starter proposal.\n```json\n{"proposed_changes":{"concept_types":{"risk":{"id":"risk","label":"Risk"}}},"evidence_refs":["anchor-blocks"]}\n```' });
     render(<OntologyPanel selectedNamespace="demo" />);
 

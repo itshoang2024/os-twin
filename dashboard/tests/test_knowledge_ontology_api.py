@@ -475,3 +475,116 @@ class TestEnterpriseMapAPI:
         assert data["nodes"][0]["ontology_path"]["layer"] == "delivery"
         assert data["edges"][0]["relationship_type"] == "syncs_with"
         assert data["meta"]["graph_instruction"]["schema_version"] == 1
+
+
+class TestEnterpriseMapProjectionAPI:
+    def _projection(self) -> dict:
+        return {
+            "nodes": [],
+            "edges": [],
+            "layers": [],
+            "abstraction_levels": [],
+            "concept_type_counts": {},
+            "relationship_type_counts": {},
+            "relationship_family_counts": {},
+            "stats": {
+                "node_count": 0,
+                "edge_count": 0,
+                "layer_count": 0,
+                "concept_type_count": 0,
+                "relationship_type_count": 0,
+                "candidate_edge_count": 0,
+                "validation_issue_count": 0,
+                "source_node_count": 0,
+                "source_edge_count": 0,
+                "ontology_candidate_count": 0,
+                "event_count": 0,
+                "active_event_count": 0,
+            },
+            "meta": {
+                "ontology_candidate_count": 0,
+                "map_state": "empty",
+                "map_source_kind": "none",
+                "source_node_count": 0,
+                "source_edge_count": 0,
+                "applied_filters": {},
+                "applied_group_by": ["default_layer", "concept_type"],
+                "applied_color_by": "type",
+            },
+        }
+
+    def test_get_enterprise_map_preserves_no_filter_default(self, client, auth_headers, mock_service) -> None:
+        mock_service.ontology_enterprise_map.return_value = self._projection()
+
+        response = client.get("/api/knowledge/namespaces/demo/ontology/enterprise-map", headers=auth_headers)
+
+        assert response.status_code == 200
+        mock_service.ontology_enterprise_map.assert_called_once_with(
+            "demo", limit=200, filters=None, group_by=None, color_by=None
+        )
+        assert response.json()["meta"]["map_state"] == "empty"
+
+    def test_post_enterprise_map_query_forwards_filters_and_directives(self, client, auth_headers, mock_service) -> None:
+        payload = self._projection()
+        payload["meta"]["applied_filters"] = {"concept_type": ["flight"]}
+        payload["meta"]["applied_group_by"] = ["concept_type"]
+        payload["meta"]["applied_color_by"] = "lifecycle_state"
+        mock_service.ontology_enterprise_map.return_value = payload
+
+        response = client.post(
+            "/api/knowledge/namespaces/demo/ontology/enterprise-map/query",
+            headers=auth_headers,
+            json={"limit": 50, "filters": {"concept_type": ["flight"]}, "group_by": ["concept_type"], "color_by": "lifecycle_state"},
+        )
+
+        assert response.status_code == 200
+        mock_service.ontology_enterprise_map.assert_called_once_with(
+            "demo", limit=50, filters={"concept_type": ["flight"]}, group_by=["concept_type"], color_by="lifecycle_state"
+        )
+        assert response.json()["meta"]["applied_filters"] == {"concept_type": ["flight"]}
+
+    def test_enterprise_map_query_rejects_unknown_filter_key(self, client, auth_headers, mock_service) -> None:
+        response = client.post(
+            "/api/knowledge/namespaces/demo/ontology/enterprise-map/query",
+            headers=auth_headers,
+            json={"filters": {"unknown_filter": ["x"]}},
+        )
+
+        assert response.status_code == 422
+        mock_service.ontology_enterprise_map.assert_not_called()
+
+
+class TestExplorerExpandRouteContract:
+    def test_expand_accepts_over_limit_depth_and_delegates_to_server_clamp(self, client, auth_headers, mock_service) -> None:
+        mock_service.explorer_expand.return_value = {
+            "nodes": [],
+            "edges": [],
+            "stats": {
+                "node_count": 0,
+                "edge_count": 0,
+                "depth_requested": 5,
+                "depth_effective": 3,
+                "node_cap": 300,
+                "truncated": False,
+            },
+            "meta": {
+                "depth_requested": 5,
+                "depth_effective": 3,
+                "node_cap": 300,
+                "truncated": False,
+            },
+        }
+
+        response = client.post(
+            "/api/knowledge/namespaces/demo/explorer/expand",
+            headers=auth_headers,
+            json={"node_ids": ["n1"], "depth": 5},
+        )
+
+        assert response.status_code == 200
+        mock_service.explorer_expand.assert_called_once_with(
+            "demo", node_ids=["n1"], depth=5, filters=None
+        )
+        data = response.json()
+        assert data["stats"]["depth_requested"] == 5
+        assert data["stats"]["depth_effective"] == 3

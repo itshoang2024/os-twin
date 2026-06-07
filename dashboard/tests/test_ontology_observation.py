@@ -88,3 +88,36 @@ def test_service_observation_api_shapes_and_inline_series_event(tmp_path) -> Non
     events = service.list_observation_events("demo", subject_id="node-1")
     assert events[0]["event_type"] == "TimeSeriesUpdated"
     assert events[0]["evidence_refs"] == ["prov:series"]
+
+
+def test_empty_enterprise_map_is_honest_empty_with_zero_overlay_counts(tmp_path) -> None:
+    nm = NamespaceManager(base_dir=tmp_path)
+    nm.create("demo")
+    service = KnowledgeService(namespace_manager=nm)
+
+    class EmptyExplorer:
+        def enterprise_map(self, **kwargs):
+            return {
+                "nodes": [],
+                "edges": [],
+                "layers": [],
+                "abstraction_levels": [],
+                "concept_type_counts": {},
+                "relationship_type_counts": {},
+                "relationship_family_counts": {},
+                "stats": {"source_node_count": 0, "source_edge_count": 0},
+                "meta": {},
+            }
+
+    service._get_explorer = lambda namespace: EmptyExplorer()  # type: ignore[method-assign]
+
+    result = service.ontology_enterprise_map("demo")
+
+    assert result["nodes"] == []
+    assert result["edges"] == []
+    assert result["meta"]["map_state"] == "empty"
+    assert result["meta"]["map_source_kind"] == "none"
+    assert result["stats"]["event_count"] == 0
+    assert result["stats"]["active_event_count"] == 0
+    assert result["stats"]["validation_issue_count"] == 0
+    assert result["stats"]["ontology_candidate_count"] == 0

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Coroutine
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -141,7 +142,7 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_list_namespaces")
 async def list_namespaces() -> dict:
     """List all knowledge namespaces with their stats.
 
@@ -168,7 +169,7 @@ async def list_namespaces() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_create_namespace")
 async def create_namespace(
     name: str,
     language: str = "English",
@@ -227,7 +228,7 @@ async def create_namespace(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_delete_namespace")
 async def delete_namespace(name: str, confirm: bool = False) -> dict:
     """Delete a knowledge namespace and all its data permanently.
 
@@ -267,7 +268,7 @@ async def delete_namespace(name: str, confirm: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_import_folder")
 async def import_folder(
     namespace: str,
     folder_path: str,
@@ -342,7 +343,7 @@ async def import_folder(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_get_import_status")
 async def get_import_status(namespace: str, job_id: str) -> dict:
     """Get the status of a knowledge import job.
 
@@ -377,7 +378,7 @@ async def get_import_status(namespace: str, job_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_import_text")
 async def import_text(
     namespace: str,
     text: str,
@@ -444,7 +445,7 @@ async def import_text(
         return _err("INTERNAL_ERROR", str(exc))
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_query")
 async def query(
     namespace: str,
     query: str,
@@ -496,7 +497,7 @@ async def query(
 
 
 
-@mcp.tool()
+@mcp.tool(name="find_notes_by_knowledge_link")
 async def find_notes_by_knowledge_link(
     namespace: str,
     file_hash: str,
@@ -605,7 +606,7 @@ def reset_mcp_session_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="knowledge_web_research")
 async def web_research(
     namespace: str,
     query: str,
@@ -677,17 +678,201 @@ async def web_research(
         return _err("INTERNAL_ERROR", str(exc))
 
 
-# Backward-compatible direct-call aliases. The MCP tool decorator exposes the
-# concise tool names, while older tests/importers still import the public
-# knowledge_* function names directly from this module.
-knowledge_list_namespaces = list_namespaces
-knowledge_create_namespace = create_namespace
-knowledge_delete_namespace = delete_namespace
-knowledge_import_folder = import_folder
-knowledge_import_text = import_text
-knowledge_get_import_status = get_import_status
-knowledge_query = query
-knowledge_web_research = web_research
+# Backward-compatible synchronous direct-call wrappers. The MCP tool decorator
+# exposes concise async tool names, while older tests/importers still import the
+# public knowledge_* names directly from this module and expect plain dicts.
+class _DirectToolResult(dict, Coroutine):
+    """Dict result that can also be awaited by legacy async callers."""
+
+    def __init__(self, value: dict):
+        super().__init__(value)
+        self._coro = None
+
+    async def _as_coro(self) -> dict:
+        return self
+
+    def _ensure_coro(self):
+        if self._coro is None:
+            self._coro = self._as_coro()
+        return self._coro
+
+    def send(self, value):
+        return self._ensure_coro().send(value)
+
+    def throw(self, typ, val=None, tb=None):
+        coro = self._ensure_coro()
+        if val is None and tb is None:
+            return coro.throw(typ)
+        if tb is None:
+            return coro.throw(typ, val)
+        return coro.throw(typ, val, tb)
+
+    def close(self):
+        if self._coro is not None:
+            return self._coro.close()
+        return None
+
+    def __await__(self):
+        return self._ensure_coro().__await__()
+
+
+def _run_direct_tool(coroutine) -> dict:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            value = loop.run_until_complete(coroutine)
+        finally:
+            loop.close()
+        return _DirectToolResult(value)
+    if loop.is_running():
+        raise RuntimeError("knowledge MCP direct wrapper cannot run inside an active event loop; await the async tool instead")
+    value = loop.run_until_complete(coroutine)
+    return _DirectToolResult(value)
+
+
+def knowledge_list_namespaces() -> dict:
+    try:
+        ks = _get_service()
+        items = ks.list_namespaces()
+        return _DirectToolResult({"namespaces": [m.model_dump(mode="json") for m in items]})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("knowledge_list_namespaces failed")
+        return _DirectToolResult(_err("INTERNAL_ERROR", str(exc)))
+
+
+def knowledge_create_namespace(
+    name: str,
+    language: str = "English",
+    description: str = "",
+) -> dict:
+    try:
+        ks = _get_service()
+        meta = ks.create_namespace(name, language=language, description=description or None, actor="anonymous")
+        return _DirectToolResult(meta.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        from dashboard.knowledge.namespace import (  # noqa: WPS433
+            InvalidNamespaceIdError,
+            NamespaceExistsError,
+        )
+        from dashboard.knowledge.audit import (  # noqa: WPS433
+            ImportInProgressError,
+            MaxNamespacesReachedError,
+        )
+
+        if isinstance(exc, InvalidNamespaceIdError):
+            return _DirectToolResult(_err("INVALID_NAMESPACE_ID", str(exc)))
+        if isinstance(exc, NamespaceExistsError):
+            return _DirectToolResult(_err("NAMESPACE_EXISTS", str(exc)))
+        if isinstance(exc, MaxNamespacesReachedError):
+            return _DirectToolResult(_err("MAX_NAMESPACES_REACHED", str(exc)))
+        if isinstance(exc, ImportInProgressError):
+            return _DirectToolResult(_err("IMPORT_IN_PROGRESS", str(exc)))
+        logger.exception("knowledge_create_namespace failed")
+        return _DirectToolResult(_err("INTERNAL_ERROR", str(exc)))
+
+
+def knowledge_delete_namespace(name: str, confirm: bool = False) -> dict:
+    try:
+        if _requires_confirmation() and not confirm:
+            return _DirectToolResult(_err(
+                "CONFIRMATION_REQUIRED",
+                f"knowledge_delete_namespace requires confirm=True when called by knowledge-curator. "
+                f"Explicitly set confirm=True to proceed with deleting namespace '{name}'."
+            ))
+        ks = _get_service()
+        deleted = ks.delete_namespace(name, actor="anonymous")
+        return _DirectToolResult({"deleted": deleted})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("knowledge_delete_namespace failed")
+        return _DirectToolResult(_err("INTERNAL_ERROR", str(exc)))
+
+
+def knowledge_import_folder(namespace: str, folder_path: str, force: bool = False) -> dict:
+    try:
+        from pathlib import Path
+
+        p = Path(folder_path)
+        if not p.is_absolute():
+            return _DirectToolResult(_err("INVALID_FOLDER_PATH", f"folder_path must be absolute, got: {folder_path}"))
+        if not p.exists():
+            return _DirectToolResult(_err("FOLDER_NOT_FOUND", f"folder does not exist: {folder_path}"))
+        if not p.is_dir():
+            return _DirectToolResult(_err("NOT_A_DIRECTORY", f"path is not a directory: {folder_path}"))
+        ks = _get_service()
+        job_id = ks.import_folder(namespace, str(p), options={"force": force}, actor="anonymous")
+        return _DirectToolResult({
+            "job_id": job_id,
+            "status": "submitted",
+            "message": f"Importing {folder_path} into {namespace}",
+        })
+    except Exception as exc:  # noqa: BLE001
+        from dashboard.knowledge.namespace import InvalidNamespaceIdError  # noqa: WPS433
+        from dashboard.knowledge.audit import ImportInProgressError  # noqa: WPS433
+
+        if isinstance(exc, InvalidNamespaceIdError):
+            return _DirectToolResult(_err("INVALID_NAMESPACE_ID", str(exc)))
+        if isinstance(exc, ImportInProgressError):
+            return _DirectToolResult(_err("IMPORT_IN_PROGRESS", str(exc)))
+        if isinstance(exc, FileNotFoundError):
+            return _DirectToolResult(_err("FOLDER_NOT_FOUND", str(exc)))
+        if isinstance(exc, NotADirectoryError):
+            return _DirectToolResult(_err("NOT_A_DIRECTORY", str(exc)))
+        logger.exception("knowledge_import_folder failed")
+        return _DirectToolResult(_err("INTERNAL_ERROR", str(exc)))
+
+
+def knowledge_import_text(
+    namespace: str,
+    text: str,
+    source_label: str = "inline",
+    force: bool = False,
+) -> dict:
+    """Backward-compatible synchronous direct-call wrapper for import_text."""
+    return _run_direct_tool(import_text(namespace, text, source_label=source_label, force=force))
+
+
+def knowledge_get_import_status(namespace: str, job_id: str) -> dict:
+    return _run_direct_tool(get_import_status(namespace, job_id))
+
+
+def knowledge_query(namespace: str, query_text: str, mode: str = "raw", top_k: int = 10) -> dict:
+    try:
+        ks = _get_service()
+        result = ks.query(namespace, query_text, mode=mode, top_k=top_k, actor="anonymous")
+        return _DirectToolResult(result.model_dump(mode="json"))
+    except Exception as exc:  # noqa: BLE001
+        from dashboard.knowledge.namespace import NamespaceNotFoundError  # noqa: WPS433
+
+        if isinstance(exc, NamespaceNotFoundError):
+            return _DirectToolResult(_err("NAMESPACE_NOT_FOUND", str(exc)))
+        if isinstance(exc, ValueError):
+            return _DirectToolResult(_err("BAD_REQUEST", str(exc)))
+        logger.exception("knowledge_query failed")
+        return _DirectToolResult(_err("INTERNAL_ERROR", str(exc)))
+
+
+def knowledge_web_research(
+    namespace: str,
+    query_text: str,
+    engines: list[str] | None = None,
+    categories: list[str] | None = None,
+    max_results: int = 10,
+    summarize: bool = True,
+    language: str = "en",
+) -> dict:
+    return _run_direct_tool(
+        web_research(
+            namespace,
+            query_text,
+            engines=engines,
+            categories=categories,
+            max_results=max_results,
+            summarize=summarize,
+            language=language,
+        )
+    )
 
 
 __all__ = [

@@ -45,6 +45,8 @@ from dashboard.routes.knowledge_models import (
     DomainPackValidateResponse,
     ErrorResponse,
     EnterpriseMapProjectionResponse,
+    EnterpriseMapQueryRequest,
+    ExplorerOntologyFilters,
     GraphCountsResponse,
     ImportFolderRequest,
     ImportFolderResponse,
@@ -1168,11 +1170,54 @@ async def get_ontology_enterprise_map(
     namespace: str,
     user: Annotated[dict, Depends(get_current_user)],
     limit: int = Query(default=200, ge=1, le=500, description="Maximum graph nodes to project"),
+    filters: str | None = Query(default=None, description="Optional JSON-encoded ExplorerOntologyFilters"),
+    group_by: list[str] | None = Query(default=None, description="Optional view-plane grouping fields"),
+    color_by: str | None = Query(default=None, description="Optional view-plane color field"),
 ) -> EnterpriseMapProjectionResponse:
     """Return a bounded graph projection composed with the active ontology profile."""
     try:
+        parsed_filters = None
+        if filters:
+            parsed_filters = ExplorerOntologyFilters.model_validate(json.loads(filters)).to_filter_dict()
         service = _get_service()
-        return await asyncio.to_thread(service.ontology_enterprise_map, namespace, limit=limit)
+        return await asyncio.to_thread(
+            service.ontology_enterprise_map,
+            namespace,
+            limit=limit,
+            filters=parsed_filters,
+            group_by=group_by,
+            color_by=color_by,
+        )
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/enterprise-map/query",
+    response_model=EnterpriseMapProjectionResponse,
+    responses={
+        200: {"description": "Filtered graph-backed ontology projection for enterprise map surfaces"},
+        401: {"description": "Authentication required"},
+        404: {"description": "Namespace not found", "model": ErrorResponse},
+    },
+    summary="Query namespace enterprise map ontology projection",
+)
+async def query_ontology_enterprise_map(
+    namespace: str,
+    request: EnterpriseMapQueryRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> EnterpriseMapProjectionResponse:
+    """Return the enterprise-map projection with rich filters and view directives."""
+    try:
+        service = _get_service()
+        return await asyncio.to_thread(
+            service.ontology_enterprise_map,
+            namespace,
+            limit=request.limit,
+            filters=request.filters.to_filter_dict() if request.filters else None,
+            group_by=request.group_by,
+            color_by=request.color_by,
+        )
     except Exception as exc:
         raise _map_error(exc)
 
@@ -1954,26 +1999,6 @@ async def get_namespace_graph(
 # ---------------------------------------------------------------------------
 
 
-class ExplorerOntologyFilters(BaseModel):
-    """Optional ontology-aware filters shared by explorer requests."""
-
-    layer: list[str] | None = Field(default=None, description="Ontology layer IDs to include")
-    abstraction_level: list[str] | None = Field(default=None, description="Abstraction level IDs to include")
-    concept_type: list[str] | None = Field(default=None, description="Canonical concept type IDs to include")
-    relationship_family: list[str] | None = Field(default=None, description="Relationship families to include")
-    relationship_type: list[str] | None = Field(default=None, description="Canonical relationship type IDs to include")
-    pack_id: list[str] | None = Field(default=None, description="Pack IDs to include")
-    lifecycle_state: list[str] | None = Field(default=None, description="Lifecycle states to include")
-    owner: list[str] | None = Field(default=None, description="Owners to include")
-    metadata: dict[str, Any] | None = Field(default=None, description="Exact-match metadata field filters")
-
-    def to_filter_dict(self) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in self.model_dump(exclude_none=True).items()
-            if value not in ([], {})
-        }
-
 
 class ExplorerExpandRequest(BaseModel):
     """Request body for POST /api/knowledge/namespaces/{namespace}/explorer/expand."""
@@ -1986,9 +2011,8 @@ class ExplorerExpandRequest(BaseModel):
     )
     depth: int = Field(
         default=1,
-        description="Number of hops to expand (1-3)",
+        description="Requested hop count; server clamps effective traversal depth to 1-3.",
         ge=1,
-        le=3,
     )
     filters: ExplorerOntologyFilters | None = Field(
         default=None,
@@ -2204,13 +2228,11 @@ async def explorer_communities(
     "/metrics",
     responses={
         200: {"description": "Metrics in JSON or Prometheus format"},
-        401: {"description": "Authentication required"},
     },
     summary="Get knowledge service metrics",
 )
 async def get_metrics(
     request: Request,
-    user: Annotated[dict, Depends(get_current_user)],
 ) -> Any:
     """Get metrics for the knowledge service.
 
@@ -2243,13 +2265,10 @@ async def get_metrics(
     response_class=PlainTextResponse,
     responses={
         200: {"description": "Metrics in Prometheus text format", "content": {"text/plain": {}}},
-        401: {"description": "Authentication required"},
     },
     summary="Get knowledge service metrics in Prometheus format",
 )
-async def get_metrics_prometheus(
-    user: Annotated[dict, Depends(get_current_user)],
-) -> PlainTextResponse:
+async def get_metrics_prometheus() -> PlainTextResponse:
     """Get metrics in Prometheus text format.
 
     This endpoint returns metrics in the Prometheus exposition format,
@@ -2286,13 +2305,10 @@ class HealthResponse(BaseModel):
     response_model=HealthResponse,
     responses={
         200: {"description": "Health status"},
-        401: {"description": "Authentication required"},
     },
     summary="Get knowledge service health",
 )
-async def get_health(
-    user: Annotated[dict, Depends(get_current_user)],
-) -> HealthResponse:
+async def get_health() -> HealthResponse:
     """Get health status of the knowledge service.
 
     Checks:

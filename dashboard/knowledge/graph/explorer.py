@@ -334,7 +334,7 @@ class KnowledgeExplorer:
         # Step 5: Expand 1-hop from top nodes
         return self._with_meta(self._expand_from_ids(top_ids, include_seed_info=True))
 
-    def expand(self, node_ids: List[str], depth: int = 1, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def expand(self, node_ids: List[str], depth: int = 1, filters: Optional[Dict[str, Any]] = None, node_cap: int = 300) -> Dict[str, Any]:
         """Expand from a set of node IDs outward by N hops.
 
         Each hop fetches the neighborhood of the frontier nodes via
@@ -347,10 +347,12 @@ class KnowledgeExplorer:
         Returns:
             Dict with nodes, edges, and stats.
         """
-        depth = max(1, min(3, depth))
+        requested_depth = int(depth or 1)
+        depth = max(1, min(3, requested_depth))
         kg = self.graph
 
         all_node_ids = set(node_ids)
+        discovered_order = list(node_ids)
         frontier = list(node_ids)
         all_edges: List[Dict[str, Any]] = []
         seen_edges: set = set()
@@ -374,26 +376,42 @@ class KnowledgeExplorer:
                     all_edges.append(_relation_to_dict(rel, profile=self.profile, source_node=source, target_node=target))
                 if s_id not in all_node_ids:
                     all_node_ids.add(s_id)
+                    discovered_order.append(s_id)
                     next_frontier.append(s_id)
                 if t_id not in all_node_ids:
                     all_node_ids.add(t_id)
+                    discovered_order.append(t_id)
                     next_frontier.append(t_id)
             frontier = next_frontier
 
-        # Fetch full node data for all discovered IDs
-        nodes = self._fetch_nodes_by_ids(list(all_node_ids))
-        # Filter edges to only those with both endpoints in the node set
+        # Fetch full node data for all discovered IDs and cap the response to keep
+        # search-around bounded even for dense hubs. Edges are re-derived against
+        # the capped node set so no dangling references leak to the UI.
+        all_ids = discovered_order
+        node_cap = max(1, int(node_cap or 300))
+        truncated = len(all_ids) > node_cap
+        nodes = self._fetch_nodes_by_ids(all_ids[:node_cap])
         node_id_set = {n["id"] for n in nodes}
         filtered_edges = [
             e for e in all_edges
             if e["source"] in node_id_set and e["target"] in node_id_set
         ]
 
-        return self._apply_filters({
-            "nodes": nodes,
-            "edges": filtered_edges,
-            "stats": {"node_count": len(nodes), "edge_count": len(filtered_edges)},
-        }, filters)
+        projection = project_enterprise_map(nodes, filtered_edges, self.profile)
+        projection["stats"].update({
+            "node_count": len(projection.get("nodes") or []),
+            "edge_count": len(projection.get("edges") or []),
+            "depth_requested": requested_depth,
+            "depth_effective": depth,
+            "node_cap": node_cap,
+            "truncated": truncated,
+        })
+        projection = self._apply_filters(projection, filters)
+        projection.setdefault("meta", {})["truncated"] = truncated
+        projection["meta"]["node_cap"] = node_cap
+        projection["meta"]["depth_requested"] = requested_depth
+        projection["meta"]["depth_effective"] = depth
+        return self._with_meta(projection)
 
     def search(self, query: str, limit: int = 20, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Vector-similarity search over node embeddings + 1-hop context.
@@ -423,7 +441,7 @@ class KnowledgeExplorer:
         result["stats"]["query"] = query
         return self._apply_filters(result, filters)
 
-    def enterprise_map(self, limit: int = 200, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def enterprise_map(self, limit: int = 200, filters: Optional[Dict[str, Any]] = None, group_by: Optional[List[str]] = None, color_by: Optional[str] = None) -> Dict[str, Any]:
         """Return an ontology-owned projection suitable for enterprise map surfaces.
 
         Unlike ``seed`` and ``expand`` this does not model an interaction state.
@@ -479,8 +497,10 @@ class KnowledgeExplorer:
             },
             filters,
         )
-        projection = project_enterprise_map(graph_result["nodes"], graph_result["edges"], self.profile)
+        projection = project_enterprise_map(graph_result["nodes"], graph_result["edges"], self.profile, group_by=group_by, color_by=color_by)
         projection["stats"].update(graph_result.get("stats") or {})
+        projection["applied_group_by"] = projection.pop("applied_group_by", [])
+        projection["applied_color_by"] = projection.pop("applied_color_by", "type")
         return self._with_meta(projection)
 
     def path(self, source_id: str, target_id: str) -> Dict[str, Any]:
@@ -632,7 +652,7 @@ class KnowledgeExplorer:
         return result
 
     def _apply_filters(self, result: Dict[str, Any], filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Apply ontology-driven filters to a graph response in memory."""
+        """Apply ontology-driven include/exclude filters to a graph response."""
         if not filters:
             return result
 
@@ -640,28 +660,41 @@ class KnowledgeExplorer:
         if not filters:
             return result
 
-        def match_values(value: Any, expected: Any) -> bool:
+        def clause(expected: Any) -> tuple[list[Any], str]:
+            if isinstance(expected, dict) and "values" in expected:
+                values = expected.get("values") or []
+                mode = expected.get("mode") or "include"
+            else:
+                values = expected if isinstance(expected, list) else [expected]
+                mode = "include"
+            return list(values), "exclude" if mode == "exclude" else "include"
+
+        def match_clause(value: Any, expected: Any) -> bool:
             if expected is None:
                 return True
-            values = expected if isinstance(expected, list) else [expected]
-            return value in values
+            values, mode = clause(expected)
+            if not values:
+                return True
+            matched = value in values
+            return not matched if mode == "exclude" else matched
 
         metadata_filters = filters.get("metadata") or {}
         nodes = []
         for node in result.get("nodes", []):
-            if not match_values(node.get("concept_type"), filters.get("concept_type")):
+            layer_value = node.get("layer") or node.get("layer_id") or (node.get("ontology_path") or {}).get("layer")
+            if not match_clause(node.get("concept_type"), filters.get("concept_type")):
                 continue
-            if not match_values(node.get("abstraction_level"), filters.get("abstraction_level")):
+            if not match_clause(node.get("abstraction_level"), filters.get("abstraction_level")):
                 continue
-            if not match_values(node.get("layer"), filters.get("layer")):
+            if not match_clause(layer_value, filters.get("layer")):
                 continue
-            if not match_values(node.get("pack_id"), filters.get("pack_id")):
+            if not match_clause(node.get("pack_id"), filters.get("pack_id")):
                 continue
-            if not match_values(node.get("lifecycle_state"), filters.get("lifecycle_state")):
+            if not match_clause(node.get("lifecycle_state"), filters.get("lifecycle_state")):
                 continue
             props = node.get("properties") or {}
             metadata = node.get("metadata") or {}
-            if filters.get("owner") is not None and not match_values(props.get("owner") or metadata.get("owner"), filters.get("owner")):
+            if filters.get("owner") is not None and not match_clause(node.get("owner") or props.get("owner") or metadata.get("owner"), filters.get("owner")):
                 continue
             if any(metadata.get(key) != value and props.get(key) != value for key, value in metadata_filters.items()):
                 continue
@@ -672,9 +705,9 @@ class KnowledgeExplorer:
         for edge in result.get("edges", []):
             if edge.get("source") not in node_ids or edge.get("target") not in node_ids:
                 continue
-            if not match_values(edge.get("family"), filters.get("relationship_family")):
+            if not match_clause(edge.get("family"), filters.get("relationship_family")):
                 continue
-            if not match_values(edge.get("relationship_type"), filters.get("relationship_type")):
+            if not match_clause(edge.get("relationship_type"), filters.get("relationship_type")):
                 continue
             edges.append(edge)
 
@@ -684,6 +717,7 @@ class KnowledgeExplorer:
         stats = dict(result.get("stats") or {})
         stats["node_count"] = len(nodes)
         stats["edge_count"] = len(edges)
+        stats["filtered"] = True
         result["stats"] = stats
         return result
 

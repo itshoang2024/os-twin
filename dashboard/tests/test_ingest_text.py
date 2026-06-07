@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import sys
 import time
@@ -26,6 +27,19 @@ sys.modules.setdefault("google.genai.types", mock_google_types)
 
 from dashboard.knowledge.ingestion import FileEntry, IngestOptions, Ingestor
 from dashboard.knowledge.jobs import JobEvent, JobState
+
+
+
+@pytest.fixture(autouse=True)
+def _ensure_default_event_loop():
+    """Keep legacy get_event_loop() tests stable under Python 3.12."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        yield
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def _sha256(text: str) -> str:

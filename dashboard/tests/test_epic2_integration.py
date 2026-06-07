@@ -8,9 +8,15 @@ import json
 def mock_get_current_user():
     return {"sub": "test-user"}
 
-app.dependency_overrides[get_current_user] = mock_get_current_user
-
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def override_auth_dependency():
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
 
 @pytest.fixture
 def plan_setup(tmp_path, monkeypatch):

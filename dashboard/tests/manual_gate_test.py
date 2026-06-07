@@ -4,8 +4,8 @@ import asyncio
 import json
 import requests
 
-def test_gate():
-    os.environ["OSTWIN_MCP_ACTOR"] = "knowledge-curator"
+def test_gate(monkeypatch):
+    monkeypatch.setenv("OSTWIN_MCP_ACTOR", "knowledge-curator")
     # We can't easily call the MCP server over stdio here without setting up the whole session.
     # But we can call the tool function directly if we import it.
     

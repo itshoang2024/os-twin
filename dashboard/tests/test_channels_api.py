@@ -1,5 +1,5 @@
 import os
-os.environ["OSTWIN_API_KEY"] = "DEBUG"
+os.environ["OSTWIN_API_KEY"] = "test-key"
 
 import pytest
 import json
@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from dashboard.api import app
 
 client = TestClient(app)
-HEADERS = {"X-API-Key": "DEBUG"}
+HEADERS = {"X-API-Key": "test-key"}
 
 @pytest.fixture
 def mock_channels_config(tmp_path, monkeypatch):

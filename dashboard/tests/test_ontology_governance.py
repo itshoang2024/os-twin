@@ -196,3 +196,23 @@ def test_governance_rest_endpoints_expose_history_diff_and_preview(tmp_path: Pat
     preview = client.get("/api/knowledge/namespaces/demo/ontology/profile/history/1.0.0/preview", headers=headers)
     assert preview.status_code == 200
     assert preview.json()["target_version"] == "1.0.0"
+
+
+def test_graph_instruction_style_edit_saves_history_and_leaves_concept_type_render_fields(tmp_path: Path) -> None:
+    service = make_service(tmp_path)
+    base = create_default_ontology_profile("demo")
+    service.save_ontology_profile(base, actor="alice", reason="Seed")
+    payload = base.model_dump(mode="json")
+    original_concept = payload["concept_types"]["feature"].copy()
+    payload["version"] = "1.1.0"
+    payload["graph_instruction"]["concept_type_defaults"]["feature"]["color"] = "#123456"
+
+    diff = service.diff_ontology_profiles("demo", target_profile=payload)
+    saved = service.save_ontology_profile_payload("demo", payload, actor="builder", reason="Update feature style")
+
+    assert saved.graph_instruction.concept_type_defaults["feature"].color == "#123456"
+    assert saved.model_dump(mode="json")["concept_types"]["feature"] == original_concept
+    assert "graph_instruction.concept_type_defaults" in diff["diff"]["changed_paths"]
+    history = service.list_ontology_profile_history("demo")
+    assert history[0]["actor"] == "builder"
+    assert "graph_instruction.concept_type_defaults" in history[0]["changed_paths"]

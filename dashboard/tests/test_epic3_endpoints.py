@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from dashboard.api import app
 from unittest.mock import patch, MagicMock
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-key"})
 
 # Mock the get_current_user dependency
 def mock_get_current_user():

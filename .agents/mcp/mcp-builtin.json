@@ -55,7 +55,7 @@
         "Authorization": "Bearer {env:OSTWIN_API_KEY}"
       }
     },
-    "codegraph": {
+    "codeindex": {
       "type": "local",
       "command": [
         "npx",

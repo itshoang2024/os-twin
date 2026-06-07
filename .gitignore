@@ -6,7 +6,6 @@ gold-mining/
 *pid
 .build-hash
 **/.war-rooms/
-
 # ── Agents (runtime data, not source) ────────────────────────────────────────
 .agents/.venv/
 .agents/.venv.bak/
@@ -48,7 +47,11 @@ __pycache__/
 */.coverage
 coverage.xml
 htmlcov/
-
+dashboard/.agents
+dashboard/.memory
+dashboard/.war-rooms
+dashboard/.opencode
+daashboard/.codegraph
 # ── Local data & secrets ──────────────────────────────────────────────────────
 .ostwin/mcp/mcp-config.json
 .claude/
@@ -140,4 +143,20 @@ docs/plan
 docs/plan/
 docs/plan/**
 
+.memory
+
+# Ostwin generated
+.opencode/opencode.json
+.war-rooms/
+.agents/*
+!.agents/
+!.agents/roles/
+!.agents/roles/_base/
+!.agents/roles/_base/LifecycleSignal.psm1
+!.agents/tests/
+.agents/tests/*
+!.agents/tests/roles/
+!.agents/tests/roles/_base/
+!.agents/tests/roles/_base/LifecycleSignal.Tests.ps1
+!.agents/tests/TestChannelHelpers.ps1
 .memory

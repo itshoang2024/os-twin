@@ -380,6 +380,12 @@ class KnowledgeService:
         
         Delegates to the cached per-namespace query engine's visualization method.
         """
+        kg = self.get_kuzu_graph(namespace)
+        if hasattr(kg, "get_graph"):
+            try:
+                return kg.get_graph(limit=limit)
+            except TypeError:
+                return kg.get_graph()
         engine = self._get_query_engine(namespace)
         return engine.get_graph(limit=limit)
 
@@ -407,23 +413,49 @@ class KnowledgeService:
     def explorer_expand(self, namespace: str, node_ids: list[str], depth: int = 1, filters: dict[str, Any] | None = None) -> dict:
         """Expand from a set of node IDs outward by N hops."""
         explorer = self._get_explorer(namespace)
-        return explorer.expand(node_ids=node_ids, depth=depth, filters=filters)
+        return explorer.expand(node_ids=node_ids, depth=depth, filters=filters, node_cap=300)
 
     def explorer_search(self, namespace: str, query: str, limit: int = 20, filters: dict[str, Any] | None = None) -> dict:
         """Vector-similarity search over node embeddings + 1-hop context."""
         explorer = self._get_explorer(namespace)
         return explorer.search(query=query, limit=limit, filters=filters)
 
-    def ontology_enterprise_map(self, namespace: str, limit: int = 200, filters: dict[str, Any] | None = None) -> dict:
+    def ontology_enterprise_map(
+        self,
+        namespace: str,
+        limit: int = 200,
+        filters: dict[str, Any] | None = None,
+        group_by: list[str] | None = None,
+        color_by: str | None = None,
+    ) -> dict:
         """Return a graph-backed ontology projection for map and builder surfaces."""
         self._require_namespace(namespace)
         explorer = self._get_explorer(namespace)
-        result = explorer.enterprise_map(limit=limit, filters=filters)
+        result = explorer.enterprise_map(limit=limit, filters=filters, group_by=group_by, color_by=color_by)
         candidate_count = self._candidate_store.pending_count(namespace)
         self._attach_observation_projection(namespace, result, filters=filters)
         self._attach_analysis_projection(namespace, result)
-        result.setdefault("stats", {})["ontology_candidate_count"] = candidate_count
-        result.setdefault("meta", {})["ontology_candidate_count"] = candidate_count
+
+        stats = result.setdefault("stats", {})
+        stats.setdefault("source_node_count", 0)
+        stats.setdefault("source_edge_count", 0)
+        stats["ontology_candidate_count"] = int(candidate_count or 0)
+        stats.setdefault("validation_issue_count", 0)
+        stats.setdefault("event_count", 0)
+        stats.setdefault("active_event_count", 0)
+
+        live = int(stats.get("source_node_count") or 0) > 0
+        meta = result.setdefault("meta", {})
+        meta["ontology_candidate_count"] = int(candidate_count or 0)
+        meta["map_state"] = "live" if live else "empty"
+        meta["map_source_kind"] = "knowledge_graph" if live else "none"
+        meta["source_node_count"] = int(stats.get("source_node_count") or 0)
+        meta["source_edge_count"] = int(stats.get("source_edge_count") or 0)
+        meta["applied_filters"] = filters or {}
+        meta.setdefault("applied_group_by", result.get("applied_group_by") or [])
+        meta.setdefault("applied_color_by", result.get("applied_color_by") or "type")
+        result.pop("applied_group_by", None)
+        result.pop("applied_color_by", None)
         return result
 
     def _attach_observation_projection(self, namespace: str, result: dict[str, Any], *, filters: dict[str, Any] | None = None) -> None:
@@ -2273,9 +2305,9 @@ class KnowledgeService:
                     )
 
             opts = IngestOptions(**(options or {}))
-            ingestor = self._get_ingestor()
 
             register_import(namespace, "__pending_text__")
+            ingestor = self._get_ingestor()
 
             def _run_ingest():
                 return ingestor.ingest_text(
@@ -2293,7 +2325,9 @@ class KnowledgeService:
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             _log_call(namespace, "import_text", "success", latency_ms, {"actor": actor})
-            self._observation_store.create(namespace, event_type="ImportCompleted", subject_type="import", subject_id=f"inline:{source_label}", actor=actor, value=result.get("chunks_added", 0), metadata={"source_label": source_label, "chunks_added": result.get("chunks_added", 0), "entities_added": result.get("entities_added", 0), "relations_added": result.get("relations_added", 0)})
+            observation_store = getattr(self, "_observation_store", None)
+            if observation_store is not None:
+                observation_store.create(namespace, event_type="ImportCompleted", subject_type="import", subject_id=f"inline:{source_label}", actor=actor, value=result.get("chunks_added", 0), metadata={"source_label": source_label, "chunks_added": result.get("chunks_added", 0), "entities_added": result.get("entities_added", 0), "relations_added": result.get("relations_added", 0)})
             return result
 
         except ImportInProgressError:

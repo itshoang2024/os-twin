@@ -16,7 +16,9 @@
 	                (retries exhausted → failed-final)
 
 .PARAMETER ConfigPath
-    Path to config.json. Default: AGENT_OS_CONFIG env var or .agents/config.json.
+    Path to config.json. Defaults through Resolve-OstwinConfigPath:
+    AGENT_OS_CONFIG, OSTWIN_CONFIG_PATH, OSTWIN_PROJECT_DIR, AGENTS_DIR,
+    then ~/.ostwin/.agents/config.json before project-local .agents/config.json.
 .PARAMETER WarRoomsDir
     Directory containing war-room directories. Default: WARROOMS_DIR env var.
 
@@ -55,8 +57,23 @@ if (Test-Path $helpersModule) { Import-Module $helpersModule -Force }
 
 # --- Resolve config ---
 if (-not $ConfigPath) {
-    $ConfigPath = if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
-                  else { Join-Path $agentsDir "config.json" }
+    $ConfigPath = if (Get-Command Resolve-OstwinConfigPath -ErrorAction SilentlyContinue) {
+        Resolve-OstwinConfigPath
+    }
+    else {
+        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE }
+                   elseif ($env:HOME) { $env:HOME }
+                   else { $HOME }
+        $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $homeDir ".ostwin" }
+        $globalConfig = Join-Path (Join-Path $ostwinHome ".agents") "config.json"
+
+        if ($env:AGENT_OS_CONFIG) { $env:AGENT_OS_CONFIG }
+        elseif ($env:OSTWIN_CONFIG_PATH) { $env:OSTWIN_CONFIG_PATH }
+        elseif ($env:OSTWIN_PROJECT_DIR) { Join-Path (Join-Path $env:OSTWIN_PROJECT_DIR ".agents") "config.json" }
+        elseif ($env:AGENTS_DIR) { Join-Path $env:AGENTS_DIR "config.json" }
+        elseif (Test-Path $globalConfig) { $globalConfig }
+        else { Join-Path $agentsDir "config.json" }
+    }
 }
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 

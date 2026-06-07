@@ -816,9 +816,9 @@ class Ingestor:
         # the extractor (they reset on each __call__ invocation), so for a
         # single insert_nodes() call they should be accurate.
         store_pre = self._get_store(namespace)
-        kg_pre = store_pre._get_graph()
-        pre_entities = kg_pre.count_entities()
-        pre_relations = kg_pre.count_relations()
+        kg_pre = store_pre._get_graph() if hasattr(store_pre, "_get_graph") else None
+        pre_entities = kg_pre.count_entities() if kg_pre is not None else 0
+        pre_relations = kg_pre.count_relations() if kg_pre is not None else 0
 
         t_insert_start = time.monotonic()
         try:
@@ -861,13 +861,14 @@ class Ingestor:
         # counts before/after insert_nodes().
         if entities_added == 0 and relations_added == 0:
             store_post = self._get_store(namespace)
-            kg_post = store_post._get_graph()
-            entities_added = max(0, kg_post.count_entities() - pre_entities)
-            relations_added = max(0, kg_post.count_relations() - pre_relations)
-            logger.debug(
-                "Extractor metrics were zero; using Kuzu delta: %d entities, %d relations",
-                entities_added, relations_added,
-            )
+            kg_post = store_post._get_graph() if hasattr(store_post, "_get_graph") else None
+            if kg_post is not None:
+                entities_added = max(0, kg_post.count_entities() - pre_entities)
+                relations_added = max(0, kg_post.count_relations() - pre_relations)
+                logger.debug(
+                    "Extractor metrics were zero; using Kuzu delta: %d entities, %d relations",
+                    entities_added, relations_added,
+                )
         else:
             logger.debug(
                 "Extractor metrics: %d entities, %d relations",

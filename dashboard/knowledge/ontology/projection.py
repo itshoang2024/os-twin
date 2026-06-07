@@ -10,6 +10,8 @@ def project_enterprise_map(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
     profile: Any = None,
+    group_by: list[str] | None = None,
+    color_by: str | None = None,
 ) -> dict[str, Any]:
     """Compose serialized graph data into an ontology-ready map projection.
 
@@ -19,7 +21,9 @@ def project_enterprise_map(
     semantics independently.
     """
     layer_defs = _profile_layers(profile)
-    projected_nodes = [_project_node(node, profile, layer_defs) for node in nodes]
+    applied_group_by = _resolve_group_by(profile, group_by)
+    applied_color_by = color_by or _resolve_color_by(profile)
+    projected_nodes = [_project_node(node, profile, layer_defs, applied_group_by) for node in nodes]
     node_ids = {node["id"] for node in projected_nodes}
 
     projected_edges = []
@@ -65,10 +69,12 @@ def project_enterprise_map(
             "candidate_edge_count": sum(1 for edge in projected_edges if edge.get("is_candidate")),
             "validation_issue_count": validation_issue_count,
         },
+        "applied_group_by": applied_group_by,
+        "applied_color_by": applied_color_by,
     }
 
 
-def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict[str, Any]], group_by: list[str]) -> dict[str, Any]:
     props = _as_dict(node.get("properties"))
     metadata = _as_dict(node.get("metadata"))
     instance_metadata = _as_dict(node.get("instance_metadata"))
@@ -111,13 +117,15 @@ def _project_node(node: dict[str, Any], profile: Any, layer_defs: dict[str, dict
         "layer_order": layer["order"],
         "owner": owner,
         "description": description,
-        "map_group": _string(
-            getattr(instruction, "group", None)
-            or node.get("pack_id")
-            or metadata.get("group")
-            or props.get("group")
-            or concept_id
-            or layer_id
+        "map_group": _map_group(
+            group_by,
+            node=node,
+            metadata=metadata,
+            props=props,
+            concept_id=concept_id,
+            layer_id=layer_id,
+            abstraction_id=abstraction_id,
+            instruction_group=getattr(instruction, "group", None),
         ),
         "data_store": _string(
             metadata.get("data_store") or props.get("data_store") or node.get("pack_id") or "knowledge_graph"
@@ -244,6 +252,52 @@ def _project_edge(edge: dict[str, Any], profile: Any) -> dict[str, Any]:
         ),
     )
     return projected
+
+
+def _resolve_group_by(profile: Any, requested: list[str] | None) -> list[str]:
+    if requested:
+        return [str(item) for item in requested if str(item).strip()]
+    hints = getattr(getattr(profile, "graph_instruction", None), "layout_hints", None)
+    configured = getattr(hints, "group_by", None) if hints is not None else None
+    return [str(item) for item in (configured or ["default_layer", "concept_type"])]
+
+
+def _resolve_color_by(profile: Any) -> str:
+    hints = getattr(getattr(profile, "graph_instruction", None), "layout_hints", None)
+    return str(getattr(hints, "color_by", None) or "type")
+
+
+def _map_group(
+    group_by: list[str],
+    *,
+    node: dict[str, Any],
+    metadata: dict[str, Any],
+    props: dict[str, Any],
+    concept_id: str,
+    layer_id: str,
+    abstraction_id: str,
+    instruction_group: Any,
+) -> str:
+    values: list[str] = []
+    for key in group_by:
+        if key in {"default_layer", "layer", "layer_id"}:
+            value = layer_id
+        elif key == "concept_type":
+            value = concept_id
+        elif key == "abstraction_level":
+            value = abstraction_id
+        elif key == "pack":
+            value = node.get("pack_id")
+        elif key == "instruction_group":
+            value = instruction_group
+        else:
+            value = node.get(key) or metadata.get(key) or props.get(key)
+        text = _string(value)
+        if text:
+            values.append(text)
+    if values:
+        return " / ".join(values)
+    return _string(instruction_group or node.get("pack_id") or metadata.get("group") or props.get("group") or concept_id or layer_id)
 
 
 def _profile_layers(profile: Any) -> dict[str, dict[str, Any]]:

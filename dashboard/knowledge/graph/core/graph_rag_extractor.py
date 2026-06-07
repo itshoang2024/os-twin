@@ -199,12 +199,23 @@ class GraphRAGExtractor(TransformComponent):
                 if attempt > 0:
                     _time.sleep(self.config.retry_delay * attempt)
                 t_llm_start = _time.monotonic()
-                entities, relations = self.llm.extract_entities(
-                    text,
-                    self.language,
-                    self.domain_prompt,
-                    ontology_profile_hint=self.ontology_profile,
-                )
+                try:
+                    entities, relations = self.llm.extract_entities(
+                        text,
+                        self.language,
+                        self.domain_prompt,
+                        ontology_profile_hint=self.ontology_profile,
+                    )
+                except TypeError as exc:
+                    if "ontology_profile_hint" not in str(exc):
+                        raise
+                    # Backward compatibility for tests/plugins that still
+                    # provide the older three-argument extraction callable.
+                    entities, relations = self.llm.extract_entities(
+                        text,
+                        self.language,
+                        self.domain_prompt,
+                    )
                 t_llm = _time.monotonic() - t_llm_start
                 logger.info(
                     "[TRACE] extractor/llm_call: %.3fs, attempt=%d, node=%s, %d entities, %d relations",
@@ -460,6 +471,7 @@ class GraphRAGExtractor(TransformComponent):
         existing_relations = node.metadata.pop(KG_RELATIONS_KEY, [])
         entity_metadata = node.metadata.copy()
 
+        entity_batch_failed = False
         if entities:
             entity_texts: list[str] = []
             for entity in entities:
@@ -475,6 +487,7 @@ class GraphRAGExtractor(TransformComponent):
                 logger.info("Batch embedding completed for %s entities", len(entities))
             except Exception as exc:  # noqa: BLE001
                 logger.error("Batch embedding failed (%s); falling back to per-text", exc)
+                entity_batch_failed = True
                 embeddings = [self.embedder.embed_one(t) for t in entity_texts]
         else:
             embeddings = []
@@ -534,7 +547,7 @@ class GraphRAGExtractor(TransformComponent):
         # can be found via KuzuDB's QUERY_VECTOR_INDEX. If the node already
         # has an embedding (e.g. from the PropertyGraphIndex embed_model) we
         # leave it alone; otherwise we generate one from its text content.
-        if not getattr(node, "embedding", None):
+        if not entity_batch_failed and not getattr(node, "embedding", None):
             try:
                 text_for_embed = node.get_content(metadata_mode="none")
                 if text_for_embed and text_for_embed.strip():

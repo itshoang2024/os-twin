@@ -26,6 +26,30 @@ def _request(headers: dict[str, str] | None = None, client_host: str = "127.0.0.
 
 
 @pytest.mark.asyncio
+async def test_localhost_3000_allows_without_dev_mode_or_api_key(monkeypatch):
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+
+    user = await get_current_user(
+        _request({"origin": "http://localhost:3000"})
+    )
+
+    assert user == {"username": "dev-mode-user", "auth_mode": "dev"}
+
+
+@pytest.mark.asyncio
+async def test_127_0_0_1_3000_allows_without_dev_mode_or_api_key(monkeypatch):
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+
+    user = await get_current_user(
+        _request({"origin": "http://127.0.0.1:3000"})
+    )
+
+    assert user == {"username": "dev-mode-user", "auth_mode": "dev"}
+
+
+@pytest.mark.asyncio
 async def test_dev_mode_allows_loopback_frontend_3000_without_api_key(monkeypatch):
     monkeypatch.setenv("OSTWIN_DEV_MODE", "1")
     monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
@@ -107,12 +131,49 @@ async def test_dev_mode_rejects_remote_client_spoofing_127_header(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_normal_mode_still_requires_api_key(monkeypatch):
+async def test_normal_mode_still_requires_api_key_for_non_default_frontend(monkeypatch):
     monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
     monkeypatch.setenv("OSTWIN_API_KEY", "test-key")
 
     with pytest.raises(HTTPException) as exc:
-        await get_current_user(_request({"referer": "http://localhost:3000"}))
+        await get_current_user(_request({"referer": "http://localhost:3001"}))
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_normal_mode_rejects_127_0_0_1_frontend_without_dev_mode(monkeypatch):
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_current_user(_request({"origin": "http://127.0.0.1:5173"}))
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_default_localhost_3000_rejects_remote_client_spoofing_header(monkeypatch):
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_current_user(
+            _request({"origin": "http://localhost:3000"}, client_host="203.0.113.10")
+        )
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_default_127_0_0_1_3000_rejects_remote_client_spoofing_header(monkeypatch):
+    monkeypatch.delenv("OSTWIN_DEV_MODE", raising=False)
+    monkeypatch.delenv("OSTWIN_API_KEY", raising=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_current_user(
+            _request({"origin": "http://127.0.0.1:3000"}, client_host="203.0.113.10")
+        )
 
     assert exc.value.status_code == 401
 

@@ -58,6 +58,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "8.0.13",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "cypress": "^13.17.0",
+    "@testing-library/cypress": "^10.0.3"
   }
 }

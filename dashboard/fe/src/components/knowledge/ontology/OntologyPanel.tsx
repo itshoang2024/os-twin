@@ -8,11 +8,15 @@ import { useOntologyAssistant, useOntologyCandidates, useOntologyHistory, useOnt
 import type { DomainPackManifest, OntologyCandidate, OntologyProfile, OntologyProfileHistoryRecord, OntologyUnit, OntologyValidationIssue } from '@/hooks/use-ontology';
 import AliasManager from './AliasManager';
 import CandidateReview from './CandidateReview';
-import ConceptTypeStudio from './ConceptTypeStudio';
 import GraphInstructionStudio from './GraphInstructionStudio';
-import ProfileSummary from './ProfileSummary';
+import ConceptTypeStudio from './ConceptTypeStudio';
 import RelationshipStudio from './RelationshipStudio';
-import { cloneProfile, IssueList, labelFor, validationErrorCount } from './ontology-ui';
+import RelationshipMatrix from './RelationshipMatrix';
+import RelationshipTypeEditor from './RelationshipTypeEditor';
+import { createObjectType, createRelationshipType, type RelationshipTypeDraftInput } from './ontology-draft-commands';
+import { useOntologyDraftController } from './useOntologyDraftController';
+import ProfileSummary from './ProfileSummary';
+import { IssueList, labelFor, SectionCard, validationErrorCount } from './ontology-ui';
 import { applyOntologyProposalToDraft, parseOntologyAssistantResponse, proposalSectionCounts, type OntologyAssistantProposal, type ProposalStatus } from './assistant-proposals';
 import { GraphCanvas, SelectionInspector, WorkbenchShell, specLensAdapter } from '@/components/knowledge/workbench';
 
@@ -20,7 +24,7 @@ type LensMode = 'spec' | 'map';
 type SelectionKind = 'namespace' | 'concept' | 'relationship' | 'layer' | 'metadata' | 'candidate' | 'instance' | 'fact' | 'source';
 type WorkbenchSelection = { kind: SelectionKind | string; id: string; title: string; concept_type?: string; instance_id?: string; source?: 'profile' | 'candidate' | 'live' | 'example' | 'graph_instruction' | string } | null;
 type LeftDockTab = 'search' | 'sources' | 'candidates' | 'object_types' | 'properties' | 'relationships' | 'validation' | 'templates' | 'histogram';
-type RightDockTab = 'object' | 'assistant' | 'model' | 'governance' | 'simulation';
+type RightDockTab = 'info' | 'object' | 'assistant' | 'model' | 'governance' | 'simulation';
 
 const leftTabs: Array<{ id: LeftDockTab; label: string; icon: string }> = [
   { id: 'search', label: 'Search', icon: 'search' },
@@ -35,9 +39,10 @@ const leftTabs: Array<{ id: LeftDockTab; label: string; icon: string }> = [
 ];
 
 const rightTabs: Array<{ id: RightDockTab; label: string; icon: string }> = [
+  { id: 'info', label: 'Info', icon: 'info' },
   { id: 'object', label: 'SelectionInspector', icon: 'view_in_ar' },
   { id: 'assistant', label: 'AI co-builder', icon: 'smart_toy' },
-  { id: 'model', label: 'Model Config', icon: 'tune' },
+  { id: 'model', label: 'Model Config (Debug)', icon: 'tune' },
   { id: 'governance', label: 'Governance', icon: 'verified' },
   { id: 'simulation', label: 'Simulation', icon: 'timeline' },
 ];
@@ -75,8 +80,7 @@ type HistogramRow = {
 type PackLifecycleRecord = { pack_id?: string; name?: string; version?: string; status?: string; additions?: Record<string, string[]>; installed_at?: string; disabled_at?: string | null };
 type PackPreview = { packId: string; action: 'install' | 'uninstall'; valid?: boolean; issues?: OntologyValidationIssue[]; affectedCounts: Record<string, number>; removed?: Record<string, string[]>; retained?: Record<string, string[]>; orphaned?: Record<string, string[]>; migrationNotes: string[] };
 type PackOwnership = Record<string, { packId: string; name?: string; status?: string }>;
-type DraftHistoryEntry = { profile: OntologyProfile; label: string; timestamp: number };
-type OntologyUnitDraft = Pick<OntologyUnit, 'name' | 'purpose' | 'domain' | 'expected_users' | 'source_material' | 'governance_mode'>;
+export type OntologyUnitDraft = Pick<OntologyUnit, 'name' | 'purpose' | 'domain' | 'expected_users' | 'source_material' | 'governance_mode'>;
 
 const groupDimensions: Array<{ value: GroupDimension; label: string }> = [
   { value: 'layer', label: 'Layer' },
@@ -154,7 +158,7 @@ function blankProfileId(namespace: string) {
   return `${normalized || 'namespace'}_ontology_unit`;
 }
 
-function makeBlankOntologyProfile(namespace: string): OntologyProfile {
+export function makeBlankOntologyProfile(namespace: string): OntologyProfile {
   return {
     profile_id: blankProfileId(namespace),
     namespace,
@@ -183,7 +187,7 @@ function makeBlankOntologyProfile(namespace: string): OntologyProfile {
 }
 
 
-function makeProfileFromPackTemplate(namespace: string, pack: DomainPackManifest): OntologyProfile {
+export function makeProfileFromPackTemplate(namespace: string, pack: DomainPackManifest): OntologyProfile {
   const base = makeBlankOntologyProfile(namespace);
   return {
     ...base,
@@ -199,14 +203,19 @@ function makeProfileFromPackTemplate(namespace: string, pack: DomainPackManifest
   };
 }
 
-function evidenceLabel(candidate: OntologyCandidate) {
+function candidateEvidenceRef(candidate: OntologyCandidate) {
   return candidate.source_evidence_ref
     ?? candidate.source_evidence?.anchor?.id
     ?? candidate.source_evidence?.artifact?.id
-    ?? 'no evidence ref';
+    ?? null;
+}
+
+function evidenceLabel(candidate: OntologyCandidate) {
+  return candidateEvidenceRef(candidate) ?? 'no evidence ref';
 }
 
 function candidateAssistantContext(candidate: OntologyCandidate) {
+  const evidenceRef = candidateEvidenceRef(candidate);
   return {
     id: candidate.id,
     type: candidate.candidate_type,
@@ -216,15 +225,15 @@ function candidateAssistantContext(candidate: OntologyCandidate) {
     confidence: candidate.confidence,
     sample_text: candidate.sample_text,
     proposed_payload: candidate.proposed_payload ?? null,
-    source_evidence_ref: candidate.source_evidence_ref ?? null,
-    evidence_ref: candidate.source_evidence_ref ?? null,
+    source_evidence_ref: evidenceRef,
+    evidence_ref: evidenceRef,
     source_evidence: candidate.source_evidence ?? null,
   };
 }
 
 function candidateEvidenceRefs(candidates: OntologyCandidate[], selectedCandidate?: OntologyCandidate | null) {
   const source = selectedCandidate ? [selectedCandidate] : candidates.slice(0, 5);
-  return Array.from(new Set(source.map((candidate) => candidate.source_evidence_ref).filter((ref): ref is string => Boolean(ref))));
+  return Array.from(new Set(source.map(candidateEvidenceRef).filter((ref): ref is string => Boolean(ref))));
 }
 
 function templateCounts(profile: OntologyProfile | null | undefined) {
@@ -236,7 +245,7 @@ function templateCounts(profile: OntologyProfile | null | undefined) {
   };
 }
 
-function OntologyUnitLauncher({
+export function OntologyUnitLauncher({
   namespace,
   suggestedProfile,
   unitDraft,
@@ -905,7 +914,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
   const { packs, installed, validatePack, installPack, uninstallPack } = useOntologyPacks(selectedNamespace);
   const { candidates, isLoading: candidatesLoading, rejectCandidate, bulkUpdateCandidates } = useOntologyCandidates(selectedNamespace, 'pending');
   const { askAssistant } = useOntologyAssistant(selectedNamespace);
-  const [draft, setDraft] = React.useState<OntologyProfile | null>(null);
+  const { draft, setDraft, commitDraft, undoStack, redoStack, handleUndoDraft, handleRedoDraft, clearHistory } = useOntologyDraftController(profile);
   const [unitDraft, setUnitDraft] = React.useState<OntologyUnitDraft>({ name: '', purpose: '', domain: '', expected_users: [], source_material: [], governance_mode: 'manual' });
   const [issues, setIssues] = React.useState<OntologyValidationIssue[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -928,10 +937,9 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
   const [assistantProposals, setAssistantProposals] = React.useState<OntologyAssistantProposal[]>([]);
   const [isAskingAssistant, setIsAskingAssistant] = React.useState(false);
   const [visualDraft, setVisualDraft] = React.useState<VisualDraftState>(() => visualStateFromProfile(profile));
-  const [undoStack, setUndoStack] = React.useState<DraftHistoryEntry[]>([]);
-  const [redoStack, setRedoStack] = React.useState<DraftHistoryEntry[]>([]);
-
-  React.useEffect(() => { setDraft(profile ? cloneProfile(profile) : null); setIssues(data?.validation_issues ?? []); setVisualDraft(visualStateFromProfile(profile)); setUndoStack([]); setRedoStack([]); setDiffPreview(null); setMigrationIssues([]); }, [profile, data?.validation_issues]);
+  const [relationshipCreatorSeed, setRelationshipCreatorSeed] = React.useState<Partial<RelationshipTypeDraftInput> | null>(null);
+  const [connectMode, setConnectMode] = React.useState<{ active: boolean; sourceId: string | null }>({ active: false, sourceId: null });
+  React.useEffect(() => { setIssues(data?.validation_issues ?? []); setVisualDraft(visualStateFromProfile(profile)); setDiffPreview(null); setMigrationIssues([]); }, [profile, data?.validation_issues]);
   React.useEffect(() => {
     if (!unit) return;
     setUnitDraft({
@@ -943,36 +951,6 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
       governance_mode: unit.governance_mode ?? 'manual',
     });
   }, [unit]);
-
-  const commitDraft = React.useCallback((next: OntologyProfile | null, label = 'Draft edit') => {
-    setDraft((current) => {
-      if (!current || !next) return next ? cloneProfile(next) : next;
-      if (JSON.stringify(current) === JSON.stringify(next)) return current;
-      setUndoStack((stack) => [...stack.slice(-19), { profile: cloneProfile(current), label, timestamp: Date.now() }]);
-      setRedoStack([]);
-      return cloneProfile(next);
-    });
-  }, []);
-
-  const handleUndoDraft = React.useCallback(() => {
-    setDraft((current) => {
-      if (!current || undoStack.length === 0) return current;
-      const previous = undoStack[undoStack.length - 1];
-      setUndoStack((stack) => stack.slice(0, -1));
-      setRedoStack((stack) => [...stack.slice(-19), { profile: cloneProfile(current), label: 'Redo draft edit', timestamp: Date.now() }]);
-      return cloneProfile(previous.profile);
-    });
-  }, [undoStack]);
-
-  const handleRedoDraft = React.useCallback(() => {
-    setDraft((current) => {
-      if (!current || redoStack.length === 0) return current;
-      const next = redoStack[redoStack.length - 1];
-      setRedoStack((stack) => stack.slice(0, -1));
-      setUndoStack((stack) => [...stack.slice(-19), { profile: cloneProfile(current), label: 'Undo draft edit', timestamp: Date.now() }]);
-      return cloneProfile(next.profile);
-    });
-  }, [redoStack]);
 
   const isDirty = React.useMemo(() => Boolean(draft && (!profile || JSON.stringify(draft) !== JSON.stringify(profile))), [draft, profile]);
   const selectorOptions = React.useMemo(() => {
@@ -998,9 +976,22 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
   const handleSpecNodeSelect = React.useCallback((nodeId: string) => {
     const concept = draft?.concept_types?.[nodeId];
     if (!concept) return;
+    if (connectMode.active) {
+      if (!connectMode.sourceId) {
+        setConnectMode({ active: true, sourceId: nodeId });
+        handleSelectionChange({ kind: 'concept', id: nodeId, title: labelFor(nodeId, concept.label), source: 'profile' });
+        addToast({ type: 'info', title: 'Connect mode', message: `Source ${labelFor(nodeId, concept.label)} selected. Choose a target Object Type.`, autoDismiss: true });
+        return;
+      }
+      setRelationshipCreatorSeed({ label: 'Depends on', sourceTypes: [connectMode.sourceId], targetTypes: [nodeId], family: 'dependency', cardinality: 'many_to_many', mapDirection: 'forward', style: 'solid', weight: 0.5 });
+      setConnectMode({ active: false, sourceId: null });
+      setRightTab('object');
+      addToast({ type: 'info', title: 'Relationship draft ready', message: 'Review endpoints, cardinality, and style before staging the Relationship Type.', autoDismiss: true });
+      return;
+    }
     handleSelectionChange({ kind: 'concept', id: nodeId, title: labelFor(nodeId, concept.label), source: 'profile' });
     setRightTab('object');
-  }, [draft, handleSelectionChange]);
+  }, [addToast, connectMode, draft, handleSelectionChange]);
   const handleSpecEdgeSelect = React.useCallback((edgeId: string) => {
     const relationshipId = edgeId.split(':')[0];
     const relationship = draft?.relationship_types?.[relationshipId];
@@ -1045,8 +1036,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     try {
       if (selectedNamespace) await saveUnit({ ...unitDraft, namespace: selectedNamespace, active_profile_id: null, lifecycle: 'draft' });
       await resetDefault();
-      setUndoStack([]);
-      setRedoStack([]);
+      clearHistory();
       setDiffPreview(null);
       setMigrationIssues([]);
       await Promise.all([refresh(), refreshSummary(), refreshUnit()]);
@@ -1069,14 +1059,13 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     setIssues([]);
     setDiffPreview(null);
     setMigrationIssues([]);
-    setUndoStack([]);
-    setRedoStack([]);
+    clearHistory();
     setLens('spec');
     setLeftTab('object_types');
     setRightTab('object');
     setSelection(null);
     setSaveReason('Create ontology unit draft');
-  }, [selectedNamespace]);
+  }, [clearHistory, selectedNamespace, setDraft]);
   const handleCreateBlankUnit = React.useCallback(async () => {
     try {
       await persistDraftUnit();
@@ -1112,8 +1101,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     setIssues([]);
     setDiffPreview(null);
     setMigrationIssues([]);
-    setUndoStack([]);
-    setRedoStack([]);
+    clearHistory();
     setLens('spec');
     setLeftTab('object_types');
     setRightTab('assistant');
@@ -1147,7 +1135,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     } finally {
       setIsAskingAssistant(false);
     }
-  }, [askAssistant, assistantHistory, candidates, handleAskAssistantDraft, installed?.installed_packs, isAskingAssistant, persistDraftUnit, selectedNamespace]);
+  }, [askAssistant, assistantHistory, candidates, clearHistory, handleAskAssistantDraft, installed?.installed_packs, isAskingAssistant, persistDraftUnit, selectedNamespace, setDraft]);
   const handlePreviewSeedTemplate = React.useCallback(() => {
     if (!suggestedProfile || !selectedNamespace) return;
     const next = cloneForDraft(suggestedProfile);
@@ -1157,15 +1145,14 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     setIssues(data?.validation_issues ?? []);
     setDiffPreview(null);
     setMigrationIssues([]);
-    setUndoStack([]);
-    setRedoStack([]);
+    clearHistory();
     setLens('spec');
     setLeftTab('object_types');
     setRightTab('governance');
     setSelection(null);
     setSaveReason('Create ontology unit from seed template');
     addToast({ type: 'info', title: 'Seed template loaded', message: 'Review this local draft, then validate, preview diff, and save before it becomes active.', autoDismiss: true });
-  }, [addToast, data?.validation_issues, selectedNamespace, suggestedProfile]);
+  }, [addToast, clearHistory, data?.validation_issues, selectedNamespace, setDraft, suggestedProfile]);
   const handlePreviewPackTemplate = React.useCallback((pack: DomainPackManifest) => {
     if (!selectedNamespace) return;
     const next = makeProfileFromPackTemplate(selectedNamespace, pack);
@@ -1173,15 +1160,14 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     setIssues([]);
     setDiffPreview(null);
     setMigrationIssues([]);
-    setUndoStack([]);
-    setRedoStack([]);
+    clearHistory();
     setLens('spec');
     setLeftTab('object_types');
     setRightTab('governance');
     setSelection(null);
     setSaveReason(`Create ontology unit from ${pack.name} template`);
     addToast({ type: 'info', title: 'Template preview loaded', message: `${pack.name} is a local draft only. Validate, preview diff, and save before it becomes active.`, autoDismiss: true });
-  }, [addToast, selectedNamespace]);
+  }, [addToast, clearHistory, selectedNamespace, setDraft]);
   const handleSave = async (): Promise<boolean> => {
     if (!draft) return false;
     setIsSaving(true);
@@ -1199,8 +1185,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
         return false;
       }
       await saveProfile(profileToPublish, { reason: saveReason || 'Governed ontology profile update', validation_override: dangerous.length > 0 ? { ticket: overrideTicket, approved_by: overrideApprovedBy, reason: saveReason, previewed: true } : null });
-      setUndoStack([]);
-      setRedoStack([]);
+      clearHistory();
       await Promise.all([refresh(), refreshSummary(), refreshUnit()]);
       addToast({ type: 'success', title: profileExists ? 'Ontology profile update saved' : 'Ontology profile published', message: 'Profile changes were validated, previewed, and persisted as the active profile.', autoDismiss: true });
       return true;
@@ -1339,6 +1324,57 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
     addToast({ type: 'success', title: 'View-plane draft updated', message: 'Visual controls were staged in GraphInstruction. Save the profile to persist them.', autoDismiss: true });
   };
 
+
+  const handleCreateObjectType = React.useCallback((label = 'Feature') => {
+    if (!draft) return;
+    const result = createObjectType(draft, { label, description: `Draft ${label} object type.`, color: '#2563eb', shape: 'rounded_rectangle' });
+    commitDraft(result.profile, `Object Type created: ${result.id}`);
+    handleSelectionChange({ kind: 'concept', id: result.id, title: labelFor(result.id, result.profile.concept_types[result.id]?.label), source: 'profile' });
+    setLeftTab('object_types');
+    setRightTab('object');
+    setDiffPreview(null);
+    addToast({ type: 'success', title: 'Object Type staged', message: `${labelFor(result.id, result.profile.concept_types[result.id]?.label)} was added locally. Publish after validate and diff.`, autoDismiss: true });
+  }, [addToast, commitDraft, draft, handleSelectionChange]);
+
+  const handleCreateRelationshipType = React.useCallback((input: RelationshipTypeDraftInput) => {
+    if (!draft) return;
+    const result = createRelationshipType(draft, input);
+    commitDraft(result.profile, `Relationship Type created: ${result.id}`);
+    handleSelectionChange({ kind: 'relationship', id: result.id, title: labelFor(result.id, result.profile.relationship_types[result.id]?.label), source: 'profile' });
+    setRelationshipCreatorSeed(null);
+    setLeftTab('relationships');
+    setRightTab('object');
+    setDiffPreview(null);
+    addToast({ type: 'success', title: 'Relationship Type staged', message: `${labelFor(result.id, result.profile.relationship_types[result.id]?.label)} edge contract was added locally.`, autoDismiss: true });
+  }, [addToast, commitDraft, draft, handleSelectionChange]);
+
+  const handleStartRelationshipCreator = React.useCallback(() => {
+    const ids = Object.keys(draft?.concept_types ?? {});
+    setRelationshipCreatorSeed({ label: 'Depends on', sourceTypes: ids.slice(0, 1), targetTypes: ids.slice(1, 2).length ? ids.slice(1, 2) : ids.slice(0, 1), family: 'dependency', cardinality: 'many_to_many', mapDirection: 'forward', style: 'solid', weight: 0.5 });
+    setRightTab('object');
+  }, [draft]);
+
+  const handleValidationIssueRoute = React.useCallback((issue: OntologyValidationIssue) => {
+    const path = String(issue.path ?? '');
+    const conceptId = path.match(/concept_types\.([^\.\]]+)/)?.[1];
+    const relationshipId = path.match(/relationship_types\.([^\.\]]+)/)?.[1];
+    if (conceptId && draft?.concept_types?.[conceptId]) {
+      handleSelectionChange({ kind: 'concept', id: conceptId, title: labelFor(conceptId, draft.concept_types[conceptId]?.label), source: 'profile' });
+      setRightTab('object');
+      return;
+    }
+    if (relationshipId && draft?.relationship_types?.[relationshipId]) {
+      handleSelectionChange({ kind: 'relationship', id: relationshipId, title: labelFor(relationshipId, draft.relationship_types[relationshipId]?.label), source: 'profile' });
+      setRightTab('object');
+    }
+  }, [draft, handleSelectionChange]);
+
+  const handlePreviewMapImpact = React.useCallback(() => {
+    setLens('map');
+    setRightTab('object');
+    addToast({ type: 'info', title: 'Map impact preview', message: 'Map Lens is using room-001 truth-state rules with example overlay only when live instances are empty.', autoDismiss: true });
+  }, [addToast]);
+
   const handleCandidateAction = async (kind: 'approve' | 'map' | 'reject', candidate: OntologyCandidate, canonicalId?: string) => {
     if (kind === 'approve') {
       if (!draft) {
@@ -1430,6 +1466,9 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
   const searchMatches = selectorOptions.filter((option) => option.label.toLowerCase().includes(searchTerm.toLowerCase())).slice(0, 8);
   const unitDisplayName = unit?.name?.trim() || unitDraft.name?.trim() || selectedNamespace;
   const activeProfileHeader = profileExists ? `${unitDisplayName} · Active profile v${draft.version}` : 'Ontology unit draft';
+  const unitIdentity = unit ?? ({ namespace: selectedNamespace ?? '', active_profile_id: null, ...unitDraft } as OntologyUnit);
+  const unitExpectedUsers = unitIdentity.expected_users?.length ? unitIdentity.expected_users : unitDraft.expected_users ?? [];
+  const unitSourceMaterial = unitIdentity.source_material?.length ? unitIdentity.source_material : unitDraft.source_material ?? [];
   const profileStateLabel = !profileExists
     ? (isDirty ? 'Ontology unit draft* · Unsaved draft' : 'Ontology unit draft')
     : isDirty
@@ -1487,7 +1526,7 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
               <ToolbarButton label="Undo" icon="undo" onClick={handleUndoDraft} disabled={undoStack.length === 0} />
               <ToolbarButton label="Redo" icon="redo" onClick={handleRedoDraft} disabled={redoStack.length === 0} />
               <ToolbarButton label="Reset to default" icon="restart_alt" onClick={handleReset} danger />
-              <ToolbarButton label="Help" icon="help" onClick={() => addToast({ type: 'info', title: 'Workbench help', message: 'Use the canvas for primary editing; advanced studios are in the right dock.', autoDismiss: true })} />
+              <ToolbarButton label="Help" icon="help" onClick={() => addToast({ type: 'info', title: 'Workbench help', message: 'Use Add Object Type, Create Relationship, validation routing, and Map impact preview from the authoring shell.', autoDismiss: true })} />
             </div>
           </div>
         </header>
@@ -1504,10 +1543,10 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
               {leftTab === 'search' && <SearchAroundPanel searchTerm={searchTerm} onSearchTerm={setSearchTerm} matches={searchMatches} families={families} state={visualDraft} onStateChange={setVisualDraft} onSelect={(match) => { const [kind, id] = match.value.split(':'); handleSelectionChange({ kind, id, title: match.label, source: kind === 'candidate' ? 'candidate' : 'profile' }); }} />}
               {leftTab === 'sources' && <div className="space-y-2 text-sm" style={{ color: 'var(--color-text-muted)' }}><p><strong style={{ color: 'var(--color-text-main)' }}>Unit sources:</strong> {(unit?.source_material?.length ? unit.source_material : unitDraft.source_material ?? []).join(', ') || 'Not specified'}</p><p>Schema source mappings are editable in SelectionInspector.</p></div>}
               {leftTab === 'candidates' && <CandidateReview profile={draft} candidates={candidates} isLoading={candidatesLoading} onApprove={(candidate) => handleCandidateAction('approve', candidate)} onMap={(candidate, canonicalId) => handleCandidateAction('map', candidate, canonicalId)} onReject={(candidate) => handleCandidateAction('reject', candidate)} onBulkReject={async (items) => { await bulkUpdateCandidates(items.map((candidate) => ({ candidate_id: candidate.id, action: 'reject', reason: 'Bulk rejected from Ontology UI' }))); await Promise.all([refresh(), refreshSummary()]); }} />}
-              {leftTab === 'object_types' && <div className="space-y-2">{Object.entries(draft.concept_types ?? {}).map(([id, concept]) => <button key={id} type="button" onClick={() => handleSelectionChange({ kind: 'concept', id, title: labelFor(id, concept?.label), source: 'profile' })} className="w-full rounded-xl border p-3 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}><div className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>{labelFor(id, concept?.label)}</div><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{concept?.description ?? 'No description yet.'}</p></button>)}</div>}
+              {leftTab === 'object_types' && <div className="space-y-2"><div className="flex items-center justify-between gap-2"><div><h4 className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--color-text-muted)' }}>Objects</h4><p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>{Object.keys(draft.concept_types ?? {}).length} Object Types</p></div><button type="button" onClick={() => handleCreateObjectType('Feature')} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Add Object Type</button></div>{Object.entries(draft.concept_types ?? {}).map(([id, concept]) => <button key={id} type="button" onClick={() => handleSelectionChange({ kind: 'concept', id, title: labelFor(id, concept?.label), source: 'profile' })} className="w-full rounded-xl border p-3 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}><div className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>{labelFor(id, concept?.label)}</div><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{concept?.description ?? 'No description yet.'}</p></button>)}</div>}
               {leftTab === 'properties' && <div className="space-y-2">{Object.entries(draft.metadata_fields ?? {}).map(([id, field]) => <button key={id} type="button" onClick={() => handleSelectionChange({ kind: 'metadata', id, title: labelFor(id, field?.label), source: 'profile' })} className="w-full rounded-xl border p-3 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}><div className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>{labelFor(id, field?.label)}</div><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{field?.description ?? field?.field_type ?? 'No property details yet.'}</p></button>)}</div>}
-              {leftTab === 'relationships' && <div className="space-y-2">{Object.entries(draft.relationship_types ?? {}).map(([id, relationship]) => <button key={id} type="button" onClick={() => handleSelectionChange({ kind: 'relationship', id, title: labelFor(id, relationship?.label), source: 'profile' })} className="w-full rounded-xl border p-3 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}><div className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>{labelFor(id, relationship?.label)}</div><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{relationship?.family ?? 'semantic'} · {relationship?.cardinality ?? 'cardinality pending'}</p></button>)}</div>}
-              {leftTab === 'validation' && <div className="space-y-3"><IssueList issues={issues} /><button type="button" onClick={() => { void runValidation(draft); }} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Validate draft</button><p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{validationSummary.errors} errors · {validationSummary.warnings} warnings</p></div>}
+              {leftTab === 'relationships' && <div className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><div><h4 className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--color-text-muted)' }}>Relationships</h4><p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>Create governed edges between Object Types.</p></div><div className="flex gap-2"><button type="button" onClick={handleStartRelationshipCreator} disabled={Object.keys(draft.concept_types ?? {}).length === 0} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Create Relationship</button><button type="button" onClick={() => { setConnectMode({ active: true, sourceId: null }); setLens('spec'); }} disabled={Object.keys(draft.concept_types ?? {}).length < 2} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Connect on Canvas</button></div></div>{connectMode.active ? <div className="rounded-xl border p-3 text-xs" style={{ borderColor: 'var(--color-primary)', color: 'var(--color-text-main)' }}>Connect mode: {connectMode.sourceId ? `source ${connectMode.sourceId} selected; click a target Object Type on the canvas` : 'click a source Object Type on the canvas'}.</div> : null}<RelationshipMatrix profile={draft} onChange={(next) => commitDraft(next, 'Relationship matrix edit')} onSelectRelationship={(id) => { const rel = draft.relationship_types[id]; handleSelectionChange({ kind: 'relationship', id, title: labelFor(id, rel?.label), source: 'profile' }); setRightTab('object'); }} />{Object.entries(draft.relationship_types ?? {}).map(([id, relationship]) => <button key={id} type="button" onClick={() => handleSelectionChange({ kind: 'relationship', id, title: labelFor(id, relationship?.label), source: 'profile' })} className="w-full rounded-xl border p-3 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}><div className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>{labelFor(id, relationship?.label)}</div><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{relationship?.family ?? 'semantic'} · {relationship?.cardinality ?? 'cardinality pending'}</p></button>)}</div>}
+              {leftTab === 'validation' && <div className="space-y-3"><div className="space-y-2">{issues.map((issue, index) => <button key={`${issue.code}-${index}`} type="button" onClick={() => handleValidationIssueRoute(issue)} className="w-full rounded-xl border px-3 py-2 text-left text-xs" style={{ borderColor: issue.severity === 'error' ? 'var(--color-danger)' : 'var(--color-border)', background: issue.severity === 'error' ? 'rgba(239,68,68,0.08)' : 'var(--color-background)' }}><strong>{issue.message}</strong><div style={{ color: 'var(--color-text-muted)' }}>{issue.path} · {issue.code}</div></button>)}</div><button type="button" onClick={() => { void runValidation(draft); }} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Validate draft</button><p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{validationSummary.errors} errors · {validationSummary.warnings} warnings</p></div>}
               {leftTab === 'templates' && <div className="space-y-3"><DomainPacksPanel packs={packs} installed={installed?.installed_packs ?? {}} packPreview={packPreview} pendingInstallPackId={pendingInstallPackId} onPreviewInstall={(packId) => { void handlePackPreviewInstall(packId); }} onInstall={(packId) => { void handlePackInstall(packId); }} onPreviewUninstall={(packId) => { void handlePackPreviewUninstall(packId); }} onUninstall={(packId) => { void handlePackUninstall(packId); }} /></div>}
               {leftTab === 'histogram' && <HistogramPanel rows={histogram} onFilterTo={(row) => handleHistogramAction(row, 'filter_to')} onFilterOut={(row) => handleHistogramAction(row, 'filter_out')} onClear={handleClearVisualFilters} />}
             </div>
@@ -1522,8 +1561,9 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
                   rightRail={<div data-testid="spec-right-rail-placeholder" className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Use the single SelectionInspector dock to edit schema types; this shell rail stays read-only to avoid duplicate inspectors.</div>}
                 >
                   <section data-testid="ontology-schema-canvas" className="space-y-3">
+                    {connectMode.active ? <div className="rounded-xl border p-3 text-xs" style={{ borderColor: 'var(--color-primary)', background: 'var(--color-primary-muted)', color: 'var(--color-primary)' }}>Connect mode is active. Click source then target Object Types to open the governed Relationship Type editor.</div> : null}
                     {isLoading ? <div className="rounded-xl border p-4 text-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}>Loading schema draft…</div> : null}
-                    {!specWorkbenchModel.nodes.length ? <div className="rounded-xl border p-4 text-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }}>Add your first object type.</div> : null}
+                    {!specWorkbenchModel.nodes.length ? <div className="rounded-xl border p-4 text-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)' }} data-testid="ontology-empty-authoring"><h3 className="font-semibold" style={{ color: 'var(--color-text-main)' }}>Add your first object type</h3><p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>Object Types are the nouns in this ontology. They stay local until publish.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleCreateObjectType('Feature')} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Add Object Type</button><button type="button" onClick={() => setLeftTab('templates')} className="rounded-lg border px-3 py-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Use Template</button><button type="button" onClick={() => setLeftTab('candidates')} className="rounded-lg border px-3 py-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Review Candidates</button></div></div> : null}
                     {issues.length ? <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">Validation: {validationSummary.errors} errors · {validationSummary.warnings} warnings</div> : null}
                     {specWorkbenchModel.nodes.length > 16 ? <div className="rounded-xl border p-3 text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>Large schema: showing {specWorkbenchModel.nodes.length} type nodes with hierarchy layout and scrollable overflow.</div> : null}
                     <GraphCanvas model={specWorkbenchModel} renderMode="extended" layoutMode="hierarchy" onSelectNode={handleSpecNodeSelect} onSelectEdge={handleSpecEdgeSelect} />
@@ -1545,10 +1585,10 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
                       const title = String(node.name ?? node.label ?? node.id);
                       const conceptType = String(node.concept_type ?? '');
                       return (
+                        <React.Fragment key={String(node.id)}>
                         <button
-                          key={String(node.id)}
                           type="button"
-                          aria-label={`Select ${title}`}
+                          aria-label={`Select map chip ${title}`}
                           data-ontology-instance-id={String(node.id)}
                           data-ontology-concept-type={conceptType}
                           data-ontology-instance-title={title}
@@ -1563,6 +1603,20 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
                         >
                           {title} <span className="font-normal" style={{ color: 'var(--color-text-muted)' }}>· {labelFor(conceptType)}</span>
                         </button>
+                        <button
+                          key={`${String(node.id)}-hit`}
+                          type="button"
+                          aria-label={`Select ${title}. ${Number(node.event_count ?? 0)} observation events.`}
+                          data-ontology-instance-id={String(node.id)}
+                          data-ontology-concept-type={conceptType}
+                          data-ontology-instance-title={title}
+                          data-ontology-source="example"
+                          onPointerDown={(event) => selectMapInstance(event.currentTarget)}
+                          onMouseDown={(event) => selectMapInstance(event.currentTarget)}
+                          onClick={(event) => selectMapInstance(event.currentTarget)}
+                          className="sr-only"
+                        >Select {title}</button>
+                        </React.Fragment>
                       );
                     })}
                   </div>
@@ -1588,7 +1642,8 @@ export default function OntologyPanel({ selectedNamespace }: { selectedNamespace
           <aside className="min-h-0 overflow-hidden border-l max-xl:col-span-2 max-xl:border-l-0 max-xl:border-t max-lg:col-span-1" style={{ borderColor: 'var(--color-border)' }} data-testid="ontology-right-dock">
             <div className="flex flex-wrap gap-2 border-b p-3" style={{ borderColor: 'var(--color-border)' }}>{rightTabs.map((tab) => <DockTabButton key={tab.id} active={rightTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setRightTab(tab.id)} />)}</div>
             <div className="h-full overflow-auto p-3 pb-28">
-              {rightTab === 'object' && <div className="space-y-4">{specWorkbenchModel ? <SelectionInspector model={specWorkbenchModel} selection={objectWorkbenchSelection(selection) as unknown as import('@/components/knowledge/workbench').WorkbenchSelection} profile={draft} onProfileChange={(next) => { if (!selection) { const firstConceptId = Object.keys(draft.concept_types ?? {})[0]; if (firstConceptId) handleSelectionChange({ kind: 'concept', id: firstConceptId, title: labelFor(firstConceptId, next.concept_types?.[firstConceptId]?.label), source: 'profile' }); } commitDraft(next, 'SelectionInspector edit'); }} onValidate={async (candidate) => { await runValidation(candidate); }} /> : null}<CandidateReview profile={draft} candidates={candidates} isLoading={candidatesLoading} onApprove={(candidate) => handleCandidateAction('approve', candidate)} onMap={(candidate, canonicalId) => handleCandidateAction('map', candidate, canonicalId)} onReject={(candidate) => handleCandidateAction('reject', candidate)} onBulkReject={async (items) => { await bulkUpdateCandidates(items.map((candidate) => ({ candidate_id: candidate.id, action: 'reject', reason: 'Bulk rejected from Ontology UI' }))); await Promise.all([refresh(), refreshSummary()]); }} /></div>}
+              {rightTab === 'info' && <div className="space-y-4" data-testid="ontology-info-tab"><SectionCard title="Unit identity" subtitle={unitDisplayName ?? 'No active ontology unit'} action={<span className="rounded-full px-2 py-1 text-[11px] font-semibold" style={{ background: 'var(--color-primary-muted)', color: 'var(--color-primary)' }}>{unitIdentity.governance_mode ?? 'manual'}</span>}><div className="space-y-3 text-sm" style={{ color: 'var(--color-text-muted)' }}><p><strong style={{ color: 'var(--color-text-main)' }}>Domain:</strong> {unitIdentity.domain || 'Not specified'}</p><p><strong style={{ color: 'var(--color-text-main)' }}>Purpose:</strong> {unitIdentity.purpose || 'Not specified'}</p><p><strong style={{ color: 'var(--color-text-main)' }}>Expected users:</strong> {unitExpectedUsers.join(', ') || 'Not specified'}</p><p><strong style={{ color: 'var(--color-text-main)' }}>Source material:</strong> {unitSourceMaterial.join(', ') || 'Not specified'}</p><p><strong style={{ color: 'var(--color-text-main)' }}>Active profile:</strong> {unitIdentity.active_profile_id ?? 'None yet'}</p></div></SectionCard><ProfileSummary profile={draft} summary={summary} profileExists={profileExists} defaultSuggested={defaultSuggested} /></div>}
+              {rightTab === 'object' && <div className="space-y-4">{relationshipCreatorSeed ? <RelationshipTypeEditor profile={draft} seed={relationshipCreatorSeed} onCreate={handleCreateRelationshipType} onCancel={() => setRelationshipCreatorSeed(null)} /> : null}{specWorkbenchModel ? <SelectionInspector model={specWorkbenchModel} selection={objectWorkbenchSelection(selection) as unknown as import('@/components/knowledge/workbench').WorkbenchSelection} profile={draft} onProfileChange={(next) => { if (!selection) { const firstConceptId = Object.keys(draft.concept_types ?? {})[0]; if (firstConceptId) handleSelectionChange({ kind: 'concept', id: firstConceptId, title: labelFor(firstConceptId, next.concept_types?.[firstConceptId]?.label), source: 'profile' }); } commitDraft(next, 'SelectionInspector edit'); }} onValidate={async (candidate) => { await runValidation(candidate); }} /> : null}<button type="button" onClick={handlePreviewMapImpact} disabled={Object.keys(draft.concept_types ?? {}).length === 0} className="rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Preview map impact</button><CandidateReview profile={draft} candidates={candidates} isLoading={candidatesLoading} onApprove={(candidate) => handleCandidateAction('approve', candidate)} onMap={(candidate, canonicalId) => handleCandidateAction('map', candidate, canonicalId)} onReject={(candidate) => handleCandidateAction('reject', candidate)} onBulkReject={async (items) => { await bulkUpdateCandidates(items.map((candidate) => ({ candidate_id: candidate.id, action: 'reject', reason: 'Bulk rejected from Ontology UI' }))); await Promise.all([refresh(), refreshSummary()]); }} /></div>}
               {rightTab === 'assistant' && <div className="space-y-4 rounded-xl border p-4 text-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-background)', color: 'var(--color-text-muted)' }} data-testid="ontology-assistant-review-panel"><div><h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-main)' }}>AI co-builder</h3><p className="mt-2">Advisory only: proposals must be applied to the draft, validated, diffed, and saved through governance before company knowledge changes.</p><p className="mt-1 text-xs">Conversation: ontology-schema:{selectedNamespace}:current-actor · Scope: {selection?.title ?? 'namespace'}</p></div><div className="grid gap-2"><textarea aria-label="Ask ontology co-builder" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} placeholder="Build starter ontology from selected docs, review this object, add a relationship, map a candidate, draft a pack, or explain validation issues." className="min-h-[92px] rounded-lg border px-3 py-2 text-sm" style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }} /><div className="flex flex-wrap gap-2"><button type="button" disabled={!assistantInput.trim() || isAskingAssistant} onClick={() => { void handleAskAssistant(); }} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{isAskingAssistant ? 'Thinking…' : 'Ask assistant'}</button><button type="button" onClick={() => { void handleAskAssistant('Review the selected ontology object and propose one small valid improvement with evidence refs when available.'); }} className="rounded-lg border px-3 py-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Review selected</button><button type="button" onClick={() => { void handleAskAssistant('Draft a small vocabulary bundle proposal with concept_types, relationship_types, layers, metadata_fields, graph_instruction, fixtures, and migration_notes. Keep it advisory and reviewable.'); }} className="rounded-lg border px-3 py-2 text-xs font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-main)' }}>Draft pack</button></div></div><AssistantProposalPanel proposals={assistantProposals} onApply={handleApplyProposal} onValidate={(index) => { void handleValidateProposal(index); }} onPreviewDiff={(index) => { void handlePreviewProposalDiff(index); }} onSave={(index) => { void handleSaveProposal(index); }} onDiscard={handleDiscardProposal} /></div>}
               {rightTab === 'model' && <div className="space-y-4"><VisualControlsPanel state={visualDraft} onStateChange={setVisualDraft} onSaveToView={handleSaveVisualView} onReset={() => setVisualDraft(visualStateFromProfile(profile))} isDirty={visualDraftDirty} /><GraphInstructionStudio profile={draft} onChange={(next) => commitDraft(next, 'GraphInstruction edit')} onValidate={async (candidate) => { await runValidation(candidate); }} /><RelationshipStudio profile={draft} onChange={(next) => commitDraft(next, 'Relationship studio edit')} /><ConceptTypeStudio profile={draft} onChange={(next) => commitDraft(next, 'Concept type studio edit')} /><AliasManager profile={draft} onChange={(next) => commitDraft(next, 'Alias manager edit')} /></div>}
               {rightTab === 'governance' && <div className="space-y-4"><ProfileSummary profile={draft} summary={summary} profileExists={profileExists} defaultSuggested={defaultSuggested} /><DomainPacksPanel packs={packs} installed={installed?.installed_packs ?? {}} packPreview={packPreview} pendingInstallPackId={pendingInstallPackId} onPreviewInstall={(packId) => { void handlePackPreviewInstall(packId); }} onInstall={(packId) => { void handlePackInstall(packId); }} onPreviewUninstall={(packId) => { void handlePackPreviewUninstall(packId); }} onUninstall={(packId) => { void handlePackUninstall(packId); }} /><HistoryPanel history={history} /></div>}

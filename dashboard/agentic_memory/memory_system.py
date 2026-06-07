@@ -28,7 +28,17 @@ def _ensure_ml_imports():
         return
     from nltk.tokenize import word_tokenize as _wt
     from rank_bm25 import BM25Okapi as _BM
-    from sklearn.metrics.pairwise import cosine_similarity as _cs
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity as _cs
+    except ModuleNotFoundError:
+        import numpy as _np
+
+        def _cs(a, b):
+            a_arr = _np.asarray(a, dtype=float)
+            b_arr = _np.asarray(b, dtype=float)
+            denom = _np.linalg.norm(a_arr, axis=1, keepdims=True) * _np.linalg.norm(b_arr, axis=1)
+            denom = _np.where(denom == 0, 1, denom)
+            return (a_arr @ b_arr.T) / denom
 
     word_tokenize = _wt
     BM25Okapi = _BM

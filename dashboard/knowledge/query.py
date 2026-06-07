@@ -200,12 +200,17 @@ class KnowledgeQueryEngine:
         llm: Any,
         graph_rag_engine: Any = None,
         language: str = "English",
+        **kwargs: Any,
     ) -> None:
         self.namespace = namespace
         self.kg = kuzu_graph
         self.embedder = embedder
         self.llm = llm
         self.graph_rag_engine = graph_rag_engine
+        vector_store = kwargs.get("vector_store")
+        self.vector_store = vector_store
+        if vector_store is not None:
+            self.vs = vector_store
         self.language = language
 
     # ---- Public entrypoint -----------------------------------------------
@@ -271,6 +276,18 @@ class KnowledgeQueryEngine:
 
             result.latency_ms = int((time.perf_counter() - t0) * 1000)
             return result
+
+        # Optional legacy vector-store retrieval for callers/tests that still
+        # inject a separate vector_store. The graph layer is authoritative for
+        # raw mode above; graph/summarized modes use these chunks only as LLM
+        # fallback context.
+        if getattr(self, "vs", None) is not None:
+            try:
+                vector_hits = self.vs.search(query, top_k=top_k)
+                result.chunks = self._vector_hits_to_chunks(vector_hits, threshold=threshold)
+                result.citations = [self._chunk_to_citation(c) for c in result.chunks]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Legacy vector_store search failed: %s", exc)
 
         # --- 2) Graph expansion (graph + summarized modes) -----------
         if self.graph_rag_engine is not None:
@@ -447,6 +464,26 @@ class KnowledgeQueryEngine:
                 ))
 
         return chunks, entities
+
+    def _vector_hits_to_chunks(self, hits: list, threshold: float = 0.0) -> list[ChunkHit]:
+        chunks: list[ChunkHit] = []
+        for hit in hits or []:
+            score = float(getattr(hit, "score", 0.0) or 0.0)
+            if score < threshold:
+                continue
+            meta = getattr(hit, "metadata", {}) or {}
+            chunks.append(ChunkHit(
+                text=str(getattr(hit, "text", "") or ""),
+                score=score,
+                file_path=str(meta.get("file_path", "")),
+                filename=str(meta.get("filename", "")),
+                chunk_index=int(meta.get("chunk_index", 0)),
+                total_chunks=int(meta.get("total_chunks", 1)),
+                file_hash=str(meta.get("file_hash", "")),
+                mime_type=meta.get("mime_type"),
+                category_id=meta.get("category_id"),
+            ))
+        return chunks
 
     def _chunk_to_citation(self, chunk: ChunkHit) -> Citation:
         """Convert a ChunkHit to a Citation."""

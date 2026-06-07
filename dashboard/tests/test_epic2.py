@@ -53,6 +53,8 @@ async def test_epic2():
         except AssertionError as e:
             print(f"✗ Test failed: {e}")
             sys.exit(1)
+        except httpx.ConnectError as e:
+            pytest.skip(f"EPIC-002 live dashboard server unavailable on 127.0.0.1:9001: {e}")
         except Exception as e:
             print(f"✗ Unexpected error: {e}")
             sys.exit(1)

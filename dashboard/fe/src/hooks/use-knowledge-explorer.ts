@@ -17,6 +17,8 @@
 
 import { useState, useCallback, useRef } from 'react';
 import useSWR from 'swr';
+export * as OntologyMapGenerated from '../types/ontology-map.generated';
+import type { EnterpriseMapNodeResponse as GeneratedEnterpriseMapNodeResponse, EnterpriseMapEdgeResponse as GeneratedEnterpriseMapEdgeResponse, EnterpriseMapProjectionResponse as GeneratedEnterpriseMapProjectionResponse, OntologyVisualExtensions as GeneratedOntologyVisualExtensions } from '../types/ontology-map.generated';
 import { apiGet, apiPost } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
@@ -130,97 +132,20 @@ export interface OntologyExternalRef {
   [key: string]: unknown;
 }
 
-export interface OntologyVisualExtensions {
-  event_count?: number | null;
-  active_event_count?: number | null;
-  time_range?: OntologyVisualTimeRange;
-  series_refs?: string[];
-  flow_refs?: string[];
-  state?: string | null;
-  simulation_state?: string | null;
-  simulation_refs?: string[];
-  state_machine_ref?: string | null;
-  state_color?: string | null;
-  phase?: string | null;
-  track?: string | null;
-  priority?: string | number | null;
-  effort?: string | number | null;
-  prerequisites?: string[];
-  acceptance?: string[] | string | null;
-}
+export type OntologyVisualExtensions = Partial<GeneratedOntologyVisualExtensions>;
 
-export interface EnterpriseMapNode extends ExplorerNode, OntologyVisualExtensions {
-  concept_label?: string | null;
-  concept_color?: string | null;
-  concept_shape?: string | null;
-  abstraction_label?: string | null;
-  layer_id?: string | null;
-  layer_label?: string | null;
-  layer_order?: number | null;
-  owner?: string | null;
-  description?: string | null;
-  map_group?: string | null;
-  data_store?: string | null;
-  sync_mode?: string | null;
-  quality_state?: string | null;
-  candidate_state?: string | null;
-  review_state?: string | null;
-  confidence?: number | null;
-  provenance_refs?: string[];
-  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
-  ontology_path?: {
-    layer?: string | null;
-    abstraction_level?: string | null;
-    concept_type?: string | null;
-    pack_id?: string | null;
-    lifecycle_state?: string | null;
-  };
-}
+export type EnterpriseMapNode = Partial<GeneratedEnterpriseMapNodeResponse> & ExplorerNode & OntologyVisualExtensions;
 
-export interface EnterpriseMapEdge extends ExplorerEdge, OntologyVisualExtensions {
-  id?: string | null;
-  color?: string | null;
-  review_state?: string | null;
-  candidate_state?: string | null;
-  confidence?: number | null;
-  provenance_refs?: string[];
-  external_ref?: EnterpriseMapExternalRef | Record<string, unknown> | null;
-  validation_issues?: Array<Record<string, unknown>>;
-  map_source?: string | null;
-  map_target?: string | null;
-  map_direction?: 'forward' | 'reversed' | string | null;
-}
+export type EnterpriseMapEdge = Partial<GeneratedEnterpriseMapEdgeResponse> & ExplorerEdge & OntologyVisualExtensions;
 
-export interface EnterpriseMapProjectionData {
+export type EnterpriseMapProjectionData = Omit<GeneratedEnterpriseMapProjectionResponse, 'nodes' | 'edges' | 'layers' | 'abstraction_levels' | 'stats' | 'meta'> & {
   nodes: EnterpriseMapNode[];
   edges: EnterpriseMapEdge[];
   layers: EnterpriseMapLayer[];
   abstraction_levels: EnterpriseMapAbstractionLevel[];
-  concept_type_counts: Record<string, number>;
-  relationship_type_counts: Record<string, number>;
-  relationship_family_counts: Record<string, number>;
-  stats: {
-    node_count: number;
-    edge_count: number;
-    layer_count: number;
-    concept_type_count: number;
-    relationship_type_count: number;
-    candidate_edge_count: number;
-    validation_issue_count: number;
-    source_node_count?: number;
-    source_edge_count?: number;
-    ontology_candidate_count?: number;
-    limit?: number;
-    filtered?: boolean;
-    [key: string]: unknown;
-  };
-  meta?: {
-    ontology_profile?: Record<string, unknown> | null;
-    profile_exists?: boolean;
-    ontology_candidate_count?: number;
-    [key: string]: unknown;
-  };
-}
+  stats: Partial<GeneratedEnterpriseMapProjectionResponse['stats']> & { node_count: number; edge_count: number; layer_count: number; concept_type_count: number; relationship_type_count: number; candidate_edge_count: number; validation_issue_count: number };
+  meta?: Partial<GeneratedEnterpriseMapProjectionResponse['meta']> & Record<string, unknown>;
+};
 
 /** Summary — lightweight topology stats. */
 export interface ExplorerSummary {
@@ -252,15 +177,18 @@ export interface ExplorerNodeDetail {
   };
 }
 
+export type ExplorerFilterClause = { values: string[]; mode?: 'include' | 'exclude' };
+export type ExplorerFilterValue = string[] | ExplorerFilterClause;
+
 export interface ExplorerOntologyFilters {
-  layer?: string[];
-  abstraction_level?: string[];
-  concept_type?: string[];
-  relationship_family?: string[];
-  relationship_type?: string[];
-  pack_id?: string[];
-  lifecycle_state?: string[];
-  owner?: string[];
+  layer?: ExplorerFilterValue;
+  abstraction_level?: ExplorerFilterValue;
+  concept_type?: ExplorerFilterValue;
+  relationship_family?: ExplorerFilterValue;
+  relationship_type?: ExplorerFilterValue;
+  pack_id?: ExplorerFilterValue;
+  lifecycle_state?: ExplorerFilterValue;
+  owner?: ExplorerFilterValue;
   metadata?: Record<string, unknown>;
 }
 
@@ -309,9 +237,11 @@ export function useKnowledgeExplorerSummary(namespace: string | null) {
   };
 }
 
-export function useEnterpriseMap(namespace: string | null, limit: number = 200) {
+export function useEnterpriseMap(namespace: string | null, limit: number = 200, filters?: ExplorerOntologyFilters, groupBy?: string | null) {
+  const filterQuery = filters && Object.keys(filters).length ? `&filters=${encodeURIComponent(JSON.stringify(filters))}` : '';
+  const groupQuery = groupBy ? `&group_by=${encodeURIComponent(groupBy)}` : '';
   const key = namespace
-    ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/enterprise-map?limit=${limit}`
+    ? `${KNOWLEDGE_BASE}/namespaces/${encodeURIComponent(namespace)}/ontology/enterprise-map?limit=${limit}${filterQuery}${groupQuery}`
     : null;
   const { data, error, isLoading, mutate } = useSWR<EnterpriseMapProjectionData>(
     key,

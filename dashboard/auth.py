@@ -6,10 +6,11 @@ OSTWIN_API_KEY must be set. All API requests must include the key via:
   - Header: Authorization: Bearer <key>
   - Cookie: ostwin_auth_key=<key> (SameSite=Strict)
 
-Local development can opt into a narrow frontend bypass with
-OSTWIN_DEV_MODE=1. The bypass is limited to loopback requests associated
-with localhost on the configured dev frontend port (default: 3000) or
-127.0.0.1 on any explicit port.
+Local development allows a narrow frontend bypass from localhost:3000 or
+127.0.0.1:3000.
+OSTWIN_DEV_MODE=1 expands that bypass to the configured dev frontend port
+and 127.0.0.1 on any explicit port. All bypasses are limited to loopback
+requests associated with explicit local frontend locations.
 
 Unauthenticated requests receive 401.
 """
@@ -82,20 +83,42 @@ def _is_dev_frontend_location(value: str | None) -> bool:
     )
 
 
-def _is_local_dev_frontend_request(request: Request) -> bool:
-    """Allow anonymous dev access only from explicit local frontend origins."""
-    if not _is_dev_mode_enabled() or not _is_loopback_client(request):
+def _is_default_dev_frontend_location(value: str | None) -> bool:
+    if not value:
         return False
 
-    return any(
-        _is_dev_frontend_location(value)
-        for value in (
-            request.headers.get("origin"),
-            request.headers.get("referer"),
-            request.headers.get("host"),
-            request.headers.get("x-forwarded-host"),
-        )
+    raw = value.strip()
+    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+
+    hostname = parsed.hostname.strip().lower() if parsed.hostname else None
+    return (
+        hostname in {"localhost", "127.0.0.1"}
+        and str(port) == DEFAULT_DEV_FRONTEND_PORT
     )
+
+
+def _is_local_dev_frontend_request(request: Request) -> bool:
+    """Allow anonymous dev access only from explicit local frontend origins."""
+    if not _is_loopback_client(request):
+        return False
+
+    frontend_locations = (
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+        request.headers.get("host"),
+        request.headers.get("x-forwarded-host"),
+    )
+    if any(_is_default_dev_frontend_location(value) for value in frontend_locations):
+        return True
+
+    if not _is_dev_mode_enabled():
+        return False
+
+    return any(_is_dev_frontend_location(value) for value in frontend_locations)
 
 
 # DEPRECATED: These stubs are retained for import compatibility only.

@@ -15,6 +15,15 @@ export interface WorkbenchNode {
   color?: string;
   layerId?: string;
   groupId?: string;
+  mapGroup?: string;
+  lifecycleState?: string;
+  reviewState?: string;
+  candidateState?: string;
+  qualityState?: string;
+  eventCount?: number;
+  activeEventCount?: number;
+  validationIssueCount?: number;
+  externalRef?: Record<string, unknown> | null;
   properties?: Record<string, unknown>;
   badges?: string[];
   sources?: string[];
@@ -25,9 +34,11 @@ export interface WorkbenchEdge {
   source: string;
   target: string;
   label?: string;
+  displayLabel?: string;
   type?: string;
   family?: string;
   weight?: number;
+  color?: string;
   style?: 'solid' | 'dashed' | 'dotted' | 'bold' | string;
   properties?: Record<string, unknown>;
 }
@@ -36,6 +47,7 @@ export interface WorkbenchFacetBucket {
   id: string;
   label: string;
   count: number;
+  totalCount?: number;
   color?: string;
 }
 

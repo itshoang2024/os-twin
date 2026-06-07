@@ -7,6 +7,8 @@ import EnterpriseMapFixturePanel from '@/components/knowledge/ontology/Enterpris
 
 const getNodeDetail = vi.fn();
 const seedMock = vi.fn();
+const expandMock = vi.fn();
+const enterpriseMapArgs = vi.hoisted(() => [] as unknown[][]);
 
 const observationState = vi.hoisted(() => ({
   events: [
@@ -43,7 +45,9 @@ const edges = [
 ];
 
 vi.mock('@/hooks/use-knowledge-explorer', () => ({
-  useEnterpriseMap: () => ({
+  useEnterpriseMap: (...args: unknown[]) => {
+    enterpriseMapArgs.push(args);
+    return ({
     map: {
       nodes,
       edges,
@@ -63,8 +67,9 @@ vi.mock('@/hooks/use-knowledge-explorer', () => ({
     },
     isLoading: false,
     error: null,
-  }),
-  useKnowledgeExplorer: () => ({ nodes, edges, isSeeded: false, seed: seedMock, getNodeDetail }),
+  });
+  },
+  useKnowledgeExplorer: () => ({ nodes, edges, isSeeded: false, seed: seedMock, expand: expandMock, getNodeDetail }),
 }));
 
 vi.mock('@/hooks/use-ontology', () => ({
@@ -89,6 +94,8 @@ describe('EnterpriseMapPanel', () => {
   beforeEach(() => {
     getNodeDetail.mockResolvedValue({ node: null, edges: [], stats: {} });
     seedMock.mockClear();
+    expandMock.mockClear();
+    enterpriseMapArgs.length = 0;
     observationState.events = [
       { id: 'event-import', namespace: 'demo', event_type: 'ImportCompleted', subject_type: 'node', subject_id: 'risk-1', occurred_at: '2026-06-01T00:00:00Z', actor: 'importer', value: true, evidence_refs: ['prov-risk'], metadata: { profile_version: '1.0.0' } },
       { id: 'event-candidate', namespace: 'demo', event_type: 'OntologyCandidateCreated', subject_type: 'candidate', subject_id: 'risk-1', occurred_at: '2026-06-02T00:00:00Z', actor: 'assistant', value: 'pending', evidence_refs: ['prov-risk'], metadata: { profile_version: '1.0.0' } },
@@ -158,7 +165,7 @@ describe('EnterpriseMapPanel', () => {
 
     expect(screen.getByTestId('enterprise-map-example-banner')).toHaveTextContent('[Example Data]');
     expect(screen.queryByTestId('enterprise-map-empty-state')).not.toBeInTheDocument();
-    expect(screen.getByTestId('enterprise-node-example-risk')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-example-risk')).toBeInTheDocument();
   });
 
   it('syncs externally selected map instances for lens switch preservation', async () => {
@@ -174,21 +181,19 @@ describe('EnterpriseMapPanel', () => {
   it('renders audit-risk and ecommerce fixtures with all required relationship families', () => {
     render(<EnterpriseMapPanel selectedNamespace="demo" />);
     expect(screen.getByText('Enterprise Ontology Map')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-depends_on')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-consumes')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-evidences')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-mitigates')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-implements')).toBeInTheDocument();
-    expect(screen.getByTestId('edge-syncs_with')).toBeInTheDocument();
-    expect(screen.getByLabelText(/audit risk management/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/ecommerce logistics/i)).toBeInTheDocument();
+    expect(screen.getByText('depends_on')).toBeInTheDocument();
+    expect(screen.getByText('consumes')).toBeInTheDocument();
+    expect(screen.getByText('evidences')).toBeInTheDocument();
+    expect(screen.getByText('mitigates')).toBeInTheDocument();
+    expect(screen.getByText('implements')).toBeInTheDocument();
+    expect(screen.getByText('syncs_with')).toBeInTheDocument();
+    expect(screen.getAllByTestId(/graph-node-/).length).toBeGreaterThanOrEqual(6);
   });
 
 
   it('renders saved flow and state overlays plus honest simulation rail', async () => {
     render(<EnterpriseMapPanel selectedNamespace="demo" />);
-    expect(screen.getByTestId('analysis-overlay')).toBeInTheDocument();
-    expect(screen.getByText(/Flow \/ state overlays/i)).toBeInTheDocument();
+    expect(screen.getByTestId('graph-canvas')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Simulation/i }));
     expect(screen.getByTestId('simulation-rail')).toBeInTheDocument();
     expect(screen.getAllByText(/Provider required/i).length).toBeGreaterThan(0);
@@ -225,22 +230,21 @@ describe('EnterpriseMapPanel', () => {
     expect(screen.getByTestId('enterprise-map-safeguards')).toBeInTheDocument();
     expect(screen.getByLabelText(/Density/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Page size/i)).toBeInTheDocument();
-    expect(screen.getByText(/Quality state/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Review state/i).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText(/Pending/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Needs Review/i)).toBeInTheDocument();
+    expect(screen.getByTestId('workbench-toolbar')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Group by/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search Around/i })).toBeDisabled();
   });
 
 
   it('prefers projected visual fields and degrades when optional fields are absent', () => {
     const { container } = render(<EnterpriseMapPanel selectedNamespace="demo" />);
-    const riskNode = screen.getByTestId('enterprise-node-risk-1');
+    const riskNode = screen.getByTestId('graph-node-risk-1');
     expect(riskNode.querySelector('rect')).toHaveAttribute('stroke', '#123456');
-    expect(screen.getByLabelText(/Watch/i)).toBeInTheDocument();
-    expect(screen.getByTestId('enterprise-node-evidence-1').querySelector('rect')).toHaveAttribute('stroke-dasharray', '2 3');
-    expect(screen.getByTestId('enterprise-node-evidence-1')).toHaveClass('candidate-instance');
+    expect(screen.getByText(/watch/i)).toBeInTheDocument();
+    expect(screen.getByTestId('graph-node-evidence-1-validation')).toBeInTheDocument();
+    expect(screen.getAllByText(/pending/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor outage risk').length).toBeGreaterThan(0);
-    expect(container.querySelector('[data-testid="edge-depends_on"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid^="graph-edge-"]')).toBeInTheDocument();
   });
 
   it('updates visible time selection mode and filters real observation data', () => {
@@ -312,10 +316,43 @@ describe('EnterpriseMapPanel', () => {
     expect(screen.getByTestId('enterprise-map-fixture-panel')).toBeInTheDocument();
     expect(screen.getByText('Enterprise Map trust metadata fixture')).toBeInTheDocument();
     expect(screen.getByTestId('enterprise-map-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('enterprise-node-evidence-1')).toHaveClass('candidate-instance');
-    expect(screen.getAllByText(/Review state/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId('graph-node-evidence-1-validation')).toBeInTheDocument();
+    expect(screen.getByTestId('workbench-toolbar')).toBeInTheDocument();
     expect(within(screen.getByTestId('series-time-panel')).getByText(/event_count \(3 pts\)/i)).toBeInTheDocument();
     expect(within(screen.getByTestId('series-time-panel')).getByText(/Validation Issue Raised/i)).toBeInTheDocument();
+  });
+
+
+  it('renders the live map through WorkbenchShell and GraphCanvas instead of the retired map path', () => {
+    render(<EnterpriseMapPanel selectedNamespace="demo" />);
+    expect(screen.getByTestId('workbench-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-canvas')).toBeInTheDocument();
+    expect(screen.queryByTestId('enterprise-map-graph')).not.toBeInTheDocument();
+  });
+
+  it('round-trips group and histogram filters into useEnterpriseMap request directives', () => {
+    render(<EnterpriseMapPanel selectedNamespace="demo" />);
+    fireEvent.change(screen.getByLabelText(/Group by/i), { target: { value: 'concept_type' } });
+    expect(enterpriseMapArgs.at(-1)?.[3]).toBe('concept_type');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Histogram$/i }));
+    fireEvent.click(screen.getAllByText('Filter to')[0]);
+    const latestFilters = enterpriseMapArgs.at(-1)?.[2] as Record<string, unknown>;
+    expect(latestFilters.concept_type).toMatchObject({ mode: 'include' });
+    expect(screen.getByTestId('workbench-applied-chips')).toHaveTextContent(/object_type:include/i);
+  });
+
+  it('gates Search Around by shared selection and calls bounded expand', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('4');
+    render(<EnterpriseMapPanel selectedNamespace="demo" />);
+    expect(screen.getByRole('button', { name: /Search Around/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Select Vendor outage risk/i }));
+    const searchAround = await waitFor(() => screen.getByRole('button', { name: /Search Around/i }));
+    expect(searchAround).not.toBeDisabled();
+    fireEvent.click(searchAround);
+    expect(promptSpy).toHaveBeenCalled();
+    expect(expandMock).toHaveBeenCalledWith(['risk-1'], 3, expect.any(Object));
+    promptSpy.mockRestore();
   });
 
 });
