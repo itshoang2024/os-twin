@@ -48,7 +48,14 @@ function Test-ActiveRoomState {
         [Parameter(Mandatory)][string]$Status
     )
 
-    if ($Status -in @("", "unknown", "pending", "passed", "failed-final", "blocked", "paused", "signoff")) {
+    $canonicalStatus = switch ($Status) {
+        "passed"       { "done" }
+        "failed-final" { "failed" }
+        "fixing"       { "optimize" }
+        default        { $Status }
+    }
+
+    if ($canonicalStatus -in @("", "unknown", "pending", "done", "failed", "blocked", "paused", "signoff")) {
         return $false
     }
 
@@ -56,7 +63,7 @@ function Test-ActiveRoomState {
     if (Test-Path $lifecycleFile) {
         try {
             $lifecycle = Get-Content $lifecycleFile -Raw | ConvertFrom-Json
-            $stateDef = $lifecycle.states.$Status
+            $stateDef = $lifecycle.states.$canonicalStatus
             if ($stateDef -and $stateDef.type) {
                 return ($stateDef.type -ne "terminal")
             }
@@ -132,10 +139,16 @@ if (Test-Path $WarroomsDir) {
         $TotalRooms++
         $statusFile = Join-Path $roomDir.FullName "status"
         $status = if (Test-Path $statusFile) { (Get-Content $statusFile -Raw).Trim() } else { "unknown" }
+        $canonicalStatus = switch ($status) {
+            "passed"       { "done" }
+            "failed-final" { "failed" }
+            "fixing"       { "optimize" }
+            default        { $status }
+        }
 
-        switch ($status) {
-            "passed" { $PassedRooms++ }
-            "failed-final" { $FailedRooms++ }
+        switch ($canonicalStatus) {
+            "done" { $PassedRooms++ }
+            "failed" { $FailedRooms++ }
             { Test-ActiveRoomState -RoomDir $roomDir.FullName -Status $_ } {
                 $ActiveRooms++
 
@@ -196,6 +209,7 @@ if ($JsonOutput) {
         }
         rooms   = [ordered]@{
             total  = $TotalRooms
+            done   = $PassedRooms
             passed = $PassedRooms
             failed = $FailedRooms
             active = $ActiveRooms
@@ -239,7 +253,7 @@ else {
 
     Write-Host "  War-Rooms:"
     Write-Host "    Total:   $TotalRooms"
-    Write-Host "    Passed:  $PassedRooms"
+    Write-Host "    Done:    $PassedRooms"
     Write-Host "    Failed:  $FailedRooms"
     Write-Host "    Active:  $ActiveRooms"
     if ($StuckRooms -gt 0) {

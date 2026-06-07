@@ -36,11 +36,10 @@ vi.mock('../components/plan/PlanWorkspace', () => ({
 vi.mock('../components/plan/EpicCard', () => ({
   stateColors: {
     pending: '#94a3b8',
-    passed: '#10b981',
+    done: '#10b981',
     developing: '#3b82f6',
     engineering: '#3b82f6',
     failed: '#ef4444',
-    'failed-final': '#ef4444',
   },
 }));
 
@@ -71,8 +70,8 @@ describe('StateNode', () => {
     });
 
     it('renders the status badge', () => {
-      render(<StateNode {...defaultProps} status="passed" />);
-      expect(screen.getByText('PASSED')).toBeInTheDocument();
+      render(<StateNode {...defaultProps} status="done" />);
+      expect(screen.getByText('DONE')).toBeInTheDocument();
     });
 
     it('renders role badge when role info provided', () => {

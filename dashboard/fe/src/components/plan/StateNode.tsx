@@ -33,17 +33,27 @@ interface StateNodeProps {
 }
 
 const statusLabels: Record<string, string> = {
-  passed: 'PASSED',
+  done: 'DONE',
+  passed: 'DONE',
+  failed: 'FAILED',
   'failed-final': 'FAILED',
   engineering: 'ENGINEERING',
   pending: 'PENDING',
   active: 'ACTIVE',
   blocked: 'BLOCKED',
   'review': 'QA REVIEW',
-  fixing: 'FIXING',
+  optimize: 'OPTIMIZE',
+  fixing: 'OPTIMIZE',
   'manager-triage': 'TRIAGE',
-  signoff: 'SIGNOFF',
+  signoff: 'DONE',
 };
+
+function normalizeStatus(status: string) {
+  if (status === 'passed' || status === 'signoff') return 'done';
+  if (status === 'failed-final') return 'failed';
+  if (status === 'fixing') return 'optimize';
+  return status;
+}
 
 export default function StateNode({
   id, label, status, x, y, role, roleInitial, roleColor, mode,
@@ -55,8 +65,9 @@ export default function StateNode({
   const { selectedEpicRef, setSelectedEpicRef, setIsContextPanelOpen } = usePlanContext();
   const isSelected = selectedEpicRef === id;
   const isSource = dragSourceRef === id;
-  const stateColor = stateColors[status] || stateColors.pending;
-  const statusLabel = statusLabels[status] || status.replace(/-/g, ' ').toUpperCase();
+  const canonicalStatus = normalizeStatus(status);
+  const stateColor = stateColors[canonicalStatus] || stateColors.pending;
+  const statusLabel = statusLabels[canonicalStatus] || canonicalStatus.replace(/-/g, ' ').toUpperCase();
 
   // Tooltip state
   const [showTooltip, setShowTooltip] = useState(false);
@@ -178,7 +189,7 @@ export default function StateNode({
               style={{ background: `${stateColor}15`, color: stateColor }}
             >
               <span
-                className={`w-1.5 h-1.5 rounded-full ${status !== 'passed' && status !== 'signoff' ? 'animate-pulse' : ''}`}
+                className={`w-1.5 h-1.5 rounded-full ${!['done', 'failed'].includes(canonicalStatus) ? 'animate-pulse' : ''}`}
                 style={{ background: stateColor }}
               />
               {statusLabel}

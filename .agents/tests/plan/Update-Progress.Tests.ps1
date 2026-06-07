@@ -45,8 +45,8 @@ Describe "Update-Progress" {
             & $script:NewWarRoom -RoomId "room-004" -TaskRef "TASK-004" `
                                  -TaskDescription "T4" -WarRoomsDir $script:warRoomsDir
 
-            "passed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
-            "failed-final" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-002" "status") -NoNewline
+            "done" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
+            "failed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-002" "status") -NoNewline
             "blocked" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-003" "status") -NoNewline
             # room-004 stays pending
         }
@@ -56,6 +56,7 @@ Describe "Update-Progress" {
 
             $data = Get-Content (Join-Path $script:warRoomsDir "progress.json") -Raw | ConvertFrom-Json
             $data.total | Should -Be 4
+            $data.done | Should -Be 1
             $data.passed | Should -Be 1
             $data.failed | Should -Be 1
             $data.blocked | Should -Be 1
@@ -88,7 +89,7 @@ Describe "Update-Progress" {
                                  -TaskDescription "T2" -WarRoomsDir $script:warRoomsDir `
                                  -DependsOn @("TASK-001")
 
-            "passed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
+            "done" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
 
             # Build DAG
             & $script:BuildDag -WarRoomsDir $script:warRoomsDir | Out-Null
@@ -100,15 +101,16 @@ Describe "Update-Progress" {
         }
     }
 
-    Context "All passed" {
+    Context "All done" {
         It "shows 100% complete" {
             & $script:NewWarRoom -RoomId "room-001" -TaskRef "TASK-001" `
                                  -TaskDescription "T1" -WarRoomsDir $script:warRoomsDir
-            "passed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
+            "done" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
 
             & $script:UpdateProgress -WarRoomsDir $script:warRoomsDir *>&1 | Out-Null
 
             $data = Get-Content (Join-Path $script:warRoomsDir "progress.json") -Raw | ConvertFrom-Json
+            $data.done | Should -Be 1
             $data.pct_complete | Should -Be 100
         }
     }

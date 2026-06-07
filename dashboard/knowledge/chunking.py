@@ -45,7 +45,6 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
-from markitdown import DocumentConverter
 from dashboard.knowledge.config import (
     SLIDING_WINDOW_OVERLAP,
     SLIDING_WINDOW_SIZE,
@@ -249,7 +248,7 @@ class _ConverterResult:
         return self.markdown
 
 
-class VisionSlidingWindowConverter(DocumentConverter):
+class VisionSlidingWindowConverter:
     """PDF / DOCX / PPTX → markdown via sliding-window vision OCR.
 
     Renders document pages to images via PyMuPDF, groups them into sliding

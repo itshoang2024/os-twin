@@ -187,7 +187,7 @@ start_dashboard() {
     else
       printf 'Nothing listening on port %s yet\n' "$DASHBOARD_PORT" > "$curl_log"
     fi
-    echo "  [$(date +%H:%M:%S)] Health check failed (attempt $_i/60). Details: $(tail -n 1 "$curl_log" 2>/dev/null || true)"
+    echo "  [$(date +%H:%M:%S)] WAIT FOR Ostwin ready (attempt $_i/60). Details: $(tail -n 1 "$curl_log" 2>/dev/null || true)"
     sleep 1
   done
 
@@ -205,6 +205,10 @@ publish_skills() {
   local start_time
   start_time=$(get_now)
   local sync_script="$INSTALL_DIR/.agents/sync-skills.sh"
+  if [[ "${DASH_OK:-false}" != "true" ]]; then
+    warn "Dashboard not healthy — skipping skill sync (run 'ostwin skills sync' later)"
+    return 0
+  fi
   if [[ -x "$sync_script" ]]; then
     OSTWIN_HOME="$INSTALL_DIR" DASHBOARD_PORT="$DASHBOARD_PORT" \
       bash "$sync_script" --install-from "$INSTALL_DIR/.agents" \

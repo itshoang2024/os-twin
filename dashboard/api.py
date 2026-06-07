@@ -194,9 +194,12 @@ async def app_lifespan(_app):
             heavy_executor.shutdown(wait=False, cancel_futures=True)
 
     pytest_current_test = os.environ.get("PYTEST_CURRENT_TEST", "")
-    needs_mcp_lifespan = (
+    needs_knowledge_mcp_lifespan = (
         not pytest_current_test
         or "test_knowledge_mcp.py" in pytest_current_test
+    )
+    needs_memory_mcp_lifespan = (
+        not pytest_current_test
         or "test_memory_mcp" in pytest_current_test
     )
 
@@ -234,7 +237,7 @@ async def app_lifespan(_app):
     # Start Memory Pool MCP session manager (Plan 007).  Most API tests do not
     # exercise MCP and should not pay for long-lived MCP background machinery.
     # Keep it enabled for MCP-specific tests and production.
-    if needs_mcp_lifespan:
+    if needs_memory_mcp_lifespan:
         try:
             from dashboard.routes.memory_mcp import startup_knowledge as _start_pool
             await _start_pool()
@@ -256,7 +259,7 @@ async def app_lifespan(_app):
     #      session manager bound to the new task group.
     #   3. Re-mount the fresh inner app onto the parent so dispatch keeps
     #      working through the rest of this lifespan window.
-    if _mcp_lifespan_app is not None and needs_mcp_lifespan:
+    if _mcp_lifespan_app is not None and needs_knowledge_mcp_lifespan:
         try:
             from dashboard.knowledge.mcp_server import (  # noqa: WPS433
                 get_mcp_app,

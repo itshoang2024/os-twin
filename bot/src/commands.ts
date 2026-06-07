@@ -37,6 +37,13 @@ function normalizeNotificationEvents(events: string[] = []): string[] {
   return Array.from(new Set(events.map(event => LEGACY_NOTIFICATION_EVENT_IDS[event] || event)));
 }
 
+function normalizeRoomStatus(status = ''): string {
+  if (status === 'passed') return 'done';
+  if (status === 'failed-final') return 'failed';
+  if (status === 'fixing') return 'optimize';
+  return status;
+}
+
 function conversationIdForCommand(platform: string, userId: string, explicitConversationId?: string): string | null {
   if (explicitConversationId) return explicitConversationId;
   if (platform === 'telegram') return telegramConversationId(userId);
@@ -315,9 +322,9 @@ async function cmdDashboard(): Promise<BotResponse> {
   const active = (summary.pending || 0)
     + (summary.developing || 0) + (summary.engineering || 0)
     + (summary.review || 0) + (summary.qa_review || 0)
-    + (summary.fixing || 0);
-  const passed = summary.passed || 0;
-  const failed = summary.failed_final || 0;
+    + (summary.optimize || 0) + (summary.fixing || 0);
+  const done = summary.done ?? summary.passed ?? 0;
+  const failed = summary.failed ?? summary.failed_final ?? 0;
 
   const makeBar = (count: number, t: number, len = 12): string => {
     if (t === 0) return '░'.repeat(len);
@@ -325,7 +332,7 @@ async function cmdDashboard(): Promise<BotResponse> {
     return '█'.repeat(filled) + '░'.repeat(len - filled);
   };
 
-  const pctPass = total ? (passed / total * 100).toFixed(1) : '0.0';
+  const pctDone = total ? (done / total * 100).toFixed(1) : '0.0';
   const pctFail = total ? (failed / total * 100).toFixed(1) : '0.0';
   const pctAct = total ? (active / total * 100).toFixed(1) : '0.0';
 
@@ -336,13 +343,13 @@ _System Status:_ 🟢 *ONLINE*
 📊 *WAR-ROOMS OVERVIEW*
 \`─────────────────────────────\`
 🏃‍♂️ *Active:*   \`${String(active).padEnd(4)}\`
-✅ *Passed:*   \`${String(passed).padEnd(4)}\`
+✅ *Done:*     \`${String(done).padEnd(4)}\`
 ❌ *Failed:*   \`${String(failed).padEnd(4)}\`
 📦 *Total:*    \`${String(total).padEnd(4)}\`
 \`─────────────────────────────\`
 
 📈 *EXECUTION PROGRESS*
-✅ \`Passed:\` \`${makeBar(passed, total)}\` \`${pctPass.padStart(5)}%\`
+✅ \`Done:\`   \`${makeBar(done, total)}\` \`${pctDone.padStart(5)}%\`
 ❌ \`Failed:\` \`${makeBar(failed, total)}\` \`${pctFail.padStart(5)}%\`
 ��‍♂️ \`Active:\` \`${makeBar(active, total)}\` \`${pctAct.padStart(5)}%\``,
     buttons: baseUrl.startsWith('https')
@@ -356,11 +363,12 @@ async function cmdStatus(): Promise<BotResponse> {
   if (error) return text(`⚠️ ${error}`);
   if (!rooms.length) return text('ℹ️ No War-Rooms found.');
 
-  const emoji: Record<string, string> = { passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', developing: '🏃‍♂️', pending: '⏳', review: '👀', qa_review: '👀', fixing: '🔧', 'failed-final': '❌' };
+  const emoji: Record<string, string> = { done: '✅', passed: '✅', running: '🏃‍♂️', engineering: '🏃‍♂️', developing: '🏃‍♂️', pending: '⏳', review: '👀', qa_review: '👀', optimize: '🔧', fixing: '🔧', failed: '❌', 'failed-final': '❌' };
   const lines = ['📋 *War-Rooms Status:*', '`─────────────────────────────`'];
   for (const r of rooms) {
-    const e = r.status.includes('fail') ? '❌' : (emoji[r.status] || '❓');
-    lines.push(`${e} \`${r.room_id}\` : ${r.status.toUpperCase()} \`[${r.message_count} msgs]\``);
+    const status = normalizeRoomStatus(r.status);
+    const e = status.includes('fail') ? '❌' : (emoji[status] || '❓');
+    lines.push(`${e} \`${r.room_id}\` : ${status.toUpperCase()} \`[${r.message_count} msgs]\``);
   }
   lines.push('`─────────────────────────────`');
   return text(lines.join('\n'));
@@ -431,7 +439,8 @@ async function cmdLogs(args: string): Promise<BotResponse> {
     const { rooms } = await api.getRooms();
     if (!rooms.length) return text('ℹ️ No war-rooms found.');
     const buttons = rooms.slice(0, 10).map(r => {
-      const emoji = r.status.includes('fail') ? '❌' : r.status === 'passed' ? '✅' : '🏃‍♂️';
+      const status = normalizeRoomStatus(r.status);
+      const emoji = status.includes('fail') ? '❌' : status === 'done' ? '✅' : '🏃‍♂️';
       return [{ label: `${emoji} ${r.room_id}`, callbackData: `menu:logs:${r.room_id}` }];
     });
     return menu('📜 *Select a War-Room to view logs:*', buttons);
@@ -469,15 +478,15 @@ async function cmdHealth(): Promise<BotResponse> {
 
   const { rooms, summary } = await api.getRooms();
   const total = summary?.total || 0;
-  const passed = summary?.passed || 0;
-  const failed = summary?.failed_final || 0;
-  const active = total - passed - failed;
+  const done = summary?.done ?? summary?.passed ?? 0;
+  const failed = summary?.failed ?? summary?.failed_final ?? 0;
+  const active = total - done - failed;
 
   return text(`🏥 *System Health*
 \`─────────────────────────────\`
 ⚙️ *Manager:*     ${mgrRunning ? `🟢 Running (PID ${mgrPid})` : '🔴 Stopped'}
 🤖 *Bot:*          ${botRunning ? `🟢 Running (PID ${botPid})` : '🔴 Stopped'}${botAvail ? '' : ' ⚠️ Unavailable'}
-📦 *War-Rooms:*    \`${total}\` total, \`${active}\` active, \`${passed}\` passed, \`${failed}\` failed
+📦 *War-Rooms:*    \`${total}\` total, \`${active}\` active, \`${done}\` done, \`${failed}\` failed
 \`─────────────────────────────\``);
 }
 
@@ -1001,7 +1010,7 @@ async function cmdSubscriptions(_userId: string, platform: string): Promise<BotR
     { id: 'plan.run.started', label: '🚀 Plan Started' },
     { id: 'plan.run.completed', label: '🏁 Plan Completed' },
     { id: 'plan.run.failed', label: '🛑 Plan Failed' },
-    { id: 'epic.passed', label: '✅ EPIC Passed' },
+    { id: 'epic.passed', label: '✅ EPIC Done' },
     { id: 'epic.failed', label: '❌ EPIC Failed' },
     { id: 'epic.retrying', label: '🔄 EPIC Retry' },
     { id: 'room.created', label: '🏗️ Room Created' },

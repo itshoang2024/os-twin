@@ -90,7 +90,7 @@ COMMANDS: dict[str, dict[str, str]] = {
     'errors': {
         "description": 'Error summary with root causes',
         "agent": 'ostwin',
-        "body": 'Summarize war-room errors with root causes.\n\nSteps:\n1. Call `ostwin_get_war_room_status` and filter rooms whose status is `failed-final` or `failed`.\n2. For each failed room, call `ostwin_get_logs` with `{room_id, limit: 5}`.\n3. For each, report: room_id, epic_ref, status, and a one-line root-cause summary inferred from the recent logs.\n\nIf no failures, say so explicitly.\n',
+        "body": 'Summarize war-room errors with root causes.\n\nSteps:\n1. Call `ostwin_get_war_room_status` and filter rooms whose canonical status is `failed`.\n2. For each failed room, call `ostwin_get_logs` with `{room_id, limit: 5}`.\n3. For each, report: room_id, epic_ref, status, and a one-line root-cause summary inferred from the recent logs.\n\nIf no failures, say so explicitly.\n',
     },
     'logs': {
         "description": 'View war-room channel messages',

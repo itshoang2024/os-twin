@@ -10,10 +10,10 @@
     Replaces: roles/manager/loop.sh
 
 	    V2 signal-based state-machine per room (lifecycle.json):
-	        pending → developing → review → passed
-	                                 ↓ fail
-	                failed → developing (retry)
-	                (retries exhausted → failed-final)
+	        pending -> developing -> review -> done
+	                                ↓ fail
+	                       optimize -> review
+	        failed is terminal; legacy passed/failed-final/fixing are normalized
 
 .PARAMETER ConfigPath
     Path to config.json. Defaults through Resolve-OstwinConfigPath:
@@ -49,10 +49,14 @@ $configModule = Join-Path $agentsDir "lib" "Config.psm1"
 $utilsModule = Join-Path $agentsDir "lib" "Utils.psm1"
 $helpersModule = Join-Path $scriptDir "ManagerLoop-Helpers.psm1"
 $eventsModule = Join-Path $agentsDir "events" "OrchestrationEvents.psm1"
+$workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
+$mergeQueueModule = Join-Path $agentsDir "workspace" "MergeQueue.psm1"
 if (Test-Path $logModule) { Import-Module $logModule -Force }
 if (Test-Path $configModule) { Import-Module $configModule -Force }
 if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 if (Test-Path $eventsModule) { Import-Module $eventsModule -Force }
+if (Test-Path $workspaceModule) { Import-Module $workspaceModule -Force }
+if (Test-Path $mergeQueueModule) { Import-Module $mergeQueueModule -Force }
 if (Test-Path $helpersModule) { Import-Module $helpersModule -Force }
 
 # --- Helper functions ---
@@ -165,6 +169,22 @@ $iteration = 0
 $stallCycles = 0
 $script:planFailed = $false
 
+function Add-CanonicalLifecycleAliases {
+    param($Lifecycle)
+
+    if (-not $Lifecycle -or -not $Lifecycle.states) { return $Lifecycle }
+    if (($Lifecycle.states.PSObject.Properties.Name -contains 'passed') -and -not ($Lifecycle.states.PSObject.Properties.Name -contains 'done')) {
+        $Lifecycle.states | Add-Member -NotePropertyName done -NotePropertyValue $Lifecycle.states.passed -Force
+    }
+    if ($Lifecycle.states.PSObject.Properties.Name -contains 'failed-final') {
+        $Lifecycle.states | Add-Member -NotePropertyName failed -NotePropertyValue ([pscustomobject]@{ type = 'terminal' }) -Force
+    }
+    if (($Lifecycle.states.PSObject.Properties.Name -contains 'fixing') -and -not ($Lifecycle.states.PSObject.Properties.Name -contains 'optimize')) {
+        $Lifecycle.states | Add-Member -NotePropertyName optimize -NotePropertyValue $Lifecycle.states.fixing -Force
+    }
+    return $Lifecycle
+}
+
 try {
 while (-not $script:shuttingDown) {
     $iteration++
@@ -202,9 +222,19 @@ while (-not $script:shuttingDown) {
         $roomCount++
         $roomId = $roomDirInfo.Name
 
-        $status = if (Test-Path (Join-Path $roomDir "status")) {
+        $rawStatus = if (Test-Path (Join-Path $roomDir "status")) {
             (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
         } else { "pending" }
+        $status = if (Get-Command ConvertTo-CanonicalRoomStatus -ErrorAction SilentlyContinue) {
+            ConvertTo-CanonicalRoomStatus -Status $rawStatus
+        } else {
+            switch ($rawStatus) {
+                'passed'       { 'done' }
+                'failed-final' { 'failed' }
+                'fixing'       { 'optimize' }
+                default        { $rawStatus }
+            }
+        }
 
         $taskRef = if (Test-Path (Join-Path $roomDir "task-ref")) {
             (Get-Content (Join-Path $roomDir "task-ref") -Raw).Trim()
@@ -220,7 +250,11 @@ while (-not $script:shuttingDown) {
         # --- Resolve Worker Script via centralized Resolve-Role ---
         $roomConfigFile = Join-Path $roomDir "config.json"
         $roomLifecycleFile = Join-Path $roomDir "lifecycle.json"
-        $lifecycle = if (Test-Path $roomLifecycleFile) { Get-Content $roomLifecycleFile -Raw | ConvertFrom-Json } else { $null }
+        $lifecycle = if (Test-Path $roomLifecycleFile) { Add-CanonicalLifecycleAliases (Get-Content $roomLifecycleFile -Raw | ConvertFrom-Json) } else { $null }
+        if ($rawStatus -ne $status -and $status) {
+            Write-Log "INFO" "[$taskRef] Normalizing legacy room status '$rawStatus' -> '$status'."
+            Write-RoomStatus $roomDir $status
+        }
         $stateDef = if ($lifecycle -and $lifecycle.states -and $lifecycle.states.$status) { $lifecycle.states.$status } else { $null }
         if (-not (Test-Path $roomConfigFile)) {
             # Skip non-war-room directories like room-expansion, room-test
@@ -296,6 +330,14 @@ while (-not $script:shuttingDown) {
                     }
                 }
 
+                if (Get-Command Get-WorkspaceDependencyState -ErrorAction SilentlyContinue) {
+                    $workspaceDeps = Get-WorkspaceDependencyState -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
+                    if (-not $workspaceDeps.Ready) {
+                        Write-Log "INFO" "[$taskRef] Waiting for workspace integration: $($workspaceDeps.BlockedBy -join ', ')"
+                        continue
+                    }
+                }
+
                 # --- ON-THE-FLY PIPELINE GENERATION ---
                 $roomLifecycleCheck = Join-Path $roomDir "lifecycle.json"
                 $smartAssignment = $false
@@ -335,6 +377,20 @@ while (-not $script:shuttingDown) {
                     # via Resolve-RoleSkills.ps1 using config-driven skill_refs.
                     $nextState = if ($lifecycle -and $lifecycle.initial_state) { $lifecycle.initial_state } else { "developing" }
                     Write-Log "INFO" "[$taskRef] Dependencies met. Transitioning to $nextState in $roomId..."
+                    if (Get-Command Ensure-RoomWorktree -ErrorAction SilentlyContinue) {
+                        try {
+                            $workspaceReady = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $WarRoomsDir -AgentsDir $agentsDir
+                            if (-not $workspaceReady.Ready) {
+                                Write-Log "WARN" "[$taskRef] Workspace is not ready; keeping room pending."
+                                continue
+                            }
+                        } catch {
+                            Write-Log "ERROR" "[$taskRef] Workspace creation failed: $($_.Exception.Message)"
+                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'workspace_worktree_failed' -Role $baseRole -State $status -Summary "$taskRef workspace creation failed."
+                            $script:shuttingDown = $true
+                            continue
+                        }
+                    }
                     Write-RoomStatus $roomDir $nextState
                     # Sync config.json assigned_role with the initial state's role
                     $initDef = if ($lifecycle -and $lifecycle.states -and $lifecycle.states.$nextState) { $lifecycle.states.$nextState } else { $null }
@@ -397,6 +453,10 @@ while (-not $script:shuttingDown) {
                 }
                 $v2MaxRetries = if ($lifecycle -and $lifecycle.max_retries) { $lifecycle.max_retries } else { $roleMaxRetries }
 
+                if (-not $v2StateDef -and $status -in @('done', 'failed', 'blocked')) {
+                    $v2StateDef = [pscustomobject]@{ type = 'terminal' }
+                }
+
                 if (-not $v2StateDef) {
                     # Unknown state with no lifecycle definition
                     Write-Log "WARN" "[$taskRef] Unknown state '$status' in $roomId (no lifecycle definition)"
@@ -406,29 +466,40 @@ while (-not $script:shuttingDown) {
 
                 switch ($v2StateDef.type) {
                     'terminal' {
-                        if ($status -eq 'passed') {
+                        if ($status -eq 'done') {
                             # Guard: only fire Complete-PlanApproval once per plan
                             $planApprovedFlag = Join-Path $WarRoomsDir ".plan_approved_$($taskRef -replace '[^a-zA-Z0-9-]','')"
                             if ($taskRef -eq 'PLAN-REVIEW' -and -not (Test-Path $planApprovedFlag)) {
                                 Complete-PlanApproval -TaskRef $taskRef
                                 "1" | Out-File -FilePath $planApprovedFlag -Encoding utf8 -NoNewline
                             }
-                        } elseif ($status -eq 'failed-final') {
-                            if ($retries -lt $v2MaxRetries) {
-                                $failFeedback = Get-LatestBody $roomDir "fail"
-                                if ($failFeedback) {
-                                    Write-Log "WARN" "[$taskRef] failed-final with retries=$retries < max=$v2MaxRetries. Rescuing to triage."
-                                    Write-RoomStatus $roomDir "triage"
-                                    $allPassed = $false; $allTerminal = $false
-                                } else {
-                                    $allPassed = $false; $failedCount++
+                            if (Get-Command Invoke-RoomWorkspaceMerge -ErrorAction SilentlyContinue) {
+                                try {
+                                    $mergeResult = Invoke-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
+                                    if (-not $mergeResult.Integrated) {
+                                        Write-Log "ERROR" "[$taskRef] Workspace merge failed: $($mergeResult.Status)"
+                                        $allPassed = $false
+                                        $failedCount++
+                                        Write-RoomStatus $roomDir 'failed'
+                                        Set-BlockedDescendants $taskRef
+                                        $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason "workspace_merge_$($mergeResult.Status)" -Role $baseRole -State $status -Summary "$taskRef workspace merge failed: $($mergeResult.Status)."
+                                        $script:shuttingDown = $true
+                                    }
+                                } catch {
+                                    Write-Log "ERROR" "[$taskRef] Workspace merge failed: $($_.Exception.Message)"
+                                    $allPassed = $false
+                                    $failedCount++
+                                    Write-RoomStatus $roomDir 'failed'
+                                    Set-BlockedDescendants $taskRef
+                                    $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'workspace_merge_failed' -Role $baseRole -State $status -Summary "$taskRef workspace merge failed."
+                                    $script:shuttingDown = $true
                                 }
-                            } else {
-                                $allPassed = $false; $failedCount++
-                                Write-Log "ERROR" "[$taskRef] Terminal failed-final is unrecoverable. Failing plan run."
-                                $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'room_failed_final' -Role $baseRole -State $status -Summary "$taskRef reached failed-final."
-                                $script:shuttingDown = $true
                             }
+                        } elseif ($status -eq 'failed') {
+                            $allPassed = $false; $failedCount++
+                            Write-Log "ERROR" "[$taskRef] Terminal failed is unrecoverable. Failing plan run."
+                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'room_failed' -Role $baseRole -State $status -Summary "$taskRef reached failed."
+                            $script:shuttingDown = $true
                             Set-BlockedDescendants $taskRef
                         } else {
                             # blocked or other terminal
@@ -507,7 +578,7 @@ while (-not $script:shuttingDown) {
                                 }
                             } else {
                                 Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.timed_out' -Summary "$baseRole timed out in $status after manager state timeout." -Payload @{ reason = 'state_timeout_exhausted'; timeout_seconds = $stateTimeout; retries = $retries; max_retries = $v2MaxRetries } -Role $baseRole -State $status -Severity 'error' | Out-Null
-                                Write-RoomStatus $roomDir 'failed-final'
+                                Write-RoomStatus $roomDir 'failed'
                                 Set-BlockedDescendants $taskRef
                                 $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'state_timeout_exhausted' -Role $baseRole -State $status -Summary "$taskRef exhausted timeout retries in $status."
                                 $script:shuttingDown = $true
@@ -559,8 +630,8 @@ while (-not $script:shuttingDown) {
 
                             if ($approved) {
                                 $planApprovedFlag = Join-Path $WarRoomsDir ".plan_approved_$($taskRef -replace '[^a-zA-Z0-9-]','')"
-                                Write-Log "INFO" "[$taskRef] Plan APPROVED. Transitioning to passed."
-                                Write-RoomStatus $roomDir 'passed'
+                                Write-Log "INFO" "[$taskRef] Plan APPROVED. Transitioning to done."
+                                Write-RoomStatus $roomDir 'done'
                                 if (-not (Test-Path $planApprovedFlag)) {
                                     Complete-PlanApproval -TaskRef $taskRef
                                     "1" | Out-File -FilePath $planApprovedFlag -Encoding utf8 -NoNewline
@@ -609,7 +680,7 @@ while (-not $script:shuttingDown) {
                                 Write-Log "WARN" "[$taskRef] Signal '$matchedSignal' would exceed max retries ($($retries+1)/$v2MaxRetries). Redirecting to failed."
                                 Invoke-SignalActions -RoomDir $roomDir -Actions $actions -TaskRef $taskRef -BaseRole $baseRole
                                 Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'lifecycle.retry.exhausted' -Summary "$taskRef exhausted lifecycle retries after '$matchedSignal'." -Payload @{ signal = $matchedSignal; retries = ($retries + 1); max_retries = $v2MaxRetries; reason = 'semantic_retry_exhausted' } -Role $baseRole -State $status -Severity 'error' | Out-Null
-                                Write-RoomStatus $roomDir "failed-final"
+                                Write-RoomStatus $roomDir "failed"
                                 Set-BlockedDescendants $taskRef
                                 $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'retry_exhausted' -Role $baseRole -State $status -Summary "$taskRef exhausted retries after '$matchedSignal'."
                                 $script:shuttingDown = $true
@@ -743,7 +814,8 @@ while (-not $script:shuttingDown) {
                 $lt = if (Test-Path (Join-Path $rd "task-ref")) { (Get-Content (Join-Path $rd "task-ref") -Raw).Trim() } else { "UNKNOWN" }
 
                 # --- Skip rooms in terminal states (already completed or failed) ---
-                if ($ls -in @('passed', 'failed-final', 'blocked', '')) {
+                $lsc = if (Get-Command ConvertTo-CanonicalRoomStatus -ErrorAction SilentlyContinue) { ConvertTo-CanonicalRoomStatus -Status $ls } else { $ls }
+                if ($lsc -in @('done', 'failed', 'blocked', '')) {
                     return  # ForEach-Object: skip this room
                 }
 
@@ -752,7 +824,7 @@ while (-not $script:shuttingDown) {
                 $dlCount = if (Test-Path $dlFile) { [int](Get-Content $dlFile -Raw).Trim() } else { 0 }
                 if ($dlCount -ge 3) {
                     Write-Log "ERROR" "[$lt] Max deadlock recoveries (3) exceeded. Marking as failed."
-                    Write-RoomStatus $rd "failed-final"
+                    Write-RoomStatus $rd "failed"
                     Set-BlockedDescendants $lt
                     return  # ForEach-Object uses 'return' to skip to next item
                 }
@@ -827,7 +899,7 @@ while (-not $script:shuttingDown) {
     # === Release check ===
     if ($roomCount -gt 0 -and $allPassed) {
         Write-Host ""
-        Write-Log "INFO" "All $roomCount rooms PASSED! Drafting release..."
+        Write-Log "INFO" "All $roomCount rooms done. Drafting release..."
 
         $draftScript = Join-Path $releaseDir "draft.sh"
         $draftOk = $true
@@ -876,7 +948,7 @@ while (-not $script:shuttingDown) {
                 Write-Host ""
                 Write-Host "============================================"
                 Write-Log "INFO" "RELEASE PENDING REVIEW: $agentsDir/RELEASE.md"
-                Write-Host "  All rooms passed but signoff was not approved after $maxSignoffAttempts attempts."
+                Write-Host "  All rooms are done but signoff was not approved after $maxSignoffAttempts attempts."
                 Write-Host "  Review RELEASE.md manually and re-run signoff."
                 Write-Host "============================================"
                 Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
@@ -889,8 +961,8 @@ while (-not $script:shuttingDown) {
     # === Exit on all-terminal (some failed/blocked) ===
     if ($roomCount -gt 0 -and -not $allPassed -and $allTerminal) {
         Write-Host ""
-        $passedRooms = $roomCount - $failedCount
-        Write-Log "ERROR" "All rooms terminal: $passedRooms passed, $failedCount failed/blocked. Exiting."
+        $doneRooms = $roomCount - $failedCount
+        Write-Log "ERROR" "All rooms terminal: $doneRooms done, $failedCount failed/blocked. Exiting."
         Write-Log "INFO" "To resume: Start-Plan.ps1 -PlanFile <plan> -Resume"
         Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
         break
@@ -899,16 +971,17 @@ while (-not $script:shuttingDown) {
     # OPT-002: Time-based progress throttle (10s minimum interval)
     $nowEpoch = Get-UnixEpoch
     if ($roomCount -gt 0 -and ($nowEpoch - $script:lastProgressUpdate) -ge 10) {
-        $passedCount = 0
+        $doneCount = 0
         $failedSummary = 0
         $blockedCount = 0
         Get-ChildItem -Path $WarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue | ForEach-Object {
             $s2 = if (Test-Path (Join-Path $_.FullName "status")) { (Get-Content (Join-Path $_.FullName "status") -Raw).Trim() } else { "" }
-            if ($s2 -eq 'passed') { $passedCount++ }
-            if ($s2 -eq 'failed-final') { $failedSummary++ }
+            $s2c = if (Get-Command ConvertTo-CanonicalRoomStatus -ErrorAction SilentlyContinue) { ConvertTo-CanonicalRoomStatus -Status $s2 } else { $s2 }
+            if ($s2c -eq 'done') { $doneCount++ }
+            if ($s2c -eq 'failed') { $failedSummary++ }
             if ($s2 -eq 'blocked') { $blockedCount++ }
         }
-        Write-Log "INFO" "Progress: $passedCount/$roomCount passed, $failedSummary failed, $blockedCount blocked (iteration $iteration)"
+        Write-Log "INFO" "Progress: $doneCount/$roomCount done, $failedSummary failed, $blockedCount blocked (iteration $iteration)"
 
         # Update progress file if available
         if (Test-Path $updateProgress) {

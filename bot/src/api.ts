@@ -56,11 +56,14 @@ export interface RoomMessage {
 
 export interface RoomsSummary {
   total?: number;
+  done?: number;
+  failed?: number;
   passed?: number;
   failed_final?: number;
   pending?: number;
   developing?: number;
   review?: number;
+  optimize?: number;
   fixing?: number;
   // Legacy aliases — older deployments report these names; kept so we sum both.
   engineering?: number;

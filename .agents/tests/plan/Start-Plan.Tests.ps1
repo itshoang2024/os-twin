@@ -158,6 +158,19 @@ Describe "Start-Plan" {
             ($output -join "`n") | Should -Match "Project: $([regex]::Escape($targetDir))"
         }
 
+        It "keeps explicit ProjectDir when plan working_dir is ignored" {
+            $workingDirPlan = Join-Path $TestDrive "working-dir-override-plan.md"
+            $targetDir = Join-Path $TestDrive "target-project-override"
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+
+            $content = "# Plan: Test`n`n## Config`nworking_dir: $targetDir`n`n### EPIC-001 — Test`n"
+            $content | Out-File $workingDirPlan -Encoding utf8
+
+            $output = & $script:StartPlan -PlanFile $workingDirPlan -ProjectDir $script:projectDir -IgnorePlanWorkingDir -DryRun *>&1
+            ($output -join "`n") | Should -Match "Project: $([regex]::Escape($script:projectDir))"
+            ($output -join "`n") | Should -Not -Match "Project: $([regex]::Escape($targetDir))"
+        }
+
         It "warns when working_dir is invalid" {
             $badDirPlan = Join-Path $TestDrive "bad-dir-plan.md"
             $content = "# Plan: Test`n`n## Config`nworking_dir: /nonexistent/path/xyz`n`n### EPIC-001 — Test`n"
@@ -931,41 +944,41 @@ working_dir: $script:projectDir
             "Write-Host 'Progress updated'" | Out-File (Join-Path $agentsPlanDir "Update-Progress.ps1") -Encoding utf8
         }
 
-        It "resets failed-final rooms to pending" {
+        It "normalizes failed-final rooms to failed" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
             $outputStr = $output -join "`n"
             
-            $outputStr | Should -Match "Resetting room-001 to pending"
+            $outputStr | Should -Match "Normalizing room-001 from failed-final to failed"
             
             $statusFile = Join-Path $absProjectDir ".war-rooms/room-001/status"
-            (Get-Content $statusFile -Raw) | Should -Be "pending"
+            (Get-Content $statusFile -Raw) | Should -Be "failed"
         }
 
-        It "moves fixing rooms to developing" {
+        It "normalizes fixing rooms to optimize" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
             $outputStr = $output -join "`n"
             
-            $outputStr | Should -Match "Moving room-002 from fixing to developing"
+            $outputStr | Should -Match "Normalizing room-002 from fixing to optimize"
             
             $statusFile = Join-Path $absProjectDir ".war-rooms/room-002/status"
-            (Get-Content $statusFile -Raw) | Should -Be "developing"
+            (Get-Content $statusFile -Raw) | Should -Be "optimize"
             
             $pidDir = Join-Path $absProjectDir ".war-rooms/room-002/pids"
             (Get-ChildItem $pidDir -Filter "*.pid").Count | Should -Be 0
         }
 
-        It "clears retry counters on resume" {
+        It "preserves failed-room retry counters on resume" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1 | Out-Null
             
             $retriesFile = Join-Path $absProjectDir ".war-rooms/room-001/retries"
             $content = (Get-Content $retriesFile -Raw).Trim()
-            $content | Should -Be "0"
+            $content | Should -Be "10"
             
             $qaRetriesFile = Join-Path $absProjectDir ".war-rooms/room-001/qa_retries"
-            (Test-Path $qaRetriesFile) | Should -Be $false
+            (Test-Path $qaRetriesFile) | Should -Be $true
         }
 
         It "triggers Update-Progress after resets" {

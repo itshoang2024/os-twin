@@ -110,6 +110,16 @@ _TRANSIENT_READ_ERRNOS = {
 }
 
 
+def canonical_room_status(status: Optional[str]) -> str:
+    """Normalize legacy room status aliases to the canonical lifecycle names."""
+    value = (status or "unknown").strip()
+    return {
+        "passed": "done",
+        "failed-final": "failed",
+        "fixing": "optimize",
+    }.get(value, value)
+
+
 def _read_text_with_retry(
     path: Path,
     *,
@@ -161,7 +171,8 @@ def read_room(
 
     room_id = room_dir.name
     status_file = room_dir / "status"
-    status = _read_text_with_retry(status_file, default="unknown", strip=True)
+    raw_status = _read_text_with_retry(status_file, default="unknown", strip=True)
+    status = canonical_room_status(raw_status)
 
     tr_file = room_dir / "task-ref"
     task_ref = _read_text_with_retry(tr_file, default=None, strip=True)
@@ -234,6 +245,7 @@ def read_room(
         "epic_ref": task_ref,
         "plan_id": plan_id,
         "status": status,
+        "raw_status": raw_status,
         "retries": retries,
         "message_count": message_count,
         "last_activity": last_activity,
@@ -539,7 +551,7 @@ def get_active_epics_using_skill(skill_name: str) -> int:
             # Check status
             status_file = room_dir / "status"
             status = status_file.read_text().strip() if status_file.exists() else "unknown"
-            if status in ["passed", "failed", "signoff", "failed-final"]:
+            if canonical_room_status(status) in ["done", "failed", "signoff"]:
                 continue
 
             # Check if any role in this room uses the skill
@@ -657,13 +669,14 @@ def build_skills_list(
     query: Optional[str] = None,
     role: Optional[str] = None,
     tags: Optional[List[str]] = None,
-    limit: int = 1000,
+    limit: Optional[int] = None,
     include_drafts: bool = False,
     include_disabled: bool = False,
 ) -> List[Skill]:
     """Helper to build and filter skills list from zvec and disk."""
     if tags is None:
         tags = []
+    effective_limit = limit if limit is not None else (50 if query else 1000)
     from dashboard import global_state
 
     store = getattr(global_state, "store", None)
@@ -673,7 +686,7 @@ def build_skills_list(
     if store:
         try:
             if query:
-                results = store.search_skills(query, limit=limit)
+                results = store.search_skills(query, limit=effective_limit)
                 skills = [Skill(**res) for res in results]
             else:
                 results = store.get_all_skills(limit=1000)
@@ -768,7 +781,7 @@ def build_skills_list(
         filtered.sort(key=lambda x: x.name)
 
     # Apply limit
-    return filtered[:limit]
+    return filtered[:effective_limit]
 
 
 # Router helpers

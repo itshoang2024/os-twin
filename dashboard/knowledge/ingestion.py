@@ -268,7 +268,11 @@ class _NamespaceStore:
                 KuzuLabelledPropertyGraph,
             )
 
-            self._graph = KuzuLabelledPropertyGraph.for_namespace(self.namespace)
+            self._graph = KuzuLabelledPropertyGraph(
+                index=self.namespace,
+                ws_id=self.namespace,
+                database_path=str(self._nm.kuzu_db_path(self.namespace)),
+            )
             return self._graph
 
 
@@ -856,10 +860,29 @@ class Ingestor:
                 relations_added += getattr(m, "total_relationships", 0)
                 candidate_count += getattr(m, "candidate_count", 0)
 
+        # Compatibility fallback for test/dry-run graph indexes: some fakes
+        # populate the llama-index KG metadata contract but do not expose
+        # extractor metrics or a backing Kuzu graph.
+        if entities_added == 0 and relations_added == 0:
+            try:
+                from llama_index.core.graph_stores.types import (  # noqa: WPS433
+                    KG_NODES_KEY,
+                    KG_RELATIONS_KEY,
+                )
+
+                entities_added = sum(
+                    len(node.metadata.get(KG_NODES_KEY) or []) for node in text_nodes
+                )
+                relations_added = sum(
+                    len(node.metadata.get(KG_RELATIONS_KEY) or []) for node in text_nodes
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not count KG metadata from text nodes: %s", exc)
+
         # Fallback: if extractor metrics are zero (e.g. extractor didn't
         # run or metrics attribute missing), compute delta from Kuzu graph
         # counts before/after insert_nodes().
-        if entities_added == 0 and relations_added == 0:
+        if entities_added == 0 and relations_added == 0 and kg_pre is not None:
             store_post = self._get_store(namespace)
             kg_post = store_post._get_graph() if hasattr(store_post, "_get_graph") else None
             if kg_post is not None:
@@ -903,6 +926,7 @@ class Ingestor:
             })
         try:
             store.add_chunks(store_chunks)
+            chunks_added = len(store_chunks)
         except Exception as exc:  # noqa: BLE001
             t_vstore = time.monotonic() - t_vstore_start
             logger.info(
@@ -918,21 +942,21 @@ class Ingestor:
         t_vstore = time.monotonic() - t_vstore_start
         logger.info(
             "[TRACE] extract_and_embed/vstore_write: %.3fs, %s, %d chunks",
-            t_vstore, file_entry.path, len(store_chunks),
+            t_vstore, file_entry.path, chunks_added,
         )
         get_metrics_registry().histogram("ingest_vstore_write_seconds").observe(t_vstore)
 
         embed_total = time.monotonic() - embed_t0
         logger.info(
             "[TRACE] extract_and_embed total: %.3fs, %s, %d entities, %d relations, %d chunks",
-            embed_total, file_entry.path, entities_added, relations_added, len(text_nodes),
+            embed_total, file_entry.path, entities_added, relations_added, chunks_added,
         )
         get_metrics_registry().histogram("ingest_extract_and_embed_seconds").observe(embed_total)
 
         return {
             "entities_added": entities_added,
             "relations_added": relations_added,
-            "chunks_added": len(text_nodes),
+            "chunks_added": int(chunks_added),
             "chunks_skipped": 0,
             "candidate_count": candidate_count,
         }

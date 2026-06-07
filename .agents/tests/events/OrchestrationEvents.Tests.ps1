@@ -15,6 +15,16 @@ AfterAll {
 Describe 'OrchestrationEvents' {
     BeforeEach {
         $script:eventsPath = Join-Path $TestDrive "events-$(Get-Random).jsonl"
+        $script:PriorRunId = $env:OSTWIN_RUN_ID
+        Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue
+    }
+
+    AfterEach {
+        if ($null -ne $script:PriorRunId) {
+            $env:OSTWIN_RUN_ID = $script:PriorRunId
+        } else {
+            Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue
+        }
     }
 
     It 'appends a valid event with defaults and compact JSONL' {
@@ -80,6 +90,26 @@ Describe 'OrchestrationEvents' {
             summary    = 'Status changed'
             payload    = @{}
         }) } | Should -Throw '*room_id*epic_ref*'
+    }
+
+    It 'rejects workspace orchestration events' {
+        { Write-OrchestrationEvent -EventsPath $script:eventsPath -Event ([ordered]@{
+            event_type = 'workspace.worktree.ready'
+            plan_id    = 'pt-test'
+            run_id     = 'run-test'
+            summary    = 'Worktree ready'
+            payload    = @{}
+        }) } | Should -Throw '*Unknown event_type*'
+
+        { Write-OrchestrationEvent -EventsPath $script:eventsPath -Event ([ordered]@{
+            event_type = 'workspace.merge.completed'
+            plan_id    = 'pt-test'
+            run_id     = 'run-test'
+            room_id    = 'room-001'
+            epic_ref   = 'EPIC-001'
+            summary    = 'Merge completed'
+            payload    = @{}
+        }) } | Should -Throw '*Unknown event_type*'
     }
 
     It 'returns existing event for idempotent duplicate append' {

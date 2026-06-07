@@ -867,7 +867,9 @@ class TestGraphRAGExtractorDeep:
         entities = result[0].metadata[KG_NODES_KEY]
         assert len(entities) == 1
         assert entities[0].embedding == [0.3] * 1024
-        fake_embedder.embed_one.assert_called_once()
+        assert fake_embedder.embed_one.call_count == 2
+        fake_embedder.embed_one.assert_any_call("Dave.Person.")
+        fake_embedder.embed_one.assert_any_call("Dave is here.")
 
     def test_extractor_domain_prompt_passed_to_llm(self) -> None:
         """domain_prompt is forwarded to llm.extract_entities as the third argument."""
@@ -2113,4 +2115,3 @@ class TestGraphModeQueryDelegation:
         assert result.entities[0].name == "Person"
         assert result.entities[0].score == 0.9
         assert result.entities[1].id == "e2"
-

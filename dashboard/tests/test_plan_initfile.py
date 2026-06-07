@@ -26,6 +26,7 @@ if _env.is_file():
 import time
 
 DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "http://localhost:3366")
+TEST_API_KEY = "test-key"
 
 
 # --------------------------------------------------------------------------
@@ -86,8 +87,7 @@ def test_create_with_initfile_content():
     title = "Migrate Auth to OAuth2"
     working_dir = "/tmp/test-initfile"
 
-    API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-    HEADERS = {"X-API-Key": API_KEY}
+    HEADERS = {"X-API-Key": TEST_API_KEY}
     with TestClient(app, headers=HEADERS) as client:
         # --- 1. Create plan WITH content (simulates -InitFile) ---
         resp = client.post("/api/plans/create", json={
@@ -162,8 +162,7 @@ def test_create_without_content_uses_default():
     title = f"Default Template Test {int(time.time())}"
     working_dir = "/tmp/test-no-initfile"
 
-    API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-    HEADERS = {"X-API-Key": API_KEY}
+    HEADERS = {"X-API-Key": TEST_API_KEY}
     with TestClient(app, headers=HEADERS) as client:
         # --- 1. Create plan WITHOUT content (no -InitFile) ---
         resp = client.post("/api/plans/create", json={
@@ -204,11 +203,11 @@ def test_create_without_content_uses_default():
         )
         print(f"  ✓ Default plan does not contain user-specific content")
 
-        # --- 3. Verify EPIC-001 is auto-generated ---
-        assert "EPIC-001" in stored_content, (
-            "Default plan missing auto-generated EPIC-001"
+        # --- 3. Verify the placeholder drafting state is present ---
+        assert "AI worker is drafting the plan structure" in stored_content, (
+            "Default plan missing drafting placeholder"
         )
-        print(f"  ✓ Default plan has auto-generated EPIC-001")
+        print(f"  ✓ Default plan has drafting placeholder")
 
     print(f"\n✅ test_create_without_content_uses_default PASSED")
     return True
@@ -219,8 +218,7 @@ def test_content_with_explicit_title_override():
     override_title = f"Override Title {int(time.time())}"
     working_dir = "/tmp/test-title-override"
 
-    API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-    HEADERS = {"X-API-Key": API_KEY}
+    HEADERS = {"X-API-Key": TEST_API_KEY}
     with TestClient(app, headers=HEADERS) as client:
         resp = client.post("/api/plans/create", json={
             "path": working_dir,
@@ -262,8 +260,7 @@ def test_empty_content_treated_as_no_content():
     title = f"Empty Content Test {int(time.time())}"
     working_dir = "/tmp/test-empty-content"
 
-    API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-    HEADERS = {"X-API-Key": API_KEY}
+    HEADERS = {"X-API-Key": TEST_API_KEY}
     with TestClient(app, headers=HEADERS) as client:
         resp = client.post("/api/plans/create", json={
             "path": working_dir,
@@ -292,15 +289,14 @@ def test_empty_content_treated_as_no_content():
     return True
 
 
-def test_content_not_mutated_by_api():
-    """API should not modify the provided content (no auto-injection of headers/footers)."""
+def test_content_gets_plan_header_without_extra_sections():
+    """API normalizes the plan header without injecting unrelated sections."""
     # Minimal markdown — no "# Plan:" header, no "## Config" section
     minimal_content = "# My Custom Plan\n\nJust some notes.\n\n## Tasks\n- [ ] Do something\n"
     title = f"Minimal Content Test {int(time.time())}"
     working_dir = "/tmp/test-minimal"
 
-    API_KEY = os.environ.get("OSTWIN_API_KEY", "")
-    HEADERS = {"X-API-Key": API_KEY}
+    HEADERS = {"X-API-Key": TEST_API_KEY}
     with TestClient(app, headers=HEADERS) as client:
         resp = client.post("/api/plans/create", json={
             "path": working_dir,
@@ -317,12 +313,12 @@ def test_content_not_mutated_by_api():
         assert resp.status_code == 200
         stored_content = resp.json().get("plan", {}).get("content", "")
 
-        assert stored_content.strip() == minimal_content.strip(), (
-            f"API mutated the content!\n"
-            f"Expected ({len(minimal_content.strip())} chars): {minimal_content.strip()!r}\n"
-            f"Got      ({len(stored_content.strip())} chars): {stored_content.strip()!r}"
-        )
-        print(f"  ✓ Content was stored verbatim without mutation")
+        assert stored_content.startswith(f"# Plan: {title}\n\n")
+        assert "# My Custom Plan" in stored_content
+        assert "Just some notes." in stored_content
+        assert "## Tasks\n- [ ] Do something" in stored_content
+        assert "## Config" not in stored_content
+        print(f"  ✓ Content got a plan header without unrelated sections")
 
     print(f"\n✅ test_content_not_mutated_by_api PASSED")
     return True
@@ -351,7 +347,7 @@ def main():
         ("create_without_content_uses_default", test_create_without_content_uses_default),
         ("content_with_explicit_title_override", test_content_with_explicit_title_override),
         ("empty_content_treated_as_no_content", test_empty_content_treated_as_no_content),
-        ("content_not_mutated_by_api", test_content_not_mutated_by_api),
+        ("content_gets_plan_header_without_extra_sections", test_content_gets_plan_header_without_extra_sections),
     ]
 
     passed = 0

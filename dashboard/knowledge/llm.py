@@ -338,6 +338,8 @@ class KnowledgeLLM(BaseLLMWrapper):
         snippets = [s for s in community_summaries if isinstance(s, str) and s.strip()]
         if not snippets:
             return ""
+        if not self.is_available():
+            return "\n\n".join(snippets)
         system = _get_prompt(
             _KEY_AGG_SYSTEM, language, language=language,
         ) or _AGG_SYSTEM.format(language=language)

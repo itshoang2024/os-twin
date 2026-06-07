@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -462,7 +462,7 @@ class TestMarkitdownReaderGetMarkitdown:
                  patch("markitdown.MarkItDown") as MockMD:
                 MockMD.return_value = MagicMock()
                 result = reader._get_markitdown()
-                mock_create.assert_called_once_with(model="gemini-2.0-flash")
+                mock_create.assert_called_once_with(model="gemini-2.0-flash", api_key=ANY)
                 MockMD.assert_called_once_with(llm_client=mock_sync, llm_model="gemini-2.0-flash")
 
     def test_no_api_key_returns_plain_markitdown(self):

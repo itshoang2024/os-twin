@@ -99,6 +99,18 @@ function Test-ValidRoomState {
     return ($null -ne $Lifecycle.states.$State)
 }
 
+function ConvertTo-CanonicalRoomStatus {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Status)
+
+    switch ($Status) {
+        'passed'       { return 'done' }
+        'failed-final' { return 'failed' }
+        'fixing'       { return 'optimize' }
+        default        { return $Status }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Get-ActiveCount
 # ---------------------------------------------------------------------------
@@ -111,7 +123,8 @@ function Get-ActiveCount {
         $s = if (Test-Path (Join-Path $_.FullName "status")) {
             (Get-Content (Join-Path $_.FullName "status") -Raw).Trim()
         } else { "pending" }
-        if ($s -notin @('pending', 'passed', 'failed-final', 'blocked', '')) { $count++ }
+        $canonical = ConvertTo-CanonicalRoomStatus -Status $s
+        if ($canonical -notin @('pending', 'done', 'failed', 'blocked', '')) { $count++ }
     }
     return $count
 }
@@ -315,6 +328,12 @@ function Write-ManagerOrchestrationEvent {
     if (-not (Get-Command Write-OrchestrationEvent -ErrorAction SilentlyContinue)) { return $null }
     $ctx = Get-RoomOrchestrationContext -RoomDir $RoomDir
     if ([string]::IsNullOrWhiteSpace($ctx.PlanId)) { return $null }
+    $roomScopedEventTypes = @('room.created', 'room.status.changed', 'epic.started', 'epic.passed', 'epic.failed', 'epic.retrying', 'epic.blocked', 'epic.unblocked', 'dependency.created', 'dependency.satisfied', 'dependency.blocked', 'dependency.unblocked', 'role.assigned', 'role.reassigned', 'role.resolved', 'role.spawn.requested', 'agent.run.started', 'agent.run.completed', 'agent.run.failed', 'agent.run.timed_out', 'agent.run.respawned', 'lifecycle.signal.posted', 'lifecycle.transition.applied', 'lifecycle.retry.exhausted', 'lifecycle.escalated', 'channel.message.posted', 'conversation.bound', 'conversation.unbound', 'conversation.subscription.updated')
+    $isRoomScopedEvent = $roomScopedEventTypes -contains $EventType
+    if ($isRoomScopedEvent -and ([string]::IsNullOrWhiteSpace($ctx.RoomId) -or [string]::IsNullOrWhiteSpace($ctx.EpicRef))) {
+        Write-Log 'DEBUG' "[Write-ManagerOrchestrationEvent] Skipping '$EventType' because room context is incomplete for '$RoomDir'."
+        return $null
+    }
 
     $event = [ordered]@{
         event_type = $EventType
@@ -333,7 +352,7 @@ function Write-ManagerOrchestrationEvent {
     if (-not $event.payload.Contains('role')) { $event.payload['role'] = $effectiveRole }
     if (-not $event.payload.Contains('agent_name')) { $event.payload['agent_name'] = $effectiveRole }
 
-    if ($EventType -in @('room.created', 'room.status.changed', 'epic.started', 'epic.passed', 'epic.failed', 'epic.retrying', 'epic.blocked', 'epic.unblocked', 'dependency.created', 'dependency.satisfied', 'dependency.blocked', 'dependency.unblocked', 'role.assigned', 'role.reassigned', 'role.resolved', 'role.spawn.requested', 'agent.run.started', 'agent.run.completed', 'agent.run.failed', 'agent.run.timed_out', 'agent.run.respawned', 'lifecycle.signal.posted', 'lifecycle.transition.applied', 'lifecycle.retry.exhausted', 'lifecycle.escalated', 'channel.message.posted', 'conversation.bound', 'conversation.unbound', 'conversation.subscription.updated')) {
+    if ($isRoomScopedEvent) {
         $event['room_id'] = $ctx.RoomId
         $event['epic_ref'] = if ($EpicRef) { $EpicRef } else { $ctx.EpicRef }
     }
@@ -394,13 +413,14 @@ function Invoke-PlanFailFast {
     if ($WarRoomsDir -and (Test-Path $WarRoomsDir)) {
         Get-ChildItem -Path $WarRoomsDir -Directory -Filter 'room-*' -ErrorAction SilentlyContinue | ForEach-Object {
             $status = if (Test-Path (Join-Path $_.FullName 'status')) { (Get-Content (Join-Path $_.FullName 'status') -Raw).Trim() } else { '' }
-            if ($status -notin @('passed', 'failed-final', 'blocked', '')) {
+            $canonicalStatus = ConvertTo-CanonicalRoomStatus -Status $status
+            if ($canonicalStatus -notin @('done', 'failed', 'blocked', '')) {
                 Stop-RoomProcesses $_.FullName
             }
         }
     }
 
-    Write-RoomStatus $RoomDir 'failed-final'
+    Write-RoomStatus $RoomDir 'failed'
     return $true
 }
 
@@ -473,6 +493,7 @@ function Stop-RoomProcesses {
 function Write-RoomStatus {
     [CmdletBinding()]
     param([string]$RoomDir, [string]$NewStatus)
+    $NewStatus = ConvertTo-CanonicalRoomStatus -Status $NewStatus
     $oldStatus = if (Test-Path (Join-Path $RoomDir "status")) {
         (Get-Content (Join-Path $RoomDir "status") -Raw).Trim()
     } else { "unknown" }
@@ -499,7 +520,7 @@ function Write-RoomStatus {
 
     $pidDir = Join-Path $RoomDir "pids"
     if (Test-Path $pidDir) {
-        $terminalStates = @('passed', 'failed-final', 'blocked')
+        $terminalStates = @('done', 'failed', 'blocked', 'passed', 'failed-final')
         if ($NewStatus -in $terminalStates) {
             Get-ChildItem $pidDir -Filter "*.pid"        -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
             Get-ChildItem $pidDir -Filter "*.spawned_at" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -1344,6 +1365,7 @@ Export-ModuleMember -Function @(
     'Get-UnixEpoch',
     'Write-AtomicFile',
     'Test-ValidRoomState',
+    'ConvertTo-CanonicalRoomStatus',
     'Set-ManagerLoopContext',
     'Get-ManagerLoopContext',
     'Get-ActiveCount',

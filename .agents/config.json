@@ -69,5 +69,918 @@
     "custom": {},
     "openai_compatible": null,
     "ollama": null
+  },
+  "active-role": {
+    "default_model": "openrouter/deepseek/deepseek-v4-pro",
+    "timeout_seconds": 300,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "architect": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 1200,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "create-architecture",
+      "create-lifecycle",
+      "create-role"
+    ],
+    "mcp_refs": []
+  },
+  "audit": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 2400,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "scope-investigation",
+      "analytical-lenses",
+      "question-library",
+      "structure-data-request",
+      "validate-output",
+      "risk-decision",
+      "brain-ops",
+      "ontology-knowledge"
+    ],
+    "mcp_refs": []
+  },
+  "audit-officer": {
+    "default_model": "google-vertex/gemini-3.5-flash",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "legal-common",
+      "legal-matter-workspace"
+    ],
+    "mcp_refs": []
+  },
+  "backend-engineer": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "build-integration-engineer": {
+    "default_model": "google-vertex/gemini-3.1-flash-lite",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "config-metadata-updater": {
+    "default_model": "google-vertex/gemini-3.1-flash-lite",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "data-analysis-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-analyst": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-analytics-engineer": {
+    "default_model": "openai/gpt-5.5-pro",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-engineering-analyst": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-exploration-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-explorer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-explorer-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-pipeline-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-processing-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-reporting-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-scientist": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-transformation-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "data-transformer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "database-architect": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "director-of-engineering": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "okr-alignment",
+      "cross-team-sync",
+      "capacity-planning",
+      "escalation-routing",
+      "org-health-check",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "dynamic-role-plan-reviewer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "create-role"
+    ],
+    "mcp_refs": []
+  },
+  "efficient-data-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "engineer": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "evaluator-role": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 300,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "extended-room-state-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "fast-data-exploration-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-accessibility-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-dag-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-engineer": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-interaction-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-layout-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-realtime-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-search-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-ui-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "frontend-video-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "kiemtoan_checker": {
+    "default_model": "google-vertex/gemini-3.5-flash",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "brain-ops"
+    ],
+    "mcp_refs": []
+  },
+  "kiemtoan_reporter": {
+    "default_model": "google-vertex/gemini-3.5-flash",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "brain-ops",
+      "deepsearch"
+    ],
+    "mcp_refs": []
+  },
+  "knowledge-curator": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "curate-namespace",
+      "ontology-knowledge"
+    ],
+    "mcp_refs": []
+  },
+  "level-designer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "macos-automation-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "manager": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 2400,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "risk-decision",
+      "war-room-communication",
+      "global-context"
+    ],
+    "mcp_refs": [
+      "global-memory",
+      "global-knowledge"
+    ]
+  },
+  "manifest-schema-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "narrative-designer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "narrative-strategist": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "research",
+      "write-document",
+      "explain-concept"
+    ],
+    "mcp_refs": []
+  },
+  "nextjs-mock-api-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "platform-engineer": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "sdk-design",
+      "cicd-pipeline-design",
+      "developer-experience",
+      "infrastructure-as-code",
+      "platform-api-governance",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "principal-engineer": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "write-rfc",
+      "technology-radar",
+      "technical-dispute-resolution",
+      "system-design-review",
+      "engineering-standards",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "program-manager": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "milestone-tracking",
+      "dependency-mapping",
+      "stakeholder-comms",
+      "risk-register",
+      "launch-readiness",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "python-data-analyst": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "python-data-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "qa": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "agent-browser"
+    ],
+    "mcp_refs": [
+      "chrome-devtools",
+      "memory"
+    ]
+  },
+  "qa-automation-engineer": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "global",
+      "roles",
+      "agent-browser",
+      "screen-capture"
+    ],
+    "mcp_refs": []
+  },
+  "reporter": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 1200,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "researcher": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "researcher-architect": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "research",
+      "create-architecture",
+      "write-adr"
+    ],
+    "mcp_refs": []
+  },
+  "role-infra-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "schema-metadata-manager": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "roles",
+      "global"
+    ],
+    "mcp_refs": []
+  },
+  "search-recs-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "security-engineer": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "threat-modeling",
+      "secure-code-review",
+      "dependency-vulnerability",
+      "security-architecture",
+      "compliance-mapping",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "security-specialist": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "threat-modeling",
+      "secure-code-review",
+      "dependency-vulnerability",
+      "security-architecture",
+      "compliance-mapping",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "short-video-creator": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "generate-script",
+      "edit-video"
+    ],
+    "mcp_refs": []
+  },
+  "skills-ui-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "sound-designer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "sre-lead": {
+    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "define-slo",
+      "incident-response",
+      "runbook-authoring",
+      "observability-design",
+      "chaos-engineering",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "staff-manager": {
+    "default_model": "openai/gpt-5.5",
+    "timeout_seconds": 3600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "critical-thinking",
+      "deep-code-review",
+      "data-contract-tracing",
+      "dependency-audit",
+      "cross-room-coherence",
+      "post-mortem",
+      "review-the-review",
+      "technical-debt-assessment",
+      "mentorship-feedback",
+      "architecture-conformance",
+      "brain-ops",
+      "war-room-communication"
+    ],
+    "mcp_refs": []
+  },
+  "subcommand-manifest-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "tech-artist": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 1200,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "technical-design-architect": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "create-architecture",
+      "write-adr",
+      "design-md",
+      "stitch-design"
+    ],
+    "mcp_refs": []
+  },
+  "technical-writer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 1200,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles",
+      "Chrome"
+    ],
+    "mcp_refs": [
+      "knowledge",
+      "chrome-devtools"
+    ]
+  },
+  "test-engineer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "web-research"
+    ],
+    "mcp_refs": []
+  },
+  "themed-blog-architect": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "research",
+      "create-architecture"
+    ],
+    "mcp_refs": []
+  },
+  "unique-role": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 300,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "ux-researcher": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "video-platform-architect": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "vietnamese-content-strategist": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "war-room-message-explorer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "web-designer": {
+    "default_model": "google-vertex/gemini-3-flash-preview",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "global",
+      "roles"
+    ],
+    "mcp_refs": []
+  },
+  "dependency-test-role": {
+    "default_model": "google-vertex/gemini-1.5-pro",
+    "timeout_seconds": 300,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
   }
 }

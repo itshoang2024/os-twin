@@ -29,8 +29,9 @@ BeforeAll {
 }
 
 Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
-    It "Builds lifecycle with three candidates (position-based)" {
-        # Position-based: [0]=worker, [1..N]=evaluators
+    It "Builds lifecycle with three candidates as worker plus one canonical reviewer" {
+        # Position-based: [0]=worker, [1]=reviewer.
+        # Additional candidates remain advisory metadata outside the lifecycle.
         # RoleOverrides kept for backward compat — InstanceType is ignored,
         # only Name and position matter.
         $roles = @(
@@ -43,33 +44,27 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         $lc = Build-LifecycleV2 -RoleOverrides $roles -MaxRetries 3
 
-        # State check — position-based: [0]=worker, [1..N]=evaluators
+        # State check — position-based: [0]=worker, [1]=reviewer
         $lc.initial_state | Should -Be "developing"
         $lc.states.developing.role | Should -Be "architect"
         $lc.states.developing.type | Should -Be "work"
         $lc.states.developing.signals.done.target | Should -Be "review"
 
-        # Position [1] is first evaluator → "review"
+        # Position [1] is the only lifecycle reviewer.
         $lc.states.review.role | Should -Be "engineer"
         $lc.states.review.type | Should -Be "review"
-        $lc.states.review.signals.done.target | Should -Be "review-2"
-        $lc.states.review.signals.pass.target | Should -Be "review-2" -Because "pass remains a legacy accepted success signal"
+        $lc.states.review.signals.done.target | Should -Be "done"
+        $lc.states.review.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
         @($lc.states.review.signals.Keys)[0] | Should -Be "done"
 
-        # Position [2] is second evaluator → "review-2" (final gate)
-        $lc.states."review-2".role | Should -Be "qa"
-        $lc.states."review-2".type | Should -Be "review"
-        $lc.states."review-2".signals.done.target | Should -Be "passed"
-        $lc.states."review-2".signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+        @($lc.states.Keys) | Should -Not -Contain "review-2"
 
-        # Evaluator fail → optimize (worker's optimize state)
-        $lc.states."review-2".signals.fail.target | Should -Be "optimize"
-
-        # Optimize and fixing states carry the worker role
+        # Review fail and optimize keep the worker loop.
+        $lc.states.review.signals.fail.target | Should -Be "optimize"
         $lc.states.optimize.role | Should -Be "architect"
-        $lc.states.fixing.role | Should -Be "architect"
-        $lc.states.fixing.type | Should -Be "work"
-        $lc.states.fixing.signals.done.target | Should -Be "review"
+        $lc.states.optimize.type | Should -Be "work"
+        $lc.states.optimize.signals.done.target | Should -Be "review"
+        @($lc.states.Keys) | Should -Not -Contain "fixing"
         Assert-NoLifecycleErrorSignal $lc
     }
 
@@ -93,8 +88,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Injected QA review state
         $lc.states.review.role | Should -Be "qa"
         $lc.states.review.type | Should -Be "review"
-        $lc.states.review.signals.done.target | Should -Be "passed"
-        $lc.states.review.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+        $lc.states.review.signals.done.target | Should -Be "done"
+        $lc.states.review.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
         @($lc.states.review.signals.Keys)[0] | Should -Be "done"
     }
 
@@ -110,8 +105,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         # Single candidate → QA review injected
         $lc.states.review.role | Should -Be "qa"
         $lc.states.review.signals.fail.target | Should -Be "optimize"
-        $lc.states.review.signals.done.target | Should -Be "passed"
-        $lc.states.review.signals.pass.target | Should -Be "passed" -Because "pass remains a legacy accepted success signal"
+        $lc.states.review.signals.done.target | Should -Be "done"
+        $lc.states.review.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
 
         Assert-NoLifecycleErrorSignal $lc
     }
@@ -131,8 +126,10 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
         $parsed = $json | ConvertFrom-Json
         $parsed.version | Should -Be 2
         $parsed.initial_state | Should -Be "developing"
-        $parsed.states.passed.type | Should -Be "terminal"
-        $parsed.states.'failed-final'.type | Should -Be "terminal"
+        $parsed.states.done.type | Should -Be "terminal"
+        $parsed.states.failed.type | Should -Be "terminal"
+        @($parsed.states.PSObject.Properties.Name) | Should -Not -Contain "passed"
+        @($parsed.states.PSObject.Properties.Name) | Should -Not -Contain "failed-final"
     }
 
     It "All generated states omit error lifecycle signals" {
@@ -146,12 +143,9 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         $lc = Build-LifecycleV2 -RoleOverrides $roles -MaxRetries 3
 
-        # Position-based: review and review-2
-        foreach ($stateName in @('review', 'review-2')) {
-            $state = $lc.states[$stateName]
-            $state | Should -Not -BeNullOrEmpty -Because "state '$stateName' should exist"
-            $state.type | Should -Be 'review'
-        }
+        $lc.states.review | Should -Not -BeNullOrEmpty -Because "canonical review state should exist"
+        $lc.states.review.type | Should -Be 'review'
+        @($lc.states.Keys) | Should -Not -Contain 'review-2'
         Assert-NoLifecycleErrorSignal $lc
     }
 

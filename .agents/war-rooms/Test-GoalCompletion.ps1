@@ -6,7 +6,7 @@
     Reads the config.json goal contract (definition_of_done, acceptance_criteria)
     and the engineer's output/artifacts, then evaluates each goal as met/not_met/partial.
 
-    This is the automated goal gate that runs after QA pass but before final "passed" status.
+    This is the automated goal gate that runs after QA pass but before final "done" status.
 
 .PARAMETER RoomDir
     Path to the war-room directory.

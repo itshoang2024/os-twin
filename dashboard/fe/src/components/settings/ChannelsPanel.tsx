@@ -24,7 +24,7 @@ const NOTIFICATION_EVENTS = [
   },
   {
     id: 'epic.passed',
-    title: 'Epic Passed',
+    title: 'Epic Done',
     description: 'epic.passed',
     group: 'Epic',
   },

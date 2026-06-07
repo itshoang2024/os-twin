@@ -21,7 +21,7 @@ param(
 $rooms = Get-ChildItem -Path $WarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
 
 $total = 0
-$passed = 0
+$done = 0
 $failed = 0
 $blocked = 0
 $active = 0
@@ -36,22 +36,30 @@ foreach ($rd in $rooms) {
         (Get-Content (Join-Path $rd.FullName "task-ref") -Raw).Trim()
     } else { "?" }
 
-    switch ($status) {
-        'passed'       { $passed++ }
-        'failed-final' { $failed++ }
-        'blocked'      { $blocked++ }
-        'pending'      { $pending++ }
-        default        { $active++ }
+    $canonicalStatus = switch ($status) {
+        'passed'       { 'done' }
+        'failed-final' { 'failed' }
+        'fixing'       { 'optimize' }
+        default        { $status }
+    }
+
+    switch ($canonicalStatus) {
+        'done'    { $done++ }
+        'failed'  { $failed++ }
+        'blocked' { $blocked++ }
+        'pending' { $pending++ }
+        default   { $active++ }
     }
 
     $roomDetails += [ordered]@{
         room_id  = $rd.Name
         task_ref = $taskRef
-        status   = $status
+        status   = $canonicalStatus
+        raw_status = $status
     }
 }
 
-$pctComplete = if ($total -gt 0) { [math]::Round(($passed / $total) * 100, 1) } else { 0 }
+$pctComplete = if ($total -gt 0) { [math]::Round(($done / $total) * 100, 1) } else { 0 }
 
 # --- Read DAG for critical path progress ---
 $cpProgress = ""
@@ -68,7 +76,12 @@ if (Test-Path $dagFile) {
                 $cpStatus = if (Test-Path (Join-Path $cpRoomDir "status")) {
                     (Get-Content (Join-Path $cpRoomDir "status") -Raw).Trim()
                 } else { "pending" }
-                if ($cpStatus -eq 'passed') { $cpPassed++ }
+                $cpCanonical = switch ($cpStatus) {
+                    'passed'       { 'done' }
+                    'failed-final' { 'failed' }
+                    default        { $cpStatus }
+                }
+                if ($cpCanonical -eq 'done') { $cpPassed++ }
             }
         }
         $cpProgress = "$cpPassed/$cpLen"
@@ -79,7 +92,8 @@ if (Test-Path $dagFile) {
 $progressData = [ordered]@{
     updated_at     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     total          = $total
-    passed         = $passed
+    done           = $done
+    passed         = $done
     failed         = $failed
     blocked        = $blocked
     active         = $active
@@ -92,7 +106,7 @@ $progressData | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $WarRoom
 
 # --- Write PROGRESS.md ---
 $blockedList = $roomDetails | Where-Object { $_.status -eq 'blocked' }
-$failedList = $roomDetails | Where-Object { $_.status -eq 'failed-final' }
+$failedList = $roomDetails | Where-Object { $_.status -eq 'failed' }
 
 $md = @"
 # Progress Report
@@ -104,7 +118,7 @@ $md = @"
 | Metric | Value |
 |--------|-------|
 | Total | $total |
-| Passed | $passed |
+| Done | $done |
 | Failed | $failed |
 | Blocked | $blocked |
 | Active | $active |

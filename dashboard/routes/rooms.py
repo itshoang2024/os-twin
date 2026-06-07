@@ -31,11 +31,13 @@ async def list_rooms(user: dict = Depends(get_current_user)):
     summary = {"total": len(rooms)}
     statuses = (
         "pending", "developing", "review", 
-        "fixing", "passed", "failed-final"
+        "optimize", "done", "failed"
     )
     for status in statuses:
         s_key = status.replace("-", "_")
         summary[s_key] = sum(1 for r in rooms if r["status"] == status)
+    summary["passed"] = summary.get("done", 0)
+    summary["failed_final"] = summary.get("failed", 0)
 
     return {
         "rooms": rooms, 
@@ -247,7 +249,7 @@ async def room_action(room_id: str, background_tasks: BackgroundTasks, action: s
 
     status_file = room_dir / "status"
     if action == "stop":
-        status_file.write_text("failed-final")
+        status_file.write_text("failed")
     elif action == "pause":
         status_file.write_text("paused")
     elif action == "resume" or action == "start":

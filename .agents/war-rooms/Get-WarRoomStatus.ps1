@@ -82,7 +82,7 @@ function Get-StatusData {
         developing  = 0
         optimize    = 0
         review      = 0
-        fixing      = 0
+        done        = 0
         passed      = 0
         failed      = 0
     }
@@ -179,20 +179,27 @@ function Get-StatusData {
         # Count by status — canonical state names (principle 5)
         # 'engineering' is a legacy alias for 'developing'; both map to the same counter.
         # 'review', 'review-2', 'review-3' are position-based evaluator states.
-        switch -Regex ($status) {
+        $canonicalStatus = switch ($status) {
+            'passed'       { 'done' }
+            'failed-final' { 'failed' }
+            'fixing'       { 'optimize' }
+            default        { $status }
+        }
+
+        switch -Regex ($canonicalStatus) {
             '^pending$'         { $summary.pending++ }
             '^(engineering|developing)$' { $summary.developing++ }
             '^optimize$'        { $summary.optimize++ }
             '^review(-\d+)?$'   { $summary.review++ }
-            '^fixing$'          { $summary.fixing++ }
-            '^passed$'          { $summary.passed++ }
-            '^failed-final$'    { $summary.failed++ }
+            '^done$'            { $summary.done++; $summary.passed++ }
+            '^failed$'          { $summary.failed++ }
         }
 
         $rooms += [PSCustomObject]@{
             room_id       = $dir.Name
             task_ref      = $taskRef
-            status        = $status
+            status        = $canonicalStatus
+            raw_status    = $status
             retries       = [int]$retries
             messages      = $msgCount
             active_pids   = $pidStr
@@ -231,9 +238,7 @@ function Show-FormattedStatus {
             '^(engineering|developing)$' { 'Yellow' }
             '^optimize$'        { 'DarkYellow' }
             '^review(-\d+)?$'   { 'Cyan' }
-            '^fixing$'          { 'DarkYellow' }
-            '^passed$'          { 'Green' }
-            '^failed-final$'    { 'Red' }
+            '^done$'            { 'Green' }
             '^failed$'          { 'Red' }
             '^triage$'          { 'Magenta' }
             default             { 'White' }
@@ -246,7 +251,7 @@ function Show-FormattedStatus {
     $s = $Data.summary
     $active = $s.developing + $s.optimize
     Write-Host ""
-    Write-Host "  Summary: $($s.total) total | $($s.pending) pending | $active active | $($s.review) review | $($s.fixing) fixing | $($s.passed) passed | $($s.failed) failed" -ForegroundColor White
+    Write-Host "  Summary: $($s.total) total | $($s.pending) pending | $active active | $($s.review) review | $($s.done) done | $($s.failed) failed" -ForegroundColor White
     Write-Host ""
 }
 

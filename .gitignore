@@ -64,6 +64,8 @@ dashboard/.agents/
 # ── Generated docs ────────────────────────────────────────────────────────────
 **/TODO.md
 **/release_note.md
+docs/public/install.sh
+docs/public/installer.sh
 
 # ── Test fixtures (war-room data should not be committed) ──────────────────────
 .agents/tests/war-rooms/room-*/

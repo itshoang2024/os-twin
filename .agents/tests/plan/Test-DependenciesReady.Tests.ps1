@@ -24,8 +24,8 @@ Describe "Test-DependenciesReady" {
         }
     }
 
-    Context "All dependencies passed" {
-        It "returns Ready=true when all deps have passed" {
+    Context "All dependencies done" {
+        It "returns Ready=true when all deps are done" {
             # Create room-001 (no deps) and room-002 (depends on TASK-001)
             & $script:NewWarRoom -RoomId "room-001" -TaskRef "TASK-001" `
                                  -TaskDescription "Auth" -WarRoomsDir $script:warRoomsDir
@@ -33,8 +33,8 @@ Describe "Test-DependenciesReady" {
                                  -TaskDescription "Dashboard" -WarRoomsDir $script:warRoomsDir `
                                  -DependsOn @("TASK-001")
 
-            # Set room-001 to passed
-            "passed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
+            # Set room-001 to done
+            "done" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
 
             # Build DAG
             & $script:BuildDag -WarRoomsDir $script:warRoomsDir | Out-Null
@@ -82,7 +82,7 @@ Describe "Test-DependenciesReady" {
         }
     }
 
-    Context "Dependency failed-final" {
+    Context "Dependency failed" {
         It "returns Ready=false, Reason=blocked when dep failed" {
             & $script:NewWarRoom -RoomId "room-001" -TaskRef "TASK-001" `
                                  -TaskDescription "Auth" -WarRoomsDir $script:warRoomsDir
@@ -90,7 +90,7 @@ Describe "Test-DependenciesReady" {
                                  -TaskDescription "Dashboard" -WarRoomsDir $script:warRoomsDir `
                                  -DependsOn @("TASK-001")
 
-            "failed-final" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
+            "failed" | Out-File -FilePath (Join-Path $script:warRoomsDir "room-001" "status") -NoNewline
             & $script:BuildDag -WarRoomsDir $script:warRoomsDir | Out-Null
 
             $roomDir = Join-Path $script:warRoomsDir "room-002"
