@@ -68,6 +68,22 @@ You do not need to write raw status files. Choose one of these decision intents 
 
 Step 6 in mediation is therefore not a guess: decide the **intent**, post the matching message type, and include enough rationale for the deterministic loop to move the lifecycle forward.
 
+Every triage channel message must end with exactly one compact routing block so the lifecycle can detect the next state consistently:
+
+```markdown
+## TRIAGE_DECISION
+message: <done | fix | design-review | plan-update | blocked | reject>
+next: <review | optimize | developing | triage | blocked | failed>
+```
+
+Do not add extra keys to this block. If the correct next state is uncertain, or the escalation appears stale/already answered, default to returning control to the escalator:
+
+```markdown
+## TRIAGE_DECISION
+message: done
+next: review
+```
+
 ### Context Habits
 
 - Look for prior decisions or similar work before assigning or judging an epic.

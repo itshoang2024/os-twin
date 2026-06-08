@@ -1430,13 +1430,33 @@ Judge:
 
 You MUST post exactly one lifecycle decision message to the war-room channel as `manager`. Do not answer only in plain text. Do not say "no new channel post should be made".
 
-Allowed triage decision message types:
-- `done` to the escalator when the escalation is resolved or already answered. This sends lifecycle back to review.
-- `fix` to the responsible member when clarification or rework is needed. Include `Retry impact: none` for clarification-only routing.
-- `redesign` when the plan/approach must restart from developing.
-- `reject` when the room should fail.
+End your channel message with exactly one compact machine-readable block:
 
-Include classification, evidence considered, decision, next role, retry impact, and return path to the original escalator.
+```markdown
+## TRIAGE_DECISION
+message: <done | fix | design-review | plan-update | blocked | reject>
+next: <review | optimize | developing | triage | blocked | failed>
+```
+
+Do not add extra keys to `TRIAGE_DECISION`.
+
+Decision mapping:
+- `message: done` / `next: review` when the escalation is resolved, stale, already answered, or the reviewer can continue.
+- `message: fix` / `next: optimize` when the responsible member must clarify or change delivered work.
+- `message: design-review` / `next: triage` when a specialist/domain decision is required before routing work.
+- `message: plan-update` / `next: blocked` when requirements or acceptance criteria must be clarified outside the room.
+- `message: blocked` / `next: blocked` when an external dependency prevents progress.
+- `message: reject` / `next: failed` when the room cannot safely continue.
+
+Fallback rule: if you cannot confidently determine the next lifecycle state, or if the escalation appears stale/already answered, return control to the escalator with:
+
+```markdown
+## TRIAGE_DECISION
+message: done
+next: review
+```
+
+Include concise classification, evidence considered, decision, next role, retry impact, and return path above the `TRIAGE_DECISION` block.
 "@
 }
 

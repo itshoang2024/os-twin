@@ -563,7 +563,11 @@ Describe "Invoke-TriageMediation" {
         $prompt | Should -Match "## Last Escalator Message To Review"
         $prompt | Should -Match "Need engineer to confirm baseUrl"
         $prompt | Should -Match "MUST post exactly one lifecycle decision message"
-        $prompt | Should -Match "`done` to the escalator"
+        $prompt | Should -Match "## TRIAGE_DECISION"
+        $prompt | Should -Match "message: <done \| fix \| design-review \| plan-update \| blocked \| reject>"
+        $prompt | Should -Match "next: <review \| optimize \| developing \| triage \| blocked \| failed>"
+        $prompt | Should -Match "message: done"
+        $prompt | Should -Match "next: review"
     }
 
     It "uses the causal pre-triage escalation when triage state_changed_at is newer" {

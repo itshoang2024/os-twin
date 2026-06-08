@@ -22,7 +22,7 @@ This skill guides the manager through classifying and routing QA failures. Every
 | Artifact | Format | Location |
 |----------|--------|----------|
 | Triage context | Markdown | `<war-room>/triage-context.md` |
-| Routing message | Channel | `fix` / `design-review` / `plan-update` |
+| Routing message | Channel | `done` / `fix` / `design-review` / `plan-update` / `blocked` / `reject` with compact `TRIAGE_DECISION` block |
 
 ## Instructions
 
@@ -102,6 +102,22 @@ Post the appropriate channel message:
 | Max retries exceeded | `escalate` | human/manager |
 
 Always include QA feedback **verbatim** when routing to the engineer.
+
+Every manager triage channel message must end with exactly one compact routing block:
+
+```markdown
+## TRIAGE_DECISION
+message: <done | fix | design-review | plan-update | blocked | reject>
+next: <review | optimize | developing | triage | blocked | failed>
+```
+
+Do not add extra keys to the block. If the manager cannot confidently determine a more specific route, or the escalation is stale/already answered by later channel evidence, use the fallback:
+
+```markdown
+## TRIAGE_DECISION
+message: done
+next: review
+```
 
 ## Verification
 
