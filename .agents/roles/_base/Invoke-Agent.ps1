@@ -607,7 +607,10 @@ if (Test-Path $retriesFile) {
 }
 
 if ($ContinueSession -or $isLifecycleRetry) { $extraCliArgs += "--continue" }
-if ($ForkSession) { $extraCliArgs += "--fork --continue" }
+if ($ForkSession) {
+    $extraCliArgs += "--fork"
+    if ($extraCliArgs -notcontains "--continue") { $extraCliArgs += "--continue" }
+}
 if ($ShareSession) { $extraCliArgs += "--share" }
 if ($Command) { $extraCliArgs += "--command"; $extraCliArgs += $Command }
 if ($AttachUrl) { $extraCliArgs += "--attach"; $extraCliArgs += $AttachUrl }
