@@ -35,7 +35,8 @@ Before reviewing ANY code, load both layers of the brain:
 ```
 memory_search(query="<epic/task terms, module names, data shapes>")
 memory_tree()
-knowledge_query(namespace="<project-docs>", query="<relevant standards>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<project-namespace>", query="<relevant standards>", mode="summarized")
 ```
 
 This tells you:

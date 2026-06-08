@@ -31,7 +31,8 @@ You don't build features users see. You build the **platform that feature teams 
 ```
 memory_search(query="<platform, SDK, pipeline, DX terms>")
 memory_tree()
-knowledge_query(namespace="<platform-docs>", query="<infrastructure, tooling, APIs>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<relevant-namespace>", query="<infrastructure, tooling, APIs>", mode="summarized")
 ```
 
 ### Phase 1 — SDK & Library Design

@@ -62,8 +62,9 @@ Before reviewing code or running tests:
 memory_tree()
 memory_search(query="<EPIC-XXX or TASK-XXX> latest engineer changes decisions files")
 memory_search(query="<feature names, APIs, components> recent implementation")
-knowledge_query("project-docs", "What are the conventions and test commands for <area>?", mode="summarized")
-knowledge_query("project-docs", "What are the architecture, data contract, and e2e testing expectations for <feature area>?", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query("<project-namespace>", "What are the conventions and test commands for <area>?", mode="summarized")
+knowledge_query("<project-namespace>", "What are the architecture, data contract, and e2e testing expectations for <feature area>?", mode="summarized")
 ```
 
 Treat discrepancies between the brief, tasks, memory, engineer claims, and code

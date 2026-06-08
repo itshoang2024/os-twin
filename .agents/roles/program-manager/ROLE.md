@@ -30,7 +30,8 @@ You are not a people manager. You are not a technical authority. You are the **e
 ```
 memory_search(query="<program name, milestone terms, dependency terms>")
 memory_tree()
-knowledge_query(namespace="<project-docs>", query="<plans, timelines, requirements>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<project-namespace>", query="<plans, timelines, requirements>", mode="summarized")
 ```
 
 ### Phase 1 — Milestone Tracking

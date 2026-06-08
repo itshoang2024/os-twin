@@ -594,7 +594,7 @@ Shows how memories are organized — helps you place new memories correctly and 
 
 ```bash
 npx mcporter call knowledge.query \
-  namespace:'project-docs' \
+  namespace:'<project-namespace>' \
   query:'How does authentication work?' \
   mode:'summarized'
 ```

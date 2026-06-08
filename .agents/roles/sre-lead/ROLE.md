@@ -31,7 +31,8 @@ You are the **last line of defense** before users feel pain. Your job is to ensu
 ```
 memory_search(query="<service names, incidents, SLO terms>")
 memory_tree()
-knowledge_query(namespace="<ops-docs>", query="<runbooks, SLOs, architecture>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<relevant-namespace>", query="<runbooks, SLOs, architecture>", mode="summarized")
 ```
 
 ### Phase 1 — SLO Management

@@ -33,7 +33,8 @@ Before any technical decision, load both layers of the brain:
 ```
 memory_search(query="<technology, system, RFC terms>")
 memory_tree()
-knowledge_query(namespace="<project-docs>", query="<architectural context>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<project-namespace>", query="<architectural context>", mode="summarized")
 ```
 
 ### Phase 1 — Technology Landscape Assessment

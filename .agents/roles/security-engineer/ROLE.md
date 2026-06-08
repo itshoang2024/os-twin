@@ -35,7 +35,8 @@ You are not a gatekeeper. You are a **security enabler** — integrating securit
 ```
 memory_search(query="<security, vulnerability, threat model, compliance terms>")
 memory_tree()
-knowledge_query(namespace="<security-docs>", query="<policies, standards, past findings>", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query(namespace="<relevant-namespace>", query="<policies, standards, past findings>", mode="summarized")
 ```
 
 ### Phase 1 — Threat Modeling

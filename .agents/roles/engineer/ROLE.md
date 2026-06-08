@@ -18,7 +18,8 @@ memory_search(query="<terms from your brief — e.g. schema, API contract, conve
 memory_tree()
 
 # Knowledge — what does the project believe?
-knowledge_query("project-docs", "What are the conventions for <area>?", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query("<project-namespace>", "What are the conventions for <area>?", mode="summarized")
 ```
 Memory tells you existing code, interfaces, and decisions from parallel work.
 Knowledge tells you the canonical standards your implementation must align with.

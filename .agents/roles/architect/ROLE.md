@@ -45,7 +45,8 @@ memory_search(query="<terms from your design scope — e.g. auth, schema, data m
 memory_tree()
 
 # Knowledge — what are the existing architectural standards?
-knowledge_query("project-docs", "What is the current architecture for <area>?", mode="summarized")
+knowledge_list_namespaces()
+knowledge_query("<project-namespace>", "What is the current architecture for <area>?", mode="summarized")
 ```
 Memory tells you what workers have built and what decisions were made.
 Knowledge tells you the canonical architecture your design must extend.
@@ -92,4 +93,3 @@ memory_save(
 ```
 
 This is NOT optional. Other agents in other rooms depend on this context to build correctly.
-
