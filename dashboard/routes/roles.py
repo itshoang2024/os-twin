@@ -792,6 +792,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
     diagnostics so the UI can show actionable information instead of raw logs.
     """
     import re
+    import os
     import shutil
     import subprocess
     import time
@@ -809,6 +810,16 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
     logger.info("test_model_connection: %r → resolved %r", version, resolved_version)
 
     cmd = [opencode, "run", "just say YES", "--model", resolved_version, "--dir", "/tmp"]
+    env = {**os.environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"}
+    if resolved_version.startswith("github-copilot-oauth/") and not env.get("GITHUB_COPILOT_TOKEN"):
+        try:
+            from dashboard.lib.settings.github_copilot_auth import get_saved_github_copilot_token
+
+            token = get_saved_github_copilot_token()
+            if token:
+                env["GITHUB_COPILOT_TOKEN"] = token
+        except Exception:
+            logger.exception("Failed to load saved GitHub Copilot token for model test")
 
     def _strip_ansi(text: str) -> str:
         return re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", text)
@@ -819,7 +830,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             capture_output=True,
             text=True,
             timeout=60,
-            env={**__import__("os").environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"},
+            env=env,
         )
         return (
             result.returncode,

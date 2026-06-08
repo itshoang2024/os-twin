@@ -878,15 +878,28 @@ def _build_configured_models(
     """
     # Read the opencode.json provider block once
     custom_providers = _read_opencode_custom_providers()
+    suppress_native_copilot = (
+        "github-copilot" in configured_providers
+        and "github-copilot-oauth" in configured_providers
+        and "github-copilot-oauth" in custom_providers
+    )
+    visible_provider_ids = {
+        provider_id
+        for provider_id in configured_providers.keys()
+        if not (suppress_native_copilot and provider_id == "github-copilot")
+    }
 
     result: Dict[str, Any] = {
         "loaded_at": _iso_now(),
         "source": MODELS_DEV_URL,
-        "configured_provider_ids": sorted(configured_providers.keys()),
+        "configured_provider_ids": sorted(visible_provider_ids),
         "providers": {},
     }
 
     for provider_id, provider_cfg in configured_providers.items():
+        if suppress_native_copilot and provider_id == "github-copilot":
+            continue
+
         raw_provider = raw_catalog.get(provider_id)
         custom_block = custom_providers.get(provider_id)
 

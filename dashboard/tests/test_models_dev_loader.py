@@ -598,13 +598,53 @@ def test_rebuild_configured_models_from_cache_picks_up_github_copilot(tmp_path):
 
     with patch("dashboard.lib.settings.models_dev_loader.AUTH_JSON_PATH", auth_path):
         with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
-            with patch("dashboard.lib.settings.models_dev_loader._HOME_RAW_PATH", raw_path):
-                with patch("dashboard.lib.settings.models_dev_loader.CONFIGURED_MODELS_PATH", configured_path):
-                    result = rebuild_configured_models_from_cache()
+            with patch("dashboard.lib.settings.models_dev_loader.USER_OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+                with patch("dashboard.lib.settings.models_dev_loader._HOME_RAW_PATH", raw_path):
+                    with patch("dashboard.lib.settings.models_dev_loader.CONFIGURED_MODELS_PATH", configured_path):
+                        result = rebuild_configured_models_from_cache()
 
     assert "github-copilot" in result["configured_provider_ids"]
     assert result["providers"]["github-copilot"]["models"]["gpt-5.2"]["name"] == "GPT-5.2"
     assert configured_path.exists()
+
+
+def test_github_copilot_oauth_alias_suppresses_native_catalog_models(monkeypatch):
+    from dashboard.lib.settings import models_dev_loader as loader
+
+    raw_catalog = {
+        "github-copilot": {
+            "id": "github-copilot",
+            "name": "GitHub Copilot",
+            "models": {
+                "gpt-5.2": {"id": "gpt-5.2", "name": "GPT-5.2"},
+                "claude-sonnet-4.5": {"id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5"},
+            },
+        }
+    }
+    configured = {
+        "github-copilot": {"type": "oauth", "source": "auth.json", "has_key": True},
+        "github-copilot-oauth": {"type": "custom", "source": "opencode.json", "has_key": True},
+    }
+    monkeypatch.setattr(
+        loader,
+        "_read_opencode_custom_providers",
+        lambda: {
+            "github-copilot-oauth": {
+                "options": {"baseURL": "https://api.githubcopilot.com", "apiKey": "{env:GITHUB_COPILOT_TOKEN}"},
+                "models": {
+                    "gpt-4o-mini": {"name": "gpt-4o-mini (Copilot)"},
+                    "gpt-4o": {"name": "gpt-4o (Copilot)"},
+                },
+            }
+        },
+    )
+
+    result = loader._build_configured_models(raw_catalog, configured)
+
+    assert "github-copilot" not in result["configured_provider_ids"]
+    assert "github-copilot" not in result["providers"]
+    assert "github-copilot-oauth" in result["configured_provider_ids"]
+    assert sorted(result["providers"]["github-copilot-oauth"]["models"].keys()) == ["gpt-4o", "gpt-4o-mini"]
 
 
 # ── configured_models structure ───────────────────────────────────────
