@@ -557,8 +557,16 @@ Describe "Invoke-TriageMediation" {
         Test-Path $result.PromptPath | Should -BeTrue
 
         $prompt = Get-Content $result.PromptPath -Raw
-        $prompt | Should -Match "## Team Domain Context"
-        $prompt | Should -Match "engineer"
+        $prompt | Should -Match "# Manager Triage Decision Brief"
+        $prompt | Should -Match "## Canonical War-Room Path"
+        $prompt | Should -Match ([regex]::Escape($script:rd))
+        $prompt | Should -Match "Use this exact absolute room_dir"
+        $prompt | Should -Match "channel_post_message"
+        $prompt | Should -Match "## Current Epic Context"
+        $prompt | Should -Not -Match "## Team Domain Context"
+        $prompt | Should -Not -Match "# Role: Team Leader / Context Mediator"
+        $prompt | Should -Not -Match "### Lifecycle Ownership Rule"
+        $prompt | Should -Not -Match "Current epic members:"
         $prompt | Should -Match "qa-automation-engineer"
         $prompt | Should -Match "## Last Escalator Message To Review"
         $prompt | Should -Match "Need engineer to confirm baseUrl"
@@ -583,6 +591,60 @@ Describe "Invoke-TriageMediation" {
         $prompt | Should -Match "Causal message before triage timestamp"
     }
 
+
+    It "uses audit.log latest review-to-triage transition to select only the causal escalator message" {
+        function Add-TestJsonMessage($RoomDir, $Id, $Ts, $From, $To, $Type, $Body) {
+            $msg = [ordered]@{ v=1; id=$Id; ts=$Ts; from=$From; to=$To; type=$Type; ref='TASK-TEST'; body=$Body }
+            ($msg | ConvertTo-Json -Compress -Depth 8) | Out-File -FilePath (Join-Path $RoomDir 'channel.jsonl') -Encoding utf8 -Append
+        }
+
+        @(
+            '2026-06-08T09:09:52Z STATUS review -> triage',
+            '2026-06-08T10:55:13Z STATUS review -> triage'
+        ) | Out-File -FilePath (Join-Path $script:rd 'audit.log') -Encoding utf8
+        Add-TestJsonMessage $script:rd 'old-escalate' '2026-06-08T09:09:40Z' 'qa-automation-engineer' 'manager' 'escalate' 'OLD stale escalation'
+        Add-TestJsonMessage $script:rd 'new-escalate' '2026-06-08T10:55:00Z' 'qa' 'manager' 'escalate' 'NEW causal escalation'
+        Add-TestJsonMessage $script:rd 'after-anchor' '2026-06-08T10:56:00Z' 'qa' 'manager' 'escalate' 'AFTER anchor should be ignored'
+        Add-TestJsonMessage $script:rd 'engineer-noise' '2026-06-08T10:54:30Z' 'engineer' 'qa' 'done' 'Engineer noise must not become escalator'
+
+        $resolved = Resolve-LatestEscalatorMessage -RoomDir $script:rd -Lifecycle $script:lc -TriageStateName 'triage'
+
+        $resolved.id | Should -Be 'new-escalate'
+        $resolved.body | Should -Be 'NEW causal escalation'
+        $resolved.triage_anchor_ts | Should -Be '2026-06-08T10:55:13Z'
+        $resolved.triage_anchor_expected_role | Should -Be 'qa-automation-engineer'
+    }
+
+    It "builds a manager triage prompt containing only the lifecycle-anchored escalator message, not recent channel noise" {
+        function Add-TestJsonMessage($RoomDir, $Id, $Ts, $From, $To, $Type, $Body) {
+            $msg = [ordered]@{ v=1; id=$Id; ts=$Ts; from=$From; to=$To; type=$Type; ref='TASK-TEST'; body=$Body }
+            ($msg | ConvertTo-Json -Compress -Depth 8) | Out-File -FilePath (Join-Path $RoomDir 'channel.jsonl') -Encoding utf8 -Append
+        }
+
+        '2026-06-08T10:55:13Z STATUS review -> triage' | Out-File -FilePath (Join-Path $script:rd 'audit.log') -Encoding utf8
+        Add-TestJsonMessage $script:rd 'causal' '2026-06-08T10:55:00Z' 'qa' 'manager' 'escalate' 'ONLY THIS ESCALATOR SHOULD APPEAR'
+        Add-TestJsonMessage $script:rd 'later-engineer' '2026-06-08T10:55:05Z' 'engineer' 'qa' 'done' 'RECENT ENGINEER NOISE SHOULD NOT APPEAR'
+
+        $result = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef 'TASK-TEST'
+        $prompt = Get-Content $result.PromptPath -Raw
+
+        $prompt | Should -Match 'ONLY THIS ESCALATOR SHOULD APPEAR'
+        $prompt | Should -Not -Match 'RECENT ENGINEER NOISE SHOULD NOT APPEAR'
+        $prompt | Should -Not -Match '## Recent Member Messages'
+        $prompt | Should -Not -Match '## Team Domain Context'
+        $prompt | Should -Not -Match 'Current epic members:'
+        $prompt | Should -Match 'Triage anchor timestamp: 2026-06-08T10:55:13Z'
+    }
+
+    It "detects explicit next state from manager TRIAGE_DECISION when manager completes triage" {
+        '0' | Out-File (Join-Path $script:rd 'state_changed_at') -Encoding utf8 -NoNewline
+        & $script:postMsg -RoomDir $script:rd -From 'manager' -To 'qa' -Type 'done' -Ref 'TASK-TEST' -Body "Manager decision`n`n## TRIAGE_DECISION`nmessage: done`nnext: optimize"
+
+        $next = Get-ManagerTriageDecisionNextState -RoomDir $script:rd -Lifecycle $script:lc -MatchedSignal 'done' -DefaultTargetState 'review'
+
+        $next | Should -Be 'optimize'
+    }
+
     It "is idempotent when a manager triage signal is already present" {
         & $script:postMsg -RoomDir $script:rd -From "qa-automation-engineer" -To "manager" -Type "escalate" -Ref "TASK-TEST" -Body "VERDICT: ESCALATE"
         & $script:postMsg -RoomDir $script:rd -From "manager" -To "engineer" -Type "fix" -Ref "TASK-TEST" -Body "Manager decision already present."
@@ -590,6 +652,19 @@ Describe "Invoke-TriageMediation" {
         $second = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef "TASK-TEST"
         $second.AlreadyPresent | Should -BeTrue
         $second.Signal | Should -Be "fix"
+    }
+
+    It "keeps manager triage spawn lock active for the full manager timeout" {
+        $env:OSTWIN_MANAGER_TRIAGE_NO_AGENT = $null
+        $pidDir = Join-Path $script:rd "pids"
+        New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
+        $staleForDefaultLock = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 45
+        $staleForDefaultLock.ToString() | Out-File -FilePath (Join-Path $pidDir "manager.spawned_at") -Encoding utf8 -NoNewline
+
+        $result = Start-ManagerTriageAgent -RoomDir $script:rd -Prompt "triage prompt" -TaskRef "TASK-TEST"
+
+        $result.Started | Should -BeFalse
+        $result.Reason | Should -Be "spawn-lock"
     }
 }
 

@@ -709,7 +709,13 @@ while (-not $script:shuttingDown) {
                         if ($v2StateDef.type -eq 'triage') {
                             $mediation = Invoke-TriageMediation -RoomDir $roomDir -Lifecycle $lifecycle -TaskRef $taskRef
                             if ($mediation -and -not $mediation.AlreadyPresent) {
-                                Write-Log "INFO" "[$taskRef] Triage mediation requested '$($mediation.TargetRole)' to respond to escalation from '$($mediation.RaisedBy)'."
+                                if ($mediation.Started) {
+                                    Write-Log "INFO" "[$taskRef] Triage mediation started manager for escalation from '$($mediation.RaisedBy)'."
+                                } elseif ($mediation.Reason -in @('spawn-lock', 'pid-alive')) {
+                                    Write-Log "DEBUG" "[$taskRef] Triage mediation already in progress for escalation from '$($mediation.RaisedBy)' (reason=$($mediation.Reason))."
+                                } else {
+                                    Write-Log "DEBUG" "[$taskRef] Triage mediation did not start manager (reason=$($mediation.Reason))."
+                                }
                             }
                         }
 
@@ -719,6 +725,9 @@ while (-not $script:shuttingDown) {
                         if ($matchedSignal) {
                             $transitionDef = $v2StateDef.signals.$matchedSignal
                             $targetState = $transitionDef.target
+                            if ($v2StateDef.type -eq 'triage' -and (Get-Command Get-ManagerTriageDecisionNextState -ErrorAction SilentlyContinue)) {
+                                $targetState = Get-ManagerTriageDecisionNextState -RoomDir $roomDir -Lifecycle $lifecycle -MatchedSignal $matchedSignal -DefaultTargetState $targetState
+                            }
                             $actions = @()
                             if ($transitionDef.actions) { $actions = @($transitionDef.actions) }
 
@@ -1038,6 +1047,56 @@ while (-not $script:shuttingDown) {
             try { & $updateProgress -WarRoomsDir $WarRoomsDir } catch { }
         }
         $script:lastProgressUpdate = $nowEpoch
+    }
+
+    # Capture completed manager triage jobs before pruning. This records the
+    # Invoke-Agent result (log/output file) and falls back to the latest manager
+    # channel message from the canonical room so triage protocol can be audited
+    # even when the agent posts to the wrong path or fails to post.
+    Get-Job -Name "ostwin-triage-*-manager" -ErrorAction SilentlyContinue | Where-Object State -eq 'Completed' | ForEach-Object {
+        $triageJob = $_
+        $triageResult = $null
+        try { $triageResult = Receive-Job $triageJob -ErrorAction SilentlyContinue 2>&1 } catch { }
+        $exitCode = $null
+        $outputFile = ''
+        $outputPreview = ''
+        $resultObj = @($triageResult | Where-Object { $_ -and $_.PSObject.Properties['ExitCode'] } | Select-Object -Last 1)
+        if ($resultObj) {
+            $exitCode = $resultObj.ExitCode
+            if ($resultObj.PSObject.Properties['OutputFile']) { $outputFile = [string]$resultObj.OutputFile }
+            if ($resultObj.PSObject.Properties['Output'] -and $resultObj.Output) {
+                $outText = [string]$resultObj.Output
+                $outputPreview = if ($outText.Length -gt 300) { $outText.Substring(0, 300) + '...' } else { $outText }
+            }
+        }
+
+        $roomNameFromJob = ''
+        if ($triageJob.Name -match '^ostwin-triage-(?<room>.+)-manager$') { $roomNameFromJob = $Matches['room'] }
+        $triageRoomDir = if ($roomNameFromJob) { Join-Path $WarRoomsDir $roomNameFromJob } else { '' }
+        $latestManagerSummary = ''
+        if ($triageRoomDir -and (Test-Path $triageRoomDir) -and (Test-Path $readMessages)) {
+            try {
+                $latestManager = & $readMessages -RoomDir $triageRoomDir -FilterFrom 'manager' -Last 1 -AsObject
+                if ($latestManager -and $latestManager.Count -gt 0) {
+                    $m = @($latestManager)[-1]
+                    $body = if ($m.body) { [string]$m.body } else { '' }
+                    $bodyPreview = if ($body.Length -gt 220) { $body.Substring(0, 220) + '...' } else { $body }
+                    $latestManagerSummary = "latest_manager_message id=$($m.id) type=$($m.type) to=$($m.to) body=[$bodyPreview]"
+                }
+            } catch {
+                $latestManagerSummary = "latest_manager_message_error=$($_.Exception.Message)"
+            }
+        }
+
+        Write-Log "INFO" "Manager triage job '$($triageJob.Name)' completed exit=$exitCode outputFile='$outputFile' $latestManagerSummary outputPreview=[$outputPreview]"
+        Remove-Job $triageJob -Force -ErrorAction SilentlyContinue
+    }
+
+    Get-Job -Name "ostwin-triage-*-manager" -ErrorAction SilentlyContinue | Where-Object State -eq 'Failed' | ForEach-Object {
+        $failedOutput = $null
+        try { $failedOutput = Receive-Job $_ -ErrorAction SilentlyContinue 2>&1 } catch { }
+        Write-Log "ERROR" "Manager triage job '$($_.Name)' failed: $failedOutput"
+        Remove-Job $_ -Force -ErrorAction SilentlyContinue
     }
 
     # Prune completed PowerShell background jobs to prevent memory accumulation.

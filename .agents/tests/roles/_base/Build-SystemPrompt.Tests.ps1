@@ -27,8 +27,9 @@ Describe "Build-SystemPrompt" {
                 Out-File (Join-Path $rolePath "ROLE.md") -Encoding utf8
 
             $prompt = & $script:BuildPrompt -RolePath $rolePath
-            $prompt | Should -Match "Test Role"
-            $prompt | Should -Match "test role agent"
+            $prompt | Should -Match "# test-role"
+            $prompt | Should -Match "A test role for validation"
+            $prompt | Should -Not -Match "test role agent"
         }
 
         It "includes capabilities section" {

@@ -3,9 +3,9 @@
     Composes a full system prompt from role definition, skills, and war-room context.
 
 .DESCRIPTION
-    Reads a role definition (via Get-RoleDefinition), loads the ROLE.md prompt template,
-    injects skill context files, war-room goals, and task context to produce
-    a complete system prompt ready for the agent.
+    Reads a role definition (via Get-RoleDefinition) for metadata, but does not
+    embed ROLE.md prompt text. It injects lightweight role identity, war-room
+    goals, and task context to produce a complete system prompt ready for the agent.
 
     Part of Epic 4 — Extensible Role Engine.
 
@@ -54,13 +54,12 @@ $role = & $getRoleDef @roleArgs
 # --- Start building the prompt ---
 $sections = [System.Collections.Generic.List[string]]::new()
 
-# Section 1: Role prompt template
-if ($role.PromptTemplate) {
-    $sections.Add($role.PromptTemplate)
-}
-else {
-    $sections.Add("# $($role.Name)`n`nYou are a $($role.Description).")
-}
+# Section 1: Lightweight role identity
+# Do not embed ROLE.md / PromptTemplate here. Agent-specific role prompts are
+# supplied by the active opencode agent configuration. This builder only adds
+# compact metadata so downstream prompt compilation can stay focused on
+# brief.md + last channel message + TASKS.md.
+$sections.Add("# $($role.Name)`n`nYou are a $($role.Description).")
 
 # Section 2: Capabilities
 if ($role.Capabilities -and $role.Capabilities.Count -gt 0) {

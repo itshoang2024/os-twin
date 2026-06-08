@@ -575,6 +575,147 @@ function Convert-ManagerSignalTimestampToEpoch {
     }
 }
 
+
+function Get-LatestAuditTransitionToState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$TargetState
+    )
+
+    $auditFile = Join-Path $RoomDir 'audit.log'
+    if (-not (Test-Path $auditFile)) { return $null }
+
+    $latest = $null
+    foreach ($line in (Get-Content $auditFile -ErrorAction SilentlyContinue)) {
+        if ($line -match '^(?<ts>\S+)\s+STATUS\s+(?<from>\S+)\s+->\s+(?<to>\S+)') {
+            if ($Matches['to'] -ne $TargetState) { continue }
+            $epoch = Convert-ManagerSignalTimestampToEpoch -Timestamp $Matches['ts']
+            $entry = [pscustomobject]@{
+                Timestamp = $Matches['ts']
+                Epoch = $epoch
+                FromState = $Matches['from']
+                ToState = $Matches['to']
+                Line = $line
+            }
+            if (-not $latest -or $entry.Epoch -ge $latest.Epoch) { $latest = $entry }
+        }
+    }
+    return $latest
+}
+
+function Get-ManagerSignalsTargetingState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$FromState,
+        [Parameter(Mandatory)][string]$TargetState
+    )
+
+    $signals = [System.Collections.Generic.List[string]]::new()
+    $stateDef = if ($Lifecycle -and $Lifecycle.states) { $Lifecycle.states.$FromState } else { $null }
+    if ($stateDef -and $stateDef.signals) {
+        foreach ($prop in $stateDef.signals.PSObject.Properties) {
+            $target = if ($prop.Value -and $prop.Value.target) { [string]$prop.Value.target } else { '' }
+            if ($target -eq $TargetState) { $signals.Add($prop.Name) | Out-Null }
+        }
+    }
+    if ($signals.Count -eq 0) {
+        foreach ($fallback in @('escalate', 'fail')) { $signals.Add($fallback) | Out-Null }
+    }
+    return @($signals)
+}
+
+function Resolve-LatestEscalatorMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [string]$TriageStateName = 'triage'
+    )
+
+    $readMessages = _ctx 'readMessages'
+    $anchor = Get-LatestAuditTransitionToState -RoomDir $RoomDir -TargetState $TriageStateName
+    $fromState = if ($anchor) { $anchor.FromState } else { 'review' }
+    $anchorEpoch = if ($anchor) { [long]$anchor.Epoch } else { [long]::MaxValue }
+
+    $fromDef = if ($Lifecycle -and $Lifecycle.states) { $Lifecycle.states.$fromState } else { $null }
+    $expectedRole = if ($fromDef -and $fromDef.role) { ([string]$fromDef.role) -replace ':.*$', '' } else { '' }
+    $signalTypes = Get-ManagerSignalsTargetingState -Lifecycle $Lifecycle -FromState $fromState -TargetState $TriageStateName
+
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    foreach ($sigType in $signalTypes) {
+        try {
+            $msgs = & $readMessages -RoomDir $RoomDir -FilterType $sigType -AsObject
+            foreach ($msg in @($msgs)) {
+                $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $msg.ts
+                if ($anchor -and $msgTs -gt $anchorEpoch) { continue }
+                if ($expectedRole -and -not (Test-ManagerSignalSenderMatches -ExpectedRole $expectedRole -ActualRole $msg.from)) { continue }
+                $candidates.Add([pscustomobject]@{ Message = $msg; Epoch = $msgTs; Id = if ($msg.id) { [string]$msg.id } else { '' } }) | Out-Null
+            }
+        } catch {
+            Write-Log 'DEBUG' "[Resolve-LatestEscalatorMessage] Error reading '$sigType' from ${RoomDir}: $($_.Exception.Message)"
+        }
+    }
+
+    $selected = $null
+    if ($candidates.Count -gt 0) {
+        $selected = $candidates |
+            Sort-Object @{ Expression = 'Epoch'; Descending = $true }, @{ Expression = 'Id'; Descending = $true } |
+            Select-Object -First 1
+    }
+
+    if ($selected) {
+        $selected.Message | Add-Member -NotePropertyName triage_anchor_ts -NotePropertyValue $(if ($anchor) { $anchor.Timestamp } else { '' }) -Force
+        $selected.Message | Add-Member -NotePropertyName triage_anchor_from_state -NotePropertyValue $fromState -Force
+        $selected.Message | Add-Member -NotePropertyName triage_anchor_expected_role -NotePropertyValue $expectedRole -Force
+        return $selected.Message
+    }
+
+    return $null
+}
+
+function Get-ManagerTriageDecisionNextState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$MatchedSignal,
+        [Parameter(Mandatory)][string]$DefaultTargetState
+    )
+
+    $readMessages = _ctx 'readMessages'
+    $changedAt = 0
+    $changedFile = Join-Path $RoomDir 'state_changed_at'
+    if (Test-Path $changedFile) {
+        try { $changedAt = [long](Get-Content $changedFile -Raw).Trim() } catch { $changedAt = 0 }
+    }
+
+    $validStates = @()
+    if ($Lifecycle -and $Lifecycle.states) { $validStates = @($Lifecycle.states.PSObject.Properties.Name) }
+    $managerMsgs = @()
+    try { $managerMsgs = & $readMessages -RoomDir $RoomDir -FilterFrom 'manager' -AsObject } catch { $managerMsgs = @() }
+
+    $latest = $null
+    foreach ($msg in @($managerMsgs)) {
+        if ($msg.type -ne $MatchedSignal) { continue }
+        $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $msg.ts
+        if ($msgTs -lt $changedAt) { continue }
+        if (-not $latest -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latest.ts)) { $latest = $msg }
+    }
+    if (-not $latest -or -not $latest.body) { return $DefaultTargetState }
+
+    $body = [string]$latest.body
+    if ($body -match '(?is)##\s*TRIAGE_DECISION\s+.*?message:\s*(?<message>[A-Za-z0-9_-]+)\s+next:\s*(?<next>[A-Za-z0-9_-]+)') {
+        $message = $Matches['message']
+        $next = $Matches['next']
+        if ($message -eq $MatchedSignal -and ($validStates.Count -eq 0 -or $validStates -contains $next)) {
+            return $next
+        }
+    }
+    return $DefaultTargetState
+}
+
 function Test-ManagerSignalSenderMatches {
     [CmdletBinding()]
     param(
@@ -1372,29 +1513,35 @@ function Build-ManagerTriagePrompt {
         [Parameter(Mandatory)]$EscalationMessage
     )
 
-    $agentsDir = _ctx 'agentsDir'
-    $managerRolePath = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'roles' (Join-Path 'manager' 'ROLE.md')) } else { '' }
-    $managerRole = if ($managerRolePath -and (Test-Path $managerRolePath)) { Get-Content $managerRolePath -Raw } else { '# manager' }
-    $teamDomain = Build-ManagerTeamDomainContext -RoomDir $RoomDir -Lifecycle $Lifecycle
+    # Keep triage prompts intentionally narrow. Invoke-Agent already supplies
+    # the active manager role instructions; do not embed ROLE.md or member role
+    # summaries here. The manager should decide from only brief.md, TASKS.md,
+    # and the lifecycle-anchored last message from the previous candidate role.
     $briefPath = Join-Path $RoomDir 'brief.md'
     $brief = if (Test-Path $briefPath) { Get-Content $briefPath -Raw } else { '_No brief.md found._' }
     $tasksPath = Join-Path $RoomDir 'TASKS.md'
     $tasks = if (Test-Path $tasksPath) { Get-Content $tasksPath -Raw } else { '_No TASKS.md found._' }
 
-    $readMessages = _ctx 'readMessages'
-    $recent = @()
-    try { $recent = & $readMessages -RoomDir $RoomDir -Last 8 -AsObject } catch { $recent = @() }
-    $recentText = if ($recent -and $recent.Count -gt 0) {
-        (@($recent) | ForEach-Object { "### $($_.from) -> $($_.to) [$($_.type)]`n$($_.body)" }) -join "`n`n"
-    } else { '_No recent messages found._' }
-
     $escalationBody = if ($EscalationMessage.body) { [string]$EscalationMessage.body } else { '' }
     $raiser = if ($EscalationMessage.from) { [string]$EscalationMessage.from } else { 'unknown' }
+    $anchorTs = if ($EscalationMessage.PSObject.Properties['triage_anchor_ts']) { [string]$EscalationMessage.triage_anchor_ts } else { '' }
+    $anchorFromState = if ($EscalationMessage.PSObject.Properties['triage_anchor_from_state']) { [string]$EscalationMessage.triage_anchor_from_state } else { '' }
+    $anchorExpectedRole = if ($EscalationMessage.PSObject.Properties['triage_anchor_expected_role']) { [string]$EscalationMessage.triage_anchor_expected_role } else { '' }
+
+    $canonicalRoomDir = $RoomDir
 
     return @"
-$managerRole
+# Manager Triage Decision Brief
 
-$teamDomain
+You are the manager for this war-room triage pass. Use your active manager role instructions, but decide only from brief.md, TASKS.md, and the lifecycle-anchored last message from the previous candidate role below.
+
+## Canonical War-Room Path
+
+Use this exact absolute room_dir for every channel/artifact/warroom MCP call:
+
+$canonicalRoomDir
+
+Do not construct .agents/war-rooms/... relative to the project working directory. If a tool call needs room_dir, copy the exact path above.
 
 ## Current Epic Context
 
@@ -1406,9 +1553,13 @@ $brief
 ### TASKS.md
 $tasks
 
-## Recent Member Messages
+## Lifecycle-Anchored Escalator Resolution
 
-$recentText
+Triage anchor timestamp: $anchorTs
+Previous state: $anchorFromState
+Expected escalator role from lifecycle: $anchorExpectedRole
+
+The prompt intentionally excludes ROLE.md, member role summaries, and recent channel history. Use only the context in this prompt to choose the next lifecycle route.
 
 ## Last Escalator Message To Review
 
@@ -1418,45 +1569,45 @@ $escalationBody
 
 ## Your Triage Task
 
-Review the last message from the escalator/member as the team leader for this epic.
+Review only the lifecycle-anchored last message from the escalator/member as the team leader for this epic. The escalator message was resolved by scanning audit.log for the latest transition into triage and then scanning channel.jsonl for the latest matching message from that role before the transition.
 
 Judge:
 1. What is the actual blocker?
-2. Is the answer already in the brief, TASKS.md, artifacts, or prior messages?
+2. Is the answer already in brief.md, TASKS.md, or the anchored previous-candidate message?
 3. Which exact member/domain should answer or act next?
 4. Is this classification: CLARIFICATION, MEMBER_WORK_DEFECT, DOMAIN_DESIGN_ISSUE, PLAN_GAP, BLOCKED, or INVALID_ALREADY_ANSWERED?
 5. Should lifecycle retry budget be consumed? Default is NO for clarification/debate.
 6. What exact next channel message should be posted?
 
-You MUST post exactly one lifecycle decision message to the war-room channel as `manager`. Do not answer only in plain text. Do not say "no new channel post should be made".
+You MUST post exactly one lifecycle decision message to the war-room channel as `manager` using `channel_post_message` with the canonical `room_dir` above. Do not answer only in plain text. Do not say "no new channel post should be made".
 
-End your channel message with exactly one compact machine-readable block:
+The channel message body must include your short rationale and must end with exactly one compact machine-readable block:
 
-```markdown
+~~~markdown
 ## TRIAGE_DECISION
 message: <done | fix | design-review | plan-update | blocked | reject>
 next: <review | optimize | developing | triage | blocked | failed>
-```
+~~~
 
-Do not add extra keys to `TRIAGE_DECISION`.
+Do not add extra keys to TRIAGE_DECISION.
 
 Decision mapping:
-- `message: done` / `next: review` when the escalation is resolved, stale, already answered, or the reviewer can continue.
-- `message: fix` / `next: optimize` when the responsible member must clarify or change delivered work.
-- `message: design-review` / `next: triage` when a specialist/domain decision is required before routing work.
-- `message: plan-update` / `next: blocked` when requirements or acceptance criteria must be clarified outside the room.
-- `message: blocked` / `next: blocked` when an external dependency prevents progress.
-- `message: reject` / `next: failed` when the room cannot safely continue.
+- message: done / next: review when the escalation is resolved, stale, already answered, or the reviewer can continue.
+- message: fix / next: optimize when the responsible member must clarify or change delivered work.
+- message: design-review / next: triage when a specialist/domain decision is required before routing work.
+- message: plan-update / next: blocked when requirements or acceptance criteria must be clarified outside the room.
+- message: blocked / next: blocked when an external dependency prevents progress.
+- message: reject / next: failed when the room cannot safely continue.
 
 Fallback rule: if you cannot confidently determine the next lifecycle state, or if the escalation appears stale/already answered, return control to the escalator with:
 
-```markdown
+~~~markdown
 ## TRIAGE_DECISION
 message: done
 next: review
-```
+~~~
 
-Include concise classification, evidence considered, decision, next role, retry impact, and return path above the `TRIAGE_DECISION` block.
+Include concise classification, evidence considered, decision, next role, retry impact, and return path above the TRIAGE_DECISION block.
 "@
 }
 
@@ -1481,7 +1632,19 @@ function Start-ManagerTriageAgent {
         return [pscustomobject]@{ Started = $false; Reason = 'disabled'; PromptPath = $promptPath }
     }
 
-    if (Test-SpawnLock -RoomDir $RoomDir -Role 'manager') {
+    $timeout = Resolve-RoleTimeout -RoleName 'manager' -RoomDir $RoomDir
+    $lockGraceSeconds = $timeout
+    if ($lockGraceSeconds -le 0) {
+        $ctxStateTimeout = _ctx 'stateTimeout'
+        $lockGraceSeconds = if ($ctxStateTimeout -and [int]$ctxStateTimeout -gt 0) { [int]$ctxStateTimeout } else { 900 }
+    }
+
+    # Manager triage runs can legitimately exceed the generic 30s spawn-lock
+    # grace period. Keep the triage launch idempotent for the full manager
+    # timeout (or state-timeout fallback when role timeout delegates to the
+    # worker default) so the loop cannot spawn duplicate managers for the same
+    # pending escalation before the first manager posts its lifecycle decision.
+    if (Test-SpawnLock -RoomDir $RoomDir -Role 'manager' -GracePeriodSeconds $lockGraceSeconds) {
         return [pscustomobject]@{ Started = $false; Reason = 'spawn-lock'; PromptPath = $promptPath }
     }
     $managerPid = Join-Path $RoomDir (Join-Path 'pids' 'manager.pid')
@@ -1491,7 +1654,6 @@ function Start-ManagerTriageAgent {
 
     Write-SpawnLock -RoomDir $RoomDir -Role 'manager'
     Set-RoleRunStatus -RoomDir $RoomDir -Role 'manager' -Status 'active' | Out-Null
-    $timeout = Resolve-RoleTimeout -RoleName 'manager' -RoomDir $RoomDir
     $roomId = Split-Path $RoomDir -Leaf
     Start-Job -Name "ostwin-triage-$roomId-manager" -ScriptBlock {
         param($invoke, $room, $prompt, $timeoutSeconds)
@@ -1524,35 +1686,12 @@ function Invoke-TriageMediation {
         try { $changedAt = [long](Get-Content $changedFile -Raw).Trim() } catch { $changedAt = 0 }
     }
 
-    $escalations = @()
-    try { $escalations = & $readMessages -RoomDir $RoomDir -FilterType 'escalate' -AsObject } catch { $escalations = @() }
-    if (-not $escalations -or $escalations.Count -eq 0) { return $null }
-
-    $latestEscalation = $null
-    $latestAnyEscalation = $null
-    foreach ($msg in $escalations) {
-        $msgTs = Convert-ManagerSignalTimestampToEpoch -Timestamp $msg.ts
-        if (-not $latestAnyEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestAnyEscalation.ts)) {
-            $latestAnyEscalation = $msg
-        }
-        if ($msgTs -ge $changedAt -and (-not $latestEscalation -or $msgTs -ge (Convert-ManagerSignalTimestampToEpoch -Timestamp $latestEscalation.ts))) {
-            $latestEscalation = $msg
-        }
-    }
-    if (-not $latestEscalation -and $latestAnyEscalation) {
-        # The escalation that caused review -> triage is usually timestamped just
-        # BEFORE triage's state_changed_at. Filtering strictly against the new
-        # triage timestamp drops the causal message and leaves triage idle with
-        # no manager-output.txt. Fall back to the latest escalation when no
-        # post-triage escalation exists; Find-LatestSignal already validated the
-        # review escalation before the state transition.
-        Write-Log "DEBUG" "[$TaskRef] Triage using latest pre-triage escalation as causal context."
-        $latestEscalation = $latestAnyEscalation
-    }
+    $latestEscalation = Resolve-LatestEscalatorMessage -RoomDir $RoomDir -Lifecycle $Lifecycle -TriageStateName 'triage'
     if (-not $latestEscalation) {
-        Write-Log "WARN" "[$TaskRef] Triage has no escalation message to compile for manager."
+        Write-Log "WARN" "[$TaskRef] Triage has no lifecycle-anchored escalation message to compile for manager."
         return $null
     }
+    Write-Log "DEBUG" "[$TaskRef] Triage using lifecycle-anchored escalator message id='$($latestEscalation.id)' from='$($latestEscalation.from)' type='$($latestEscalation.type)' anchor='$($latestEscalation.triage_anchor_ts)'."
 
     $raiser = if ($latestEscalation.from) { [string]$latestEscalation.from } else { '' }
     $raiserBase = $raiser -replace ':.*$', ''
@@ -1562,7 +1701,7 @@ function Invoke-TriageMediation {
     $managerNotes = @"
 Manager triage judge requested for ESCALATE: $raiserBase asked for leadership mediation before review can proceed.
 
-The deterministic manager loop compiled the current epic member ROLE.md headers, recent messages, brief, TASKS.md, and the latest escalator message, then invoked --agent manager to judge the next action.
+The deterministic manager loop resolved the escalator from audit.log and channel.jsonl, then compiled only that lifecycle-anchored escalator message with the brief, TASKS.md, and team role context before invoking --agent manager.
 "@
 
     Write-TriageContext -RoomDir $RoomDir -Classification 'leader-triage' -QaFeedback $escalationBody -ArchitectGuidance '' -ManagerNotes $managerNotes
@@ -1613,6 +1752,10 @@ Export-ModuleMember -Function @(
     'Get-RoomOrchestrationContext',
     'Get-LatestFailureMessage',
     'Get-LatestChannelMessage',
+    'Get-LatestAuditTransitionToState',
+    'Get-ManagerSignalsTargetingState',
+    'Resolve-LatestEscalatorMessage',
+    'Get-ManagerTriageDecisionNextState',
     'Write-ManagerOrchestrationEvent',
     'Invoke-PlanFailFast',
     'Test-StateTimedOut',
