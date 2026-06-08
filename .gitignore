@@ -60,7 +60,7 @@ dashboard/nextjs/
 # ── Logs ──────────────────────────────────────────────────────────────────────
 .agents/logs/
 *.log
-
+.agents/plans/*
 # ── Bot (Telegram + Discord) ──────────────────────────────────────────────────
 bot/logs/
 bot/recordings/

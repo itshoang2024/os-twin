@@ -55,11 +55,14 @@ param(
 
     [switch]$EnablePlanning,
 
-    [ValidateSet('room-worktree','shared')]
-    [string]$WorkspaceIsolation = 'shared',
-
-    [string]$WorktreeRoot = ''
+    [ValidateSet('shared')]
+    [string]$WorkspaceIsolation = 'shared'
 )
+
+if ($WorkspaceIsolation -ne 'shared') {
+    Write-Warning "Unsupported workspace isolation '$WorkspaceIsolation'; using shared workspace."
+    $WorkspaceIsolation = 'shared'
+}
 
 # --- Resolve paths ---
 # The agentsDir must point to the Ostwin *installation* (where scripts like
@@ -556,11 +559,6 @@ if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
 
 $workspaceManifest = $null
 if (-not $DryRun) {
-    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
-        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
-        exit 1
-    }
-
     $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
     if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
         $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir
@@ -575,8 +573,7 @@ if (-not $DryRun) {
                 -PlanId $planId `
                 -RunId $runId `
                 -SourceWorkingDir $ProjectDir `
-                -WorkspaceIsolation $WorkspaceIsolation `
-                -WorktreeRoot $WorktreeRoot
+                -WorkspaceIsolation $WorkspaceIsolation
         } catch {
             Write-Error "Workspace initialization failed: $($_.Exception.Message)"
             exit 1
@@ -924,12 +921,8 @@ function New-PlanWarRooms {
             }
         }
         if (-not (Test-Path $resolvedWorkingDir)) {
-            if ($WorkspaceIsolation -eq 'shared') {
-                Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
-                New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
-            } else {
-                Write-Host "    Deferring working_dir creation to room worktree: $resolvedWorkingDir" -ForegroundColor DarkGray
-            }
+            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }

@@ -320,20 +320,22 @@ function Initialize-PlanIntegrationWorkspace {
         New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
     }
 
-    if ($WorkspaceIsolation -eq 'shared') {
-        $manifest = [ordered]@{
-            version            = 1
-            isolation          = 'shared'
-            plan_id            = $PlanId
-            run_id             = $RunId
-            source_working_dir = (Resolve-Path $SourceWorkingDir).Path
-            status             = 'not_applicable'
-            rooms              = [ordered]@{}
-            created_at         = (Get-Date).ToUniversalTime().ToString('o')
-        }
-        Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
-        return [pscustomobject]$manifest
+    if ($WorkspaceIsolation -ne 'shared') {
+        Write-Warning "Unsupported workspace isolation '$WorkspaceIsolation'; writing a shared workspace manifest."
     }
+
+    $manifest = [ordered]@{
+        version            = 1
+        isolation          = 'shared'
+        plan_id            = $PlanId
+        run_id             = $RunId
+        source_working_dir = (Resolve-Path $SourceWorkingDir).Path
+        status             = 'not_applicable'
+        rooms              = [ordered]@{}
+        created_at         = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
+    return [pscustomobject]$manifest
 
     $ready = Test-GitReady -WorkingDir $SourceWorkingDir -AllowRuntimeState
     if (-not $ready.Ready) {
@@ -420,10 +422,7 @@ function Get-WorkspaceDependencyState {
         [Parameter(Mandatory)][string]$WarRoomsDir
     )
 
-    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
-    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
-        return [pscustomobject]@{ Ready = $true; Reason = 'shared'; BlockedBy = @() }
-    }
+    return [pscustomobject]@{ Ready = $true; Reason = 'shared'; BlockedBy = @() }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     if (-not (Test-Path $cfgPath)) {
@@ -504,11 +503,8 @@ function Ensure-RoomWorktree {
         [string]$AgentsDir = ''
     )
 
-    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
-    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
-        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
-        return [pscustomobject]@{ Ready = $true; Mode = 'shared'; WorkingDir = '' }
-    }
+    Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+    return [pscustomobject]@{ Ready = $true; Mode = 'shared'; WorkingDir = '' }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
@@ -610,11 +606,8 @@ function Complete-RoomWorkspaceMerge {
         [Parameter(Mandatory)][string]$WarRoomsDir
     )
 
-    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
-    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
-        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
-        return [pscustomobject]@{ Integrated = $true; Status = 'not_applicable' }
-    }
+    Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+    return [pscustomobject]@{ Integrated = $true; Status = 'not_applicable' }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
