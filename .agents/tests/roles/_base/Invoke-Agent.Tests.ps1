@@ -620,6 +620,9 @@ Write-Output "PROJDIR_CHECK:`$val"
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $args = Get-Content $script:argsDump
             $args | Should -Contain "--fork"
+            $args | Should -Contain "--continue"
+            $args | Should -Not -Contain "--fork --continue" `
+                -Because "fork and continue must be separate argv tokens, not one combined exec arg"
         }
 
         It "passes --share flag" {
