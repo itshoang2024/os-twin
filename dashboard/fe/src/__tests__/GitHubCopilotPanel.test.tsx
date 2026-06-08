@@ -24,7 +24,7 @@ describe('GitHubCopilotPanel', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders GitHub Copilot auth methods and connection status', () => {
+  it('renders GitHub Copilot login and connection status', () => {
     render(
       <GitHubCopilotPanel
         provider={{ enabled: false }}
@@ -39,15 +39,15 @@ describe('GitHubCopilotPanel', () => {
     expect(screen.getByText(/copilot not connected/i)).toBeInTheDocument();
   });
 
-  it('starts browser oauth by default', async () => {
+  it('starts browser OAuth after selecting Browser OAuth', async () => {
     const popup = {
       document: {
         write: vi.fn(),
-        open: vi.fn(),
-        close: vi.fn(),
       },
       focus: vi.fn(),
       location: { href: '' },
+      close: vi.fn(),
+      closed: false,
     } as unknown as Window;
     vi.spyOn(window, 'open').mockReturnValue(popup);
     vi.mocked(apiPost).mockResolvedValue({
@@ -61,12 +61,47 @@ describe('GitHubCopilotPanel', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: /browser oauth/i }));
     fireEvent.click(screen.getByRole('button', { name: /login with github copilot/i }));
 
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith('/settings/github/oauth/start');
     });
     expect(popup.location.href).toBe('https://github.com/login/oauth/authorize?client_id=test');
+  });
+
+  it('starts OpenCode device auth and shows the GitHub code popup', async () => {
+    const popup = {
+      document: {
+        write: vi.fn(),
+        open: vi.fn(),
+        close: vi.fn(),
+      },
+      focus: vi.fn(),
+      location: { href: '' },
+    } as unknown as Window;
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    vi.mocked(apiPost).mockResolvedValue({
+      status: 'pending',
+      connected: false,
+      verification_url: 'https://github.com/login/device',
+      user_code: 'C73C-CD17',
+    });
+
+    render(
+      <GitHubCopilotPanel
+        provider={{ enabled: false }}
+        onSettingsChange={onSettingsChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /device code/i }));
+    fireEvent.click(screen.getByRole('button', { name: /login with github copilot/i }));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith('/settings/github/copilot/device/start');
+    });
+    expect(popup.document.write).toHaveBeenCalledWith(expect.stringContaining('C73C-CD17'));
   });
 
   it('starts device auth and saves provider settings when already connected', async () => {

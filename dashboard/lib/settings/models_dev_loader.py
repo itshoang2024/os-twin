@@ -29,7 +29,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from dashboard.lib.opencode_paths import get_managed_opencode_config_path
+from dashboard.lib.opencode_paths import (
+    get_managed_opencode_config_path,
+    get_user_opencode_config_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ MODELS_DEV_LOGO_URL = "https://models.dev/logos/{provider}.svg"
 
 AUTH_JSON_PATH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 OPENCODE_CONFIG_PATH = get_managed_opencode_config_path()
+USER_OPENCODE_CONFIG_PATH = get_user_opencode_config_path()
 CONFIGURED_MODELS_PATH = (
     Path.home() / ".ostwin" / ".agents" / "configured_models.json"
 )
@@ -674,18 +678,20 @@ def _read_configured_providers() -> Dict[str, Dict[str, Any]]:
             logger.warning("Failed to read auth.json: %s", exc)
 
     # 2. opencode.json -- custom providers (provider block)
-    if OPENCODE_CONFIG_PATH.exists():
+    for opencode_path in (OPENCODE_CONFIG_PATH, USER_OPENCODE_CONFIG_PATH):
+        if not opencode_path.exists():
+            continue
         try:
-            oc_data = json.loads(OPENCODE_CONFIG_PATH.read_text())
+            oc_data = json.loads(opencode_path.read_text())
             for provider_id, entry in oc_data.get("provider", {}).items():
                 if provider_id not in providers:
                     providers[provider_id] = {
                         "type": "custom",
-                        "source": "opencode.json",
+                        "source": str(opencode_path),
                         "has_key": bool(entry.get("options", {}).get("apiKey")),
                     }
         except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to read opencode.json: %s", exc)
+            logger.warning("Failed to read opencode.json %s: %s", opencode_path, exc)
 
     # 3. Dashboard settings -- provider cards persist here. This is the
     #    canonical source for runtime model selection, so do not require an
@@ -1055,13 +1061,18 @@ def _read_opencode_custom_providers() -> Dict[str, Any]:
 
     Returns ``{provider_id: {options, models}}``.
     """
-    if not OPENCODE_CONFIG_PATH.exists():
-        return {}
-    try:
-        data = json.loads(OPENCODE_CONFIG_PATH.read_text())
-        return data.get("provider", {})
-    except (json.JSONDecodeError, OSError):
-        return {}
+    providers: Dict[str, Any] = {}
+    for opencode_path in (OPENCODE_CONFIG_PATH, USER_OPENCODE_CONFIG_PATH):
+        if not opencode_path.exists():
+            continue
+        try:
+            data = json.loads(opencode_path.read_text())
+            provider_block = data.get("provider", {})
+            if isinstance(provider_block, dict):
+                providers.update(provider_block)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return providers
 
 
 def _format_context_window(ctx: int) -> str:

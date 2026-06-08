@@ -36,6 +36,39 @@ _load_env_file() {
 _load_env_file "$HOME/.ostwin/.env"
 _load_env_file "$AGENTS_DIR/.env"
 
+_load_github_copilot_token() {
+  [[ -z "${GITHUB_COPILOT_TOKEN:-}" ]] || return 0
+  local auth_json="$HOME/.local/share/opencode/auth.json"
+  [[ -f "$auth_json" ]] || return 0
+  local pybin="${OSTWIN_PYTHON:-}"
+  if [[ -z "$pybin" || ! -x "$pybin" ]]; then
+    pybin="$(command -v python3 || command -v python || true)"
+  fi
+  [[ -n "$pybin" ]] || return 0
+  local token
+  token="$("$pybin" - "$auth_json" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    raise SystemExit
+
+entry = data.get("github-copilot") or data.get("copilot") or {}
+if isinstance(entry, dict):
+    token = entry.get("refresh") or entry.get("access") or entry.get("token")
+    if isinstance(token, str):
+        print(token)
+PY
+)"
+  if [[ -n "$token" ]]; then
+    export GITHUB_COPILOT_TOKEN="$token"
+  fi
+}
+_load_github_copilot_token
+
 # Force-disable Claude Code skill loading for every opencode run.
 # Set after loading env files so local overrides cannot re-enable it.
 export OPENCODE_DISABLE_CLAUDE_CODE=1

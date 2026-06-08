@@ -53,9 +53,11 @@ SERVER_DIR = INSTALL_DIR / "opencode_server"
 ENV_FILE = INSTALL_DIR / ".env"
 ENV_SH_FILE = INSTALL_DIR / ".env.sh"
 MANAGED_OPENCODE_CONFIG = get_managed_opencode_config_path(INSTALL_DIR)
+OPENCODE_AUTH_JSON = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4096"
 OPENCODE_DISABLE_CLAUDE_CODE = "1"
+GITHUB_COPILOT_TOKEN_ENV = "GITHUB_COPILOT_TOKEN"
 
 # Serialize concurrent restarts so two credential changes can't race-spawn.
 _restart_lock = threading.Lock()
@@ -224,10 +226,27 @@ def _isolate_cloudsdk_fallback(env: dict[str, str]) -> None:
     env["CLOUDSDK_CONFIG"] = str(isolated)
 
 
+def _inject_github_copilot_token(env: dict[str, str]) -> None:
+    """Expose the saved Copilot OAuth token to custom OpenCode providers."""
+    if env.get(GITHUB_COPILOT_TOKEN_ENV) or not OPENCODE_AUTH_JSON.exists():
+        return
+    try:
+        data = json.loads(OPENCODE_AUTH_JSON.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    entry = data.get("github-copilot") or data.get("copilot") or {}
+    if not isinstance(entry, dict):
+        return
+    token = entry.get("refresh") or entry.get("access") or entry.get("token")
+    if isinstance(token, str) and token:
+        env[GITHUB_COPILOT_TOKEN_ENV] = token
+
+
 def _build_child_env(project_dir: Path) -> dict[str, str]:
     env = _load_env_via_bash(project_dir)
     _normalize_vertex_aliases(env)
     _isolate_cloudsdk_fallback(env)
+    _inject_github_copilot_token(env)
     env["OSTWIN_PROJECT_DIR"] = str(project_dir)
     # Always disable Claude Code skill loading for every opencode child process.
     # This is intentionally forced after loading user env files so local overrides

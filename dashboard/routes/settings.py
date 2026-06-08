@@ -46,12 +46,14 @@ from dashboard.lib.settings.github_copilot_auth import (
     GitHubCopilotDeviceAuthResponse,
     GitHubCopilotOAuthStartResponse,
     GitHubCopilotSessionStatus,
+    GitHubCopilotSyncResponse,
     exchange_github_copilot_oauth_code,
     github_copilot_oauth_result_page,
     get_github_copilot_device_auth_status,
     get_github_copilot_session_status,
     start_github_copilot_oauth,
     start_github_copilot_device_auth,
+    sync_github_copilot_opencode_config,
 )
 
 
@@ -962,6 +964,23 @@ async def github_copilot_device_status(
 ):
     """Return current dashboard-managed GitHub Copilot login status."""
     return get_github_copilot_device_auth_status()
+
+
+class GitHubCopilotSyncRequest(BaseModel):
+    project_dir: str = ""
+
+
+@router.post("/github/copilot/sync-opencode", response_model=GitHubCopilotSyncResponse)
+async def github_copilot_sync_opencode(
+    request: GitHubCopilotSyncRequest = Body(default_factory=GitHubCopilotSyncRequest),
+    user: dict = Depends(get_current_user),
+):
+    """Sync the GitHub Copilot OAuth provider alias into OpenCode config files."""
+    try:
+        project_dir = FSPath(request.project_dir).expanduser() if request.project_dir else None
+        return sync_github_copilot_opencode_config(project_dir=project_dir)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────

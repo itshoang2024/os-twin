@@ -632,6 +632,28 @@ $envExportLines
 # Static vars belong in `$safeOstwinHome`/.env; this file is for shell logic.
 if [ -f "`$HOME/.ostwin/.env.sh" ]; then . "`$HOME/.ostwin/.env.sh"; fi
 if [ -f '$safeOstwinHome/.env.sh' ]; then . '$safeOstwinHome/.env.sh'; fi
+if [ -z "`$GITHUB_COPILOT_TOKEN" ] && [ -f "`$HOME/.local/share/opencode/auth.json" ]; then
+  _ostwin_py="`$OSTWIN_PYTHON"
+  if [ -z "`$_ostwin_py" ] || [ ! -x "`$_ostwin_py" ]; then _ostwin_py="`$(command -v python3 || command -v python || true)"; fi
+  if [ -n "`$_ostwin_py" ]; then
+    _copilot_token="`$(`$_ostwin_py - "`$HOME/.local/share/opencode/auth.json" <<'PY' 2>/dev/null || true
+import json
+import sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    raise SystemExit
+entry = data.get("github-copilot") or data.get("copilot") or {}
+if isinstance(entry, dict):
+    token = entry.get("refresh") or entry.get("access") or entry.get("token")
+    if isinstance(token, str):
+        print(token)
+PY
+)"
+    if [ -n "`$_copilot_token" ]; then export GITHUB_COPILOT_TOKEN="`$_copilot_token"; fi
+  fi
+fi
 export OPENCODE_DISABLE_CLAUDE_CODE=1
 $cwdLine
 # Write PID before exec — `$`$ survives exec, so this is the real agent PID.
