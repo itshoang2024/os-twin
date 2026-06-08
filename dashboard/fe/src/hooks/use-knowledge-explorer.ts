@@ -18,6 +18,8 @@ import { useState, useCallback, useRef } from 'react';
 import useSWR from 'swr';
 import { apiGet, apiPost } from '@/lib/api-client';
 
+export type { EnterpriseMapNode, EnterpriseMapEdge, ProjectionData, OntologyVisualExtensions } from '@/types/ontology-map.generated';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

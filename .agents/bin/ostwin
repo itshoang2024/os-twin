@@ -485,7 +485,13 @@ switch ($Command) {
         $runArgs = [System.Collections.ArrayList]::new()
         $planArgResolved = $false
         $resolvedPlanFile = ""
-        $resolvedWorkingDir = ""
+        # `ostwin run` is intentionally anchored to the directory where the
+        # command is invoked. Plan files may contain stale `working_dir:` values
+        # from creation time; those are treated as metadata unless the caller
+        # explicitly passes --working-dir.
+        $commandWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir ""
+        $resolvedWorkingDir = $commandWorkingDir
+        $planDeclaredWorkingDir = ""
         $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
         $worktreeRoot = ""
         $expectingValueFor = ""
@@ -523,15 +529,11 @@ switch ($Command) {
                 $resolved = Resolve-PlanId -Arg $a
                 if (-not $resolved) { exit 1 }
                 $resolvedPlanFile = $resolved.PlanFile
-                if ($resolved.WorkingDir -and -not $resolvedWorkingDir) {
-                    $resolvedWorkingDir = $resolved.WorkingDir
+                if ($resolved.WorkingDir) {
+                    $planDeclaredWorkingDir = $resolved.WorkingDir
                 }
                 $null = $runArgs.Add("--plan-file")
                 $null = $runArgs.Add($resolvedPlanFile)
-                if ($resolved.WorkingDir -and $resolvedWorkingDir -eq $resolved.WorkingDir) {
-                    $null = $runArgs.Add("--working-dir")
-                    $null = $runArgs.Add($resolved.WorkingDir)
-                }
                 $planArgResolved = $true
             }
             else {
@@ -630,20 +632,21 @@ switch ($Command) {
             }
         }
 
-        # ── Ensure working_dir exists and is initialized ──
-        if (-not $resolvedWorkingDir -and (Test-Path $resolvedPlanFile)) {
+        # ── Preserve plan-declared working_dir for diagnostics only. Runtime
+        # working_dir remains the command cwd unless --working-dir was supplied.
+        if (-not $planDeclaredWorkingDir -and (Test-Path $resolvedPlanFile)) {
             $pc = Get-Content $resolvedPlanFile -Raw
             # Pattern 1: YAML-style  working_dir: /path
             if ($pc -match '(?m)^\s*working_dir:\s*(.+)$') {
-                $resolvedWorkingDir = $Matches[1].Trim()
+                $planDeclaredWorkingDir = $Matches[1].Trim()
             }
             # Pattern 2: Markdown    > **Working dir:** `/path`
-            if (-not $resolvedWorkingDir -and ($pc -match '(?m)^>\s*\*\*Working dir:\*\*\s*`([^`]+)`')) {
-                $resolvedWorkingDir = $Matches[1].Trim()
+            if (-not $planDeclaredWorkingDir -and ($pc -match '(?m)^>\s*\*\*Working dir:\*\*\s*`([^`]+)`')) {
+                $planDeclaredWorkingDir = $Matches[1].Trim()
             }
             # Pattern 3: Markdown    > Project: /path
-            if (-not $resolvedWorkingDir -and ($pc -match '(?m)^>\s*Project:\s*(.+)$')) {
-                $resolvedWorkingDir = $Matches[1].Trim()
+            if (-not $planDeclaredWorkingDir -and ($pc -match '(?m)^>\s*Project:\s*(.+)$')) {
+                $planDeclaredWorkingDir = $Matches[1].Trim()
             }
         }
 
@@ -667,20 +670,20 @@ switch ($Command) {
             }
         }
 
-        if ($resolvedWorkingDir -and $resolvedWorkingDir -ne ".") {
-            if (-not (Test-Path $resolvedWorkingDir -PathType Container)) {
+        if ($effectiveWorkingDir -and $effectiveWorkingDir -ne ".") {
+            if (-not (Test-Path $effectiveWorkingDir -PathType Container)) {
                 if ($workspaceIsolation -eq 'room-worktree') {
-                    Write-Error "working_dir does not exist for worktree isolation: $resolvedWorkingDir"
+                    Write-Error "working_dir does not exist for worktree isolation: $effectiveWorkingDir"
                     exit 1
                 }
-                Write-Host ([char]::ConvertFromUtf32(0x1F4C1) + " Creating project directory: $resolvedWorkingDir")
-                New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+                Write-Host ([char]::ConvertFromUtf32(0x1F4C1) + " Creating project directory: $effectiveWorkingDir")
+                New-Item -ItemType Directory -Path $effectiveWorkingDir -Force | Out-Null
             }
         }
         # Ensure project env is initialized (.agents/ + .opencode/opencode.json)
         # Uses the same pattern as `ostwin init`, plus -PlanId for memory binding.
         # init.ps1 handles idempotency — fast-exits when already set up.
-        $initTarget = if ($resolvedWorkingDir -and $resolvedWorkingDir -ne ".") { $resolvedWorkingDir } else { $effectiveWorkingDir }
+        $initTarget = $effectiveWorkingDir
         $initPs1 = Join-Path $AgentsDir "init.ps1"
         if ($workspaceIsolation -eq 'room-worktree') {
             Write-Host "  [init] Skipped: worktree isolation uses pre-existing runtime files." -ForegroundColor DarkGray
@@ -716,10 +719,19 @@ switch ($Command) {
             Write-Error "[ERROR] init.ps1 not found at $initPs1"
         }
 
-        if (-not ($runArgs -contains '--working-dir')) {
-            $null = $runArgs.Add('--working-dir')
-            $null = $runArgs.Add($effectiveWorkingDir)
+        # Normalize the runtime working directory passed to Start-Plan. Remove any
+        # raw/relative --working-dir occurrence collected during argument parsing
+        # and replace it with the effective absolute path.
+        for ($ri = $runArgs.Count - 1; $ri -ge 0; $ri--) {
+            if ($runArgs[$ri] -eq '--working-dir') {
+                if (($ri + 1) -lt $runArgs.Count) {
+                    $runArgs.RemoveAt($ri + 1)
+                }
+                $runArgs.RemoveAt($ri)
+            }
         }
+        $null = $runArgs.Add('--working-dir')
+        $null = $runArgs.Add($effectiveWorkingDir)
         if (-not ($runArgs -contains '--workspace-isolation')) {
             $null = $runArgs.Add('--workspace-isolation')
             $null = $runArgs.Add($workspaceIsolation)
@@ -747,9 +759,10 @@ switch ($Command) {
                     default { $null = $psArgs.Add($runArgs[$i]); $i++ }
                 }
             }
-            if ($explicitWorkingDir) {
-                $null = $psArgs.Add('-IgnorePlanWorkingDir')
-            }
+            # `ostwin run` always treats the invocation directory (or explicit
+            # --working-dir) as authoritative, preventing stale PLAN.md
+            # working_dir values from overriding the user's current context.
+            $null = $psArgs.Add('-IgnorePlanWorkingDir')
             & pwsh -NoProfile -File $startPlan @psArgs
         }
         else {
