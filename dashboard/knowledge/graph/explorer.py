@@ -255,26 +255,56 @@ class KnowledgeExplorer:
         # Step 5: Expand 1-hop from top nodes
         return self._expand_from_ids(top_ids, include_seed_info=True)
 
-    def expand(self, node_ids: List[str], depth: int = 1) -> Dict[str, Any]:
-        """Expand from a set of node IDs outward by N hops.
+    def enterprise_map(
+        self,
+        limit: int = 200,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return the raw graph slice used by the governed EnterpriseMap projection."""
 
-        Each hop fetches the neighborhood of the frontier nodes via
-        ``get_triplets(ids=...)``. Depth is capped at 3 for performance.
+        limit = max(1, min(500, int(limit or 200)))
+        kg = self.graph
+        try:
+            result = kg.get_graph(limit=limit)
+        except TypeError:
+            result = kg.get_graph()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Explorer enterprise_map graph fetch failed: %s", exc)
+            result = {"nodes": [], "edges": [], "stats": {}}
 
-        Args:
-            node_ids: Starting node IDs to expand from.
-            depth: Number of hops (1-3, default 1).
+        nodes = list(result.get("nodes") or [])[:limit]
+        node_ids = {str(node.get("id")) for node in nodes}
+        edges = [
+            edge for edge in list(result.get("edges") or [])
+            if str(edge.get("source")) in node_ids and str(edge.get("target")) in node_ids
+        ]
+        filtered = self._apply_filters(nodes, edges, filters or {})
+        filtered["stats"].update(result.get("stats") or {})
+        filtered["stats"].update({
+            "node_count": len(filtered["nodes"]),
+            "edge_count": len(filtered["edges"]),
+        })
+        return filtered
 
-        Returns:
-            Dict with nodes, edges, and stats.
-        """
-        depth = max(1, min(3, depth))
+    def expand(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        filters: Optional[Dict[str, Any]] = None,
+        node_cap: int = 300,
+    ) -> Dict[str, Any]:
+        """Expand from a set of node IDs outward by N hops with server caps."""
+
+        requested_depth = int(depth or 1)
+        depth = max(1, min(3, requested_depth))
+        node_cap = max(1, min(300, int(node_cap or 300)))
         kg = self.graph
 
         all_node_ids = set(node_ids)
         frontier = list(node_ids)
         all_edges: List[Dict[str, Any]] = []
         seen_edges: set = set()
+        truncated = False
 
         for hop in range(depth):
             if not frontier:
@@ -293,27 +323,115 @@ class KnowledgeExplorer:
                 if r_key not in seen_edges:
                     seen_edges.add(r_key)
                     all_edges.append(_relation_to_dict(rel))
-                if s_id not in all_node_ids:
-                    all_node_ids.add(s_id)
-                    next_frontier.append(s_id)
-                if t_id not in all_node_ids:
-                    all_node_ids.add(t_id)
-                    next_frontier.append(t_id)
+                for candidate in (s_id, t_id):
+                    if candidate and candidate not in all_node_ids:
+                        if len(all_node_ids) >= node_cap:
+                            truncated = True
+                            continue
+                        all_node_ids.add(candidate)
+                        next_frontier.append(candidate)
             frontier = next_frontier
 
-        # Fetch full node data for all discovered IDs
-        nodes = self._fetch_nodes_by_ids(list(all_node_ids))
-        # Filter edges to only those with both endpoints in the node set
+        nodes = self._fetch_nodes_by_ids(list(all_node_ids)[:node_cap])
         node_id_set = {n["id"] for n in nodes}
         filtered_edges = [
             e for e in all_edges
             if e["source"] in node_id_set and e["target"] in node_id_set
         ]
+        filtered = self._apply_filters(nodes, filtered_edges, filters or {})
+        filtered["stats"].update({
+            "node_count": len(filtered["nodes"]),
+            "edge_count": len(filtered["edges"]),
+            "depth_requested": requested_depth,
+            "depth_effective": depth,
+            "node_cap": node_cap,
+            "truncated": truncated or len(nodes) >= node_cap and len(all_node_ids) > node_cap,
+        })
+        return filtered
+
+
+    @staticmethod
+    def _filter_values(raw_value: Any) -> tuple[set[str], str]:
+        """Normalize a filter facet to (values, include/exclude mode)."""
+
+        if isinstance(raw_value, dict):
+            values = raw_value.get("values", [])
+            mode = raw_value.get("mode", "include")
+        else:
+            values = raw_value
+            mode = "include"
+        if values is None:
+            return set(), "include"
+        if not isinstance(values, (list, tuple, set)):
+            values = [values]
+        return {str(value) for value in values}, "exclude" if mode == "exclude" else "include"
+
+    @staticmethod
+    def _facet_value(item: Dict[str, Any], facet: str) -> Any:
+        props = item.get("properties") if isinstance(item.get("properties"), dict) else {}
+        aliases = {
+            "concept_type": ("concept_type", "type", "label"),
+            "relationship_type": ("relationship_type", "type", "label"),
+            "relationship_family": ("relationship_family", "family"),
+            "layer": ("layer", "default_layer"),
+            "abstraction_level": ("abstraction_level",),
+            "pack_id": ("pack_id",),
+            "lifecycle_state": ("lifecycle_state",),
+            "owner": ("owner",),
+        }.get(facet, (facet,))
+        for key in aliases:
+            if item.get(key) is not None:
+                return item.get(key)
+            if props.get(key) is not None:
+                return props.get(key)
+        return None
+
+    @classmethod
+    def _matches_facet(cls, item: Dict[str, Any], facet: str, clause: Any) -> bool:
+        values, mode = cls._filter_values(clause)
+        if not values:
+            return True
+        actual = cls._facet_value(item, facet)
+        actual_values = {str(v) for v in actual} if isinstance(actual, (list, tuple, set)) else ({str(actual)} if actual is not None else set())
+        intersects = bool(actual_values & values)
+        return not intersects if mode == "exclude" else intersects
+
+    @classmethod
+    def _apply_filters(
+        cls,
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Apply include/exclude ontology filters and remove dangling edges."""
+
+        active = filters or {}
+        node_facets = ("concept_type", "abstraction_level", "layer", "pack_id", "lifecycle_state", "owner")
+        edge_facets = ("relationship_family", "relationship_type")
+        metadata = active.get("metadata") or {}
+
+        filtered_nodes = []
+        for node in nodes:
+            if not all(cls._matches_facet(node, facet, active.get(facet)) for facet in node_facets if facet in active):
+                continue
+            props = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+            if any(str(props.get(key)) != str(value) for key, value in metadata.items()):
+                continue
+            filtered_nodes.append(node)
+
+        node_ids = {str(node.get("id")) for node in filtered_nodes}
+        filtered_edges = []
+        for edge in edges:
+            if str(edge.get("source")) not in node_ids or str(edge.get("target")) not in node_ids:
+                continue
+            if not all(cls._matches_facet(edge, facet, active.get(facet)) for facet in edge_facets if facet in active):
+                continue
+            filtered_edges.append(edge)
 
         return {
-            "nodes": nodes,
+            "nodes": filtered_nodes,
             "edges": filtered_edges,
-            "stats": {"node_count": len(nodes), "edge_count": len(filtered_edges)},
+            "stats": {"node_count": len(filtered_nodes), "edge_count": len(filtered_edges)},
         }
 
     def search(self, query: str, limit: int = 20) -> Dict[str, Any]:

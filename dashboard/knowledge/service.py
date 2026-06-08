@@ -384,10 +384,79 @@ class KnowledgeService:
         explorer = self._get_explorer(namespace)
         return explorer.seed(top_k=top_k)
 
-    def explorer_expand(self, namespace: str, node_ids: list[str], depth: int = 1) -> dict:
-        """Expand from a set of node IDs outward by N hops."""
+    def ontology_enterprise_map(
+        self,
+        namespace: str,
+        limit: int = 200,
+        filters: Optional[dict[str, Any]] = None,
+        group_by: Optional[list[str]] = None,
+        color_by: Optional[str] = None,
+    ) -> dict:
+        """Return the governed EnterpriseMap projection contract for a namespace."""
+
+        from dashboard.knowledge.ontology.projection import project_enterprise_map  # noqa: WPS433
+
         explorer = self._get_explorer(namespace)
-        return explorer.expand(node_ids=node_ids, depth=depth)
+        raw = explorer.enterprise_map(limit=limit, filters=filters or {})
+        projection = project_enterprise_map(
+            raw.get("nodes") or [],
+            raw.get("edges") or [],
+            profile=None,
+            group_by=group_by,
+            color_by=color_by,
+        )
+        stats = {**projection.get("stats", {})}
+        raw_stats = raw.get("stats") if isinstance(raw.get("stats"), dict) else {}
+        # Preserve upstream roll-ups (notably ontology candidates) while keeping
+        # projected node/edge counts authoritative for this read contract.
+        for key, value in raw_stats.items():
+            if key not in {"node_count", "edge_count", "source_node_count", "source_edge_count"}:
+                stats[key] = value
+        stats.update({
+            "ontology_candidate_count": int(stats.get("ontology_candidate_count") or 0),
+            "validation_issue_count": int(stats.get("validation_issue_count") or 0),
+            "event_count": int(stats.get("event_count") or 0),
+            "active_event_count": int(stats.get("active_event_count") or 0),
+        })
+        source_node_count = int(stats.get("source_node_count") or 0)
+        source_edge_count = int(stats.get("source_edge_count") or 0)
+        map_state = "live" if source_node_count > 0 else "empty"
+        meta = {**projection.get("meta", {})}
+        meta.update({
+            "map_state": map_state,
+            "map_source_kind": "knowledge_graph" if map_state == "live" else "none",
+            "source_node_count": source_node_count,
+            "source_edge_count": source_edge_count,
+            "applied_filters": filters or {},
+        })
+        projection["stats"] = stats
+        projection["meta"] = meta
+        return projection
+
+    def explorer_expand(
+        self,
+        namespace: str,
+        node_ids: list[str],
+        depth: int = 1,
+        filters: Optional[dict[str, Any]] = None,
+        node_cap: int = 300,
+    ) -> dict:
+        """Expand from node IDs and return the governed projection contract."""
+        from dashboard.knowledge.ontology.projection import project_enterprise_map  # noqa: WPS433
+
+        explorer = self._get_explorer(namespace)
+        requested_depth = int(depth or 1)
+        raw = explorer.expand(node_ids=node_ids, depth=depth, filters=filters or {}, node_cap=node_cap)
+        projection = project_enterprise_map(raw.get("nodes") or [], raw.get("edges") or [], profile=None)
+        projection["stats"].update(raw.get("stats") or {})
+        projection["meta"].update({
+            "applied_filters": filters or {},
+            "truncated": bool(projection["stats"].get("truncated", False)),
+            "depth_requested": requested_depth,
+            "depth_effective": int(projection["stats"].get("depth_effective") or max(1, min(3, requested_depth))),
+            "node_cap": int(projection["stats"].get("node_cap") or node_cap),
+        })
+        return projection
 
     def explorer_search(self, namespace: str, query: str, limit: int = 20) -> dict:
         """Vector-similarity search over node embeddings + 1-hop context."""

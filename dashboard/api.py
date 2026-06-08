@@ -76,7 +76,7 @@ from dashboard.tasks import startup_all
 from dashboard.routes import (
     ai, agent_costs, auth, system, mcp, threads, plans, rooms, skills,
     roles, memory, amem, channels, command, tunnel,
-    files, settings, engagement, knowledge, memory_mcp, chat
+    files, settings, engagement, knowledge, memory_mcp, chat, plan_logs
 )
 
 # Configure logging — file + console
@@ -504,6 +504,7 @@ app.include_router(auth.router)
 app.include_router(engagement.router)
 app.include_router(threads.router)
 app.include_router(plans.router)
+app.include_router(plan_logs.router)
 app.include_router(rooms.router)
 app.include_router(system.router)
 app.include_router(mcp.router)

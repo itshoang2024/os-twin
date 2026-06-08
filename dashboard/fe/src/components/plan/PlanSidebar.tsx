@@ -16,6 +16,7 @@ export default function PlanSidebar() {
     { id: 'editor', label: 'Planner', icon: 'edit_document' },
     { id: 'epics', label: 'EPICs', icon: 'view_kanban', count: epics?.length },
     { id: 'files', label: 'Files', icon: 'folder_open' },
+    { id: 'logs', label: 'Live Logs', icon: 'terminal', count: progress?.active },
     { id: 'assets', label: 'Assets', icon: 'attach_file' },
     { id: 'roles', label: 'Roles & Config', icon: 'group' },
     { id: 'dag', label: 'DAG View', icon: 'account_tree' },

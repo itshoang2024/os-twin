@@ -11,9 +11,9 @@ All models are JSON-serializable (Pydantic v2) and include OpenAPI examples.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -621,6 +621,201 @@ class ResearchIngestJobResponse(BaseModel):
     message: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Enterprise Map Projection Contract (EPIC-001)
+# ---------------------------------------------------------------------------
+
+JsonScalar = Union[str, int, float, bool, None]
+JsonObject = dict[str, Union[JsonScalar, list[JsonScalar], dict[str, JsonScalar]]]
+FilterValue = Union[list[str], "ExplorerOntologyFilterClause"]
+
+
+class StrictRequestModel(BaseModel):
+    """Base model for governed request contracts; unknown keys are rejected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TimeRangeResponse(StrictRequestModel):
+    """Optional time range attached to map nodes/edges."""
+
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+class ExplorerOntologyFilterClause(StrictRequestModel):
+    """Include/exclude filter clause for one enterprise-map facet."""
+
+    values: list[str] = Field(default_factory=list)
+    mode: Literal["include", "exclude"] = "include"
+
+
+class ExplorerOntologyFilters(StrictRequestModel):
+    """Strict ontology filters accepted by enterprise-map and explorer expand."""
+
+    layer: Optional[FilterValue] = None
+    abstraction_level: Optional[FilterValue] = None
+    concept_type: Optional[FilterValue] = None
+    relationship_family: Optional[FilterValue] = None
+    relationship_type: Optional[FilterValue] = None
+    pack_id: Optional[FilterValue] = None
+    lifecycle_state: Optional[FilterValue] = None
+    owner: Optional[FilterValue] = None
+    metadata: dict[str, JsonScalar] = Field(default_factory=dict)
+
+    def to_filter_dict(self) -> dict[str, object]:
+        """Return a compact dict with unset/empty filters removed."""
+
+        data = self.model_dump(exclude_none=True)
+        if not data.get("metadata"):
+            data.pop("metadata", None)
+        return data
+
+
+class EnterpriseMapQueryRequest(StrictRequestModel):
+    """Rich enterprise-map read body for filtered/view-directed POST queries."""
+
+    limit: int = Field(default=200, ge=1, le=500)
+    filters: Optional[ExplorerOntologyFilters] = None
+    group_by: Optional[list[str]] = None
+    color_by: Optional[str] = None
+
+
+class EnterpriseMapOntologyPathResponse(BaseModel):
+    """Ontology path breadcrumbs for a projected node."""
+
+    concept_type: Optional[str] = None
+    abstraction_level: Optional[str] = None
+    layer: Optional[str] = None
+    pack_id: Optional[str] = None
+
+
+class EnterpriseMapNodeResponse(BaseModel):
+    """Single node in the governed enterprise-map visual projection."""
+
+    id: str
+    label: str = "entity"
+    name: str
+    score: float = 1.0
+    properties: JsonObject = Field(default_factory=dict)
+    concept_type: Optional[str] = None
+    concept_label: Optional[str] = None
+    abstraction_level: Optional[str] = None
+    layer: Optional[str] = None
+    pack_id: Optional[str] = None
+    family: Optional[str] = None
+    review_state: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    validation_issues: list[str] = Field(default_factory=list)
+    external_ref: Optional[str] = None
+    provenance_refs: list[str] = Field(default_factory=list)
+    ontology_path: Optional[EnterpriseMapOntologyPathResponse] = None
+    map_group: Optional[str] = None
+    color: Optional[str] = None
+    shape: Optional[str] = None
+    event_count: Optional[int] = None
+    active_event_count: Optional[int] = None
+    time_range: Optional[TimeRangeResponse] = None
+    series_refs: list[str] = Field(default_factory=list)
+    flow_refs: list[str] = Field(default_factory=list)
+    simulation_refs: list[str] = Field(default_factory=list)
+    state: Optional[str] = None
+    simulation_state: Optional[str] = None
+    state_machine_ref: Optional[str] = None
+    state_color: Optional[str] = None
+    phase: Optional[str] = None
+    track: Optional[str] = None
+    priority: Optional[Union[str, int]] = None
+    effort: Optional[Union[str, int]] = None
+    prerequisites: list[str] = Field(default_factory=list)
+    acceptance: Optional[Union[list[str], str]] = None
+
+
+class EnterpriseMapEdgeResponse(BaseModel):
+    """Single edge in the governed enterprise-map visual projection."""
+
+    source: str
+    target: str
+    label: str = "RELATES"
+    weight: float = 1.0
+    properties: JsonObject = Field(default_factory=dict)
+    relationship_type: Optional[str] = None
+    relationship_family: Optional[str] = None
+    family: Optional[str] = None
+    review_state: Optional[str] = None
+    validation_issues: list[str] = Field(default_factory=list)
+    external_ref: Optional[str] = None
+    provenance_refs: list[str] = Field(default_factory=list)
+    color: Optional[str] = None
+    event_count: Optional[int] = None
+    active_event_count: Optional[int] = None
+    time_range: Optional[TimeRangeResponse] = None
+    series_refs: list[str] = Field(default_factory=list)
+    flow_refs: list[str] = Field(default_factory=list)
+    simulation_refs: list[str] = Field(default_factory=list)
+    state: Optional[str] = None
+    simulation_state: Optional[str] = None
+    state_machine_ref: Optional[str] = None
+    state_color: Optional[str] = None
+    phase: Optional[str] = None
+    track: Optional[str] = None
+    priority: Optional[Union[str, int]] = None
+    effort: Optional[Union[str, int]] = None
+    prerequisites: list[str] = Field(default_factory=list)
+    acceptance: Optional[Union[list[str], str]] = None
+
+
+class EnterpriseMapLayerResponse(BaseModel):
+    id: str
+    label: str
+    order: int = 0
+
+
+class EnterpriseMapAbstractionLevelResponse(BaseModel):
+    id: str
+    label: str
+    order: int = 0
+
+
+class EnterpriseMapStatsResponse(BaseModel):
+    source_node_count: int = 0
+    source_edge_count: int = 0
+    node_count: int = 0
+    edge_count: int = 0
+    ontology_candidate_count: int = 0
+    validation_issue_count: int = 0
+    event_count: int = 0
+    active_event_count: int = 0
+    truncated: bool = False
+    depth_requested: Optional[int] = None
+    depth_effective: Optional[int] = None
+    node_cap: Optional[int] = None
+
+
+class EnterpriseMapMetaResponse(BaseModel):
+    profile_id: Optional[str] = None
+    map_state: Literal["live", "empty"] = "empty"
+    map_source_kind: Literal["knowledge_graph", "none"] = "none"
+    source_node_count: int = 0
+    source_edge_count: int = 0
+    applied_filters: dict[str, object] = Field(default_factory=dict)
+    applied_group_by: list[str] = Field(default_factory=list)
+    applied_color_by: str = "type"
+    truncated: bool = False
+    depth_requested: Optional[int] = None
+    depth_effective: Optional[int] = None
+    node_cap: Optional[int] = None
+
+
+class EnterpriseMapProjectionResponse(BaseModel):
+    nodes: list[EnterpriseMapNodeResponse] = Field(default_factory=list)
+    edges: list[EnterpriseMapEdgeResponse] = Field(default_factory=list)
+    layers: list[EnterpriseMapLayerResponse] = Field(default_factory=list)
+    abstraction_levels: list[EnterpriseMapAbstractionLevelResponse] = Field(default_factory=list)
+    stats: EnterpriseMapStatsResponse = Field(default_factory=EnterpriseMapStatsResponse)
+    meta: EnterpriseMapMetaResponse = Field(default_factory=EnterpriseMapMetaResponse)
+
+
 __all__ = [
     # Requests
     "CreateNamespaceRequest",
@@ -632,6 +827,18 @@ __all__ = [
     "ResearchSearchRequest",
     "ResearchIngestItem",
     "ResearchIngestRequest",
+    "TimeRangeResponse",
+    "ExplorerOntologyFilterClause",
+    "ExplorerOntologyFilters",
+    "EnterpriseMapQueryRequest",
+    "EnterpriseMapNodeResponse",
+    "EnterpriseMapEdgeResponse",
+    "EnterpriseMapMetaResponse",
+    "EnterpriseMapStatsResponse",
+    "EnterpriseMapProjectionResponse",
+    "EnterpriseMapLayerResponse",
+    "EnterpriseMapAbstractionLevelResponse",
+    "EnterpriseMapOntologyPathResponse",
     # Responses
     "DeleteNamespaceResponse",
     "ImportFolderResponse",

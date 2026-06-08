@@ -58,6 +58,9 @@ from dashboard.routes.knowledge_models import (
     ResearchIngestJobResponse,
     RetentionPolicyRequest,
     RetentionPolicyResponse,
+    EnterpriseMapProjectionResponse,
+    EnterpriseMapQueryRequest,
+    ExplorerOntologyFilters,
 )
 
 logger = logging.getLogger(__name__)
@@ -833,6 +836,59 @@ async def get_namespace_graph(
         raise _map_error(exc)
 
 
+
+@router.get(
+    "/namespaces/{namespace}/ontology/enterprise-map",
+    response_model=EnterpriseMapProjectionResponse,
+    summary="Get governed EnterpriseMap projection",
+)
+async def get_ontology_enterprise_map(
+    namespace: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    limit: int = Query(default=200, ge=1, le=500),
+) -> EnterpriseMapProjectionResponse:
+    """Return the no-filter EnterpriseMap projection.
+
+    This GET remains the legacy-compatible read path; rich filters and view
+    directives are accepted by the sibling POST query endpoint.
+    """
+
+    try:
+        service = _get_service()
+        result = await asyncio.to_thread(service.ontology_enterprise_map, namespace, limit=limit)
+        return EnterpriseMapProjectionResponse.model_validate(result)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
+@router.post(
+    "/namespaces/{namespace}/ontology/enterprise-map/query",
+    response_model=EnterpriseMapProjectionResponse,
+    summary="Query governed EnterpriseMap projection",
+)
+async def query_ontology_enterprise_map(
+    namespace: str,
+    request: EnterpriseMapQueryRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+) -> EnterpriseMapProjectionResponse:
+    """Return EnterpriseMap projection with typed filters and view directives."""
+
+    try:
+        service = _get_service()
+        filters = request.filters.to_filter_dict() if request.filters else {}
+        result = await asyncio.to_thread(
+            service.ontology_enterprise_map,
+            namespace,
+            limit=request.limit,
+            filters=filters,
+            group_by=request.group_by,
+            color_by=request.color_by,
+        )
+        return EnterpriseMapProjectionResponse.model_validate(result)
+    except Exception as exc:
+        raise _map_error(exc)
+
+
 # ---------------------------------------------------------------------------
 # Supernova Explorer Endpoints
 # ---------------------------------------------------------------------------
@@ -849,10 +905,11 @@ class ExplorerExpandRequest(BaseModel):
     )
     depth: int = Field(
         default=1,
-        description="Number of hops to expand (1-3)",
+        description="Requested hops to expand; clamped server-side to 1-3",
         ge=1,
-        le=3,
     )
+    filters: Optional[ExplorerOntologyFilters] = None
+    node_cap: int = Field(default=300, ge=1, le=300)
 
 
 class ExplorerSearchRequest(BaseModel):
@@ -943,6 +1000,8 @@ async def explorer_expand(
             namespace,
             node_ids=request.node_ids,
             depth=request.depth,
+            filters=request.filters.to_filter_dict() if request.filters else {},
+            node_cap=request.node_cap,
         )
     except Exception as exc:
         raise _map_error(exc)

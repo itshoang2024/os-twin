@@ -1093,3 +1093,129 @@ depends_on: ["EPIC-001"]
         }
     }
 }
+
+
+Describe "ostwin run working_dir precedence" {
+    BeforeAll {
+        $script:SourceOstwinCli = Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "bin/ostwin"
+
+        function New-OstwinRunFixture {
+            param([string]$Name = "project")
+
+            $projectDir = Join-Path $TestDrive "$Name-$(Get-Random)"
+            $agentsDir = Join-Path $projectDir ".agents"
+            New-Item -ItemType Directory -Path (Join-Path $agentsDir "bin") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $agentsDir "plan") -Force | Out-Null
+            @{} | ConvertTo-Json | Out-File (Join-Path $agentsDir "config.json") -Encoding utf8
+            Copy-Item -Path $script:SourceOstwinCli -Destination (Join-Path $agentsDir "bin" "ostwin") -Force
+
+            $captureFile = Join-Path $projectDir "start-plan-args.json"
+            @'
+param(
+    [string]$PlanFile,
+    [string]$ProjectDir,
+    [switch]$DryRun,
+    [switch]$Resume,
+    [switch]$Expand,
+    [switch]$Review,
+    [int]$MaxConcurrent,
+    [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree',
+    [string]$WorktreeRoot = '',
+    [switch]$NonInteractive,
+    [switch]$EnablePlanning,
+    [switch]$IgnorePlanWorkingDir
+)
+[ordered]@{
+    PlanFile = $PlanFile
+    ProjectDir = $ProjectDir
+    DryRun = [bool]$DryRun
+    WorkspaceIsolation = $WorkspaceIsolation
+    NonInteractive = [bool]$NonInteractive
+    IgnorePlanWorkingDir = [bool]$IgnorePlanWorkingDir
+} | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'start-plan-args.json') -Encoding utf8
+'@ | Out-File (Join-Path $agentsDir "plan" "Start-Plan.ps1") -Encoding utf8
+
+            @'
+param([string]$Directory, [switch]$Yes, [string]$PlanId)
+[ordered]@{
+    Directory = $Directory
+    Yes = [bool]$Yes
+    PlanId = $PlanId
+} | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path $Directory 'init-args.json') -Encoding utf8
+'@ | Out-File (Join-Path $agentsDir "init.ps1") -Encoding utf8
+
+            [pscustomobject]@{
+                ProjectDir = $projectDir
+                AgentsDir = $agentsDir
+                Ostwin = Join-Path $agentsDir "bin" "ostwin"
+                CaptureFile = $captureFile
+            }
+        }
+
+        function Invoke-FixtureOstwinRun {
+            param(
+                [Parameter(Mandatory)][object]$Fixture,
+                [Parameter(Mandatory)][string[]]$Args
+            )
+
+            $oldOstwinHome = $env:OSTWIN_HOME
+            $oldWarRooms = $env:WARROOMS_DIR
+            $env:OSTWIN_HOME = Join-Path $TestDrive "ostwin-home-$(Get-Random)"
+            Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $env:OSTWIN_HOME -Force | Out-Null
+            Push-Location $Fixture.ProjectDir
+            try {
+                & pwsh -NoProfile -File $Fixture.Ostwin @Args *>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+                if ($oldOstwinHome) { $env:OSTWIN_HOME = $oldOstwinHome } else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+                if ($oldWarRooms) { $env:WARROOMS_DIR = $oldWarRooms } else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It "uses the command cwd instead of stale PLAN.md working_dir" {
+        $fixture = New-OstwinRunFixture
+        $oldProject = Join-Path $TestDrive "old-project-$(Get-Random)"
+        $planFile = Join-Path $fixture.ProjectDir "PLAN.md"
+        @"
+# Plan: Cwd Override
+working_dir: $oldProject
+
+## EPIC-001 - Build from current folder
+#### Definition of Done
+- [ ] Done
+"@ | Out-File $planFile -Encoding utf8
+
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--workspace-isolation', 'shared', '--dry-run', '-n')
+
+        Test-Path $fixture.CaptureFile | Should -BeTrue
+        $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
+        $captured.ProjectDir | Should -Be $fixture.ProjectDir
+        $captured.IgnorePlanWorkingDir | Should -BeTrue
+    }
+
+    It "keeps explicit --working-dir as the highest priority" {
+        $fixture = New-OstwinRunFixture
+        $explicitDir = Join-Path $TestDrive "explicit-project-$(Get-Random)"
+        New-Item -ItemType Directory -Path $explicitDir -Force | Out-Null
+        $oldProject = Join-Path $TestDrive "old-project-$(Get-Random)"
+        $planFile = Join-Path $fixture.ProjectDir "PLAN.md"
+        @"
+# Plan: Explicit Override
+working_dir: $oldProject
+
+## EPIC-001 - Build from explicit folder
+#### Definition of Done
+- [ ] Done
+"@ | Out-File $planFile -Encoding utf8
+
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--working-dir', $explicitDir, '--workspace-isolation', 'shared', '--dry-run', '-n')
+
+        Test-Path $fixture.CaptureFile | Should -BeTrue
+        $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
+        $captured.ProjectDir | Should -Be $explicitDir
+        $captured.IgnorePlanWorkingDir | Should -BeTrue
+    }
+}

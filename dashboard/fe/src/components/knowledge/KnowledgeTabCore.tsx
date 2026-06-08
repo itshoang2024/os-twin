@@ -13,8 +13,9 @@ import ImportPanel from '@/components/knowledge/ImportPanel';
 import ResearchPanel from '@/components/knowledge/ResearchPanel';
 import NexusExplorer from '@/components/knowledge/NexusExplorer';
 import MetricsStrip from '@/components/knowledge/MetricsStrip';
+import OntologyPanel from '@/components/knowledge/ontology/OntologyPanel';
 
-type DetailView = 'overview' | 'import' | 'research' | 'nexus';
+type DetailView = 'overview' | 'import' | 'research' | 'nexus' | 'ontology';
 
 /**
  * Props interface for the KnowledgeTabCore component.
@@ -39,7 +40,7 @@ export interface KnowledgeTabCoreProps {
   /** If set, filter namespaces to only show this specific namespace */
   filterNamespace?: string;
   /** Default tab to open in the detail view (used by deep-link routes) */
-  defaultTab?: 'import' | 'research' | 'nexus';
+  defaultTab?: 'import' | 'research' | 'nexus' | 'ontology';
 }
 
 /**
@@ -101,7 +102,6 @@ export default function KnowledgeTabCore({
     jobs,
     graphCounts,
     activeJob,
-    latestJob,
     isLoading: jobsLoading,
     startImport,
     refreshJobs,
@@ -279,6 +279,7 @@ export default function KnowledgeTabCore({
     { id: 'import', label: 'Import', icon: 'upload' },
     { id: 'research', label: 'Research', icon: 'travel_explore' },
     { id: 'nexus', label: 'Nexus', icon: 'hub' },
+    { id: 'ontology', label: 'Ontology', icon: 'schema' },
   ];
 
   // In plan context with filter, hide overview tab
@@ -417,6 +418,9 @@ export default function KnowledgeTabCore({
                 onNoteClick={handleNoteClick}
               />
             )}
+            {activeDetailView === 'ontology' && (
+              <OntologyPanel selectedNamespace={selectedNamespace} />
+            )}
           </div>
         </div>
       </div>
@@ -515,6 +519,8 @@ export default function KnowledgeTabCore({
               onSelectNamespace={handleSelectNamespace}
               onNoteClick={handleNoteClick}
             />
+          ) : activeDetailView === 'ontology' ? (
+            <OntologyPanel selectedNamespace={selectedNamespace} />
           ) : activeDetailView === 'research' ? (
             <div className="h-full flex flex-col">
               <div className="flex items-center gap-2 px-5 py-2.5 border-b shrink-0" style={{ borderColor: 'var(--color-border)' }}>
