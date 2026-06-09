@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 
 $gitWorkspaceModule = Join-Path $PSScriptRoot 'GitWorkspace.psm1'
 if (Test-Path $gitWorkspaceModule) {
-    Import-Module (Resolve-Path $gitWorkspaceModule).Path -Force
+    Import-Module (Resolve-Path $gitWorkspaceModule).Path -Force -DisableNameChecking
 }
 
 function Invoke-RoomWorkspaceMerge {

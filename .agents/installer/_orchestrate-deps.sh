@@ -26,22 +26,25 @@ ensure_js_package_manager() {
   return 1
 }
 
-install_clawhub_cli() {
-  command -v clawhub &>/dev/null && return 0
+setup_node_js_tools() {
+  local node_label="${1:-Node.js}"
+  local install_optional_clis="${2:-false}"
+  local node_ver
+  node_ver=$(node --version 2>&1 | head -1)
+  ok "$node_label $node_ver"
 
-  if ! check_bun; then
-    ensure_js_package_manager || return 0
+  ensure_js_package_manager || true
+  install_core_js_clis
+
+  if ! $install_optional_clis; then
+    return 0
   fi
 
-  step "Installing clawhub CLI with bun..."
-  if bun add -g clawhub 2>/dev/null; then
-    local bun_bin="${BUN_INSTALL:-$HOME/.bun}/bin"
-    [[ -d "$bun_bin" && ":$PATH:" != *":$bun_bin:"* ]] && export PATH="$bun_bin:$PATH"
-  else
-    warn "clawhub bun install failed"
+  if ! $SKIP_OPTIONAL; then
+    install_agent_browser
+  elif ! check_agent_browser; then
+    warn "agent-browser not found (skipped — --skip-optional)"
   fi
-
-  return 0
 }
 
 if $DASHBOARD_ONLY; then
@@ -65,10 +68,7 @@ if $DASHBOARD_ONLY; then
     install_node
   fi
   if check_node; then
-    NODE_VERSION=$(node --version 2>&1 | head -1)
-    ok "Node.js $NODE_VERSION"
-    ensure_js_package_manager || true
-    install_clawhub_cli
+    setup_node_js_tools "Node.js" false
   else
     fail "Node.js required for dashboard"
     exit 1
@@ -171,29 +171,13 @@ fi
 
 # --- Node.js ---
 if check_node; then
-  NODE_VERSION=$(node --version 2>&1 | head -1)
-  ok "Node.js $NODE_VERSION"
-  ensure_js_package_manager || true
-  install_clawhub_cli
-  if ! $SKIP_OPTIONAL; then
-    install_agent_browser
-  elif ! check_agent_browser; then
-    warn "agent-browser not found (skipped — --skip-optional)"
-  fi
+  setup_node_js_tools "Node.js" true
 else
   warn "Node.js not found"
   if ask "Install Node.js? (required for Dashboard UI)"; then
     install_node
     if check_node; then
-      NODE_VERSION=$(node --version 2>&1 | head -1)
-      ok "Node.js $NODE_VERSION installed"
-      ensure_js_package_manager || true
-      install_clawhub_cli
-      if ! $SKIP_OPTIONAL; then
-        install_agent_browser
-      elif ! check_agent_browser; then
-        warn "agent-browser not found (skipped — --skip-optional)"
-      fi
+      setup_node_js_tools "Node.js" true
     else
       warn "Node.js installation failed"
     fi

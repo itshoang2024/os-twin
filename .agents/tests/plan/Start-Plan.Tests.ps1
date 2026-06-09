@@ -935,6 +935,7 @@ working_dir: $script:projectDir
             $room002 = Join-Path $warRooms "room-002"
             if (-not (Test-Path $room002)) { New-Item -ItemType Directory -Path $room002 -Force | Out-Null }
             "fixing" | Out-File (Join-Path $room002 "status") -Encoding utf8 -NoNewline
+            "7" | Out-File (Join-Path $room002 "retries") -Encoding utf8 -NoNewline
             $pidDir002 = New-Item -ItemType Directory -Path (Join-Path $room002 "pids") -Force
             New-Item -ItemType File -Path (Join-Path $pidDir002 "test.pid") -Force | Out-Null
 
@@ -969,16 +970,19 @@ working_dir: $script:projectDir
             (Get-ChildItem $pidDir -Filter "*.pid").Count | Should -Be 0
         }
 
-        It "preserves failed-room retry counters on resume" {
+        It "resets room retry counters on resume" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1 | Out-Null
             
             $retriesFile = Join-Path $absProjectDir ".war-rooms/room-001/retries"
             $content = (Get-Content $retriesFile -Raw).Trim()
-            $content | Should -Be "10"
+            $content | Should -Be "0"
             
             $qaRetriesFile = Join-Path $absProjectDir ".war-rooms/room-001/qa_retries"
-            (Test-Path $qaRetriesFile) | Should -Be $true
+            (Test-Path $qaRetriesFile) | Should -BeFalse
+
+            $activeRetriesFile = Join-Path $absProjectDir ".war-rooms/room-002/retries"
+            (Get-Content $activeRetriesFile -Raw).Trim() | Should -Be "0"
         }
 
         It "triggers Update-Progress after resets" {
@@ -1119,7 +1123,7 @@ param(
     [switch]$Expand,
     [switch]$Review,
     [int]$MaxConcurrent,
-    [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree',
+    [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'shared',
     [string]$WorktreeRoot = '',
     [switch]$NonInteractive,
     [switch]$EnablePlanning,
@@ -1188,11 +1192,12 @@ working_dir: $oldProject
 - [ ] Done
 "@ | Out-File $planFile -Encoding utf8
 
-        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--workspace-isolation', 'shared', '--dry-run', '-n')
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--dry-run', '-n')
 
         Test-Path $fixture.CaptureFile | Should -BeTrue
         $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
         $captured.ProjectDir | Should -Be $fixture.ProjectDir
+        $captured.WorkspaceIsolation | Should -Be 'shared'
         $captured.IgnorePlanWorkingDir | Should -BeTrue
     }
 

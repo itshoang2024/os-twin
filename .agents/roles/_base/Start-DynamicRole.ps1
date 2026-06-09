@@ -267,6 +267,30 @@ if ($roleConfigs) {
         $latestRoleConfig | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigs[0].FullName -Encoding utf8
     }
 }
+else {
+    # Dynamic review/triage roles may be introduced by lifecycle.json after the
+    # room was created for the primary worker. Materialize their per-role config
+    # on first run so artifacts remain complete and later status updates have a
+    # concrete {role}_{id}.json file to target.
+    $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $roleConfigObj = [ordered]@{
+        role            = $baseRole
+        instance_id     = "001"
+        instance_type   = $instanceSuffix
+        display_name    = if ($instanceSuffix) { "$baseRole`:$instanceSuffix #001" } else { "$baseRole #001" }
+        model           = $agentModel
+        timeout_seconds = $TimeoutSeconds
+        assigned_at     = $ts
+        status          = "active"
+        config_override = [ordered]@{}
+    }
+    $roleConfigFile = Join-Path $RoomDir "${baseRole}_001.json"
+    $roleConfigObj | ConvertTo-Json -Depth 5 | Out-File -FilePath $roleConfigFile -Encoding utf8
+    $roleConfigs = @(Get-Item $roleConfigFile)
+    if (Get-Command Set-LifecycleRoleStatus -ErrorAction SilentlyContinue) {
+        Set-LifecycleRoleStatus -RoomDir $RoomDir -RoleName $baseRole -Status "active" -ConfigFile $roleConfigFile | Out-Null
+    }
+}
 
 # --- Write per-role context.md ---
 $contextsDir = Join-Path $RoomDir "contexts"

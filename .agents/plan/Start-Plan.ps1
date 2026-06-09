@@ -55,14 +55,9 @@ param(
 
     [switch]$EnablePlanning,
 
-    [ValidateSet('shared')]
+    [ValidateSet('room-worktree','shared')]
     [string]$WorkspaceIsolation = 'shared'
 )
-
-if ($WorkspaceIsolation -ne 'shared') {
-    Write-Warning "Unsupported workspace isolation '$WorkspaceIsolation'; using shared workspace."
-    $WorkspaceIsolation = 'shared'
-}
 
 # --- Resolve paths ---
 # The agentsDir must point to the Ostwin *installation* (where scripts like
@@ -137,7 +132,7 @@ if (Test-Path $eventsModule) {
 $workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
 if (Test-Path $workspaceModule) {
     $workspaceModule = (Resolve-Path $workspaceModule).Path
-    Import-Module $workspaceModule -Force
+    Import-Module $workspaceModule -Force -DisableNameChecking
 }
 
 # --- Helper Functions ---
@@ -559,6 +554,11 @@ if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
 
 $workspaceManifest = $null
 if (-not $DryRun) {
+    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
+        exit 1
+    }
+
     $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
     if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
         $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir
@@ -711,6 +711,11 @@ if ($Resume) {
     if (Test-Path $targetWarRoomsDir) {
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
         foreach ($rd in $rooms) {
+            # Resume starts a fresh retry budget; subsequent fail signals/events
+            # consume retries from zero during the resumed run.
+            "0" | Out-File -FilePath (Join-Path $rd.FullName "retries") -Encoding utf8 -NoNewline
+            Remove-Item (Join-Path $rd.FullName "qa_retries") -Force -ErrorAction SilentlyContinue
+
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
@@ -731,12 +736,6 @@ if ($Resume) {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                     
-                    # Reset retry counters
-                    $retriesFile = Join-Path $rd.FullName "retries"
-                    if (Test-Path $retriesFile) { "0" | Out-File -FilePath $retriesFile -Encoding utf8 -NoNewline }
-                    $qaRetriesFile = Join-Path $rd.FullName "qa_retries"
-                    if (Test-Path $qaRetriesFile) { Remove-Item $qaRetriesFile -Force -ErrorAction SilentlyContinue }
-
                     # Clear old PID files
                     $pidDir = Join-Path $rd.FullName "pids"
                     if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
