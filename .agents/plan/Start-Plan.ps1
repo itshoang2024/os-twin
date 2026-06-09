@@ -711,6 +711,11 @@ if ($Resume) {
     if (Test-Path $targetWarRoomsDir) {
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
         foreach ($rd in $rooms) {
+            # Resume starts a fresh retry budget; subsequent fail signals/events
+            # consume retries from zero during the resumed run.
+            "0" | Out-File -FilePath (Join-Path $rd.FullName "retries") -Encoding utf8 -NoNewline
+            Remove-Item (Join-Path $rd.FullName "qa_retries") -Force -ErrorAction SilentlyContinue
+
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
@@ -731,12 +736,6 @@ if ($Resume) {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                     
-                    # Reset retry counters
-                    $retriesFile = Join-Path $rd.FullName "retries"
-                    if (Test-Path $retriesFile) { "0" | Out-File -FilePath $retriesFile -Encoding utf8 -NoNewline }
-                    $qaRetriesFile = Join-Path $rd.FullName "qa_retries"
-                    if (Test-Path $qaRetriesFile) { Remove-Item $qaRetriesFile -Force -ErrorAction SilentlyContinue }
-
                     # Clear old PID files
                     $pidDir = Join-Path $rd.FullName "pids"
                     if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }

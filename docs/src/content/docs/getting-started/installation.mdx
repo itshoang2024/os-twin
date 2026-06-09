@@ -1,24 +1,31 @@
 ---
 title: Installation
-description: Install OSTwin and configure your environment.
+description: Install OSTwin, optional runtime components, and the documentation site.
 sidebar:
   order: 2
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
+This guide installs the full OSTwin runtime: CLI, dashboard, agent orchestration scripts, JavaScript tooling, Python environment, OpenCode integration, and optional services.
+
 ## Prerequisites
 
-| Requirement | Version | Check command |
-|------------|---------|---------------|
-| **PowerShell** | 7.4+ | `pwsh --version` |
-| **Node.js** | 20+ | `node --version` |
-| **Python** | 3.11+ | `python3 --version` |
-| **Git** | 2.40+ | `git --version` |
-| **pnpm** | 9+ | `pnpm --version` |
+The installer can install most missing dependencies for you.
+
+| Dependency | Required | Notes |
+|------------|----------|-------|
+| macOS or Linux | Yes | Native Bash installer path. |
+| Bash | Yes | Used by the installer wrapper. |
+| PowerShell 7+ | Yes | Used by the orchestration engine. Auto-installed when possible. |
+| Python 3.10+ | Yes | Python 3.12 recommended. Auto-installed when possible. |
+| Node.js + npm | Yes | Used by dashboard and JavaScript CLIs. Auto-installed when possible. |
+| Bun | Recommended | Preferred package manager for JavaScript runtime tasks. Auto-installed when possible. |
+| Git | Recommended | Required for room worktree isolation. Shared isolation is the default. |
+| Provider API key | Yes | At least one of Google, OpenAI, Anthropic, or another configured provider. |
 
 :::tip
-The packaged bootstrapper and native installers can install or validate many runtime dependencies for you. Go is only required when developing or testing the packaged `ostwin-installer` binary locally.
+The installer also installs global JavaScript CLIs used by OSTwin, including `@colbymchenry/codegraph`.
 :::
 
 ## Install OSTwin
@@ -29,6 +36,8 @@ The packaged bootstrapper and native installers can install or validate many run
 
     ```bash
     curl -fsSL https://twin.igot.ai/installer.sh | bash
+
+    # Non-interactive
     curl -fsSL https://twin.igot.ai/installer.sh | bash -s -- --yes
     ```
 
@@ -36,11 +45,10 @@ The packaged bootstrapper and native installers can install or validate many run
 
     If the packaged release binary is unavailable, `install.sh` falls back to the source-archive Bash installer. Checksum mismatches fail closed and do not fall back.
 
-    Useful forwarded options:
+    Common forwarded options:
 
     ```bash
     --yes
-    --profile full|dashboard|minimal
     --dir ~/.ostwin
     --port 3366
     --skip-optional
@@ -49,15 +57,17 @@ The packaged bootstrapper and native installers can install or validate many run
     ```
   </TabItem>
   <TabItem label="Local Clone">
-    If you already cloned the repository, run the native installer directly:
+    Use this path when developing OSTwin or testing installer changes from a checkout:
 
     ```bash
     git clone https://github.com/igot-ai/os-twin.git
     cd os-twin
-    .agents/install.sh
+    ./build.sh --yes
     ```
 
-    Non-interactive install:
+    `build.sh` delegates to `.agents/install.sh` with local source defaults, so it exercises the current checkout instead of downloading the latest release.
+
+    You can also call the native installer directly:
 
     ```bash
     .agents/install.sh --yes
@@ -84,6 +94,19 @@ The packaged bootstrapper and native installers can install or validate many run
   </TabItem>
 </Tabs>
 
+## Common Installer Options
+
+| Option | Purpose |
+|--------|---------|
+| `--yes` | Run without prompts. |
+| `--dir PATH` | Install to a custom directory. Default: `~/.ostwin`. |
+| `--port PORT` | Set the dashboard port. Default: `3366`. |
+| `--skip-optional` | Skip optional components. |
+| `--sync-skills` | Force built-in skill sync. |
+| `--no-start` | Install only; do not start services. |
+| `--dashboard-only` | Install dashboard API and frontend only. |
+| `--no-channel` | Install bot dependencies but do not start channel connectors. |
+
 ## Release Artifacts
 
 Tagged releases publish these installer assets:
@@ -101,69 +124,196 @@ ostwin-installer_windows_arm64.tar.gz
 
 ## API Key Setup
 
-OSTwin needs at least one LLM provider key. Set the key for the provider you plan to use:
+OSTwin needs at least one LLM provider key. Add keys to `~/.ostwin/.env` after installation:
 
 <Tabs>
   <TabItem label="Anthropic (recommended)">
     ```bash
-    export ANTHROPIC_API_KEY="sk-ant-..."
+    ANTHROPIC_API_KEY=sk-ant-...
     ```
   </TabItem>
   <TabItem label="OpenAI">
     ```bash
-    export OPENAI_API_KEY="sk-..."
+    OPENAI_API_KEY=sk-...
     ```
   </TabItem>
   <TabItem label="Google">
     ```bash
-    export GOOGLE_API_KEY="AI..."
+    GOOGLE_API_KEY=AI...
     ```
   </TabItem>
 </Tabs>
 
 :::caution
-API keys are read from environment variables at runtime. Never commit them to your plan files or role configs. The engine will fail fast if the required key is missing.
+Never commit API keys to plan files, role configs, or source control.
 :::
 
-For persistent configuration, add the export to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.).
+Reload your shell after installation:
+
+```bash
+source ~/.zshrc
+```
+
+Use `~/.bashrc` instead if your shell is Bash.
+
+## Optional Components
+
+### Search Engine
+
+Install local SearXNG support during setup:
+
+```bash
+./build.sh --search-engine --search-engine-mode docker
+```
+
+Or install and start it after setup:
+
+```bash
+ostwin search-engine install
+ostwin search-engine start
+```
+
+### Dashboard Daemon
+
+Install OS autostart for the dashboard and host daemon:
+
+```bash
+./build.sh --daemon
+```
+
+Skip daemon setup explicitly:
+
+```bash
+./build.sh --no-daemon
+```
+
+### Channel Connectors
+
+Start Telegram, Discord, and Slack connectors during install:
+
+```bash
+./build.sh --channel
+```
+
+Skip connector startup:
+
+```bash
+./build.sh --no-channel
+```
 
 ## Runtime File Locations
 
-After installation, OSTwin uses the following directory structure:
+After installation, OSTwin uses this runtime structure:
 
 | Path | Purpose |
 |------|---------|
-| `.agents/skills/` | Skill definitions organized by role |
-| `.agents/roles/` | Role definitions (`role.json` + `ROLE.md`) |
-| `.agents/war-rooms/` | Active war-room directories, created at runtime |
-| `.agents/memory/` | Shared memory ledger |
-| `.agents/roles/registry.json` | Role registry mapping |
-| `api/` | FastAPI dashboard backend |
-| `dashboard/` | Next.js dashboard frontend |
-| `bot/` | TypeScript conversational bot |
+| `~/.ostwin/.agents/` | Installed engine, roles, skills, MCP config, and CLI scripts. |
+| `~/.ostwin/.env` | Runtime environment variables and provider API keys. |
+| `~/.ostwin/plans/` | Registered global plans. |
+| `<project>/.agents/` | Project-local OSTwin scaffold created by `ostwin init`. |
+| `<project>/.war-rooms/` | Active war-room directories created at runtime. |
+| `<project>/.agents/plans/` | Local plan copies that agents can read inside the project sandbox. |
 
 ## Verify Installation
 
-Run the health check from a local checkout:
+Run the health check:
 
 ```bash
-.agents/health.sh
+ostwin health
 ```
 
-On Windows:
+Check the installed version:
 
-```powershell
-.agents\health.ps1
+```bash
+ostwin version
 ```
 
-This checks key prerequisites and installed runtime state.
+Start or restart the dashboard if it is not already running:
+
+```bash
+ostwin dashboard start
+```
+
+Open the dashboard at:
+
+```text
+http://localhost:3366
+```
+
+## Initialize a Project
+
+From the project you want OSTwin to operate on:
+
+```bash
+ostwin init
+```
+
+Create and run a plan:
+
+```bash
+ostwin plan create "Build a REST API with auth"
+ostwin run plans/my-feature.md
+```
+
+Monitor execution:
+
+```bash
+ostwin status --watch
+ostwin logs room-001 --follow
+```
+
+By default, OSTwin runs with shared workspace isolation. Use room worktrees only when you need per-room Git worktrees:
+
+```bash
+ostwin run plans/my-feature.md --workspace-isolation room-worktree
+```
+
+## Install and Run the Docs Site
+
+The documentation site lives in `docs/` and uses Astro Starlight.
+
+```bash
+cd docs
+npm install --package-lock=false
+npm run dev
+```
+
+Build the static docs site:
+
+```bash
+cd docs
+npm run build
+```
+
+Preview the production build:
+
+```bash
+cd docs
+npm run preview
+```
+
+The docs build runs `npm run sync-installer` first. That copies the root `install.sh` into `docs/public/installer.sh` and `docs/public/install.sh`, keeping the public curl installer URL aligned with the repository installer.
+
+## Update an Existing Install
+
+To update an initialized project from the installed framework:
+
+```bash
+ostwin sync
+```
+
+To refresh the global install from a local checkout:
+
+```bash
+./build.sh --yes --sync-skills
+```
 
 ## Uninstall
 
-To remove OSTwin:
+Remove the local OSTwin install:
 
 ```bash
-.agents/uninstall.sh
+~/.ostwin/.agents/uninstall.sh
 ```
 
 On Windows:
@@ -171,6 +321,8 @@ On Windows:
 ```powershell
 .agents\uninstall.ps1
 ```
+
+Review the uninstall prompt before confirming, especially if you have local plans, logs, or generated artifacts under `~/.ostwin`.
 
 ## Next Steps
 
