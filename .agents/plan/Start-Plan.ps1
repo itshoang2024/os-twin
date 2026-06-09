@@ -737,6 +737,15 @@ if ($Resume) {
             # consume retries from zero during the resumed run.
             "0" | Out-File -FilePath (Join-Path $rd.FullName "retries") -Encoding utf8 -NoNewline
             Remove-Item (Join-Path $rd.FullName "qa_retries") -Force -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path $rd.FullName "crash_respawns") -Force -ErrorAction SilentlyContinue
+
+            # Reset process-level runtime markers for all rooms. The manager loop
+            # should restart from the restored status, not from stale PIDs/locks.
+            $pidDir = Join-Path $rd.FullName "pids"
+            if (Test-Path $pidDir) {
+                Get-ChildItem $pidDir -Filter "*.pid" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                Get-ChildItem $pidDir -Filter "*.spawned_at" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
 
             # Discard stale role-wrapper status from the previous process/run.
             # Otherwise a prior qa_*.json status=failed can look fresh relative
@@ -768,10 +777,6 @@ if ($Resume) {
                 } elseif ($status -eq "fixing") {
                     Write-Host "  → Normalizing $($rd.Name) from fixing to optimize" -ForegroundColor Yellow
                     "optimize" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                    
-                    # Clear old PID files
-                    $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
                 } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
@@ -780,11 +785,6 @@ if ($Resume) {
                 $normalizedStatus = (Get-Content $statusFile -Raw).Trim()
                 if ($normalizedStatus -notin @('done', 'failed')) {
                     $resumeEpoch.ToString() | Out-File -FilePath (Join-Path $rd.FullName "state_changed_at") -Encoding utf8 -NoNewline
-                    $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) {
-                        Get-ChildItem $pidDir -Filter "*.pid" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-                        Get-ChildItem $pidDir -Filter "*.spawned_at" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-                    }
                 }
             }
         }

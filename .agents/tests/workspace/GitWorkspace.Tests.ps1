@@ -67,6 +67,23 @@ Describe 'GitWorkspace preflight' {
         $result.Ready | Should -BeTrue
         $result.BaseRef | Should -Not -BeNullOrEmpty
     }
+
+    It 'allows generated runtime state under the ostwin run working directory' {
+        $repo = New-TestRepo -Name 'nested-runtime-only'
+        $sourceDir = Join-Path $repo 'app'
+        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
+        'app' | Out-File -FilePath (Join-Path $sourceDir 'app.txt') -Encoding utf8
+        Invoke-TestGit -Cwd $repo -Args @('add', 'app/app.txt') | Out-Null
+        Invoke-TestGit -Cwd $repo -Args @('commit', '-m', 'add app') | Out-Null
+        $runtimeDir = Join-Path $sourceDir '.worktree/room-001'
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+        '{}' | Out-File -FilePath (Join-Path $runtimeDir 'config.json') -Encoding utf8
+
+        $result = Test-GitReady -WorkingDir $sourceDir -AllowRuntimeState
+
+        $result.Ready | Should -BeTrue
+        $result.BaseRef | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'GitWorkspace lazy room worktrees' {
@@ -102,6 +119,82 @@ Describe 'GitWorkspace lazy room worktrees' {
         $record.base_ref | Should -Be $sourceHead
         $record.worktree_dir | Should -Be (Join-Path (Join-Path $repo '.worktree') 'room-001')
         Test-Path (Join-Path $roomDir 'lifecycle.json') | Should -BeTrue
+    }
+
+    It 'places the managed worktree root under the ostwin run working directory' {
+        $repo = New-TestRepo -Name 'run-subdir-root'
+        $sourceDir = Join-Path $repo 'app'
+        New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
+        'app' | Out-File -FilePath (Join-Path $sourceDir 'app.txt') -Encoding utf8
+        Invoke-TestGit -Cwd $repo -Args @('add', 'app/app.txt') | Out-Null
+        Invoke-TestGit -Cwd $repo -Args @('commit', '-m', 'add app') | Out-Null
+        $warRoomsDir = Join-Path $TestDrive 'war-rooms-run-subdir'
+
+        $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $sourceDir -WorkspaceIsolation room-worktree
+
+        $manifest.worktree_root | Should -Be (Join-Path $sourceDir '.worktree')
+        $manifest.source_git_root | Should -Be $repo
+        $manifest.source_working_dir | Should -Be $sourceDir
+        $manifest.source_relative_dir | Should -Be 'app'
+    }
+
+    It 'provisions the room worktree when a ready record points at a missing worktree' {
+        $repo = New-TestRepo -Name 'stale-ready-record'
+        $warRoomsDir = Join-Path $TestDrive 'war-rooms-stale-ready'
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
+
+        $roomDir = Join-Path $warRoomsDir 'room-001'
+        New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+        @{
+            room_id = 'room-001'
+            task_ref = 'EPIC-001'
+            plan_id = 'plan-test'
+            run_id = 'run-test'
+            working_dir = $repo
+            depends_on = @()
+            assignment = @{ title = 'Provision stale worktree' }
+        } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
+        $expectedWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        Set-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001' -TaskRef 'EPIC-001' -Status 'ready' -Fields @{
+            worktree_dir = $expectedWorktree
+            working_dir = $expectedWorktree
+        } | Out-Null
+
+        $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+
+        $result.Ready | Should -BeTrue
+        $result.Reused | Should -BeNullOrEmpty
+        $result.WorkingDir | Should -Be $expectedWorktree
+        Test-Path (Join-Path $expectedWorktree '.git') | Should -BeTrue
+    }
+
+    It 'does not derive nested worktree paths from a persisted room working_dir' {
+        $repo = New-TestRepo -Name 'nested-working-dir'
+        $warRoomsDir = Join-Path $TestDrive 'war-rooms-nested-working-dir'
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
+
+        $roomDir = Join-Path $warRoomsDir 'room-001'
+        New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+        $roomWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        $nestedWorkingDir = Join-Path $roomWorktree '.worktree/room-001'
+        @{
+            room_id = 'room-001'
+            task_ref = 'EPIC-001'
+            plan_id = 'plan-test'
+            run_id = 'run-test'
+            working_dir = $nestedWorkingDir
+            depends_on = @()
+            assignment = @{ title = 'Avoid nested worktree path' }
+        } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
+
+        $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+        $config = Get-Content (Join-Path $roomDir 'config.json') -Raw | ConvertFrom-Json
+        $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
+
+        $result.WorkingDir | Should -Be $roomWorktree
+        $config.working_dir | Should -Be $roomWorktree
+        $record.working_dir | Should -Be $roomWorktree
+        Test-Path (Join-Path $roomWorktree '.git') | Should -BeTrue
     }
 
     It 'does not unblock dependencies that are done but not merged' {
