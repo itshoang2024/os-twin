@@ -1,55 +1,25 @@
 ﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
-<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="18" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-06-07" time="21:28:45">
-  <environment clr-version="10.0.5" os-version="25.5.0" user="paulaan" platform="Darwin" cwd="/Users/paulaan/PycharmProjects/os-twin" nunit-version="2.5.8.0" machine-name="Ans-MacBook-Pro-2.local" user-domain="" />
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="8" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-06-08" time="23:54:47">
+  <environment machine-name="Ans-MacBook-Pro-2.local" user="paulaan" user-domain="" os-version="25.5.0" nunit-version="2.5.8.0" cwd="/Users/paulaan/PycharmProjects/os-twin" clr-version="10.0.5" platform="Darwin" />
   <culture-info current-culture="en-VN" current-uiculture="en-VN" />
-  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="0.4516" asserts="0" description="Pester">
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="5.5416" asserts="0" description="Pester">
     <results>
-      <test-suite type="TestFixture" name="/Users/paulaan/PycharmProjects/os-twin/.agents/tests/roles/_base/Get-RoleDefinition.Tests.ps1" executed="True" result="Success" success="True" time="0.4516" asserts="0" description="/Users/paulaan/PycharmProjects/os-twin/.agents/tests/roles/_base/Get-RoleDefinition.Tests.ps1">
+      <test-suite type="TestFixture" name="/Users/paulaan/PycharmProjects/os-twin/.agents/tests/workspace/GitWorkspace.Tests.ps1" executed="True" result="Success" success="True" time="5.5416" asserts="0" description="/Users/paulaan/PycharmProjects/os-twin/.agents/tests/workspace/GitWorkspace.Tests.ps1">
         <results>
-          <test-suite type="TestFixture" name="Get-RoleDefinition" executed="True" result="Success" success="True" time="0.2924" asserts="0" description="Get-RoleDefinition">
+          <test-suite type="TestFixture" name="GitWorkspace preflight" executed="True" result="Success" success="True" time="1.0136" asserts="0" description="GitWorkspace preflight">
             <results>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.JSON role definition" executed="True" result="Success" success="True" time="0.199" asserts="0" description="Get-RoleDefinition.JSON role definition">
-                <results>
-                  <test-case description="loads role name" name="Get-RoleDefinition.JSON role definition.loads role name" time="0.1086" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads description" name="Get-RoleDefinition.JSON role definition.loads description" time="0.0122" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads capabilities" name="Get-RoleDefinition.JSON role definition.loads capabilities" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads quality gates" name="Get-RoleDefinition.JSON role definition.loads quality gates" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads skills" name="Get-RoleDefinition.JSON role definition.loads skills" time="0.008" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads CLI config" name="Get-RoleDefinition.JSON role definition.loads CLI config" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads prompt template from ROLE.md" name="Get-RoleDefinition.JSON role definition.loads prompt template from ROLE.md" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="stores source file path" name="Get-RoleDefinition.JSON role definition.stores source file path" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.Default from ROLE.md" executed="True" result="Success" success="True" time="0.2424" asserts="0" description="Get-RoleDefinition.Default from ROLE.md">
-                <results>
-                  <test-case description="generates default role from ROLE.md when no definition file" name="Get-RoleDefinition.Default from ROLE.md.generates default role from ROLE.md when no definition file" time="0.0142" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="sets default capabilities" name="Get-RoleDefinition.Default from ROLE.md.sets default capabilities" time="0.005" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads prompt from ROLE.md" name="Get-RoleDefinition.Default from ROLE.md.loads prompt from ROLE.md" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="uses default CLI" name="Get-RoleDefinition.Default from ROLE.md.uses default CLI" time="0.0063" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="uses default timeout" name="Get-RoleDefinition.Default from ROLE.md.uses default timeout" time="0.0053" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.Built-in roles" executed="True" result="Success" success="True" time="0.2579" asserts="0" description="Get-RoleDefinition.Built-in roles">
-                <results>
-                  <test-case description="loads engineer role from standard path" name="Get-RoleDefinition.Built-in roles.loads engineer role from standard path" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
-                  <test-case description="loads qa role from standard path" name="Get-RoleDefinition.Built-in roles.loads qa role from standard path" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.Role by name" executed="True" result="Success" success="True" time="0.2676" asserts="0" description="Get-RoleDefinition.Role by name">
-                <results>
-                  <test-case description="resolves role by name when RolePath not provided" name="Get-RoleDefinition.Role by name.resolves role by name when RolePath not provided" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.Error handling" executed="True" result="Success" success="True" time="0.2756" asserts="0" description="Get-RoleDefinition.Error handling">
-                <results>
-                  <test-case description="fails when neither path nor name provided" name="Get-RoleDefinition.Error handling.fails when neither path nor name provided" time="0.0061" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
-              <test-suite type="TestFixture" name="Get-RoleDefinition.Empty role directory" executed="True" result="Success" success="True" time="0.2877" asserts="0" description="Get-RoleDefinition.Empty role directory">
-                <results>
-                  <test-case description="generates minimal default for empty directory" name="Get-RoleDefinition.Empty role directory.generates minimal default for empty directory" time="0.0051" asserts="0" success="True" result="Success" executed="True" />
-                </results>
-              </test-suite>
+              <test-case description="fails outside a Git work tree" name="GitWorkspace preflight.fails outside a Git work tree" time="0.0979" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails when tracked files are dirty" name="GitWorkspace preflight.fails when tracked files are dirty" time="0.4079" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allows generated untracked Ostwin runtime state" name="GitWorkspace preflight.allows generated untracked Ostwin runtime state" time="0.4617" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="GitWorkspace lazy room worktrees" executed="True" result="Success" success="True" time="5.3796" asserts="0" description="GitWorkspace lazy room worktrees">
+            <results>
+              <test-case description="creates a room worktree under source .worktree and keeps room state in .war-rooms" name="GitWorkspace lazy room worktrees.creates a room worktree under source .worktree and keeps room state in .war-rooms" time="0.677" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not unblock dependencies that are done but not merged" name="GitWorkspace lazy room worktrees.does not unblock dependencies that are done but not merged" time="0.4818" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="unblocks dependencies when predecessor is done and manifest is merged" name="GitWorkspace lazy room worktrees.unblocks dependencies when predecessor is done and manifest is merged" time="0.4669" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="merges two epic room worktrees back while preserving .war-rooms artifacts" name="GitWorkspace lazy room worktrees.merges two epic room worktrees back while preserving .war-rooms artifacts" time="1.5649" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="records merge conflicts in the manifest and room artifact" name="GitWorkspace lazy room worktrees.records merge conflicts in the manifest and room artifact" time="1.113" asserts="0" success="True" result="Success" executed="True" />
             </results>
           </test-suite>
         </results>

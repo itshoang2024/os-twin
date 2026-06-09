@@ -10,6 +10,7 @@ def _repo(tmp_path):
         project_roles_dir=tmp_path / "project" / ".agents" / "roles",
         roles_config_file=tmp_path / "home" / ".agents" / "roles" / "config.json",
         engine_config_file=tmp_path / "project" / ".agents" / "config.json",
+        opencode_agents_dir=tmp_path / "home" / ".opencode" / "agents",
     )
 
 
@@ -103,6 +104,57 @@ def test_sync_migrates_legacy_config_values_into_role_folder(tmp_path):
     assert (repo.global_roles_dir / "engineer" / "ROLE.md").read_text() == "Legacy instructions"
 
 
+def test_write_role_syncs_role_md_to_opencode_agent(tmp_path):
+    repo = _repo(tmp_path)
+    role = Role(
+        id="principal-engineer",
+        name="Principal Engineer",
+        description="Sets technical direction.",
+        instructions="You are a principal engineer.\nReview architecture first.",
+        provider="claude",
+        version="anthropic/claude-sonnet-4",
+        temperature=0.2,
+        budget_tokens_max=500000,
+        max_retries=3,
+        timeout_seconds=900,
+        skill_refs=[],
+        mcp_refs=[],
+        instance_type="worker",
+        system_prompt_override=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-02T00:00:00+00:00",
+    )
+
+    repo.write_role(role)
+
+    role_md = (repo.global_roles_dir / "Principal Engineer" / "ROLE.md").read_text()
+    agent_md = (repo.opencode_agents_dir / "principal-engineer.md").read_text()
+    assert role_md == role.instructions
+    assert 'name: "principal-engineer"' in agent_md
+    assert 'description: "Sets technical direction."' in agent_md
+    assert 'mode: "subagent"' in agent_md
+    assert 'model: "anthropic/claude-sonnet-4"' in agent_md
+    assert agent_md.endswith(role.instructions + "\n")
+
+
+def test_delete_role_removes_synced_opencode_agent(tmp_path):
+    repo = _repo(tmp_path)
+    _write_role(
+        repo.global_roles_dir,
+        "temporary-role",
+        {"name": "temporary-role", "model": "openai/gpt-5"},
+        "Temporary instructions",
+    )
+    role = repo.list_roles()[0]
+    repo.write_role(role)
+
+    assert (repo.opencode_agents_dir / "temporary-role.md").exists()
+
+    repo.delete_role(role)
+
+    assert not (repo.opencode_agents_dir / "temporary-role.md").exists()
+
+
 def test_delete_role_removes_global_role_folder(tmp_path):
     repo = _repo(tmp_path)
     role_dir = _write_role(
@@ -118,4 +170,3 @@ def test_delete_role_removes_global_role_folder(tmp_path):
 
     assert not role_dir.exists()
     assert repo.list_roles() == []
-

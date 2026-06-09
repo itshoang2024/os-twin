@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from dashboard.models import Role
+from dashboard.lib.opencode_paths import get_ostwin_home
 
 
 DEFAULT_MODEL = "google-vertex/gemini-3-flash-preview"
@@ -127,11 +128,13 @@ class RoleRepository:
         project_roles_dir: Path,
         roles_config_file: Path,
         engine_config_file: Path,
+        opencode_agents_dir: Optional[Path] = None,
     ):
         self.global_roles_dir = global_roles_dir
         self.project_roles_dir = project_roles_dir
         self.roles_config_file = roles_config_file
         self.engine_config_file = engine_config_file
+        self.opencode_agents_dir = opencode_agents_dir or get_ostwin_home() / ".opencode" / "agents"
         self.projections = RoleProjectionWriter(roles_config_file, engine_config_file)
 
     def list_roles(self) -> List[Role]:
@@ -162,11 +165,34 @@ class RoleRepository:
         role_file = role_dir / "role.json"
         role_file.write_text(json.dumps(self._role_to_role_json(role), indent=2))
         (role_dir / "ROLE.md").write_text(role.instructions or "")
+        self.write_opencode_agent(role)
 
     def delete_role(self, role: Role) -> None:
         role_dir = self.global_roles_dir / role.name
         if role_dir.exists() and role_dir.is_dir():
             shutil.rmtree(role_dir)
+        self.delete_opencode_agent(role)
+
+    def write_opencode_agent(self, role: Role) -> None:
+        """Sync ROLE.md content into OpenCode's agent markdown format.
+
+        The dashboard's canonical editable role body is ``ROLE.md``. OpenCode,
+        however, discovers agents from ``.opencode/agents/<name>.md`` where the
+        markdown body is the agent prompt and frontmatter carries runtime
+        metadata. Keeping this projection in the repository write path ensures
+        every create/update/sync that saves role content also refreshes the
+        OpenCode agent prompt.
+        """
+        self.opencode_agents_dir.mkdir(parents=True, exist_ok=True)
+        agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
+        agent_file.write_text(self._render_opencode_agent_markdown(role))
+
+    def delete_opencode_agent(self, role: Role) -> None:
+        agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
+        try:
+            agent_file.unlink()
+        except FileNotFoundError:
+            pass
 
     def save_projections(self, roles: Iterable[Role]) -> None:
         self.projections.write_all(roles)
@@ -330,3 +356,17 @@ class RoleRepository:
             "updated_at": role.updated_at,
         }
 
+    @staticmethod
+    def _render_opencode_agent_markdown(role: Role) -> str:
+        frontmatter: Dict[str, Any] = {
+            "name": stable_role_id(role.name),
+            "description": role.description or f"Ostwin role: {role.name}",
+            "mode": "subagent",
+            "model": role.version,
+            "temperature": role.temperature,
+        }
+        lines = ["---"]
+        for key, value in frontmatter.items():
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+        lines.extend(["---", "", role.instructions or ""])
+        return "\n".join(lines).rstrip() + "\n"
