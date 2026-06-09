@@ -703,12 +703,34 @@ Write-Host "  Plan ID: $planId"
 Write-Host "  Project: $ProjectDir"
 Write-Host "  Workspace isolation: $WorkspaceIsolation"
 
+function Get-ResumeStatusBeforeFailed {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $auditFile = Join-Path $RoomDir "audit.log"
+    if (-not (Test-Path $auditFile)) { return $null }
+
+    $lines = @(Get-Content $auditFile -ErrorAction SilentlyContinue)
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        $line = $lines[$i]
+        if ($line -match '^\S+\s+STATUS\s+(?<from>\S+)\s+->\s+(?<to>\S+)') {
+            $from = $Matches['from']
+            $to = $Matches['to']
+            if ($to -in @('failed', 'failed-final') -and $from -notin @('failed', 'failed-final', 'done', 'passed')) {
+                return $from
+            }
+        }
+    }
+
+    return $null
+}
+
 if ($Resume) {
     Write-Host "  Mode: RESUME (using existing war-rooms)" -ForegroundColor Yellow
     
     # --- RESUME NORMALIZATION: canonicalize legacy statuses and clear restartable blocked rooms ---
     $targetWarRoomsDir = Join-Path $ProjectDir ".war-rooms"
     if (Test-Path $targetWarRoomsDir) {
+        $resumeEpoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         $rooms = Get-ChildItem -Path $targetWarRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue
         foreach ($rd in $rooms) {
             # Resume starts a fresh retry budget; subsequent fail signals/events
@@ -716,15 +738,33 @@ if ($Resume) {
             "0" | Out-File -FilePath (Join-Path $rd.FullName "retries") -Encoding utf8 -NoNewline
             Remove-Item (Join-Path $rd.FullName "qa_retries") -Force -ErrorAction SilentlyContinue
 
+            # Discard stale role-wrapper status from the previous process/run.
+            # Otherwise a prior qa_*.json status=failed can look fresh relative
+            # to the old state_changed_at and fail-fast the resumed run.
+            foreach ($roleRunFile in (Get-ChildItem -Path $rd.FullName -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+                if ($roleRunFile.Name -in @('config.json', 'lifecycle.json', 'DAG.json', 'progress.json')) { continue }
+                try {
+                    $roleRun = Get-Content $roleRunFile.FullName -Raw | ConvertFrom-Json
+                    if (-not ($roleRun.PSObject.Properties['role'] -and $roleRun.PSObject.Properties['instance_id'])) { continue }
+                    if ($roleRun.PSObject.Properties['status']) { $roleRun.status = 'pending' }
+                    foreach ($propName in @('status_updated_epoch', 'status_updated_at', 'status_state')) {
+                        if ($roleRun.PSObject.Properties[$propName]) { $roleRun.PSObject.Properties.Remove($propName) }
+                    }
+                    $roleRun | ConvertTo-Json -Depth 10 | Out-File -FilePath $roleRunFile.FullName -Encoding utf8
+                } catch { }
+            }
+
             $statusFile = Join-Path $rd.FullName "status"
             if (Test-Path $statusFile) {
                 $status = (Get-Content $statusFile -Raw).Trim()
                 if ($status -eq "passed") {
                     Write-Host "  → Normalizing $($rd.Name) from passed to done" -ForegroundColor Yellow
                     "done" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                } elseif ($status -eq "failed-final") {
-                    Write-Host "  → Normalizing $($rd.Name) from failed-final to failed" -ForegroundColor Yellow
-                    "failed" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -in @("failed", "failed-final")) {
+                    $resumeStatus = Get-ResumeStatusBeforeFailed -RoomDir $rd.FullName
+                    if (-not $resumeStatus) { $resumeStatus = "developing" }
+                    Write-Host "  → Restoring $($rd.Name) from $status to $resumeStatus (pre-failed audit state)" -ForegroundColor Yellow
+                    $resumeStatus | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
                 } elseif ($status -eq "fixing") {
                     Write-Host "  → Normalizing $($rd.Name) from fixing to optimize" -ForegroundColor Yellow
                     "optimize" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
@@ -735,10 +775,16 @@ if ($Resume) {
                 } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
-                    
-                    # Clear old PID files
+                }
+
+                $normalizedStatus = (Get-Content $statusFile -Raw).Trim()
+                if ($normalizedStatus -notin @('done', 'failed')) {
+                    $resumeEpoch.ToString() | Out-File -FilePath (Join-Path $rd.FullName "state_changed_at") -Encoding utf8 -NoNewline
                     $pidDir = Join-Path $rd.FullName "pids"
-                    if (Test-Path $pidDir) { Get-ChildItem $pidDir -Filter "*.pid" | Remove-Item -Force -ErrorAction SilentlyContinue }
+                    if (Test-Path $pidDir) {
+                        Get-ChildItem $pidDir -Filter "*.pid" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                        Get-ChildItem $pidDir -Filter "*.spawned_at" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                    }
                 }
             }
         }

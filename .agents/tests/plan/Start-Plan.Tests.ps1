@@ -927,17 +927,45 @@ working_dir: $script:projectDir
             "failed-final" | Out-File (Join-Path $roomDir "status") -Encoding utf8 -NoNewline
             "10" | Out-File (Join-Path $roomDir "retries") -Encoding utf8 -NoNewline
             "5" | Out-File (Join-Path $roomDir "qa_retries") -Encoding utf8 -NoNewline
+            @(
+                "2026-06-09T07:38:04Z STATUS pending -> developing",
+                "2026-06-09T07:48:18Z STATUS developing -> failed",
+                "2026-06-09T07:49:08Z STATUS failed -> failed"
+            ) | Out-File (Join-Path $roomDir "audit.log") -Encoding utf8
+            @{ task_ref = "EPIC-001"; assignment = @{ assigned_role = "engineer"; candidate_roles = @("engineer", "qa") } } |
+                ConvertTo-Json -Depth 6 | Out-File (Join-Path $roomDir "config.json") -Encoding utf8
             
             $room000 = Join-Path $warRooms "room-000"
             if (-not (Test-Path $room000)) { New-Item -ItemType Directory -Path $room000 -Force | Out-Null }
             "passed" | Out-File (Join-Path $room000 "status") -Encoding utf8 -NoNewline
+            @{ task_ref = "PLAN-REVIEW"; assignment = @{ assigned_role = "architect"; candidate_roles = @("architect", "manager") } } |
+                ConvertTo-Json -Depth 6 | Out-File (Join-Path $room000 "config.json") -Encoding utf8
 
             $room002 = Join-Path $warRooms "room-002"
             if (-not (Test-Path $room002)) { New-Item -ItemType Directory -Path $room002 -Force | Out-Null }
             "fixing" | Out-File (Join-Path $room002 "status") -Encoding utf8 -NoNewline
             "7" | Out-File (Join-Path $room002 "retries") -Encoding utf8 -NoNewline
+            @{ task_ref = "EPIC-002"; assignment = @{ assigned_role = "qa-automation-engineer"; candidate_roles = @("engineer", "qa-automation-engineer") } } |
+                ConvertTo-Json -Depth 6 | Out-File (Join-Path $room002 "config.json") -Encoding utf8
+            "1" | Out-File (Join-Path $room002 "state_changed_at") -Encoding utf8 -NoNewline
+            @{
+                role = "qa-automation-engineer"
+                instance_id = "001"
+                status = "failed"
+                status_updated_epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                status_updated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                status_state = "review"
+            } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $room002 "qa-automation-engineer_001.json") -Encoding utf8
             $pidDir002 = New-Item -ItemType Directory -Path (Join-Path $room002 "pids") -Force
             New-Item -ItemType File -Path (Join-Path $pidDir002 "test.pid") -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $pidDir002 "test.spawned_at") -Force | Out-Null
+
+            $room003 = Join-Path $warRooms "room-003"
+            if (-not (Test-Path $room003)) { New-Item -ItemType Directory -Path $room003 -Force | Out-Null }
+            "failed" | Out-File (Join-Path $room003 "status") -Encoding utf8 -NoNewline
+            "2026-06-09T07:49:08Z STATUS failed -> failed" | Out-File (Join-Path $room003 "audit.log") -Encoding utf8
+            @{ task_ref = "EPIC-003"; assignment = @{ assigned_role = "engineer"; candidate_roles = @("engineer", "qa") } } |
+                ConvertTo-Json -Depth 6 | Out-File (Join-Path $room003 "config.json") -Encoding utf8
 
             # Ensure .agents/plan exists for mock Update-Progress
             $agentsPlanDir = Join-Path $absProjectDir ".agents/plan"
@@ -945,15 +973,26 @@ working_dir: $script:projectDir
             "Write-Host 'Progress updated'" | Out-File (Join-Path $agentsPlanDir "Update-Progress.ps1") -Encoding utf8
         }
 
-        It "normalizes failed-final rooms to failed" {
+        It "restores failed rooms to the pre-failed audit state" {
             $absProjectDir = (Resolve-Path $script:projectDir).Path
             $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
             $outputStr = $output -join "`n"
             
-            $outputStr | Should -Match "Normalizing room-001 from failed-final to failed"
+            $outputStr | Should -Match "Restoring room-001 from failed-final to developing"
             
             $statusFile = Join-Path $absProjectDir ".war-rooms/room-001/status"
-            (Get-Content $statusFile -Raw) | Should -Be "failed"
+            (Get-Content $statusFile -Raw) | Should -Be "developing"
+        }
+
+        It "restores failed rooms to developing when audit has no prior non-failed state" {
+            $absProjectDir = (Resolve-Path $script:projectDir).Path
+            $output = & $script:StartPlan -PlanFile $script:resumePlan -ProjectDir $absProjectDir -Resume -DryRun:$false -SkipLoop *>&1
+            $outputStr = $output -join "`n"
+
+            $outputStr | Should -Match "Restoring room-003 from failed to developing"
+
+            $statusFile = Join-Path $absProjectDir ".war-rooms/room-003/status"
+            (Get-Content $statusFile -Raw) | Should -Be "developing"
         }
 
         It "normalizes fixing rooms to optimize" {
@@ -983,6 +1022,15 @@ working_dir: $script:projectDir
 
             $activeRetriesFile = Join-Path $absProjectDir ".war-rooms/room-002/retries"
             (Get-Content $activeRetriesFile -Raw).Trim() | Should -Be "0"
+
+            $roleRun = Get-Content (Join-Path $absProjectDir ".war-rooms/room-002/qa-automation-engineer_001.json") -Raw | ConvertFrom-Json
+            $roleRun.status | Should -Be "pending"
+            $roleRun.PSObject.Properties.Name | Should -Not -Contain "status_updated_epoch"
+            $roleRun.PSObject.Properties.Name | Should -Not -Contain "status_updated_at"
+            $roleRun.PSObject.Properties.Name | Should -Not -Contain "status_state"
+
+            [long](Get-Content (Join-Path $absProjectDir ".war-rooms/room-002/state_changed_at") -Raw).Trim() | Should -BeGreaterThan 1
+            (Get-ChildItem (Join-Path $absProjectDir ".war-rooms/room-002/pids") -Filter "*.spawned_at").Count | Should -Be 0
         }
 
         It "triggers Update-Progress after resets" {
