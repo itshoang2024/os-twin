@@ -524,7 +524,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $script:argsMockCmd = Get-PwshAgentCmd $script:argsMock
         }
 
-        It "passes prompt via stdin without a positional placeholder" {
+        It "passes prompt as --file without a positional placeholder" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "Hello world test" `
                 -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
@@ -537,8 +537,10 @@ Write-Output "PROJDIR_CHECK:`$val"
             $capturedArgs | Should -Not -Contain "start"
             # Prompt should NOT appear as inline text on the command line
             $capturedArgs | Should -Not -Contain "Hello world test"
-            # Prompt file is delivered over stdin, not attached via --file.
-            $capturedArgs | Should -Not -Contain "--file"
+            # Prompt file is attached explicitly for opencode run.
+            $fileIdx = [array]::IndexOf($capturedArgs, "--file")
+            $fileIdx | Should -BeGreaterOrEqual 0
+            $capturedArgs[$fileIdx + 1] | Should -Match "\.ostwin[/\\]logs[/\\].*-prompt\.txt$"
         }
 
         It "passes --model flag" {
@@ -648,7 +650,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $args | Should -Contain "test"
         }
 
-        It "passes --file flag only for each extra file" {
+        It "passes --file flag for prompt and each extra file" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "review these files" `
                 -Files @("file1.txt", "file2.txt") `
@@ -656,9 +658,11 @@ Write-Output "PROJDIR_CHECK:`$val"
 
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:argsDump
-            # --file should appear only for caller-provided attachments.
+            # --file should appear for the compiled prompt plus caller-provided attachments.
             $fileFlags = $capturedArgs | Where-Object { $_ -eq "--file" }
-            $fileFlags.Count | Should -Be 2
+            $fileFlags.Count | Should -Be 3
+            $firstFileIdx = [array]::IndexOf($capturedArgs, "--file")
+            $capturedArgs[$firstFileIdx + 1] | Should -Match "\.ostwin[/\\]logs[/\\].*-prompt\.txt$"
             $capturedArgs | Should -Contain "file1.txt"
             $capturedArgs | Should -Contain "file2.txt"
         }
@@ -747,8 +751,8 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result.Output | Should -Not -Match "ARGS: start "
             # Should NOT contain the raw prompt text inline
             $result.Output | Should -Not -Match "test positional prompt"
-            # Prompt file is passed via stdin, not as an attachment.
-            $result.Output | Should -Not -Match "--file"
+            # Prompt file is passed as an explicit opencode --file attachment.
+            $result.Output | Should -Match "--file .*\.ostwin[/\\]logs[/\\].*-prompt\.txt"
             $result.Output | Should -Match "PROMPT_FILE=.*\.ostwin/logs/.*-prompt\.txt"
         }
 

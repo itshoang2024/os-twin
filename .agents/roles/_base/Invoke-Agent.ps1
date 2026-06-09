@@ -616,6 +616,11 @@ if ($Command) { $extraCliArgs += "--command"; $extraCliArgs += $Command }
 if ($AttachUrl) { $extraCliArgs += "--attach"; $extraCliArgs += $AttachUrl }
 if ($Port -gt 0) { $extraCliArgs += "--port"; $extraCliArgs += $Port.ToString() }
 if ($ProjectDir) { $extraCliArgs += "--dir"; $extraCliArgs += $ProjectDir }
+# opencode run requires prompt/file input to be provided as --file. Keep stdin
+# below for compatibility with test/mocked commands, but make the compiled
+# prompt an explicit attachment so real opencode invocations are complete.
+$extraCliArgs += "--file"
+$extraCliArgs += $promptFileAbsolute
 foreach ($f in $Files) { $extraCliArgs += "--file"; $extraCliArgs += $f }
 
 # --- MCP config: use pre-compiled .opencode/opencode.json if available ---
@@ -760,7 +765,7 @@ if (Test-Path `$envSh) { . `$envSh }
 `$cmdArgs = $argsArrayLiteral
 "[$wrapper] PID=`$PID, CMD=$exe, ARGS=`$(`$cmdArgs -join ' ')" | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
 
-            # Execute using call operator with array; prompt is stdin, not argv/--file.
+            # Execute using call operator with array; compiled prompt is also stdin for compatibility with mocks.
             Get-Content -Raw -Path '$winPrompt' | & '$exe' @cmdArgs 2>&1 | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
 `$agentExitCode = if (`$null -ne `$global:LASTEXITCODE) { [int]`$global:LASTEXITCODE } else { 0 }
 exit `$agentExitCode
@@ -819,7 +824,7 @@ echo "`$$" > '$safePidFile'
 # Log diagnostic info before exec
 echo "[wrapper] PID=`$$, CMD=$AgentCmd, CWD=`$(pwd)" >> '$safeOutput'
 echo "[wrapper] PROMPT_FILE='$safePrompt' (exists: `$(test -f '$safePrompt' && echo yes || echo no), size: `$(wc -c < '$safePrompt' 2>/dev/null || echo 0) bytes)" >> '$safeOutput'
-echo "[wrapper] EXEC: cat '$safePrompt' | $AgentCmd $argsLine" >> '$safeOutput'
+echo "[wrapper] EXEC: $AgentCmd $argsLine < '$safePrompt'" >> '$safeOutput'
 exec $AgentCmd $argsLine < '$safePrompt' >> '$safeOutput' 2>&1
 # If exec fails, this line runs:
 echo "[wrapper] EXEC FAILED: exit=`$?" >> '$safeOutput'
