@@ -55,14 +55,9 @@ param(
 
     [switch]$EnablePlanning,
 
-    [ValidateSet('shared')]
+    [ValidateSet('room-worktree','shared')]
     [string]$WorkspaceIsolation = 'shared'
 )
-
-if ($WorkspaceIsolation -ne 'shared') {
-    Write-Warning "Unsupported workspace isolation '$WorkspaceIsolation'; using shared workspace."
-    $WorkspaceIsolation = 'shared'
-}
 
 # --- Resolve paths ---
 # The agentsDir must point to the Ostwin *installation* (where scripts like
@@ -559,6 +554,11 @@ if ($Resume -and $eventsPath -and (Test-Path $eventsPath)) {
 
 $workspaceManifest = $null
 if (-not $DryRun) {
+    if ($WorkspaceIsolation -eq 'room-worktree' -and -not (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+        Write-Error "Workspace isolation requires workspace/GitWorkspace.psm1, but Initialize-PlanIntegrationWorkspace is unavailable."
+        exit 1
+    }
+
     $workspaceManifestPath = Join-Path $warRoomsDir 'workspace.json'
     if ($Resume -and (Test-Path $workspaceManifestPath) -and (Get-Command Get-PlanWorkspaceManifest -ErrorAction SilentlyContinue)) {
         $workspaceManifest = Get-PlanWorkspaceManifest -WarRoomsDir $warRoomsDir

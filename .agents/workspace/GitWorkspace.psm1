@@ -65,8 +65,10 @@ function Test-WorkspaceRuntimePath {
     param([Parameter(Mandatory)][string]$Path)
 
     $normalized = ($Path -replace '\\', '/').TrimStart('/')
+    if ($normalized -eq '.gitignore') { return $true }
     foreach ($prefix in @(
         '.war-rooms/',
+        '.worktree/',
         '.opencode/',
         '.agents/logs/',
         '.agents/plans/',
@@ -93,6 +95,22 @@ function Get-WorkspaceSafeSlug {
     return $slug
 }
 
+function Get-RoomWorkspaceBranchName {
+    param(
+        [Parameter(Mandatory)][string]$PlanId,
+        [Parameter(Mandatory)][string]$RoomId,
+        [Parameter(Mandatory)][string]$TaskRef,
+        [AllowEmptyString()][string]$Title = ''
+    )
+
+    $titleSlug = Get-WorkspaceSafeSlug -Value $Title -MaxLength 56
+    $taskSlug = Get-WorkspaceSafeSlug -Value $TaskRef -MaxLength 24
+    if ($titleSlug -eq 'room') { $titleSlug = $taskSlug }
+    $roomSlug = Get-WorkspaceSafeSlug -Value $RoomId -MaxLength 24
+    $planSlug = Get-WorkspaceSafeSlug -Value $PlanId -MaxLength 32
+    return "ostwin/$planSlug/$roomSlug/$titleSlug-$taskSlug"
+}
+
 function Get-WorkspaceShortHash {
     param([Parameter(Mandatory)][string]$Value)
 
@@ -112,10 +130,7 @@ function Get-DefaultWorktreeRoot {
         [Parameter(Mandatory)][string]$RunId
     )
 
-    $homeDir = if ($env:HOME) { $env:HOME } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { [Environment]::GetFolderPath('UserProfile') }
-    $ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $homeDir '.ostwin' }
-    $repoHash = Get-WorkspaceShortHash -Value $SourceGitRoot
-    return (Join-Path (Join-Path (Join-Path (Join-Path $ostwinHome 'worktrees') $repoHash) (Get-WorkspaceSafeSlug -Value $PlanId)) (Get-WorkspaceSafeSlug -Value $RunId))
+    return (Join-Path $SourceGitRoot '.worktree')
 }
 
 function Get-WorkspaceStatusLines {
@@ -179,7 +194,9 @@ function Test-GitReady {
                 $dirtyUntracked += $path
             }
         } else {
-            $dirtyTracked += $path
+            if (-not ($AllowRuntimeState -and (Test-WorkspaceRuntimePath -Path $path))) {
+                $dirtyTracked += $path
+            }
         }
     }
     if ($dirtyTracked.Count -gt 0) {
@@ -320,22 +337,21 @@ function Initialize-PlanIntegrationWorkspace {
         New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
     }
 
-    if ($WorkspaceIsolation -ne 'shared') {
-        Write-Warning "Unsupported workspace isolation '$WorkspaceIsolation'; writing a shared workspace manifest."
+    if ($WorkspaceIsolation -eq 'shared') {
+        $sourcePath = if (Test-Path $SourceWorkingDir -PathType Container) { (Resolve-Path $SourceWorkingDir).Path } else { $SourceWorkingDir }
+        $manifest = [ordered]@{
+            version            = 2
+            isolation          = 'shared'
+            plan_id            = $PlanId
+            run_id             = $RunId
+            source_working_dir = $sourcePath
+            status             = 'not_applicable'
+            rooms              = [ordered]@{}
+            created_at         = (Get-Date).ToUniversalTime().ToString('o')
+        }
+        Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
+        return [pscustomobject]$manifest
     }
-
-    $manifest = [ordered]@{
-        version            = 1
-        isolation          = 'shared'
-        plan_id            = $PlanId
-        run_id             = $RunId
-        source_working_dir = (Resolve-Path $SourceWorkingDir).Path
-        status             = 'not_applicable'
-        rooms              = [ordered]@{}
-        created_at         = (Get-Date).ToUniversalTime().ToString('o')
-    }
-    Write-WorkspaceJson -Path (Get-PlanWorkspaceManifestPath -WarRoomsDir $WarRoomsDir) -Value $manifest
-    return [pscustomobject]$manifest
 
     $ready = Test-GitReady -WorkingDir $SourceWorkingDir -AllowRuntimeState
     if (-not $ready.Ready) {
@@ -346,17 +362,11 @@ function Initialize-PlanIntegrationWorkspace {
         $WorktreeRoot = Get-DefaultWorktreeRoot -SourceGitRoot $ready.SourceGitRoot -PlanId $PlanId -RunId $RunId
     }
     $WorktreeRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorktreeRoot)
-    $integrationWorktree = Join-Path $WorktreeRoot 'integration'
-    $integrationBranch = "ostwin/$((Get-WorkspaceSafeSlug -Value $PlanId -MaxLength 48))/$((Get-WorkspaceSafeSlug -Value $RunId -MaxLength 48))/integration"
 
     New-Item -ItemType Directory -Path $WorktreeRoot -Force | Out-Null
-    if (-not (Test-Path $integrationWorktree)) {
-        Invoke-GitWorkspaceCommand -Cwd $ready.SourceGitRoot -Arguments @('worktree', 'add', '-B', $integrationBranch, $integrationWorktree, $ready.BaseRef) | Out-Null
-    }
-    $integrationHead = (Invoke-GitWorkspaceCommand -Cwd $integrationWorktree -Arguments @('rev-parse', 'HEAD')).Output.Trim()
 
     $manifest = [ordered]@{
-        version                  = 1
+        version                  = 2
         isolation                = 'room-worktree'
         plan_id                  = $PlanId
         run_id                   = $RunId
@@ -365,9 +375,6 @@ function Initialize-PlanIntegrationWorkspace {
         source_relative_dir      = $ready.SourceRelativeDir
         base_ref                 = $ready.BaseRef
         base_branch              = $ready.BaseBranch
-        integration_branch       = $integrationBranch
-        integration_worktree_dir = $integrationWorktree
-        integration_head         = $integrationHead
         worktree_root            = $WorktreeRoot
         status                   = 'ready'
         rooms                    = [ordered]@{}
@@ -422,7 +429,10 @@ function Get-WorkspaceDependencyState {
         [Parameter(Mandatory)][string]$WarRoomsDir
     )
 
-    return [pscustomobject]@{ Ready = $true; Reason = 'shared'; BlockedBy = @() }
+    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
+    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
+        return [pscustomobject]@{ Ready = $true; Reason = 'shared'; BlockedBy = @() }
+    }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     if (-not (Test-Path $cfgPath)) {
@@ -503,13 +513,17 @@ function Ensure-RoomWorktree {
         [string]$AgentsDir = ''
     )
 
-    Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
-    return [pscustomobject]@{ Ready = $true; Mode = 'shared'; WorkingDir = '' }
+    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
+    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
+        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+        return [pscustomobject]@{ Ready = $true; Mode = 'shared'; WorkingDir = '' }
+    }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
     $roomId = "$($cfg.room_id)"
     $taskRef = "$($cfg.task_ref)"
+    $title = if ($cfg.assignment -and $cfg.assignment.title) { "$($cfg.assignment.title)" } else { $taskRef }
 
     if ($taskRef -eq 'PLAN-REVIEW') {
         Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
@@ -530,10 +544,9 @@ function Ensure-RoomWorktree {
         }
     }
 
-    $roomSlug = Get-WorkspaceSafeSlug -Value "$taskRef-$roomId" -MaxLength 96
-    $roomWorktreeRoot = Join-Path $manifest.worktree_root $roomSlug
-    $branch = "ostwin/$((Get-WorkspaceSafeSlug -Value $manifest.plan_id -MaxLength 48))/$((Get-WorkspaceSafeSlug -Value $manifest.run_id -MaxLength 48))/$roomSlug"
-    $baseRef = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('rev-parse', 'HEAD')).Output.Trim()
+    $roomWorktreeRoot = Join-Path "$($manifest.worktree_root)" $roomId
+    $branch = Get-RoomWorkspaceBranchName -PlanId "$($manifest.plan_id)" -RoomId $roomId -TaskRef $taskRef -Title $title
+    $baseRef = (Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('rev-parse', 'HEAD')).Output.Trim()
     Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'creating' -Fields @{
         branch       = $branch
         base_ref     = $baseRef
@@ -542,9 +555,9 @@ function Ensure-RoomWorktree {
 
     try {
         if (-not (Test-Path $roomWorktreeRoot)) {
-            Invoke-GitWorkspaceCommand -Cwd $manifest.source_git_root -Arguments @('worktree', 'add', '-B', $branch, $roomWorktreeRoot, $baseRef) | Out-Null
+            Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('worktree', 'add', '-B', $branch, $roomWorktreeRoot, $baseRef) | Out-Null
         }
-        Sync-AgentRuntimeOverlay -SourceGitRoot $manifest.source_git_root -RoomWorktreeRoot $roomWorktreeRoot -AgentsDir $AgentsDir
+        Sync-AgentRuntimeOverlay -SourceGitRoot "$($manifest.source_git_root)" -RoomWorktreeRoot $roomWorktreeRoot -AgentsDir $AgentsDir
         $relativeDir = ''
         if ($manifest.PSObject.Properties.Name -contains 'source_git_root' -and $manifest.source_git_root -and $cfg.working_dir) {
             try {
@@ -606,8 +619,11 @@ function Complete-RoomWorkspaceMerge {
         [Parameter(Mandatory)][string]$WarRoomsDir
     )
 
-    Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
-    return [pscustomobject]@{ Integrated = $true; Status = 'not_applicable' }
+    $manifest = Get-PlanWorkspaceManifest -WarRoomsDir $WarRoomsDir
+    if (-not $manifest -or "$($manifest.isolation)" -eq 'shared') {
+        Set-RoomWorkspaceStatus -RoomDir $RoomDir -Status 'not_applicable' | Out-Null
+        return [pscustomobject]@{ Integrated = $true; Status = 'not_applicable' }
+    }
 
     $cfgPath = Join-Path $RoomDir 'config.json'
     $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
@@ -654,6 +670,19 @@ function Complete-RoomWorkspaceMerge {
     }
 
     try {
+        $sourceStatusLines = Get-WorkspaceStatusLines -GitRoot "$($manifest.source_git_root)"
+        $dirtySourceTracked = @()
+        foreach ($line in $sourceStatusLines) {
+            if ($line.StartsWith('!! ')) { throw $line }
+            if ($line.Length -lt 4 -or $line.StartsWith('?? ')) { continue }
+            $path = $line.Substring(3).Trim('"')
+            if (-not (Test-WorkspaceRuntimePath -Path $path)) { $dirtySourceTracked += $path }
+        }
+        if ($dirtySourceTracked.Count -gt 0) {
+            Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'failed' -Fields @{ error = "Source worktree has dirty tracked files: $($dirtySourceTracked -join ', ')" } | Out-Null
+            return [pscustomobject]@{ Integrated = $false; Status = 'source_dirty'; DirtyPaths = $dirtySourceTracked }
+        }
+
         $statusLines = Get-WorkspaceStatusLines -GitRoot $roomWorktree
         $hasCandidateChanges = $false
         foreach ($line in $statusLines) {
@@ -686,7 +715,6 @@ function Complete-RoomWorkspaceMerge {
         if (-not $commitCreated -and $baseRef -and $roomHead -eq $baseRef) {
             Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merged' -Fields @{
                 branch             = $branch
-                integration_branch = $manifest.integration_branch
                 merged_at          = (Get-Date).ToUniversalTime().ToString('o')
                 no_changes         = $true
             } | Out-Null
@@ -694,19 +722,17 @@ function Complete-RoomWorkspaceMerge {
         }
 
         Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merging' -Fields @{
-            branch             = $branch
-            integration_branch = $manifest.integration_branch
+            branch = $branch
         } | Out-Null
 
-        $merge = Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('-c', 'user.name=ostwin', '-c', 'user.email=ostwin@local', 'merge', '--no-ff', '--no-edit', $branch) -AllowFailure
+        $merge = Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('-c', 'user.name=ostwin', '-c', 'user.email=ostwin@local', 'merge', '--no-ff', '--no-edit', $branch) -AllowFailure
         if ($merge.ExitCode -ne 0) {
-            $conflicts = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('diff', '--name-only', '--diff-filter=U') -AllowFailure).Output
+            $conflicts = (Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('diff', '--name-only', '--diff-filter=U') -AllowFailure).Output
             $conflictFiles = @($conflicts -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             $conflictDetails = [ordered]@{
                 room_id = $roomId
                 task_ref = $taskRef
                 branch = $branch
-                integration_branch = $manifest.integration_branch
                 conflict_files = $conflictFiles
                 error = $merge.Output
                 conflicted_at = (Get-Date).ToUniversalTime().ToString('o')
@@ -714,28 +740,26 @@ function Complete-RoomWorkspaceMerge {
             $artifactsDir = Join-Path $RoomDir 'artifacts'
             if (-not (Test-Path $artifactsDir)) { New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null }
             Write-WorkspaceJson -Path (Join-Path $artifactsDir 'workspace-merge-conflict.json') -Value $conflictDetails
-            Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('merge', '--abort') -AllowFailure | Out-Null
+            Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('merge', '--abort') -AllowFailure | Out-Null
             Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'conflicted' -Fields @{
-                branch             = $branch
-                integration_branch = $manifest.integration_branch
-                conflict_files     = $conflictFiles
-                error              = $merge.Output
-                artifact           = 'artifacts/workspace-merge-conflict.json'
+                branch         = $branch
+                conflict_files = $conflictFiles
+                error          = $merge.Output
+                artifact       = 'artifacts/workspace-merge-conflict.json'
             } | Out-Null
             return [pscustomobject]@{ Integrated = $false; Status = 'conflicted'; ConflictFiles = $conflictFiles; Artifact = 'artifacts/workspace-merge-conflict.json' }
         }
 
-        $integrationHead = (Invoke-GitWorkspaceCommand -Cwd $manifest.integration_worktree_dir -Arguments @('rev-parse', 'HEAD')).Output.Trim()
-        Update-PlanWorkspaceIntegrationHead -WarRoomsDir $WarRoomsDir -IntegrationHead $integrationHead
+        $mergedHead = (Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('rev-parse', 'HEAD')).Output.Trim()
+        Update-PlanWorkspaceIntegrationHead -WarRoomsDir $WarRoomsDir -IntegrationHead $mergedHead
         Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'merged' -Fields @{
-            branch             = $branch
-            integration_branch = $manifest.integration_branch
-            integration_head   = $integrationHead
-            merged_at          = (Get-Date).ToUniversalTime().ToString('o')
+            branch      = $branch
+            merged_head = $mergedHead
+            merged_at   = (Get-Date).ToUniversalTime().ToString('o')
         } | Out-Null
         $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
         Write-WorkspaceJson -Path $cfgPath -Value $cfg
-        return [pscustomobject]@{ Integrated = $true; Status = 'merged'; IntegrationHead = $integrationHead }
+        return [pscustomobject]@{ Integrated = $true; Status = 'merged'; MergedHead = $mergedHead }
     } finally {
         if ($lockStream) { $lockStream.Dispose() }
     }

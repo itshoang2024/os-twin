@@ -70,16 +70,12 @@ Describe 'GitWorkspace preflight' {
 }
 
 Describe 'GitWorkspace lazy room worktrees' {
-    It 'creates a room worktree from the current integration head' {
+    It 'creates a room worktree under source .worktree and keeps room state in .war-rooms' {
         $repo = New-TestRepo -Name 'lazy-base'
         $warRoomsDir = Join-Path $TestDrive 'war-rooms-lazy'
-        $worktreeRoot = Join-Path $TestDrive 'worktrees-lazy'
 
-        $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot $worktreeRoot
-        'integration change' | Out-File -FilePath (Join-Path $manifest.integration_worktree_dir 'integration.txt') -Encoding utf8
-        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('add', 'integration.txt') | Out-Null
-        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('commit', '-m', 'integration change') | Out-Null
-        $integrationHead = (Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
+        $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree
+        $sourceHead = (Invoke-TestGit -Cwd $repo -Args @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
 
         $roomDir = Join-Path $warRoomsDir 'room-001'
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
@@ -90,23 +86,28 @@ Describe 'GitWorkspace lazy room worktrees' {
             run_id = 'run-test'
             working_dir = $repo
             depends_on = @()
+            assignment = @{ title = 'Build checkout API' }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
+        '{}' | Out-File (Join-Path $roomDir 'lifecycle.json') -Encoding utf8
 
         $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         $config = Get-Content (Join-Path $roomDir 'config.json') -Raw | ConvertFrom-Json
         $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
 
         $result.Ready | Should -BeTrue
+        $manifest.worktree_root | Should -Be (Join-Path $repo '.worktree')
         $config.PSObject.Properties.Name | Should -Not -Contain 'workspace'
+        $config.working_dir | Should -Be (Join-Path (Join-Path $repo '.worktree') 'room-001')
         $record.status | Should -Be 'ready'
-        $record.base_ref | Should -Be $integrationHead
-        Test-Path (Join-Path $record.worktree_dir 'integration.txt') | Should -BeTrue
+        $record.base_ref | Should -Be $sourceHead
+        $record.worktree_dir | Should -Be (Join-Path (Join-Path $repo '.worktree') 'room-001')
+        Test-Path (Join-Path $roomDir 'lifecycle.json') | Should -BeTrue
     }
 
     It 'does not unblock dependencies that are done but not merged' {
         $repo = New-TestRepo -Name 'dep-state'
         $warRoomsDir = Join-Path $TestDrive 'war-rooms-deps'
-        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-deps') | Out-Null
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
 
         $depRoom = Join-Path $warRoomsDir 'room-001'
         $nextRoom = Join-Path $warRoomsDir 'room-002'
@@ -132,7 +133,7 @@ Describe 'GitWorkspace lazy room worktrees' {
     It 'unblocks dependencies when predecessor is done and manifest is merged' {
         $repo = New-TestRepo -Name 'dep-state-merged'
         $warRoomsDir = Join-Path $TestDrive 'war-rooms-deps-merged'
-        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-deps-merged') | Out-Null
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
 
         $depRoom = Join-Path $warRoomsDir 'room-001'
         $nextRoom = Join-Path $warRoomsDir 'room-002'
@@ -147,10 +148,47 @@ Describe 'GitWorkspace lazy room worktrees' {
         $state.Ready | Should -BeTrue
     }
 
+    It 'merges two epic room worktrees back while preserving .war-rooms artifacts' {
+        $repo = New-TestRepo -Name 'two-epics'
+        $warRoomsDir = Join-Path $repo '.war-rooms'
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
+
+        foreach ($roomSpec in @(
+            @{ RoomId = 'room-001'; TaskRef = 'EPIC-001'; Title = 'Create Alpha Feature'; File = 'alpha.txt'; Content = 'alpha' },
+            @{ RoomId = 'room-002'; TaskRef = 'EPIC-002'; Title = 'Create Beta Feature'; File = 'beta.txt'; Content = 'beta' }
+        )) {
+            $roomDir = Join-Path $warRoomsDir $roomSpec.RoomId
+            New-Item -ItemType Directory -Path (Join-Path $roomDir 'artifacts') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $roomDir 'contexts') -Force | Out-Null
+            @{ room_id = $roomSpec.RoomId; task_ref = $roomSpec.TaskRef; plan_id = 'plan-test'; run_id = 'run-test'; working_dir = $repo; depends_on = @(); assignment = @{ title = $roomSpec.Title } } |
+                ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
+            '{}' | Out-File (Join-Path $roomDir 'lifecycle.json') -Encoding utf8
+            'pending' | Out-File (Join-Path $roomDir 'status') -Encoding utf8 -NoNewline
+
+            $ready = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+            $ready.WorkingDir | Should -Be (Join-Path (Join-Path $repo '.worktree') $roomSpec.RoomId)
+            $roomSpec.Content | Out-File -FilePath (Join-Path $ready.WorkingDir $roomSpec.File) -Encoding utf8
+            "agent wrapper" | Out-File -FilePath (Join-Path $roomDir 'artifacts/run-agent.sh') -Encoding utf8
+
+            $merge = Complete-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $warRoomsDir
+            $merge.Integrated | Should -BeTrue
+            Test-Path (Join-Path $repo $roomSpec.File) | Should -BeTrue
+            Test-Path (Join-Path $roomDir 'lifecycle.json') | Should -BeTrue
+            Test-Path (Join-Path $roomDir 'artifacts/run-agent.sh') | Should -BeTrue
+        }
+
+        Test-Path (Join-Path $repo '.worktree/room-001/.git') | Should -BeTrue
+        Test-Path (Join-Path $repo '.worktree/room-002/.git') | Should -BeTrue
+        $record1 = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
+        $record2 = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-002'
+        $record1.status | Should -Be 'merged'
+        $record2.status | Should -Be 'merged'
+    }
+
     It 'records merge conflicts in the manifest and room artifact' {
         $repo = New-TestRepo -Name 'merge-conflict'
         $warRoomsDir = Join-Path $TestDrive 'war-rooms-conflict'
-        $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree -WorktreeRoot (Join-Path $TestDrive 'worktrees-conflict')
+        Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $repo -WorkspaceIsolation room-worktree | Out-Null
 
         $roomDir = Join-Path $warRoomsDir 'room-001'
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
@@ -161,14 +199,15 @@ Describe 'GitWorkspace lazy room worktrees' {
             run_id = 'run-test'
             working_dir = $repo
             depends_on = @()
+            assignment = @{ title = 'Conflicting README update' }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
 
         $ready = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         'room change' | Out-File -FilePath (Join-Path $ready.WorkingDir 'README.md') -Encoding utf8
 
-        'integration change' | Out-File -FilePath (Join-Path $manifest.integration_worktree_dir 'README.md') -Encoding utf8
-        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('add', 'README.md') | Out-Null
-        Invoke-TestGit -Cwd $manifest.integration_worktree_dir -Args @('commit', '-m', 'integration diverged') | Out-Null
+        'source change' | Out-File -FilePath (Join-Path $repo 'README.md') -Encoding utf8
+        Invoke-TestGit -Cwd $repo -Args @('add', 'README.md') | Out-Null
+        Invoke-TestGit -Cwd $repo -Args @('commit', '-m', 'source diverged') | Out-Null
 
         $merge = Complete-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'

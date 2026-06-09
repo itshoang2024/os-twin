@@ -1154,6 +1154,29 @@ function Start-WorkerJob {
     if ($TimeoutSeconds -gt 0) {
         Write-Log "DEBUG" "[$TaskRef] Spawning '$Role' with TimeoutSeconds=$TimeoutSeconds (passTimeout=$acceptsTimeout)"
     }
+    if (-not (Get-Command Ensure-RoomWorktree -ErrorAction SilentlyContinue)) {
+        $ctxAgentsDirForWorkspace = _ctx 'agentsDir'
+        $workspaceModuleForSpawn = if ($ctxAgentsDirForWorkspace) { Join-Path $ctxAgentsDirForWorkspace 'workspace/GitWorkspace.psm1' } else { '' }
+        if ($workspaceModuleForSpawn -and (Test-Path $workspaceModuleForSpawn)) {
+            Import-Module $workspaceModuleForSpawn -Force -Global
+        }
+    }
+    if (Get-Command Ensure-RoomWorktree -ErrorAction SilentlyContinue) {
+        try {
+            $ctxWarRoomsDir = _ctx 'WarRoomsDir'
+            $ctxAgentsDir = _ctx 'agentsDir'
+            if ($ctxWarRoomsDir) {
+                $workspaceReady = Ensure-RoomWorktree -RoomDir $RoomDir -WarRoomsDir $ctxWarRoomsDir -AgentsDir $ctxAgentsDir
+                if ($workspaceReady -and -not $workspaceReady.Ready) {
+                    Write-Log "WARN" "[$TaskRef] Workspace is not ready for '$Role' — skipping spawn."
+                    return $false
+                }
+            }
+        } catch {
+            Write-Log "ERROR" "[$TaskRef] Workspace setup failed before spawning '$Role': $($_.Exception.Message)"
+            return $false
+        }
+    }
     Set-RoleRunStatus -RoomDir $RoomDir -Role $Role -Status "active" | Out-Null
     $roomId = Split-Path $RoomDir -Leaf
     Start-Job -Name "ostwin-worker-$roomId-$Role" -ScriptBlock {
