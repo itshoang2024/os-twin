@@ -524,7 +524,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $script:argsMockCmd = Get-PwshAgentCmd $script:argsMock
         }
 
-        It "passes prompt via stdin without a positional placeholder" {
+        It "passes prompt via stdin without an implicit --file or positional placeholder" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "Hello world test" `
                 -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
@@ -537,8 +537,27 @@ Write-Output "PROJDIR_CHECK:`$val"
             $capturedArgs | Should -Not -Contain "start"
             # Prompt should NOT appear as inline text on the command line
             $capturedArgs | Should -Not -Contain "Hello world test"
-            # Prompt file is delivered over stdin, not attached via --file.
+            # Prompt is delivered over stdin, not as an implicit --file attachment.
             $capturedArgs | Should -Not -Contain "--file"
+        }
+
+        It "generates a Unix wrapper that logs conceptual cat pipeline but execs agent with stdin redirection" {
+            if (-not ($IsLinux -or $IsMacOS)) { Set-ItResult -Skipped -Because "Unix wrapper generation is only used on Linux/macOS"; return }
+
+            $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                -RoleName "engineer" -Prompt "Hello stdin wrapper" `
+                -AgentCmd $script:argsMockCmd -TimeoutSeconds 5
+
+            $wrapperPath = Join-Path $script:roomDir "artifacts/run-agent.sh"
+            Test-Path $wrapperPath | Should -BeTrue -Because "Unix invocation should generate run-agent.sh"
+            $wrapper = Get-Content $wrapperPath -Raw
+
+            $wrapper | Should -Match "EXEC: cat '.*-prompt\.txt' \| .+" `
+                -Because "diagnostic log preserves the conceptual cat prompt | agent command"
+            $wrapper | Should -Not -Match "exec\s+cat\s+'.*'\s*\|" `
+                -Because "actual execution must not create a pipeline that leaves the agent orphaned"
+            $wrapper | Should -Match "exec\s+.+\s+<\s+'.*-prompt\.txt'\s+>>\s+'.*'\s+2>&1" `
+                -Because "actual execution must let the agent replace the wrapper PID while reading prompt from stdin"
         }
 
         It "passes --model flag" {
@@ -648,7 +667,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $args | Should -Contain "test"
         }
 
-        It "passes --file flag only for each extra file" {
+        It "passes --file flag only for explicit extra files" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "engineer" -Prompt "review these files" `
                 -Files @("file1.txt", "file2.txt") `
@@ -656,9 +675,11 @@ Write-Output "PROJDIR_CHECK:`$val"
 
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:argsDump
-            # --file should appear only for caller-provided attachments.
+            # --file should appear only for caller-provided attachments; prompt is stdin.
             $fileFlags = $capturedArgs | Where-Object { $_ -eq "--file" }
             $fileFlags.Count | Should -Be 2
+            $firstFileIdx = [array]::IndexOf($capturedArgs, "--file")
+            $capturedArgs[$firstFileIdx + 1] | Should -Be "file1.txt"
             $capturedArgs | Should -Contain "file1.txt"
             $capturedArgs | Should -Contain "file2.txt"
         }
@@ -747,8 +768,8 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $result.Output | Should -Not -Match "ARGS: start "
             # Should NOT contain the raw prompt text inline
             $result.Output | Should -Not -Match "test positional prompt"
-            # Prompt file is passed via stdin, not as an attachment.
-            $result.Output | Should -Not -Match "--file"
+            # Prompt file is logged for stdin redirection, not passed as implicit --file.
+            $result.Output | Should -Not -Match "--file .*\.ostwin[/\\]logs[/\\].*-prompt\.txt"
             $result.Output | Should -Match "PROMPT_FILE=.*\.ostwin/logs/.*-prompt\.txt"
         }
 
@@ -1026,6 +1047,8 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             $capturedArgs[4] | Should -Be "--dir"
             $capturedArgs[5] | Should -Be $script:projectDir
             $capturedArgs[6] | Should -Be "--dangerously-skip-permissions"
+            $capturedArgs | Should -Not -Contain "--file" `
+                -Because "compiled prompt is stdin only unless caller explicitly passes -Files"
         }
 
         It "--dir value is never concatenated with adjacent arguments" {
@@ -1085,7 +1108,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -Because "spaces in path must be preserved as a single argument, not split"
         }
 
-        It "prompt text is never inlined and prompt file is not attached" {
+        It "prompt text is never inlined and prompt file is not implicitly attached" {
             $longPrompt = "This is a detailed prompt about authentication and user management"
 
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
@@ -1104,7 +1127,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -Because "no part of the prompt should leak into CLI args"
 
             $capturedArgs | Should -Not -Contain "--file" `
-                -Because "prompt must be delivered via stdin rather than --file"
+                -Because "compiled prompt must be delivered via stdin, not implicit --file"
         }
 
         It "extra --file args are preserved without adding prompt.txt" {
@@ -1123,7 +1146,7 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 if ($capturedArgs[$i] -eq "--file") { $fileValues += $capturedArgs[$i + 1] }
             }
 
-            $fileValues.Count | Should -Be 2 -Because "only caller-provided files are attached"
+            $fileValues.Count | Should -Be 2 -Because "only caller-provided files are attached; compiled prompt is stdin"
             $fileValues[0] | Should -Be "src/main.ts"
             $fileValues[1] | Should -Be "README.md"
         }

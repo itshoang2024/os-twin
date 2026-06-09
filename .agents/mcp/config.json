@@ -1,0 +1,70 @@
+{
+  "mcp": {
+    "channel": {
+      "type": "local",
+      "command": [
+        "/Users/paulaan/.ostwin/.venv/bin/python",
+        "/Users/paulaan/.ostwin/mcp/channel-server.py"
+      ],
+      "environment": {
+        "AGENT_OS_ROOT": "/Users/paulaan/PycharmProjects/agent-os"
+      }
+    },
+    "warroom": {
+      "type": "local",
+      "command": [
+        "/Users/paulaan/.ostwin/.venv/bin/python",
+        "/Users/paulaan/.ostwin/mcp/warroom-server.py"
+      ],
+      "environment": {
+        "AGENT_OS_ROOT": "/Users/paulaan/PycharmProjects/agent-os"
+      }
+    },
+    "memory": {
+      "type": "remote",
+      "url": "http://localhost:3366/api/memory-pool/mcp",
+      "headers": {
+        "Authorization": "Bearer ostwin_PQMdoqfwyPrqxw7gD2p1p2mPLLaiVdb6"
+      }
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "obscura",
+        "mcp"
+      ],
+      "environment": {
+        "PATH": "/Users/paulaan/.ostwin/.venv/bin:/opt/homebrew/bin:/Users/paulaan/.ostwin/.agents/bin:/Users/paulaan/.local/bin:/Users/paulaan/.opencode/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest"
+      ],
+      "environment": {
+        "PATH": "/Users/paulaan/.ostwin/.venv/bin:/opt/homebrew/Cellar/powershell/7.6.0/libexec:/Users/paulaan/.ostwin/.agents/bin:/Users/paulaan/.local/bin:/Users/paulaan/.opencode/bin:/Users/paulaan/osmedeus-base/external-binaries:/opt/homebrew/opt/postgresql@16/bin:/Users/paulaan/.bun/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/opt/homebrew/opt/go/libexec/bin:/opt/homebrew/share/google-cloud-sdk/bin:/Users/paulaan/.local/share/solana/install/active_release/active_release/bin:/Users/paulaan/.local/share/solana/install/active_release/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Users/paulaan/.ostwin/.agents/bin:/Users/paulaan/.local/bin:/Users/paulaan/.opencode/bin:/Users/paulaan/osmedeus-base/external-binaries:/opt/homebrew/opt/postgresql@16/bin:/Users/paulaan/.bun/bin:/opt/anaconda3/bin:/opt/anaconda3/condabin:/Users/paulaan/.orbstack/bin:/Users/paulaan/.cargo/bin:/opt/homebrew/Cellar/ripgrep/15.1.0/bin:/opt/homebrew/Cellar/node/25.9.0_1/bin:/opt/homebrew/Cellar/go/1.22.3/bin:/Users/paulaan/go/bin:/Users/paulaan/.antigravity/extensions/ms-python.debugpy-2026.4.0-darwin-arm64/bundled/scripts/noConfigScripts"
+      }
+    },
+    "knowledge": {
+      "type": "remote",
+      "url": "http://localhost:3366/api/knowledge/mcp/",
+      "headers": {
+        "Authorization": "Bearer ostwin_PQMdoqfwyPrqxw7gD2p1p2mPLLaiVdb6"
+      }
+    },
+    "codeindex": {
+      "type": "local",
+      "command": [
+        "npx",
+        "codegraph",
+        "serve",
+        "--mcp"
+      ],
+      "enabled": true,
+      "environment": {}
+    }
+  }
+}

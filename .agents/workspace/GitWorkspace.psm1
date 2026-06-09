@@ -66,6 +66,7 @@ function Test-WorkspaceRuntimePath {
 
     $normalized = ($Path -replace '\\', '/').TrimStart('/')
     if ($normalized -eq '.gitignore') { return $true }
+    if ($normalized -eq '.DS_Store' -or $normalized.EndsWith('/.DS_Store', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     foreach ($prefix in @(
         '.war-rooms/',
         '.worktree/',
@@ -75,6 +76,12 @@ function Test-WorkspaceRuntimePath {
         '.agents/mcp/'
     )) {
         if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    foreach ($runtimeSegment in @('/.war-rooms/', '/.worktree/', '/.opencode/', '/.agents/skills/', '/.agents/mcp/')) {
+        if ($normalized.Contains($runtimeSegment, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -126,11 +133,50 @@ function Get-WorkspaceShortHash {
 function Get-DefaultWorktreeRoot {
     param(
         [Parameter(Mandatory)][string]$SourceGitRoot,
+        [Parameter(Mandatory)][string]$SourceWorkingDir,
         [Parameter(Mandatory)][string]$PlanId,
         [Parameter(Mandatory)][string]$RunId
     )
 
-    return (Join-Path $SourceGitRoot '.worktree')
+    return (Join-Path $SourceWorkingDir '.worktree')
+}
+
+function Test-WorkspacePathUnderRoot {
+    param(
+        [AllowEmptyString()][string]$Path,
+        [AllowEmptyString()][string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $normalizedPath = ([System.IO.Path]::GetFullPath($Path) -replace '\\', '/').TrimEnd('/')
+    $normalizedRoot = ([System.IO.Path]::GetFullPath($Root) -replace '\\', '/').TrimEnd('/')
+    return $normalizedPath.Equals($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $normalizedPath.StartsWith("$normalizedRoot/", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-RoomWorktreeDirectory {
+    param([AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Container)) { return $false }
+    return (Test-Path (Join-Path $Path '.git'))
+}
+
+function Test-StaleGeneratedRoomWorktreeDirectory {
+    param([AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Container)) { return $false }
+    if (Test-RoomWorktreeDirectory -Path $Path) { return $false }
+
+    $items = @(Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue)
+    if ($items.Count -eq 0) { return $true }
+
+    foreach ($item in $items) {
+        $name = $item.Name
+        if ($name -notin @('.worktree', '.agents', '.opencode', '.war-rooms', '.DS_Store')) {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Get-WorkspaceStatusLines {
@@ -359,7 +405,7 @@ function Initialize-PlanIntegrationWorkspace {
     }
 
     if ([string]::IsNullOrWhiteSpace($WorktreeRoot)) {
-        $WorktreeRoot = Get-DefaultWorktreeRoot -SourceGitRoot $ready.SourceGitRoot -PlanId $PlanId -RunId $RunId
+        $WorktreeRoot = Get-DefaultWorktreeRoot -SourceGitRoot $ready.SourceGitRoot -SourceWorkingDir $ready.WorkingDir -PlanId $PlanId -RunId $RunId
     }
     $WorktreeRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorktreeRoot)
 
@@ -532,11 +578,15 @@ function Ensure-RoomWorktree {
         return [pscustomobject]@{ Ready = $true; Mode = 'plan-review'; WorkingDir = "$($cfg.working_dir)" }
     }
 
+    $roomWorktreeRoot = Join-Path "$($manifest.worktree_root)" $roomId
+
     $existingRecord = Get-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId
     if ($existingRecord) {
         $existingStatus = if ($existingRecord.PSObject.Properties.Name -contains 'status') { "$($existingRecord.status)" } else { '' }
+        $existingWorktreeDir = if ($existingRecord.PSObject.Properties.Name -contains 'worktree_dir') { "$($existingRecord.worktree_dir)" } else { '' }
         $existingDir = if ($existingRecord.PSObject.Properties.Name -contains 'working_dir') { "$($existingRecord.working_dir)" } else { '' }
-        if ($existingStatus -in @('ready', 'merged') -and $existingDir -and (Test-Path $existingDir -PathType Container)) {
+        $existingWorktreeMatches = $existingWorktreeDir -and ([System.IO.Path]::GetFullPath($existingWorktreeDir) -eq [System.IO.Path]::GetFullPath($roomWorktreeRoot))
+        if ($existingStatus -in @('ready', 'merged') -and $existingWorktreeMatches -and (Test-RoomWorktreeDirectory -Path $roomWorktreeRoot) -and $existingDir -and (Test-Path $existingDir -PathType Container)) {
             $cfg.working_dir = $existingDir
             $cfg = Remove-RoomConfigWorkspaceState -Config $cfg
             Write-WorkspaceJson -Path $cfgPath -Value $cfg
@@ -544,7 +594,6 @@ function Ensure-RoomWorktree {
         }
     }
 
-    $roomWorktreeRoot = Join-Path "$($manifest.worktree_root)" $roomId
     $branch = Get-RoomWorkspaceBranchName -PlanId "$($manifest.plan_id)" -RoomId $roomId -TaskRef $taskRef -Title $title
     $baseRef = (Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('rev-parse', 'HEAD')).Output.Trim()
     Set-RoomWorkspaceRecord -WarRoomsDir $WarRoomsDir -RoomId $roomId -TaskRef $taskRef -Status 'creating' -Fields @{
@@ -554,12 +603,19 @@ function Ensure-RoomWorktree {
     } | Out-Null
 
     try {
-        if (-not (Test-Path $roomWorktreeRoot)) {
+        if (-not (Test-RoomWorktreeDirectory -Path $roomWorktreeRoot)) {
+            if ((Test-Path $roomWorktreeRoot -PathType Container) -and ((Get-ChildItem -Path $roomWorktreeRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0)) {
+                Remove-Item -Path $roomWorktreeRoot -Force
+            } elseif (Test-StaleGeneratedRoomWorktreeDirectory -Path $roomWorktreeRoot) {
+                Remove-Item -Path $roomWorktreeRoot -Recurse -Force
+            } elseif (Test-Path $roomWorktreeRoot -PathType Container) {
+                throw "Room worktree path exists but is not a Git worktree and contains non-runtime files: $roomWorktreeRoot"
+            }
             Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('worktree', 'add', '-B', $branch, $roomWorktreeRoot, $baseRef) | Out-Null
         }
         Sync-AgentRuntimeOverlay -SourceGitRoot "$($manifest.source_git_root)" -RoomWorktreeRoot $roomWorktreeRoot -AgentsDir $AgentsDir
         $relativeDir = ''
-        if ($manifest.PSObject.Properties.Name -contains 'source_git_root' -and $manifest.source_git_root -and $cfg.working_dir) {
+        if ($manifest.PSObject.Properties.Name -contains 'source_git_root' -and $manifest.source_git_root -and $cfg.working_dir -and -not (Test-WorkspacePathUnderRoot -Path "$($cfg.working_dir)" -Root "$($manifest.worktree_root)")) {
             try {
                 $candidateRelative = [System.IO.Path]::GetRelativePath("$($manifest.source_git_root)", "$($cfg.working_dir)") -replace '\\', '/'
                 if ($candidateRelative -and $candidateRelative -ne '.') { $relativeDir = $candidateRelative }

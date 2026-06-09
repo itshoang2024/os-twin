@@ -945,6 +945,7 @@ working_dir: $script:projectDir
             if (-not (Test-Path $room002)) { New-Item -ItemType Directory -Path $room002 -Force | Out-Null }
             "fixing" | Out-File (Join-Path $room002 "status") -Encoding utf8 -NoNewline
             "7" | Out-File (Join-Path $room002 "retries") -Encoding utf8 -NoNewline
+            "3" | Out-File (Join-Path $room002 "crash_respawns") -Encoding utf8 -NoNewline
             @{ task_ref = "EPIC-002"; assignment = @{ assigned_role = "qa-automation-engineer"; candidate_roles = @("engineer", "qa-automation-engineer") } } |
                 ConvertTo-Json -Depth 6 | Out-File (Join-Path $room002 "config.json") -Encoding utf8
             "1" | Out-File (Join-Path $room002 "state_changed_at") -Encoding utf8 -NoNewline
@@ -1030,7 +1031,9 @@ working_dir: $script:projectDir
             $roleRun.PSObject.Properties.Name | Should -Not -Contain "status_state"
 
             [long](Get-Content (Join-Path $absProjectDir ".war-rooms/room-002/state_changed_at") -Raw).Trim() | Should -BeGreaterThan 1
+            (Get-ChildItem (Join-Path $absProjectDir ".war-rooms/room-002/pids") -Filter "*.pid").Count | Should -Be 0
             (Get-ChildItem (Join-Path $absProjectDir ".war-rooms/room-002/pids") -Filter "*.spawned_at").Count | Should -Be 0
+            Test-Path (Join-Path $absProjectDir ".war-rooms/room-002/crash_respawns") | Should -BeFalse
         }
 
         It "triggers Update-Progress after resets" {
