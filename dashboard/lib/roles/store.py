@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from dashboard.models import Role
-from dashboard.lib.opencode_paths import get_ostwin_home
 
 
 DEFAULT_MODEL = "google-vertex/gemini-3-flash-preview"
@@ -134,7 +133,7 @@ class RoleRepository:
         self.project_roles_dir = project_roles_dir
         self.roles_config_file = roles_config_file
         self.engine_config_file = engine_config_file
-        self.opencode_agents_dir = opencode_agents_dir or get_ostwin_home() / ".opencode" / "agents"
+        self.opencode_agents_dir = opencode_agents_dir or Path.home() / ".config" / "opencode" / "agents"
         self.projections = RoleProjectionWriter(roles_config_file, engine_config_file)
 
     def list_roles(self) -> List[Role]:
@@ -185,7 +184,8 @@ class RoleRepository:
         """
         self.opencode_agents_dir.mkdir(parents=True, exist_ok=True)
         agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
-        agent_file.write_text(self._render_opencode_agent_markdown(role))
+        existing_content = agent_file.read_text() if agent_file.exists() else None
+        agent_file.write_text(self._render_opencode_agent_markdown(role, existing_content))
 
     def delete_opencode_agent(self, role: Role) -> None:
         agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
@@ -357,16 +357,41 @@ class RoleRepository:
         }
 
     @staticmethod
-    def _render_opencode_agent_markdown(role: Role) -> str:
-        frontmatter: Dict[str, Any] = {
-            "name": stable_role_id(role.name),
-            "description": role.description or f"Ostwin role: {role.name}",
-            "mode": "subagent",
-            "model": role.version,
-            "temperature": role.temperature,
-        }
+    def _render_opencode_agent_markdown(role: Role, existing_content: Optional[str] = None) -> str:
+        frontmatter = RoleRepository._extract_frontmatter(existing_content)
+        frontmatter.update({
+            "name": json.dumps(stable_role_id(role.name), ensure_ascii=False),
+            "description": json.dumps(role.description or f"Ostwin role: {role.name}", ensure_ascii=False),
+            "mode": json.dumps("subagent"),
+            "model": json.dumps(role.version, ensure_ascii=False),
+            "temperature": json.dumps(role.temperature),
+        })
         lines = ["---"]
         for key, value in frontmatter.items():
-            lines.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+            lines.append(f"{key}: {value}")
         lines.extend(["---", "", role.instructions or ""])
         return "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _extract_frontmatter(content: Optional[str]) -> Dict[str, str]:
+        """Return existing OpenCode agent frontmatter, preserving unknown keys.
+
+        Existing global agents may contain metadata that is not represented by
+        the dashboard role model, such as ``tags`` or ``trust_level``. Preserve
+        those keys while updating the OpenCode runtime fields and prompt body.
+        """
+        if not content or not content.startswith("---\n"):
+            return {}
+        end = content.find("\n---", 4)
+        if end == -1:
+            return {}
+
+        frontmatter: Dict[str, str] = {}
+        for raw_line in content[4:end].splitlines():
+            if not raw_line.strip() or raw_line.lstrip().startswith("#") or ":" not in raw_line:
+                continue
+            key, value = raw_line.split(":", 1)
+            key = key.strip()
+            if key:
+                frontmatter[key] = value.strip()
+        return frontmatter

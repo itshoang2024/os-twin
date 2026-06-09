@@ -137,6 +137,46 @@ def test_write_role_syncs_role_md_to_opencode_agent(tmp_path):
     assert agent_md.endswith(role.instructions + "\n")
 
 
+def test_write_role_preserves_existing_opencode_agent_metadata(tmp_path):
+    repo = _repo(tmp_path)
+    repo.opencode_agents_dir.mkdir(parents=True)
+    (repo.opencode_agents_dir / "game-qa.md").write_text(
+        "---\n"
+        "name: game-qa\n"
+        "description: Old description\n"
+        "tags: [game, qa]\n"
+        "trust_level: core\n"
+        "---\n"
+        "Old prompt\n"
+    )
+    role = Role(
+        id="game-qa",
+        name="game-qa",
+        description="Unity game QA specialist.",
+        instructions="Validate Unity playtest scenarios and regressions.",
+        provider="claude",
+        version="anthropic/claude-sonnet-4",
+        temperature=0.1,
+        budget_tokens_max=500000,
+        max_retries=3,
+        timeout_seconds=900,
+        skill_refs=[],
+        mcp_refs=[],
+        instance_type="evaluator",
+        system_prompt_override=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-02T00:00:00+00:00",
+    )
+
+    repo.write_role(role)
+
+    agent_md = (repo.opencode_agents_dir / "game-qa.md").read_text()
+    assert "tags: [game, qa]" in agent_md
+    assert "trust_level: core" in agent_md
+    assert 'description: "Unity game QA specialist."' in agent_md
+    assert agent_md.endswith(role.instructions + "\n")
+
+
 def test_delete_role_removes_synced_opencode_agent(tmp_path):
     repo = _repo(tmp_path)
     _write_role(
