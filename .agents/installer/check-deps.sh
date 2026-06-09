@@ -3,8 +3,8 @@
 # check-deps.sh — Dependency presence checks (pure — no installs)
 #
 # Provides: check_python, check_pwsh, check_node, check_bun, check_uv,
-#           check_opencode, check_agent_browser, check_chrome_devtools,
-#           check_brew
+#           check_opencode, check_clawhub, check_codegraph,
+#           check_agent_browser, check_chrome_devtools, check_brew
 #
 # Requires: lib.sh (version_gte), versions.conf (MIN_PYTHON_VERSION, MIN_PWSH_VERSION)
 #
@@ -79,6 +79,16 @@ check_uv() {
 
 check_opencode() {
   command -v opencode &>/dev/null
+}
+
+# ─── Core JavaScript CLIs ───────────────────────────────────────────────────
+
+check_clawhub() {
+  command -v clawhub &>/dev/null
+}
+
+check_codegraph() {
+  command -v codegraph &>/dev/null
 }
 
 # ─── agent-browser (Browser automation CLI) ─────────────────────────────────

@@ -5,7 +5,7 @@
 # Provides: verify_components, print_completion_banner
 #
 # Requires: lib.sh, check-deps.sh (check_python, check_pwsh, check_uv,
-#           check_opencode, check_agent_browser, check_chrome_devtools),
+#           check_opencode, check_codegraph, check_agent_browser, check_chrome_devtools),
 #           globals: INSTALL_DIR, VENV_DIR, DASHBOARD_ONLY,
 #           BASH_VER, PYTHON_VERSION, PWSH_VERSION, DASHBOARD_PORT,
 #           START_CHANNEL, TUNNEL_URL
@@ -64,6 +64,12 @@ verify_components() {
       echo -e "    opencode:         ${GREEN}✅ $(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo 'installed')${NC}"
     else
       echo -e "    opencode:         ${YELLOW}⚠️  not in PATH${NC}"
+    fi
+
+    if check_codegraph; then
+      echo -e "    codegraph:        ${GREEN}✅ installed${NC}"
+    else
+      echo -e "    codegraph:        ${YELLOW}⚠️  not installed${NC}"
     fi
 
     if check_agent_browser; then

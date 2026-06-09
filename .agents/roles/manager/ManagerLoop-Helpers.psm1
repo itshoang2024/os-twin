@@ -1158,7 +1158,7 @@ function Start-WorkerJob {
         $ctxAgentsDirForWorkspace = _ctx 'agentsDir'
         $workspaceModuleForSpawn = if ($ctxAgentsDirForWorkspace) { Join-Path $ctxAgentsDirForWorkspace 'workspace/GitWorkspace.psm1' } else { '' }
         if ($workspaceModuleForSpawn -and (Test-Path $workspaceModuleForSpawn)) {
-            Import-Module $workspaceModuleForSpawn -Force -Global
+            Import-Module $workspaceModuleForSpawn -Force -Global -DisableNameChecking
         }
     }
     if (Get-Command Ensure-RoomWorktree -ErrorAction SilentlyContinue) {

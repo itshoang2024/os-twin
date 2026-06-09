@@ -55,7 +55,7 @@ if (Test-Path $logModule) { Import-Module $logModule -Force }
 if (Test-Path $configModule) { Import-Module $configModule -Force }
 if (Test-Path $utilsModule) { Import-Module $utilsModule -Force }
 if (Test-Path $eventsModule) { Import-Module $eventsModule -Force }
-if (Test-Path $workspaceModule) { Import-Module $workspaceModule -Force -Global }
+if (Test-Path $workspaceModule) { Import-Module $workspaceModule -Force -Global -DisableNameChecking }
 if (Test-Path $mergeQueueModule) { Import-Module $mergeQueueModule -Force -Global }
 if (Test-Path $helpersModule) { Import-Module $helpersModule -Force }
 

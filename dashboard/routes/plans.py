@@ -2358,7 +2358,7 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
             slug = plan_id
         working_dir = str(Path.home() / ".ostwin" / "projects" / slug)
 
-    workspace_isolation = request.workspace_isolation or os.environ.get("OSTWIN_WORKSPACE_ISOLATION") or "room-worktree"
+    workspace_isolation = request.workspace_isolation or os.environ.get("OSTWIN_WORKSPACE_ISOLATION") or "shared"
     if workspace_isolation not in {"room-worktree", "shared"}:
         raise HTTPException(status_code=422, detail="workspace_isolation must be 'room-worktree' or 'shared'")
     worktree_root = request.worktree_root or ""

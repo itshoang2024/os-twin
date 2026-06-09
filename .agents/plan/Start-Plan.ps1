@@ -132,7 +132,7 @@ if (Test-Path $eventsModule) {
 $workspaceModule = Join-Path $agentsDir "workspace" "GitWorkspace.psm1"
 if (Test-Path $workspaceModule) {
     $workspaceModule = (Resolve-Path $workspaceModule).Path
-    Import-Module $workspaceModule -Force
+    Import-Module $workspaceModule -Force -DisableNameChecking
 }
 
 # --- Helper Functions ---

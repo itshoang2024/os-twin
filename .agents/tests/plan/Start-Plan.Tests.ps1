@@ -1119,7 +1119,7 @@ param(
     [switch]$Expand,
     [switch]$Review,
     [int]$MaxConcurrent,
-    [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree',
+    [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'shared',
     [string]$WorktreeRoot = '',
     [switch]$NonInteractive,
     [switch]$EnablePlanning,
@@ -1188,11 +1188,12 @@ working_dir: $oldProject
 - [ ] Done
 "@ | Out-File $planFile -Encoding utf8
 
-        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--workspace-isolation', 'shared', '--dry-run', '-n')
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--dry-run', '-n')
 
         Test-Path $fixture.CaptureFile | Should -BeTrue
         $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
         $captured.ProjectDir | Should -Be $fixture.ProjectDir
+        $captured.WorkspaceIsolation | Should -Be 'shared'
         $captured.IgnorePlanWorkingDir | Should -BeTrue
     }
 

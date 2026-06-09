@@ -329,7 +329,7 @@ function Initialize-PlanIntegrationWorkspace {
         [Parameter(Mandatory)][string]$PlanId,
         [Parameter(Mandatory)][string]$RunId,
         [Parameter(Mandatory)][string]$SourceWorkingDir,
-        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree',
+        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'shared',
         [string]$WorktreeRoot = ''
     )
 

@@ -369,7 +369,7 @@ install_chrome_devtools() {
   ok "chrome-devtools runtime installed to $bin_dir"
 }
 
-# ─── agent-browser (Browser automation CLI) ─────────────────────────────────
+# ─── Global JavaScript CLI packages ─────────────────────────────────────────
 
 _select_global_js_pm() {
   if command -v bun &>/dev/null; then
@@ -445,6 +445,45 @@ _install_global_js_package() {
       ;;
   esac
 }
+
+install_clawhub_cli() {
+  check_clawhub && return 0
+
+  if ! command -v bun &>/dev/null; then
+    warn "Skipping clawhub CLI — bun not found"
+    return 0
+  fi
+
+  step "Installing clawhub CLI with bun..."
+  if ! _install_global_js_package bun clawhub 2>/dev/null; then
+    warn "clawhub bun install failed"
+  fi
+
+  return 0
+}
+
+install_codegraph_cli() {
+  check_codegraph && return 0
+
+  if ! command -v npm &>/dev/null; then
+    warn "Skipping codegraph CLI — npm not found"
+    return 0
+  fi
+
+  step "Installing codegraph CLI with npm..."
+  if ! _install_global_js_package npm @colbymchenry/codegraph; then
+    warn "codegraph npm install failed"
+  fi
+
+  return 0
+}
+
+install_core_js_clis() {
+  install_codegraph_cli
+  install_clawhub_cli
+}
+
+# ─── agent-browser (Browser automation CLI) ─────────────────────────────────
 
 install_agent_browser() {
   if check_agent_browser; then

@@ -376,7 +376,7 @@ function Invoke-OstwinRunGitPreflight {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$WorkingDir,
-        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'room-worktree'
+        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'shared'
     )
 
     if ($WorkspaceIsolation -eq 'shared') { return }
@@ -491,7 +491,7 @@ switch ($Command) {
         $commandWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir ""
         $resolvedWorkingDir = $commandWorkingDir
         $planDeclaredWorkingDir = ""
-        $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
+        $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "shared" }
         $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
         $expectingValueFor = ""
         $explicitWorkingDir = $false
@@ -883,7 +883,7 @@ switch ($Command) {
             "start" {
                 $startArgs = [System.Collections.ArrayList]::new()
                 $startResolved = $false
-                $startWorkspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "room-worktree" }
+                $startWorkspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "shared" }
                 $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
                 $startWorkingDir = ""
                 $startExpectingValueFor = ""

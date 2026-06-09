@@ -1,0 +1,15 @@
+**
+!.agents/bin/ostwin
+!.agents/init.ps1
+!.agents/channel/**
+!.agents/events/**
+!.agents/lib/**
+!.agents/lifecycle/**
+!.agents/plan/**
+!.agents/release/**
+!.agents/roles/**
+!.agents/skills/**
+!.agents/war-rooms/**
+!.agents/workspace/GitWorkspace.psm1
+!.agents/config.json
+!.github/smoke-test/worktree-two-epics.ps1
