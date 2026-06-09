@@ -66,6 +66,7 @@ function Test-WorkspaceRuntimePath {
 
     $normalized = ($Path -replace '\\', '/').TrimStart('/')
     if ($normalized -eq '.gitignore') { return $true }
+    if ($normalized -eq '.DS_Store' -or $normalized.EndsWith('/.DS_Store', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     foreach ($prefix in @(
         '.war-rooms/',
         '.worktree/',
@@ -79,7 +80,7 @@ function Test-WorkspaceRuntimePath {
         }
     }
 
-    foreach ($runtimeSegment in @('/.war-rooms/', '/.worktree/', '/.opencode/')) {
+    foreach ($runtimeSegment in @('/.war-rooms/', '/.worktree/', '/.opencode/', '/.agents/skills/', '/.agents/mcp/')) {
         if ($normalized.Contains($runtimeSegment, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
@@ -158,6 +159,24 @@ function Test-RoomWorktreeDirectory {
 
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Container)) { return $false }
     return (Test-Path (Join-Path $Path '.git'))
+}
+
+function Test-StaleGeneratedRoomWorktreeDirectory {
+    param([AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path -PathType Container)) { return $false }
+    if (Test-RoomWorktreeDirectory -Path $Path) { return $false }
+
+    $items = @(Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue)
+    if ($items.Count -eq 0) { return $true }
+
+    foreach ($item in $items) {
+        $name = $item.Name
+        if ($name -notin @('.worktree', '.agents', '.opencode', '.war-rooms', '.DS_Store')) {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Get-WorkspaceStatusLines {
@@ -587,6 +606,10 @@ function Ensure-RoomWorktree {
         if (-not (Test-RoomWorktreeDirectory -Path $roomWorktreeRoot)) {
             if ((Test-Path $roomWorktreeRoot -PathType Container) -and ((Get-ChildItem -Path $roomWorktreeRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0)) {
                 Remove-Item -Path $roomWorktreeRoot -Force
+            } elseif (Test-StaleGeneratedRoomWorktreeDirectory -Path $roomWorktreeRoot) {
+                Remove-Item -Path $roomWorktreeRoot -Recurse -Force
+            } elseif (Test-Path $roomWorktreeRoot -PathType Container) {
+                throw "Room worktree path exists but is not a Git worktree and contains non-runtime files: $roomWorktreeRoot"
             }
             Invoke-GitWorkspaceCommand -Cwd "$($manifest.source_git_root)" -Arguments @('worktree', 'add', '-B', $branch, $roomWorktreeRoot, $baseRef) | Out-Null
         }

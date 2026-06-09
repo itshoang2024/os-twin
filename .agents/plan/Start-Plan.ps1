@@ -566,6 +566,20 @@ if (-not $DryRun) {
             $runId = "$($workspaceManifest.run_id)"
             $env:OSTWIN_RUN_ID = $runId
         }
+        $manifestSource = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'source_working_dir')) { "$($workspaceManifest.source_working_dir)" } else { '' }
+        $manifestIsolation = if ($workspaceManifest -and ($workspaceManifest.PSObject.Properties.Name -contains 'isolation')) { "$($workspaceManifest.isolation)" } else { '' }
+        $expectedSource = if (Test-Path $ProjectDir -PathType Container) { (Resolve-Path $ProjectDir).Path } else { $ProjectDir }
+        $sourceMismatch = $manifestSource -and ([System.IO.Path]::GetFullPath($manifestSource) -ne [System.IO.Path]::GetFullPath($expectedSource))
+        $isolationMismatch = $manifestIsolation -and ($manifestIsolation -ne $WorkspaceIsolation)
+        if (($sourceMismatch -or $isolationMismatch) -and (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue)) {
+            Write-Host "  Re-anchoring workspace manifest to current working_dir: $expectedSource" -ForegroundColor DarkGray
+            $workspaceManifest = Initialize-PlanIntegrationWorkspace `
+                -WarRoomsDir $warRoomsDir `
+                -PlanId $planId `
+                -RunId $runId `
+                -SourceWorkingDir $ProjectDir `
+                -WorkspaceIsolation $WorkspaceIsolation
+        }
     } elseif (Get-Command Initialize-PlanIntegrationWorkspace -ErrorAction SilentlyContinue) {
         try {
             $workspaceManifest = Initialize-PlanIntegrationWorkspace `
@@ -921,10 +935,36 @@ function New-PlanWarRooms {
         }
     }
 
+    function Resolve-EntryWorkingDir {
+        param($ProjectDir, $Entry)
+
+        $resolvedWorkingDir = $ProjectDir
+        if ($Entry.EpicWorkingDir -and $Entry.EpicWorkingDir -ne '') {
+            $wd = $Entry.EpicWorkingDir
+            if ($wd -eq '.') {
+                $resolvedWorkingDir = $ProjectDir
+            } elseif ([System.IO.Path]::IsPathRooted($wd)) {
+                $resolvedWorkingDir = $wd
+            } else {
+                $resolvedWorkingDir = (Join-Path $ProjectDir $wd)
+            }
+        }
+        if (Test-Path $resolvedWorkingDir -PathType Container) {
+            return (Resolve-Path $resolvedWorkingDir).Path
+        }
+        return $resolvedWorkingDir
+    }
+
     # --- Create missing war-rooms or reconcile existing ones ---
     $newWarRoom = Join-Path $agentsDir "war-rooms" "New-WarRoom.ps1"
     foreach ($entry in $parsed) {
         $roomPath = Join-Path $warRoomsDir $entry.RoomId
+        $resolvedWorkingDir = Resolve-EntryWorkingDir -ProjectDir $ProjectDir -Entry $entry
+        if (-not (Test-Path $resolvedWorkingDir)) {
+            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
+            $resolvedWorkingDir = (Resolve-Path $resolvedWorkingDir).Path
+        }
         if (Test-Path $roomPath) {
             $existingConfigPath = Join-Path $roomPath "config.json"
             if (-not (Test-Path $existingConfigPath)) {
@@ -943,6 +983,16 @@ function New-PlanWarRooms {
                         $existingConfig.assignment.assigned_role = $primaryRole
                         $existingConfig.assignment.candidate_roles = $candidateRoles
                     }
+                    $currentWorkingDir = if ($existingConfig.PSObject.Properties.Name -contains 'working_dir') { "$($existingConfig.working_dir)" } else { '' }
+                    $workingDirChanged = -not $currentWorkingDir -or ([System.IO.Path]::GetFullPath($currentWorkingDir) -ne [System.IO.Path]::GetFullPath($resolvedWorkingDir))
+                    if ($workingDirChanged) {
+                        Write-Host "    [RECONCILE] $($entry.RoomId): working_dir → $resolvedWorkingDir" -ForegroundColor DarkGray
+                        if ($existingConfig.PSObject.Properties.Name -contains 'working_dir') {
+                            $existingConfig.working_dir = $resolvedWorkingDir
+                        } else {
+                            $existingConfig | Add-Member -NotePropertyName working_dir -NotePropertyValue $resolvedWorkingDir
+                        }
+                    }
                     if ($existingConfig.PSObject.Properties.Name -contains 'workspace') {
                         $existingConfig.PSObject.Properties.Remove('workspace')
                     }
@@ -952,22 +1002,6 @@ function New-PlanWarRooms {
                 }
                 continue
             }
-        }
-
-        $resolvedWorkingDir = $ProjectDir
-        if ($entry.EpicWorkingDir -and $entry.EpicWorkingDir -ne '') {
-            $wd = $entry.EpicWorkingDir
-            if ($wd -eq '.') {
-                $resolvedWorkingDir = $ProjectDir
-            } elseif ([System.IO.Path]::IsPathRooted($wd)) {
-                $resolvedWorkingDir = $wd
-            } else {
-                $resolvedWorkingDir = (Join-Path $ProjectDir $wd)
-            }
-        }
-        if (-not (Test-Path $resolvedWorkingDir)) {
-            Write-Host "    Creating working_dir: $resolvedWorkingDir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $resolvedWorkingDir -Force | Out-Null
         }
 
         $primaryRole = if ($entry.Roles -and $entry.Roles.Count -gt 0) { $entry.Roles[0] } else { "engineer" }

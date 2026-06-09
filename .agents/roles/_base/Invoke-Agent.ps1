@@ -616,11 +616,6 @@ if ($Command) { $extraCliArgs += "--command"; $extraCliArgs += $Command }
 if ($AttachUrl) { $extraCliArgs += "--attach"; $extraCliArgs += $AttachUrl }
 if ($Port -gt 0) { $extraCliArgs += "--port"; $extraCliArgs += $Port.ToString() }
 if ($ProjectDir) { $extraCliArgs += "--dir"; $extraCliArgs += $ProjectDir }
-# opencode run requires prompt/file input to be provided as --file. Keep stdin
-# below for compatibility with test/mocked commands, but make the compiled
-# prompt an explicit attachment so real opencode invocations are complete.
-$extraCliArgs += "--file"
-$extraCliArgs += $promptFileAbsolute
 foreach ($f in $Files) { $extraCliArgs += "--file"; $extraCliArgs += $f }
 
 # --- MCP config: use pre-compiled .opencode/opencode.json if available ---
@@ -824,10 +819,13 @@ echo "`$$" > '$safePidFile'
 # Log diagnostic info before exec
 echo "[wrapper] PID=`$$, CMD=$AgentCmd, CWD=`$(pwd)" >> '$safeOutput'
 echo "[wrapper] PROMPT_FILE='$safePrompt' (exists: `$(test -f '$safePrompt' && echo yes || echo no), size: `$(wc -c < '$safePrompt' 2>/dev/null || echo 0) bytes)" >> '$safeOutput'
-echo "[wrapper] EXEC: $AgentCmd $argsLine < '$safePrompt'" >> '$safeOutput'
+echo "[wrapper] EXEC: cat '$safePrompt' | $AgentCmd $argsLine" >> '$safeOutput'
 exec $AgentCmd $argsLine < '$safePrompt' >> '$safeOutput' 2>&1
-# If exec fails, this line runs:
-echo "[wrapper] EXEC FAILED: exit=`$?" >> '$safeOutput'
+agent_exit=`$?
+if [ "`$agent_exit" -ne 0 ]; then
+  echo "[wrapper] EXEC FAILED: exit=`$agent_exit" >> '$safeOutput'
+fi
+exit "`$agent_exit"
 "@
             $scriptContent | Out-File -FilePath $wrapperScript -Encoding utf8 -NoNewline -Force
             chmod +x $wrapperScript 2>$null
