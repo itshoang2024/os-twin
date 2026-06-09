@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Palantir-Style Ontology Workbench Breakdown</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #eef2f6;
+      --panel: #ffffff;
+      --panel-2: #f7f9fc;
+      --canvas: #f4f7fa;
+      --ink: #1d2733;
+      --muted: #607487;
+      --faint: #8b9aaa;
+      --line: #d4dce5;
+      --line-2: #b8c5d1;
+      --blue: #2278ad;
+      --blue-soft: #e4f2fb;
+      --teal: #0aa58d;
+      --green: #2e9448;
+      --amber: #c98b06;
+      --orange: #d96a2b;
+      --red: #d43d3d;
+      --rose: #c62e72;
+      --shadow: 0 8px 22px rgba(30, 42, 56, .13);
+      --soft-shadow: 0 3px 10px rgba(30, 42, 56, .10);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); letter-spacing: 0; }
+    button, input, select { font: inherit; }
+    button { cursor: default; }
+    h1, h2, h3, p { margin-top: 0; }
+    .top {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 14px 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: start;
+    }
+    .eyebrow { color: var(--faint); font-size: 11px; font-weight: 780; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 4px 0 4px; font-size: 20px; line-height: 1.2; letter-spacing: 0; }
+    .top p { margin: 0; max-width: 930px; color: var(--muted); font-size: 13px; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .chip {
+      display: inline-flex; align-items: center; min-height: 26px; gap: 6px;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2);
+      color: var(--muted); padding: 4px 8px; font-size: 12px; font-weight: 700; white-space: nowrap;
+    }
+    .chip strong { color: var(--ink); }
+    .scope {
+      background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 18px; display: grid; gap: 8px; min-width: 0; overflow: hidden;
+    }
+    .label { color: var(--muted); font-size: 11px; font-weight: 780; letter-spacing: .07em; text-transform: uppercase; }
+    .selector {
+      min-height: 42px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--panel);
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; min-width: 0;
+    }
+    .selector span:first-child {
+      display: inline-block; max-width: 100%; min-height: 28px; border-radius: 4px; background: #667889; color: #fff;
+      padding: 4px 9px; font-weight: 740; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .commands {
+      background: var(--panel-2); border-bottom: 1px solid var(--line); padding: 10px 18px;
+      display: flex; gap: 10px; overflow-x: auto; white-space: nowrap;
+    }
+    .group {
+      display: inline-flex; min-height: 46px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 5px; box-shadow: var(--soft-shadow); overflow: hidden; flex: 0 0 auto;
+    }
+    .cmd {
+      border: 0; border-right: 1px solid var(--line); background: transparent; color: #253241;
+      display: inline-flex; align-items: center; gap: 8px; padding: 0 13px; font-weight: 730;
+    }
+    .cmd:last-child { border-right: 0; }
+    .cmd.primary { background: #2563eb; color: #fff; }
+    .ico {
+      width: 20px; height: 20px; border: 2px solid currentColor; border-radius: 4px;
+      display: inline-grid; place-items: center; font-size: 10px; font-weight: 900; flex: 0 0 auto;
+    }
+    .ico.round { border-radius: 999px; }
+    .workbench {
+      min-height: 760px;
+      display: grid;
+      grid-template-columns: 330px minmax(760px, 1fr) 330px;
+      grid-template-rows: minmax(540px, 1fr) 180px;
+      overflow: hidden;
+    }
+    .left, .right { background: var(--panel); min-width: 0; overflow-y: auto; }
+    .left { grid-row: 1 / span 2; border-right: 1px solid var(--line); }
+    .right { grid-row: 1 / span 2; border-left: 1px solid var(--line); }
+    .tabs { display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--line); padding: 10px 12px; overflow-x: auto; }
+    .tab { border: 0; background: transparent; color: var(--muted); border-radius: 4px; padding: 5px 9px; font-weight: 730; white-space: nowrap; }
+    .tab.active { background: #d9ecfb; color: #126293; }
+    .drawer { padding: 12px; display: grid; gap: 12px; }
+    .selected-card {
+      display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 12px;
+    }
+    .big-icon { width: 52px; height: 52px; border-radius: 5px; background: var(--teal); display: grid; place-items: center; color: #fff; font-weight: 900; }
+    .selected-card h2 { margin: 0 0 2px; font-size: 18px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .selected-card p { margin: 0; color: var(--muted); font-weight: 650; }
+    .subtabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); margin: 0 -12px; padding: 0 12px; overflow-x: auto; }
+    .subtab { border: 0; background: transparent; padding: 9px 0; font-weight: 730; color: var(--ink); white-space: nowrap; }
+    .subtab.active { color: var(--blue); box-shadow: inset 0 -3px var(--blue); }
+    .input { height: 36px; border: 1px solid var(--line-2); border-radius: 5px; padding: 0 9px; color: var(--muted); background: #fff; width: 100%; }
+    .prop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, 1fr); gap: 12px; min-height: 31px; align-items: center; color: var(--muted); }
+    .prop strong { color: var(--ink); }
+    .prop span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .canvas {
+      grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background: var(--canvas);
+      background-image: radial-gradient(#dfe7ef 1px, transparent 1px); background-size: 24px 24px;
+    }
+    .canvas-note {
+      position: absolute; left: 16px; top: 14px; z-index: 2; display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .note { border: 1px solid #b7d9ef; border-radius: 4px; background: rgba(228,242,251,.94); color: #2c6b91; padding: 5px 8px; font-size: 12px; font-weight: 700; }
+    .float-actions { position: absolute; top: 14px; right: 14px; z-index: 2; display: flex; gap: 8px; max-width: calc(100% - 28px); overflow-x: auto; }
+    .float-actions button { border: 1px solid var(--line); border-radius: 5px; background: #fff; box-shadow: var(--soft-shadow); min-height: 36px; padding: 0 10px; color: var(--muted); font-weight: 720; white-space: nowrap; }
+    .zoom { position: absolute; left: 12px; bottom: 16px; z-index: 2; display: grid; gap: 6px; }
+    .zoom button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--muted); box-shadow: var(--soft-shadow); font-weight: 900; }
+    .graph { width: 100%; height: 100%; min-width: 900px; }
+    .edge { fill: none; stroke: #94a8ba; stroke-width: 2; opacity: .84; }
+    .edge.strong { stroke: #718796; stroke-width: 4; }
+    .edge.selected { stroke: #70bce6; stroke-width: 5; }
+    .edge-label-bg { fill: #dff0fa; stroke: #c7e5f5; rx: 3; }
+    .edge-label { fill: #43576a; font-size: 11px; font-weight: 720; }
+    .node-shell { fill: #fff; stroke: #cfd9e2; stroke-width: 1.4; rx: 5; filter: drop-shadow(0 3px 4px rgba(30,42,56,.14)); }
+    .node-shell.active { fill: #e8f4fb; stroke: #91caec; stroke-width: 8; }
+    .node-title { fill: #253241; font-size: 13px; font-weight: 780; }
+    .node-sub { fill: #607487; font-size: 11px; font-weight: 650; }
+    .flight { fill: #46aee8; stroke: #117caf; stroke-width: 2; rx: 3; }
+    .airport { fill: #0d6f9e; stroke: #065a82; stroke-width: 2; rx: 3; }
+    .event { fill: #e45a36; stroke: #b84729; stroke-width: 2; rx: 3; }
+    .goods { fill: var(--green); stroke: #1d7035; stroke-width: 2; rx: 3; }
+    .recipe { fill: var(--amber); stroke: #9d7000; stroke-width: 2; rx: 3; }
+    .customer { fill: var(--rose); stroke: #a91f5f; stroke-width: 2; rx: 3; }
+    .badge { fill: var(--red); stroke: #fff; stroke-width: 2; }
+    .inspector-head { padding: 14px; border-bottom: 1px solid var(--line); background: #fbfcfe; }
+    .inspector-head h2 { margin: 0 0 2px; font-size: 18px; }
+    .inspector-head p { margin: 0; color: var(--muted); }
+    .status-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    .status { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); padding: 3px 8px; font-size: 11px; font-weight: 740; }
+    .section { padding: 14px; border-bottom: 1px solid var(--line); }
+    .section h3 { color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; margin: 0 0 9px; }
+    .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; min-height: 29px; align-items: center; border-bottom: 1px solid #edf1f5; color: var(--muted); font-size: 12px; }
+    .kv strong { color: var(--ink); }
+    .matrix { display: grid; grid-template-columns: 80px repeat(3, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font-size: 11px; }
+    .matrix div { min-height: 31px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; place-items: center; text-align: center; padding: 4px; color: var(--muted); }
+    .matrix div:nth-child(4n) { border-right: 0; }
+    .matrix .head { background: var(--panel-2); color: var(--ink); font-weight: 780; }
+    .matrix .on { background: var(--blue-soft); color: #116391; font-weight: 760; }
+    .series { grid-column: 2; grid-row: 2; background: #fff; border-top: 1px solid var(--line); display: grid; grid-template-columns: 300px minmax(420px, 1fr); min-width: 0; }
+    .series-list { border-right: 1px solid var(--line); padding: 12px 14px; display: grid; gap: 10px; align-content: start; }
+    .series-item { display: grid; grid-template-columns: 3px minmax(0,1fr) auto; gap: 10px; }
+    .stroke { width: 3px; height: 36px; background: #222d36; }
+    .series-item:nth-child(2) .stroke { background: #f0a02b; }
+    .series-name { font-weight: 780; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .series-scope { color: var(--muted); font-size: 12px; font-weight: 760; text-transform: uppercase; }
+    .chart { padding: 8px; min-width: 0; overflow: hidden; }
+    .chart svg { width: 100%; height: 150px; }
+    .doc { padding: 24px 18px; }
+    .doc-inner { max-width: 1220px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr .9fr; gap: 14px; }
+    .doc-card { border: 1px solid var(--line); border-radius: 6px; background: #fff; box-shadow: var(--soft-shadow); padding: 15px; }
+    .doc-card.wide { grid-column: 1 / -1; }
+    .doc-card p, .doc-card li { color: var(--muted); font-size: 13px; }
+    .doc-card ul { margin: 0; padding-left: 18px; }
+    .map-row { display: grid; grid-template-columns: 190px 220px minmax(0,1fr); border-bottom: 1px solid var(--line); }
+    .map-row:last-child { border-bottom: 0; }
+    .map-row div { padding: 10px; border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .map-row div:last-child { border-right: 0; }
+    .map-row.head div { background: var(--panel-2); color: var(--ink); font-weight: 780; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+    .code { color: #126293; font: 760 12px var(--mono); }
+    @media (max-width: 1180px) {
+      .workbench { grid-template-columns: 300px minmax(640px, 1fr) 300px; }
+      .series { grid-template-columns: 1fr; }
+      .series-list { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 900px) {
+      .top { grid-template-columns: 1fr; }
+      .chips { justify-content: flex-start; }
+      .workbench { display: flex; flex-direction: column; min-height: auto; overflow: visible; }
+      .left, .right, .canvas, .series { width: 100%; grid-column: auto; grid-row: auto; }
+      .canvas { min-height: 520px; overflow-x: auto; }
+      .right { border-left: 0; border-top: 1px solid var(--line); }
+      .doc-inner { grid-template-columns: 1fr; }
+      .map-row { grid-template-columns: 1fr; }
+      .map-row div { border-right: 0; border-bottom: 1px solid var(--line); }
+      .map-row div:last-child { border-bottom: 0; }
+    }
+    @media (max-width: 620px) {
+      .top, .scope, .commands, .doc { padding-left: 12px; padding-right: 12px; }
+      .selected-card { grid-template-columns: 44px minmax(0, 1fr); }
+      .big-icon { width: 42px; height: 42px; }
+      .prop { grid-template-columns: 1fr; gap: 1px; }
+      .float-actions { left: 12px; right: 12px; max-width: calc(100% - 24px); }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <div class="eyebrow">Room 002 HTML artifact</div>
+      <h1>Ontology Workbench Anatomy</h1>
+      <p>Static FE concept showing the Palantir-style graph workbench: object selector, command bar, left drawer modes, graph canvas, contextual inspector, relationship matrix, and time-series rail.</p>
+    </div>
+    <div class="chips"><span class="chip"><strong>Format</strong> standalone HTML</span><span class="chip"><strong>Goal</strong> FE alignment</span><span class="chip"><strong>Scope</strong> no API</span></div>
+  </header>
+
+  <section class="scope">
+    <div class="label">Objects selector</div>
+    <div class="selector"><span>AA1004 SFO-&gt;DFW 2018-06-09_Departure_Delay</span><b>v</b></div>
+  </section>
+
+  <nav class="commands" aria-label="Workbench command bar">
+    <div class="group"><button class="cmd"><span class="ico round">o</span>Selection</button><button class="cmd"><span class="ico">n</span>Search Around</button><button class="cmd"><span class="ico round">g</span>Group</button><button class="cmd"><span class="ico">l</span>Layout</button><button class="cmd"><span class="ico">A</span>Annotate</button><button class="cmd"><span class="ico round">x</span>Delete</button></div>
+    <div class="group"><button class="cmd"><span class="ico">&lt;</span>Undo</button><button class="cmd"><span class="ico">&gt;</span>Redo</button></div>
+    <div class="group"><button class="cmd primary"><span class="ico">+</span>Add</button><button class="cmd"><span class="ico round">?</span>Help</button></div>
+  </nav>
+
+  <main class="workbench">
+    <aside class="left" aria-label="Left drawer">
+      <div class="tabs"><button class="tab">Layers</button><button class="tab active">Selection</button><button class="tab">Search</button><button class="tab">Histogram</button><button class="tab">Info</button></div>
+      <div class="drawer">
+        <section class="selected-card">
+          <div class="big-icon">P</div>
+          <div><h2>[DFW] Dallas/Fort Worth Inter...</h2><p>[Example Data] Airport</p></div>
+        </section>
+        <div class="subtabs"><button class="subtab active">Properties</button><button class="subtab">Series</button><button class="subtab">Events 0</button></div>
+        <input class="input" placeholder="Filter..." />
+        <div class="prop"><strong>Airport</strong><span>DFW</span></div>
+        <div class="prop"><strong>Airport Country ISO Code</strong><span>US</span></div>
+        <div class="prop"><strong>Airport Country Name</strong><span>United States</span></div>
+        <div class="prop"><strong>Airport Location</strong><span>32.89722222,-97.03777778</span></div>
+        <div class="prop"><strong>Airport State Code</strong><span>TX</span></div>
+        <div class="prop"><strong>Display Airport Name</strong><span>Dallas/Fort Worth Internation</span></div>
+      </div>
+    </aside>
+
+    <section class="canvas" aria-label="Graph canvas">
+      <div class="canvas-note"><span class="note">Center graph stays primary</span><span class="note">Edges create governed Relationship Types</span></div>
+      <div class="float-actions"><button>Time selection</button><button>Series</button><button>Preview impact</button></div>
+      <div class="zoom"><button>[]</button><button>+</button><button>-</button></div>
+      <svg class="graph" viewBox="0 0 1600 760" role="img" aria-label="Flight delay graph">
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#8fa5b7"/></marker></defs>
+        <path class="edge" marker-end="url(#arrow)" d="M290 355 C390 350,430 350,520 350"/><path class="edge" marker-end="url(#arrow)" d="M290 410 C390 398,430 385,520 365"/><path class="edge selected" marker-end="url(#arrow)" d="M675 355 C790 355,820 350,930 350"/><path class="edge" marker-end="url(#arrow)" d="M1085 350 C1195 325,1245 250,1390 250"/><path class="edge selected" marker-end="url(#arrow)" d="M1390 280 C1300 350,1260 430,1130 500"/>
+        <rect class="edge-label-bg" x="410" y="322" width="116" height="24"/><text class="edge-label" x="420" y="338">Delayed same day</text><rect class="edge-label-bg" x="735" y="326" width="116" height="24"/><text class="edge-label" x="746" y="342">Delayed same day</text><rect class="edge-label-bg" x="1160" y="302" width="116" height="24"/><text class="edge-label" x="1171" y="318">Delayed same day</text>
+        <g transform="translate(165 318)"><rect class="event" width="42" height="42"/><text class="node-title" x="-12" y="66">AA1004 event</text></g>
+        <g transform="translate(245 365)"><rect class="airport" width="42" height="42"/><text class="node-title" x="-28" y="65">[SFO] San Francisco</text></g>
+        <g transform="translate(520 330)"><rect class="node-shell active" x="-4" y="-4" width="128" height="104"/><rect class="flight" x="18" y="10" width="42" height="42"/><text class="node-title" x="16" y="75">AA1004 SFO-&gt;DFW</text><text class="node-sub" x="18" y="94">0732 / 0215</text><circle class="badge" cx="110" cy="2" r="13"/><text x="110" y="6" fill="#fff" font-size="11" font-weight="800" text-anchor="middle">1</text></g>
+        <g transform="translate(930 318)"><rect class="airport" width="42" height="42"/><rect class="node-shell" x="-34" y="48" width="142" height="28"/><text class="node-title" x="-22" y="66">[DFW] Dallas/Fort W...</text></g>
+        <g transform="translate(1110 225)"><rect class="node-shell active" x="-4" y="-4" width="142" height="104"/><rect class="flight" x="18" y="12" width="42" height="42"/><text class="node-title" x="16" y="78">AA1064 DFW-&gt;SAN</text><text class="node-sub" x="18" y="96">0944 / 0844</text></g>
+        <g transform="translate(1370 330)"><rect class="airport" width="42" height="42"/><rect class="node-shell" x="-38" y="48" width="150" height="28"/><text class="node-title" x="-30" y="66">[SAN] San Diego Inte...</text></g>
+        <g transform="translate(1160 500)"><rect class="node-shell active" x="-4" y="-4" width="142" height="104"/><rect class="flight" x="18" y="12" width="42" height="42"/><text class="node-title" x="16" y="78">AA1064 SAN-&gt;DFW</text><text class="node-sub" x="18" y="96">1538 / 1036</text></g>
+      </svg>
+    </section>
+
+    <aside class="right" aria-label="Contextual inspector">
+      <div class="inspector-head"><h2>Flight</h2><p>Object Type Unit inside Transportation</p><div class="status-row"><span class="status">draft local</span><span class="status">9 properties</span><span class="status">5 relations</span></div></div>
+      <section class="section"><h3>Identity</h3><div class="kv"><span>Object type label</span><strong>Flight</strong></div><div class="kv"><span>Default layer</span><strong>Transportation</strong></div><div class="kv"><span>Ontology path</span><strong>transportation.flight</strong></div></section>
+      <section class="section"><h3>Properties</h3><div class="kv"><span>flight_number</span><strong>string</strong></div><div class="kv"><span>departure_time</span><strong>datetime</strong></div><div class="kv"><span>arrival_time</span><strong>datetime</strong></div><div class="kv"><span>cancelled</span><strong>boolean</strong></div></section>
+      <section class="section"><h3>Relationship coverage</h3><div class="matrix"><div class="head">source</div><div class="head">Airport</div><div class="head">Airline</div><div class="head">People</div><div class="head">Flight</div><div class="on">originates</div><div class="on">operated by</div><div class="on">booked by</div><div class="head">Crew</div><div>-</div><div>-</div><div class="on">crews</div></div></section>
+      <section class="section"><h3>Governance</h3><div class="kv"><span>Validation</span><strong>ready</strong></div><div class="kv"><span>Publish path</span><strong>validate - diff - publish</strong></div></section>
+    </aside>
+
+    <section class="series" aria-label="Bottom series rail">
+      <div class="series-list"><div class="series-item"><span class="stroke"></span><div><div class="series-name">@demand</div><div class="series-scope">Belgian Ale</div></div><span>...</span></div><div class="series-item"><span class="stroke"></span><div><div class="series-name">ale_demand_forecast</div><div class="series-scope">Belgian Ale</div></div><span>...</span></div></div>
+      <div class="chart"><svg viewBox="0 0 760 150" role="img" aria-label="Series chart"><rect width="760" height="150" fill="#fff"/><g stroke="#dfe6ee"><path d="M0 30H760M0 65H760M0 100H760M0 135H760"/><path d="M130 0V150M300 0V150M470 0V150M640 0V150"/></g><polyline fill="none" stroke="#222d36" stroke-width="2" points="14,132 40,116 62,82 88,118 110,28 136,132 166,116 190,92 215,45 238,132 270,118 300,88 332,22 360,132 392,120 420,95 454,36 486,132 520,118 552,78 580,32 612,132 645,118 670,80"/><polyline fill="none" stroke="#f0a02b" stroke-width="2" points="675,132 700,94 724,122 750,108"/></svg></div>
+    </section>
+  </main>
+
+  <section class="doc">
+    <div class="doc-inner">
+      <article class="doc-card wide"><h2>Reference states included</h2><p>This rewrite condenses the five screenshots into a single FE-readable anatomy: Selection, Histogram, Layers styling, Production Line exploration, and Template authoring all share one shell contract.</p></article>
+      <article class="doc-card"><h2>UX rules</h2><ul><li>Left drawer is mode-specific context.</li><li>Center graph remains the primary work surface.</li><li>Right inspector is the single editing home.</li><li>Bottom rail is reserved for series and time context.</li></ul></article>
+      <article class="doc-card"><h2>FE mapping</h2><ul><li><span class="code">WorkbenchShell</span> owns layout.</li><li><span class="code">GraphCanvas</span> owns nodes and edges.</li><li><span class="code">SelectionInspector</span> owns contextual editing.</li><li><span class="code">HistogramPanel</span> and <span class="code">LayersStylingPanel</span> become drawer modes.</li></ul></article>
+      <article class="doc-card wide"><h2>Implementation contract</h2><div class="map-row head"><div>Zone</div><div>Component</div><div>Intent</div></div><div class="map-row"><div>Shell</div><div><span class="code">WorkbenchShell</span></div><div>One left rail, one graph canvas, one inspector, one bottom rail.</div></div><div class="map-row"><div>Object and relation creation</div><div><span class="code">OntologyPanel</span></div><div>Add Object Type and Connect Relationship operate on local draft before validation/publish.</div></div><div class="map-row"><div>Graph state</div><div><span class="code">GraphCanvas</span></div><div>Renders selection, badges, edge labels, weights, and impact preview.</div></div></article>
+    </div>
+  </section>
+</body>
+</html>

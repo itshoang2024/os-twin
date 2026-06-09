@@ -19,6 +19,7 @@ import useSWR from 'swr';
 import { apiGet, apiPost } from '@/lib/api-client';
 
 export type { EnterpriseMapNode, EnterpriseMapEdge, ProjectionData, OntologyVisualExtensions } from '@/types/ontology-map.generated';
+import type { ExplorerSearchResponse as ContractExplorerSearchResponse, ExplorerNodeDetailResponse as ContractExplorerNodeDetailResponse } from '@/types/ontology-map.generated';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,6 +65,19 @@ export interface ExplorerGraphData {
     query?: string;
     path_length?: number;
     error?: string;
+    source_node_count?: number;
+    source_edge_count?: number;
+    ontology_candidate_count?: number;
+    validation_issue_count?: number;
+    truncated?: boolean;
+    node_cap?: number | null;
+    limit?: number | null;
+    warnings?: string[];
+  };
+  meta?: {
+    truncated?: boolean;
+    warnings?: string[];
+    [key: string]: unknown;
   };
 }
 
@@ -106,6 +120,7 @@ interface ExpandRequest {
 interface SearchRequest {
   query: string;
   limit: number;
+  filters?: Record<string, unknown>;
 }
 
 /** Path request body. */
@@ -116,6 +131,51 @@ interface PathRequest {
 
 /** Visual brightness computed for a node (0 = dim, 1 = full glow). */
 export type LensMode = 'structural' | 'semantic' | 'category' | 'community';
+
+
+function graphDataFromSearchResponse(response: ExplorerGraphData | ContractExplorerSearchResponse): ExplorerGraphData {
+  if ('nodes' in response) return response;
+  return {
+    nodes: response.results.map((result) => ({
+      id: result.id,
+      label: result.object_type,
+      name: result.label,
+      score: 1,
+      properties: result.redacted ? {} : result.properties ?? {},
+    })),
+    edges: [],
+    stats: {
+      node_count: response.results.length,
+      edge_count: 0,
+      query: response.meta.query,
+      truncated: response.meta.truncated,
+      limit: response.meta.limit ?? null,
+      warnings: response.meta.warnings ?? [],
+    },
+    meta: response.meta,
+  };
+}
+
+function normalizeNodeDetail(response: ExplorerNodeDetail | ContractExplorerNodeDetailResponse): ExplorerNodeDetail {
+  if ('node' in response) return response;
+  return {
+    node: {
+      id: response.id,
+      label: 'object',
+      name: response.label,
+      score: 1,
+      properties: response.redacted ? {} : response.properties,
+    },
+    edges: response.relationships.map((relationship) => ({
+      source: relationship.direction === 'out' ? response.id : relationship.target,
+      target: relationship.direction === 'out' ? relationship.target : response.id,
+      label: relationship.label,
+      weight: 1,
+      direction: relationship.direction === 'out' ? 'outgoing' : 'incoming',
+    })),
+    stats: { degree: response.relationships.length },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Hook: useKnowledgeExplorerSummary
@@ -311,11 +371,11 @@ export function useKnowledgeExplorer(namespace: string | null) {
     if (!namespace || !query.trim()) return;
     setIsSearching(true);
     try {
-      const data = await apiPost<ExplorerGraphData>(
+      const data = await apiPost<ExplorerGraphData | ContractExplorerSearchResponse>(
         `${KNOWLEDGE_BASE}/namespaces/${namespace}/explorer/search`,
-        { query: query.trim(), limit: limit ?? 20 } satisfies SearchRequest
+        { query: query.trim(), limit: limit ?? 20, filters: {} } satisfies SearchRequest
       );
-      mergeGraphData(data);
+      mergeGraphData(graphDataFromSearchResponse(data));
     } catch (err) {
       console.error('Explorer search failed:', err);
     } finally {
@@ -350,9 +410,10 @@ export function useKnowledgeExplorer(namespace: string | null) {
   const getNodeDetail = useCallback(async (nodeId: string): Promise<ExplorerNodeDetail | null> => {
     if (!namespace) return null;
     try {
-      return await apiGet<ExplorerNodeDetail>(
+      const data = await apiGet<ExplorerNodeDetail | ContractExplorerNodeDetailResponse>(
         `${KNOWLEDGE_BASE}/namespaces/${namespace}/explorer/node/${encodeURIComponent(nodeId)}`
       );
+      return normalizeNodeDetail(data);
     } catch (err) {
       console.error('Explorer node detail failed:', err);
       return null;

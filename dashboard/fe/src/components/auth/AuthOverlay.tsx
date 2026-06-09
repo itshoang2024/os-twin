@@ -1,16 +1,50 @@
-'use client';
+"use client";
 
 import React, { useState } from 'react';
+import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
 
+function normalizePath(pathname: string | null | undefined): string {
+  const rawPath = pathname || (typeof window !== 'undefined' ? window.location.pathname : '');
+  return decodeURIComponent(rawPath.split('?')[0] || '').replace(/\/+$/, '');
+}
+
+function getBrowserSearch(): string {
+  return typeof window !== 'undefined' ? window.location.search : '';
+}
+
+export function isOntologyFixturePath(pathname: string | null | undefined): boolean {
+  return normalizePath(pathname) === '/knowledge/ontology-fixture';
+}
+
+export function isOntologyGraphBuilderFixturePath(pathname: string | null | undefined, search = getBrowserSearch()): boolean {
+  const normalized = normalizePath(pathname);
+  const isGraphBuilderRoute = /^\/knowledge\/[^/]+\/ontology-graph-builder$/.test(normalized);
+  if (!isGraphBuilderRoute) return false;
+
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  return ['basic', 'empty', 'redacted', 'large', 'error'].includes(params.get('fixture') || '');
+}
+
 export default function AuthOverlay() {
+  const pathname = usePathname();
   const { isAuthenticated, isLoading, error, login } = useAuth();
   const [key, setKey] = useState('');
   const [username, setUsername] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Don't render if authenticated or still loading
-  if (isLoading || isAuthenticated) return null;
+  const browserPathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isOntologyFixtureRoute = isOntologyFixturePath(pathname) || isOntologyFixturePath(browserPathname);
+  const isOntologyGraphBuilderFixtureRoute =
+    isOntologyGraphBuilderFixturePath(pathname) || isOntologyGraphBuilderFixturePath(browserPathname);
+
+  // Don't render if authenticated/loading, or when QA opens local ontology fixtures.
+  // These fixture workbenches are client-local and must stay interactive without
+  // requiring a backend auth handshake; all non-fixture routes keep the setup overlay
+  // unchanged. Check both usePathname() and window.location because static-export
+  // hydration can briefly expose placeholder paths such as /knowledge/_.
+  if (isLoading || isAuthenticated || isOntologyFixtureRoute || isOntologyGraphBuilderFixtureRoute) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,14 +55,14 @@ export default function AuthOverlay() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-md">
-      <div 
+      <div
         className="w-full max-w-sm mx-4 p-8 bg-surface rounded-2xl border border-border shadow-2xl"
         style={{ animation: 'fadeInUp 0.3s ease-out' }}
       >
         {/* Logo / Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 mb-4">
-            <img src="/logo.svg" alt="OsTwin" width={28} height={28} />
+            <Image src="/logo.svg" alt="OsTwin" width={28} height={28} />
           </div>
           <h1 className="text-xl font-black text-text-main tracking-tight">
             Os<span style={{ background: 'linear-gradient(135deg, #00ff88, #00c4e0, #00d4ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Twin</span>

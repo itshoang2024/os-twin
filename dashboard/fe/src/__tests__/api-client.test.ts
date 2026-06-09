@@ -13,6 +13,7 @@ import { Plan } from '@/types';
 describe('api-client response unwrapping', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.history.pushState({}, '', '/');
   });
 
   /**
@@ -121,6 +122,31 @@ describe('api-client response unwrapping', () => {
     expect(result.results).toHaveLength(1);
     expect(result.elapsed_seconds).toBe(1.23);
     expect(result.warnings).toEqual(['partial']);
+  });
+
+
+  it('serves shell-safe mock responses on fixture-backed ontology graph builder routes', async () => {
+    window.history.pushState({}, '', '/knowledge/demo/ontology-graph-builder?fixture=basic');
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { fetcher } = await import('@/lib/api-client');
+
+    await expect(fetcher('/plans/threads?limit=5&offset=0')).resolves.toEqual({ threads: [], total: 0 });
+    await expect(fetcher('/stats')).resolves.toEqual({});
+    await expect(fetcher('/notifications')).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not mock shell endpoints on live ontology graph builder routes', async () => {
+    window.history.pushState({}, '', '/knowledge/demo/ontology-graph-builder');
+    mockFetch({ threads: [{ id: 'thread-1' }], total: 1 });
+
+    const { fetcher } = await import('@/lib/api-client');
+    const result = await fetcher('/plans/threads?limit=5&offset=0');
+
+    expect(result).toEqual({ threads: [{ id: 'thread-1' }], total: 1 });
+    expect(fetch).toHaveBeenCalled();
   });
 
   it('respects NEXT_PUBLIC_API_BASE_URL if set', async () => {

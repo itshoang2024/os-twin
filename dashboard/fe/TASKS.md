@@ -22,3 +22,9 @@
   - AC: Mockup concepts (layered left inventory, center graph builder, right inspector, bottom impact/series strip, relationship matrix, object/relationship labels) are reflected in the live authoring shell and relationship endpoint chip UX.
 - [x] TASK-009 — QA duplicate-key event log fix
   - AC: Repeated local authoring/preview event log messages use stable unique keys and regression coverage proves no React duplicate-key console warnings are emitted.
+- [x] TASK-010 — QA route unblock and review clarifications
+  - AC: `/knowledge/ontology-fixture` and `/knowledge/{namespace}?tab=ontology` open the authoring workbench; draft resets on source profile changes; template staging creates Risk and Control together; regression tests, targeted ESLint, build, and agent-browser screenshots verify the unblockers.
+- [x] TASK-011 — QA connect-mode keyboard fallback fix
+  - AC: In canvas connect mode, each non-source Object Type exposes a semantic target button that completes Relationship Type creation without SVG-only clicks; regression tests verify source selection, target button completion, and connect-mode exit.
+- [x] TASK-012 — QA ontology fixture auth-overlay bypass
+  - AC: `/knowledge/ontology-fixture` skips the local setup/auth overlay so agent-browser can interact with the Ontology Authoring Workbench; all other routes keep the setup gate. Regression tests cover exact fixture route matching.

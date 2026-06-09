@@ -794,6 +794,8 @@ class EnterpriseMapStatsResponse(BaseModel):
 
 class EnterpriseMapMetaResponse(BaseModel):
     profile_id: Optional[str] = None
+    namespace: str = ""
+    generated_at: str = ""
     map_state: Literal["live", "empty"] = "empty"
     map_source_kind: Literal["knowledge_graph", "none"] = "none"
     source_node_count: int = 0
@@ -805,6 +807,12 @@ class EnterpriseMapMetaResponse(BaseModel):
     depth_requested: Optional[int] = None
     depth_effective: Optional[int] = None
     node_cap: Optional[int] = None
+    node_limit: Optional[int] = None
+    edge_limit: Optional[int] = None
+    event_limit: Optional[int] = None
+    next_cursor: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    feature_flags: dict[str, bool] = Field(default_factory=dict)
 
 
 class EnterpriseMapProjectionResponse(BaseModel):

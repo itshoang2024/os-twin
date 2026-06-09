@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Layered Ontology Unit Workbench Mockup</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #eef2f6;
+      --panel: #ffffff;
+      --panel-2: #f7f9fc;
+      --canvas: #f4f7fa;
+      --ink: #1d2733;
+      --muted: #607487;
+      --faint: #8b9aaa;
+      --line: #d4dce5;
+      --line-2: #b8c5d1;
+      --blue: #2278ad;
+      --blue-soft: #e4f2fb;
+      --teal: #0aa58d;
+      --orange: #d96a2b;
+      --slate: #566577;
+      --violet: #7357a2;
+      --amber: #c28f3e;
+      --shadow: 0 8px 22px rgba(30, 42, 56, .13);
+      --soft-shadow: 0 3px 10px rgba(30, 42, 56, .10);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    html, body { margin: 0; min-height: 100%; }
+    body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); letter-spacing: 0; }
+    button, input, select { font: inherit; }
+    button { cursor: default; }
+    h1, h2, h3, p { margin-top: 0; }
+    .topbar {
+      min-height: 58px; background: var(--panel); border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 16px;
+      position: sticky; top: 0; z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .menu { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); color: var(--muted); font-weight: 900; }
+    h1 { margin: 0; font-size: 18px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .actions { display: flex; gap: 8px; overflow-x: auto; white-space: nowrap; }
+    .action {
+      min-height: 34px; border: 1px solid var(--line-2); border-radius: 5px; background: #fff; color: #263545;
+      padding: 0 10px; font-weight: 730; display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+    }
+    .action.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .action.blue { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+    .ico { width: 18px; height: 18px; border: 2px solid currentColor; border-radius: 4px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 900; }
+    .layout {
+      min-height: 780px;
+      display: grid;
+      grid-template-columns: 286px minmax(760px, 1fr) 340px;
+      grid-template-rows: minmax(620px, 1fr) 188px;
+      overflow: hidden;
+    }
+    .sidebar {
+      grid-row: 1 / span 2; background: var(--panel); border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; min-width: 0;
+    }
+    .side-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+    .side-tab { min-height: 46px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--muted); font-weight: 760; }
+    .side-tab.active { color: #1d65a6; border-bottom-color: #1d65a6; background: #f8fbff; }
+    .side-body { overflow-y: auto; padding: 12px; display: grid; gap: 14px; align-content: start; }
+    .draft { border: 1px solid #c8dff6; border-radius: 6px; background: #eff6ff; padding: 9px; color: #173f73; font-weight: 730; display: flex; justify-content: space-between; }
+    .callout { border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); padding: 10px; color: var(--muted); font-size: 12px; }
+    .callout strong { display: block; color: var(--ink); margin-bottom: 4px; }
+    .layer {
+      border: 1px solid var(--line); border-radius: 6px; background: #fff; overflow: hidden;
+    }
+    .layer-head {
+      min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: var(--panel-2); border-bottom: 1px solid var(--line); padding: 8px 10px;
+    }
+    .layer-name { color: var(--muted); font-size: 12px; font-weight: 780; letter-spacing: .07em; text-transform: uppercase; }
+    .count { color: var(--faint); font-size: 11px; font-weight: 730; white-space: nowrap; }
+    .objects { list-style: none; margin: 0; padding: 6px; display: grid; gap: 4px; }
+    .object {
+      display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+      min-height: 34px; border-radius: 5px; padding: 4px 6px; color: #334155;
+    }
+    .object.active { background: #e8f3fb; outline: 1px solid #b7d9ef; }
+    .glyph { width: 22px; height: 22px; border-radius: 4px; color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 900; }
+    .airport { background: #6f7f8e; }
+    .flight { background: var(--blue); }
+    .aircraft { background: var(--teal); }
+    .airline { background: var(--violet); }
+    .passenger { background: var(--orange); }
+    .crew { background: var(--slate); }
+    .object-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 720; }
+    .unit { color: var(--faint); font: 760 10px var(--mono); }
+    .search { width: 100%; height: 36px; border: 1px solid var(--line-2); border-radius: 5px; padding: 0 10px; color: var(--muted); }
+    .relation { min-height: 34px; border: 1px solid var(--line); border-radius: 5px; background: #fff; box-shadow: var(--soft-shadow); display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 6px 8px; color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .canvas {
+      grid-column: 2; grid-row: 1; position: relative; min-width: 0; overflow: hidden;
+      background: var(--canvas); background-image: radial-gradient(#dfe7ef 1px, transparent 1px); background-size: 24px 24px;
+    }
+    .tools { position: absolute; top: 14px; right: 14px; z-index: 3; display: flex; gap: 8px; overflow-x: auto; max-width: calc(100% - 28px); }
+    .tools button { min-height: 36px; border: 1px solid var(--line); border-radius: 5px; background: #fff; box-shadow: var(--soft-shadow); color: var(--muted); font-size: 12px; font-weight: 730; padding: 0 10px; white-space: nowrap; }
+    .bands { position: absolute; inset: 78px 30px 28px; min-width: 720px; }
+    .band { position: absolute; left: 0; right: 0; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.55); }
+    .band.transport { top: 0; height: 58%; }
+    .band.people { bottom: 0; height: 35%; }
+    .band span {
+      position: absolute; top: 10px; left: 14px; border: 1px solid var(--line); border-radius: 4px; background: rgba(255,255,255,.90);
+      padding: 3px 6px; color: var(--muted); font-size: 11px; font-weight: 780; letter-spacing: .08em; text-transform: uppercase;
+    }
+    .graph { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 760px; }
+    .edge { fill: none; stroke: #8fa5b7; stroke-width: 2; opacity: .84; }
+    .edge.strong { stroke-width: 4; stroke: #738797; }
+    .edge.cross { stroke: var(--amber); stroke-width: 3; }
+    .edge-bg { fill: #e5f2fa; stroke: #cbe4f2; rx: 3; }
+    .edge-label { fill: #43576a; font-size: 11px; font-weight: 720; }
+    .node { filter: drop-shadow(0 4px 5px rgba(30,42,56,.13)); }
+    .node-shell { fill: #fff; stroke: #cfd9e2; stroke-width: 1.4; rx: 8; }
+    .node-shell.active { fill: #e9f5fc; stroke: #8cc6e8; stroke-width: 4; }
+    .node-title { fill: #1f2d3b; font-size: 14px; font-weight: 780; }
+    .node-sub { fill: #617487; font-size: 11px; font-weight: 650; }
+    .node-meta { fill: #8796a6; font: 760 10px var(--mono); }
+    .right { grid-column: 3; grid-row: 1 / span 2; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-width: 0; }
+    .inspector-head { padding: 16px; border-bottom: 1px solid var(--line); background: #fbfcfe; }
+    .inspector-title { display: flex; gap: 10px; align-items: start; }
+    .inspector-title h2 { margin: 0 0 2px; font-size: 18px; }
+    .inspector-title p { margin: 0; color: var(--muted); font-size: 13px; }
+    .status-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .status { border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); padding: 3px 8px; font-size: 11px; font-weight: 760; }
+    .section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .section h3 { margin: 0 0 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+    .field { display: grid; gap: 5px; margin-bottom: 10px; }
+    .field label { color: #34495b; font-weight: 720; font-size: 12px; }
+    .input-like { min-height: 34px; border: 1px solid var(--line-2); border-radius: 5px; background: #fff; display: flex; align-items: center; padding: 0 9px; color: var(--ink); font-weight: 650; }
+    .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; min-height: 30px; align-items: center; color: var(--muted); font-size: 12px; border-bottom: 1px solid #edf1f5; }
+    .kv strong { color: var(--ink); }
+    .matrix { display: grid; grid-template-columns: 84px repeat(3, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font-size: 11px; }
+    .matrix div { min-height: 32px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; place-items: center; text-align: center; padding: 4px; color: var(--muted); background: #fff; }
+    .matrix div:nth-child(4n) { border-right: 0; }
+    .matrix .head { background: var(--panel-2); color: var(--ink); font-weight: 760; }
+    .matrix .on { background: var(--blue-soft); color: #16699d; font-weight: 760; }
+    .bottom { grid-column: 2; grid-row: 2; background: #fff; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1.15fr 1fr 1fr; min-width: 0; }
+    .bottom-panel { padding: 13px 15px; border-right: 1px solid var(--line); min-width: 0; }
+    .bottom-panel:last-child { border-right: 0; }
+    .bottom-panel h3 { color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; margin: 0 0 8px; }
+    .bottom-panel p { margin: 0; color: var(--muted); font-size: 12px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip { border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 740; }
+    .doc { padding: 24px 18px; }
+    .doc-inner { max-width: 1220px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .doc-card { border: 1px solid var(--line); border-radius: 6px; background: #fff; box-shadow: var(--soft-shadow); padding: 15px; }
+    .doc-card.wide { grid-column: 1 / -1; }
+    .doc-card p, .doc-card li { color: var(--muted); font-size: 13px; }
+    .doc-card ul { margin: 0; padding-left: 18px; }
+    .contract-row { display: grid; grid-template-columns: 180px minmax(0,1fr) minmax(0,1fr); border-bottom: 1px solid var(--line); }
+    .contract-row:last-child { border-bottom: 0; }
+    .contract-row div { padding: 10px; border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .contract-row div:last-child { border-right: 0; }
+    .contract-row.head div { background: var(--panel-2); color: var(--ink); font-weight: 780; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+    @media (max-width: 1180px) {
+      .layout { grid-template-columns: 260px minmax(620px, 1fr) 310px; }
+      .bottom { grid-template-columns: 1fr; }
+      .bottom-panel { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 900px) {
+      .topbar { align-items: start; flex-direction: column; }
+      .brand, .actions { width: 100%; }
+      .layout { display: flex; flex-direction: column; min-height: auto; overflow: visible; }
+      .sidebar, .canvas, .right, .bottom { width: 100%; grid-column: auto; grid-row: auto; }
+      .canvas { min-height: 620px; overflow-x: auto; }
+      .bands { inset: 78px 16px 24px; }
+      .right { border-left: 0; border-top: 1px solid var(--line); }
+      .doc-inner { grid-template-columns: 1fr; }
+      .contract-row { grid-template-columns: 1fr; }
+      .contract-row div { border-right: 0; border-bottom: 1px solid var(--line); }
+      .contract-row div:last-child { border-bottom: 0; }
+    }
+    @media (max-width: 620px) {
+      h1 { font-size: 16px; }
+      .side-body, .doc { padding-left: 12px; padding-right: 12px; }
+      .tools { left: 12px; right: 12px; max-width: calc(100% - 24px); }
+      .graph, .bands { min-width: 720px; }
+      .matrix { grid-template-columns: 76px repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><button class="menu">=</button><h1>Ontology Graph Workspace - Layers and Object Type Units</h1></div>
+    <div class="actions"><button class="action primary"><span class="ico">+</span>New Object Type</button><button class="action"><span class="ico">r</span>New Relation</button><button class="action blue"><span class="ico">ai</span>Run Reasoner</button><button class="action"><span class="ico">v</span>Export Schema</button></div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar" aria-label="Layered object type sidebar">
+      <div class="side-tabs"><button class="side-tab active">Object Types</button><button class="side-tab">Relations</button></div>
+      <div class="side-body">
+        <div class="draft"><span>Draft Ontology Unit</span><span>v3</span></div>
+        <div class="callout"><strong>Layer is not the Object Type.</strong>Transportation and People are layer groupings. Airport, Flight, Passenger, and Crew Member are Object Type units inside the managed ontology.</div>
+        <section class="layer" aria-label="Transportation layer"><div class="layer-head"><span class="layer-name">v Transportation</span><span class="count">4 object types</span></div><ul class="objects"><li class="object"><span class="glyph airport">A</span><span class="object-name">Airport</span><span class="unit">unit</span></li><li class="object active"><span class="glyph flight">F</span><span class="object-name">Flight</span><span class="unit">unit</span></li><li class="object"><span class="glyph aircraft">AC</span><span class="object-name">Aircraft</span><span class="unit">unit</span></li><li class="object"><span class="glyph airline">AL</span><span class="object-name">Airline</span><span class="unit">unit</span></li></ul></section>
+        <section class="layer" aria-label="People layer"><div class="layer-head"><span class="layer-name">v People</span><span class="count">2 object types</span></div><ul class="objects"><li class="object"><span class="glyph passenger">P</span><span class="object-name">Passenger</span><span class="unit">unit</span></li><li class="object"><span class="glyph crew">C</span><span class="object-name">Crew Member</span><span class="unit">unit</span></li></ul></section>
+        <input class="search" placeholder="Search layers, object types..." />
+        <section><h3 style="font-size:13px;margin:0 0 6px;">Relations <span style="float:right;color:var(--muted);font-weight:500;">Search/Query</span></h3><div class="relation"><span>Airport - hosts - Flight</span><span>...</span></div><div class="relation"><span>Airline - operates - Flight</span><span>...</span></div><div class="relation"><span>Passenger - books - Flight</span><span>...</span></div></section>
+      </div>
+    </aside>
+
+    <section class="canvas" aria-label="Layered graph canvas">
+      <div class="tools"><button>Time v</button><button>Property v</button><button>Group by Layer</button><button>Search Around</button></div>
+      <div class="bands"><div class="band transport"><span>Layer: Transportation</span></div><div class="band people"><span>Layer: People</span></div></div>
+      <svg class="graph" viewBox="0 0 1040 650" role="img" aria-label="Object type units grouped by layer">
+        <defs><marker id="arrow-layered" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#8fa5b7"/></marker><marker id="arrow-cross" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#c28f3e"/></marker></defs>
+        <path class="edge strong" marker-end="url(#arrow-layered)" d="M255 228 C350 202,405 194,500 178"/><path class="edge" marker-end="url(#arrow-layered)" d="M255 228 C355 258,405 276,500 298"/><path class="edge" marker-end="url(#arrow-layered)" d="M685 178 C760 172,800 160,875 138"/><path class="edge" marker-end="url(#arrow-layered)" d="M680 298 C760 280,805 244,875 210"/><path class="edge cross" marker-end="url(#arrow-cross)" d="M255 500 C350 420,420 345,515 310"/><path class="edge cross" marker-end="url(#arrow-cross)" d="M550 502 C580 430,590 374,594 338"/>
+        <rect class="edge-bg" x="340" y="194" width="96" height="24"/><text class="edge-label" x="352" y="210">originates at</text><rect class="edge-bg" x="715" y="158" width="78" height="24"/><text class="edge-label" x="727" y="174">operates</text><rect class="edge-bg" x="330" y="422" width="78" height="24"/><text class="edge-label" x="345" y="438">books</text><rect class="edge-bg" x="570" y="410" width="76" height="24"/><text class="edge-label" x="584" y="426">crews</text>
+        <g class="node" transform="translate(112 185)"><rect class="node-shell" width="148" height="78"/><rect class="airport" x="14" y="16" width="34" height="34"/><text class="node-title" x="60" y="30">Airport</text><text class="node-sub" x="60" y="48">350 instances</text><text class="node-meta" x="14" y="66">layer.transportation</text></g>
+        <g class="node" transform="translate(505 138)"><rect class="node-shell active" width="178" height="92"/><rect class="flight" x="14" y="16" width="40" height="40"/><text class="node-title" x="68" y="30">Flight</text><text class="node-sub" x="68" y="48">Object Type Unit</text><text class="node-sub" x="68" y="66">properties: 9</text><text class="node-meta" x="14" y="82">layer.transportation</text></g>
+        <g class="node" transform="translate(500 268)"><rect class="node-shell" width="162" height="78"/><rect class="aircraft" x="14" y="16" width="34" height="34"/><text class="node-title" x="60" y="30">Aircraft</text><text class="node-sub" x="60" y="48">assigned equipment</text><text class="node-meta" x="14" y="66">layer.transportation</text></g>
+        <g class="node" transform="translate(875 124)"><rect class="node-shell" width="150" height="78"/><rect class="airline" x="14" y="16" width="34" height="34"/><text class="node-title" x="60" y="30">Airline</text><text class="node-sub" x="60" y="48">operator</text><text class="node-meta" x="14" y="66">layer.transportation</text></g>
+        <g class="node" transform="translate(112 468)"><rect class="node-shell" width="158" height="78"/><rect class="passenger" x="14" y="16" width="34" height="34"/><text class="node-title" x="60" y="30">Passenger</text><text class="node-sub" x="60" y="48">traveling person</text><text class="node-meta" x="14" y="66">layer.people</text></g>
+        <g class="node" transform="translate(470 468)"><rect class="node-shell" width="170" height="78"/><rect class="crew" x="14" y="16" width="34" height="34"/><text class="node-title" x="60" y="30">Crew Member</text><text class="node-sub" x="60" y="48">operational person</text><text class="node-meta" x="14" y="66">layer.people</text></g>
+      </svg>
+    </section>
+
+    <aside class="right" aria-label="Selected Object Type inspector">
+      <div class="inspector-head"><div class="inspector-title"><span class="glyph flight">F</span><div><h2>Flight</h2><p>Object Type Unit inside Transportation</p></div></div><div class="status-row"><span class="status">draft local</span><span class="status">9 properties</span><span class="status">5 relations</span></div></div>
+      <section class="section"><h3>Identity</h3><div class="field"><label>Object type label</label><div class="input-like">Flight</div></div><div class="field"><label>Default layer</label><div class="input-like">Transportation</div></div><div class="field"><label>Ontology path</label><div class="input-like">transportation.flight</div></div></section>
+      <section class="section"><h3>Properties</h3><div class="kv"><span>flight_number</span><strong>string</strong></div><div class="kv"><span>departure_time</span><strong>datetime</strong></div><div class="kv"><span>arrival_time</span><strong>datetime</strong></div><div class="kv"><span>cancelled</span><strong>boolean</strong></div><div class="kv"><span>actual_elapsed_time</span><strong>number</strong></div></section>
+      <section class="section"><h3>Allowed relation coverage</h3><div class="matrix"><div class="head">source</div><div class="head">Airport</div><div class="head">Airline</div><div class="head">People</div><div class="head">Flight</div><div class="on">originates at</div><div class="on">operated by</div><div class="on">booked by</div><div class="head">Aircraft</div><div>-</div><div>-</div><div>-</div><div class="head">Crew</div><div>-</div><div>-</div><div class="on">crews</div></div></section>
+      <section class="section"><h3>Governance</h3><div class="kv"><span>Validation state</span><strong>ready</strong></div><div class="kv"><span>GraphInstruction default</span><strong>card</strong></div><div class="kv"><span>Publish path</span><strong>validate - diff - publish</strong></div></section>
+    </aside>
+
+    <section class="bottom" aria-label="Layer and object type contract">
+      <div class="bottom-panel"><h3>Concept correction</h3><p>Layers are visual and semantic groupings. They organize Object Type units, but they do not replace the object type model.</p><div class="chips"><span class="chip">Transportation</span><span class="chip">People</span><span class="chip">Finance</span><span class="chip">Evidence</span></div></div>
+      <div class="bottom-panel"><h3>Object Type Unit</h3><p>Each row under a layer is a managed ontology unit with identity, properties, source mappings, relationships, validation, and view defaults.</p><div class="chips"><span class="chip">Flight</span><span class="chip">Airport</span><span class="chip">Passenger</span><span class="chip">Crew Member</span></div></div>
+      <div class="bottom-panel"><h3>Palantir-style behavior</h3><p>The user picks a layer to orient the graph, then selects an Object Type unit to author properties and governed relationship endpoints.</p></div>
+    </section>
+  </main>
+
+  <section class="doc">
+    <div class="doc-inner">
+      <article class="doc-card wide"><h2>Review: Layer is the container; Object Type is the ontology unit</h2><p>The sample's left rail is directionally right: Transportation and People are layer groups. The nested items are the units the ontology manages, validates, maps, and publishes. This rewrite makes the distinction explicit in the left rail, graph bands, inspector, and contract mapping.</p></article>
+      <article class="doc-card"><h2>FE concept changes</h2><ul><li>Layer rows own grouping, visibility, ordering, and view behavior.</li><li>Object Type rows own identity, properties, source mappings, endpoint rules, and lifecycle.</li><li>The graph can group by layer while editing a single Object Type unit.</li></ul></article>
+      <article class="doc-card"><h2>Interaction rule</h2><ul><li>Click a layer to filter or group the graph.</li><li>Click an Object Type to open the inspector.</li><li>Drag between Object Type nodes to create a governed relation.</li><li>Use the matrix to audit endpoint coverage.</li></ul></article>
+      <article class="doc-card wide"><h2>Contract mapping</h2><div class="contract-row head"><div>Concept</div><div>Meaning</div><div>Implementation mapping</div></div><div class="contract-row"><div>Layer</div><div>Semantic/view grouping such as Transportation or People.</div><div>`layers`, `GraphInstruction`, grouping and visibility controls.</div></div><div class="contract-row"><div>Object Type Unit</div><div>Managed ontology unit such as Flight, Airport, Passenger, or Crew Member.</div><div>`OntologyProfile.concept_types`, metadata fields, source mappings, validation, and lifecycle.</div></div><div class="contract-row"><div>Relationship Type</div><div>Governed edge contract between object type units.</div><div>`OntologyProfile.relationship_types`, endpoint chips, cardinality, direction, family, inverse.</div></div><div class="contract-row"><div>Graph View</div><div>Projection of layers, object type units, relationships, and selected state.</div><div>`WorkbenchShell` plus `GraphCanvas`, with `SelectionInspector` as the single editing home.</div></div></article>
+    </div>
+  </section>
+</body>
+</html>

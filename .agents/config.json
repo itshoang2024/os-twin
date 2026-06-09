@@ -70,19 +70,11 @@
     "openai_compatible": null,
     "ollama": null
   },
-  "active-role": {
-    "default_model": "openrouter/deepseek/deepseek-v4-pro",
-    "timeout_seconds": 300,
-    "max_retries": 3,
-    "instance_type": "worker",
-    "skill_refs": [],
-    "mcp_refs": []
-  },
   "architect": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 1200,
     "max_retries": 3,
-    "instance_type": "evaluator",
+    "instance_type": "worker",
     "skill_refs": [
       "create-architecture",
       "create-lifecycle",
@@ -91,36 +83,23 @@
     "mcp_refs": []
   },
   "audit": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 2400,
     "max_retries": 3,
-    "instance_type": "evaluator",
+    "instance_type": "worker",
     "skill_refs": [
       "scope-investigation",
       "analytical-lenses",
       "question-library",
       "structure-data-request",
       "validate-output",
-      "risk-decision",
-      "brain-ops",
-      "ontology-knowledge"
-    ],
-    "mcp_refs": []
-  },
-  "audit-officer": {
-    "default_model": "google-vertex/gemini-3.5-flash",
-    "timeout_seconds": 900,
-    "max_retries": 3,
-    "instance_type": "evaluator",
-    "skill_refs": [
-      "legal-common",
-      "legal-matter-workspace"
+      "risk-decision"
     ],
     "mcp_refs": []
   },
   "backend-engineer": {
-    "default_model": "openai/gpt-5.5",
-    "timeout_seconds": 3600,
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [
@@ -130,7 +109,7 @@
     "mcp_refs": []
   },
   "build-integration-engineer": {
-    "default_model": "google-vertex/gemini-3.1-flash-lite",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -141,7 +120,7 @@
     "mcp_refs": []
   },
   "config-metadata-updater": {
-    "default_model": "google-vertex/gemini-3.1-flash-lite",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -152,18 +131,7 @@
     "mcp_refs": []
   },
   "data-analysis-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
-    "timeout_seconds": 600,
-    "max_retries": 3,
-    "instance_type": "worker",
-    "skill_refs": [
-      "global",
-      "roles"
-    ],
-    "mcp_refs": []
-  },
-  "data-analyst": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -174,7 +142,7 @@
     "mcp_refs": []
   },
   "data-analytics-engineer": {
-    "default_model": "openai/gpt-5.5-pro",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -185,7 +153,7 @@
     "mcp_refs": []
   },
   "data-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -196,7 +164,7 @@
     "mcp_refs": []
   },
   "data-engineering-analyst": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -207,7 +175,7 @@
     "mcp_refs": []
   },
   "data-exploration-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -218,7 +186,7 @@
     "mcp_refs": []
   },
   "data-explorer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -229,7 +197,7 @@
     "mcp_refs": []
   },
   "data-explorer-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -240,7 +208,7 @@
     "mcp_refs": []
   },
   "data-pipeline-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -251,7 +219,7 @@
     "mcp_refs": []
   },
   "data-processing-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -262,7 +230,7 @@
     "mcp_refs": []
   },
   "data-reporting-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -273,7 +241,7 @@
     "mcp_refs": []
   },
   "data-scientist": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -284,7 +252,7 @@
     "mcp_refs": []
   },
   "data-transformation-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -295,7 +263,7 @@
     "mcp_refs": []
   },
   "data-transformer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -306,7 +274,7 @@
     "mcp_refs": []
   },
   "database-architect": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -317,7 +285,7 @@
     "mcp_refs": []
   },
   "director-of-engineering": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "evaluator",
@@ -333,7 +301,7 @@
     "mcp_refs": []
   },
   "dynamic-role-plan-reviewer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -343,7 +311,7 @@
     "mcp_refs": []
   },
   "efficient-data-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -354,15 +322,15 @@
     "mcp_refs": []
   },
   "engineer": {
-    "default_model": "openai/gpt-5.5",
-    "timeout_seconds": 3600,
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 1200,
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [],
     "mcp_refs": []
   },
   "evaluator-role": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 300,
     "max_retries": 3,
     "instance_type": "evaluator",
@@ -370,7 +338,7 @@
     "mcp_refs": []
   },
   "extended-room-state-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -381,7 +349,7 @@
     "mcp_refs": []
   },
   "fast-data-exploration-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -392,7 +360,7 @@
     "mcp_refs": []
   },
   "frontend-accessibility-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -403,7 +371,7 @@
     "mcp_refs": []
   },
   "frontend-dag-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -414,7 +382,7 @@
     "mcp_refs": []
   },
   "frontend-engineer": {
-    "default_model": "openai/gpt-5.5",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -425,7 +393,7 @@
     "mcp_refs": []
   },
   "frontend-interaction-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -436,7 +404,7 @@
     "mcp_refs": []
   },
   "frontend-layout-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -446,7 +414,7 @@
     "mcp_refs": []
   },
   "frontend-realtime-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -457,7 +425,7 @@
     "mcp_refs": []
   },
   "frontend-search-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -468,7 +436,7 @@
     "mcp_refs": []
   },
   "frontend-ui-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -479,7 +447,7 @@
     "mcp_refs": []
   },
   "frontend-video-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -489,29 +457,8 @@
     ],
     "mcp_refs": []
   },
-  "kiemtoan_checker": {
-    "default_model": "google-vertex/gemini-3.5-flash",
-    "timeout_seconds": 900,
-    "max_retries": 3,
-    "instance_type": "evaluator",
-    "skill_refs": [
-      "brain-ops"
-    ],
-    "mcp_refs": []
-  },
-  "kiemtoan_reporter": {
-    "default_model": "google-vertex/gemini-3.5-flash",
-    "timeout_seconds": 900,
-    "max_retries": 3,
-    "instance_type": "evaluator",
-    "skill_refs": [
-      "brain-ops",
-      "deepsearch"
-    ],
-    "mcp_refs": []
-  },
   "knowledge-curator": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -522,7 +469,7 @@
     "mcp_refs": []
   },
   "level-designer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -530,33 +477,35 @@
     "mcp_refs": []
   },
   "macos-automation-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [
-      "global",
-      "roles"
+      "app-control",
+      "window-management",
+      "input-capture",
+      "screen-capture",
+      "system-prefs",
+      "file-finder",
+      "developer-workflows",
+      "axbridge"
     ],
     "mcp_refs": []
   },
   "manager": {
-    "default_model": "openai/gpt-5.5",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 2400,
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [
       "risk-decision",
-      "war-room-communication",
-      "global-context"
+      "war-room-communication"
     ],
-    "mcp_refs": [
-      "global-memory",
-      "global-knowledge"
-    ]
+    "mcp_refs": []
   },
   "manifest-schema-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -567,7 +516,7 @@
     "mcp_refs": []
   },
   "narrative-designer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -575,7 +524,7 @@
     "mcp_refs": []
   },
   "narrative-strategist": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -587,7 +536,7 @@
     "mcp_refs": []
   },
   "nextjs-mock-api-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -595,7 +544,7 @@
     "mcp_refs": []
   },
   "platform-engineer": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -611,10 +560,10 @@
     "mcp_refs": []
   },
   "principal-engineer": {
-    "default_model": "openai/gpt-5.5",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
-    "instance_type": "worker",
+    "instance_type": "evaluator",
     "skill_refs": [
       "write-rfc",
       "technology-radar",
@@ -627,7 +576,7 @@
     "mcp_refs": []
   },
   "program-manager": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -643,7 +592,7 @@
     "mcp_refs": []
   },
   "python-data-analyst": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -654,7 +603,7 @@
     "mcp_refs": []
   },
   "python-data-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -665,33 +614,33 @@
     "mcp_refs": []
   },
   "qa": {
-    "default_model": "openai/gpt-5.5",
-    "timeout_seconds": 3600,
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "qa-automation-engineer": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 2400,
     "max_retries": 3,
     "instance_type": "evaluator",
     "skill_refs": [
-      "agent-browser"
+      "agent-browser",
+      "build-verify",
+      "runnable-verify",
+      "review-task",
+      "critique",
+      "audit"
     ],
     "mcp_refs": [
       "chrome-devtools",
-      "memory"
+      "playwright"
     ]
   },
-  "qa-automation-engineer": {
-    "default_model": "openai/gpt-5.5",
-    "timeout_seconds": 600,
-    "max_retries": 3,
-    "instance_type": "evaluator",
-    "skill_refs": [
-      "global",
-      "roles",
-      "agent-browser",
-      "screen-capture"
-    ],
-    "mcp_refs": []
-  },
   "reporter": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 1200,
     "max_retries": 3,
     "instance_type": "worker",
@@ -699,7 +648,7 @@
     "mcp_refs": []
   },
   "researcher": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -707,7 +656,7 @@
     "mcp_refs": []
   },
   "researcher-architect": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -719,7 +668,7 @@
     "mcp_refs": []
   },
   "role-infra-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -730,7 +679,7 @@
     "mcp_refs": []
   },
   "schema-metadata-manager": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -741,7 +690,7 @@
     "mcp_refs": []
   },
   "search-recs-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -752,10 +701,10 @@
     "mcp_refs": []
   },
   "security-engineer": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
-    "instance_type": "evaluator",
+    "instance_type": "worker",
     "skill_refs": [
       "threat-modeling",
       "secure-code-review",
@@ -768,7 +717,7 @@
     "mcp_refs": []
   },
   "security-specialist": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "evaluator",
@@ -784,7 +733,7 @@
     "mcp_refs": []
   },
   "short-video-creator": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 900,
     "max_retries": 3,
     "instance_type": "worker",
@@ -795,7 +744,7 @@
     "mcp_refs": []
   },
   "skills-ui-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -806,7 +755,7 @@
     "mcp_refs": []
   },
   "sound-designer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -814,7 +763,7 @@
     "mcp_refs": []
   },
   "sre-lead": {
-    "default_model": "google-vertex/zai-org/glm-5-maas",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -830,7 +779,7 @@
     "mcp_refs": []
   },
   "staff-manager": {
-    "default_model": "openai/gpt-5.5",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 3600,
     "max_retries": 3,
     "instance_type": "evaluator",
@@ -851,7 +800,7 @@
     "mcp_refs": []
   },
   "subcommand-manifest-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -862,15 +811,17 @@
     "mcp_refs": []
   },
   "tech-artist": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
-    "timeout_seconds": 1200,
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
-    "skill_refs": [],
+    "skill_refs": [
+      "unity-dev-principles"
+    ],
     "mcp_refs": []
   },
   "technical-design-architect": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -883,22 +834,18 @@
     "mcp_refs": []
   },
   "technical-writer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
-    "timeout_seconds": 1200,
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [
       "global",
-      "roles",
-      "Chrome"
+      "roles"
     ],
-    "mcp_refs": [
-      "knowledge",
-      "chrome-devtools"
-    ]
+    "mcp_refs": []
   },
   "test-engineer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -908,7 +855,7 @@
     "mcp_refs": []
   },
   "themed-blog-architect": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -919,7 +866,7 @@
     "mcp_refs": []
   },
   "unique-role": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 300,
     "max_retries": 3,
     "instance_type": "worker",
@@ -927,7 +874,7 @@
     "mcp_refs": []
   },
   "ux-researcher": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "evaluator",
@@ -935,7 +882,7 @@
     "mcp_refs": []
   },
   "video-platform-architect": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -946,7 +893,7 @@
     "mcp_refs": []
   },
   "vietnamese-content-strategist": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -954,18 +901,7 @@
     "mcp_refs": []
   },
   "war-room-message-explorer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
-    "timeout_seconds": 600,
-    "max_retries": 3,
-    "instance_type": "worker",
-    "skill_refs": [
-      "global",
-      "roles"
-    ],
-    "mcp_refs": []
-  },
-  "web-designer": {
-    "default_model": "google-vertex/gemini-3-flash-preview",
+    "default_model": "opencode/big-pickle",
     "timeout_seconds": 600,
     "max_retries": 3,
     "instance_type": "worker",
@@ -981,6 +917,111 @@
     "max_retries": 3,
     "instance_type": "worker",
     "skill_refs": [],
+    "mcp_refs": []
+  },
+  "game-architect": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "game-architecture",
+      "generate-project-context",
+      "correct-course",
+      "check-readiness",
+      "write-adr",
+      "design-review",
+      "unity-dev-principles",
+      "unity-ugui",
+      "unit-code-review"
+    ],
+    "mcp_refs": []
+  },
+  "game-designer": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "create-game-brief",
+      "create-gdd",
+      "create-ux-design",
+      "create-epics",
+      "create-story",
+      "quick-spec",
+      "brainstorm-game",
+      "unity-dev-principles",
+      "unity-ugui",
+      "code-explorer"
+    ],
+    "mcp_refs": []
+  },
+  "game-devops": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "game-engineer": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "build-ui",
+      "build-anim",
+      "add-ui",
+      "add-anim",
+      "add-feature",
+      "unity-templates",
+      "code-refactor",
+      "unit-code-review",
+      "ui-enhancement",
+      "implement-epic",
+      "write-tests",
+      "fix-from-qa",
+      "unity-dev-principles",
+      "unity-ugui",
+      "develop-unity-ui"
+    ],
+    "mcp_refs": []
+  },
+  "game-producer": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [],
+    "mcp_refs": []
+  },
+  "game-qa": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 600,
+    "max_retries": 3,
+    "instance_type": "evaluator",
+    "skill_refs": [
+      "unity-code-review",
+      "playtest-plan",
+      "test-design",
+      "test-automate",
+      "automation-testing",
+      "performance-testing",
+      "unity-dev-principles",
+      "unit-code-review"
+    ],
+    "mcp_refs": []
+  },
+  "game-ui-analyst": {
+    "default_model": "opencode/big-pickle",
+    "timeout_seconds": 900,
+    "max_retries": 3,
+    "instance_type": "worker",
+    "skill_refs": [
+      "detect-ui",
+      "detect-anim"
+    ],
     "mcp_refs": []
   }
 }

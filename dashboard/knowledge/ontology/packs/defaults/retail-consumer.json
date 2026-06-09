@@ -1,0 +1,157 @@
+{
+  "aliases": {
+    "aimed_at": "targets_segment",
+    "merchandised_for": "targets_segment",
+    "sells_through": "contains"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "customer_segment": {
+      "abstraction_level": "capability",
+      "color": "#db2777",
+      "description": "Shopper or consumer audience segment",
+      "id": "customer_segment",
+      "label": "Customer Segment",
+      "metadata_schema": {},
+      "shape": "rounded_rectangle"
+    },
+    "sales_channel": {
+      "abstraction_level": "implementation",
+      "color": "#be185d",
+      "description": "Commerce channel such as store, web, marketplace, or mobile",
+      "id": "sales_channel",
+      "label": "Sales Channel",
+      "metadata_schema": {},
+      "shape": "rectangle"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "targets_segment",
+          "source": "loyalty_feature",
+          "source_type": "feature",
+          "target": "vip_shoppers",
+          "target_type": "customer_segment"
+        }
+      ],
+      "id": "loyalty_fixture",
+      "nodes": [
+        {
+          "id": "vip_shoppers",
+          "type": "customer_segment"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "customer_segment": {
+        "color": "#db2777",
+        "concept_type": "customer_segment",
+        "label_template": "{label}",
+        "shape": "rounded_rectangle"
+      },
+      "sales_channel": {
+        "color": "#be185d",
+        "concept_type": "sales_channel",
+        "label_template": "{label}",
+        "shape": "rectangle"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "retail_consumer",
+        "label": "Retail / Consumer",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "targets_segment": {
+        "group": "semantic",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "targets_segment",
+        "weight": 0.6
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "retail_channel_type_recommended"
+    ]
+  },
+  "metadata_fields": {
+    "channel_type": {
+      "allowed_values": [
+        "store",
+        "web",
+        "mobile",
+        "marketplace"
+      ],
+      "description": "Retail channel classification",
+      "field_type": "enum",
+      "id": "channel_type",
+      "label": "Channel Type"
+    }
+  },
+  "migration_notes": [
+    "Adds domain-specific concept, relationship aliases, metadata, validation, and seed fixtures."
+  ],
+  "name": "Retail / Consumer",
+  "pack_id": "retail-consumer",
+  "relationship_types": {
+    "targets_segment": {
+      "allowed_source_types": [
+        "capability",
+        "feature"
+      ],
+      "allowed_target_types": [
+        "customer_segment"
+      ],
+      "description": "Feature or capability is intended for a customer segment",
+      "family": "semantic",
+      "id": "targets_segment",
+      "is_directed": true,
+      "is_system": false,
+      "label": "Targets segment",
+      "style": "solid",
+      "weight": 0.6
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "retail_channel_type_recommended",
+      "label": "Retail channel type recommended",
+      "message": "Sales channels should include channel_type metadata.",
+      "params": {
+        "concept_type": "sales_channel",
+        "field": "channel_type"
+      },
+      "rule_type": "required_metadata",
+      "severity": "info"
+    }
+  ],
+  "version": "1.0.0"
+}

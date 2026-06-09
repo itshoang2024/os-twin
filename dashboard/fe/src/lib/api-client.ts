@@ -5,6 +5,32 @@
 
 import { getApiBaseUrl } from './runtime-config';
 
+
+function isOntologyGraphBuilderFixtureRuntime(): boolean {
+  if (typeof window === 'undefined') return false;
+  const normalized = decodeURIComponent(window.location.pathname.split('?')[0] || '').replace(/\/+$/, '');
+  if (!/^\/knowledge\/[^/]+\/ontology-graph-builder$/.test(normalized)) return false;
+  const fixture = new URLSearchParams(window.location.search).get('fixture');
+  return ['basic', 'empty', 'redacted', 'large', 'error'].includes(fixture || '');
+}
+
+function getOntologyGraphBuilderFixtureResponse<T>(path: string): T | undefined {
+  if (!isOntologyGraphBuilderFixtureRuntime()) return undefined;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  if (normalizedPath.startsWith('/plans/threads')) {
+    return { threads: [], total: 0 } as T;
+  }
+  if (normalizedPath === '/stats') {
+    return {} as T;
+  }
+  if (normalizedPath === '/notifications') {
+    return [] as T;
+  }
+
+  return undefined;
+}
+
 export class ApiError extends Error {
   status: number;
   data: unknown;
@@ -21,6 +47,9 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const fixtureResponse = getOntologyGraphBuilderFixtureResponse<T>(path);
+  if (fixtureResponse !== undefined) return fixtureResponse;
+
   const BASE_URL = getApiBaseUrl();
   const url = `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
   
@@ -40,8 +69,9 @@ async function request<T>(
     } catch {
       errorData = { message: response.statusText };
     }
+    const canonicalMessage = errorData?.error?.message || errorData?.message || `API Request failed with status ${response.status}`;
     throw new ApiError(
-      errorData.message || `API Request failed with status ${response.status}`,
+      canonicalMessage,
       response.status,
       errorData
     );
@@ -52,7 +82,7 @@ async function request<T>(
   }
 
   const json = await response.json();
-  const preserveWrappedResponse = path.includes('/research/search');
+  const preserveWrappedResponse = path.includes('/research/search') || path.includes('/explorer/search');
 
   // Unwrap backend responses that wrap arrays in named keys.
   // e.g. { plans: [...], count: N } → [...] so SWR hooks get Plan[] directly.

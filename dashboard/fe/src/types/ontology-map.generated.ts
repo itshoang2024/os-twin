@@ -16,6 +16,40 @@ export interface EnterpriseMapOntologyPathResponse {
   pack_id?: string | null;
 }
 
+export type PermissionLevel = 'read' | 'limited' | 'blocked';
+
+export interface EnterpriseMapPermission {
+  level: PermissionLevel;
+  reason?: string;
+  allowed_actions?: string[];
+}
+
+export type EnterpriseMapCanonicalErrorCode =
+  | 'NOT_FOUND'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'VALIDATION_FAILED'
+  | 'CONFLICT'
+  | 'GRAPH_TOO_LARGE'
+  | 'TIMEOUT'
+  | 'REDACTED'
+  | 'CAP_EXCEEDED'
+  | 'INVALID_TRAVERSAL'
+  | 'SCHEMA_INCOMPATIBLE'
+  | 'FEATURE_DISABLED';
+
+export interface EnterpriseMapCanonicalError {
+  code: EnterpriseMapCanonicalErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+  validation_issues?: string[];
+}
+
+export interface EnterpriseMapApiErrorResponse {
+  error: EnterpriseMapCanonicalError;
+  request_id?: string;
+}
+
 export interface EnterpriseMapNode {
   id: string;
   label: string;
@@ -104,6 +138,8 @@ export interface EnterpriseMapStats {
 
 export interface EnterpriseMapMeta {
   profile_id?: string | null;
+  namespace: string;
+  generated_at: string;
   map_state: 'live' | 'empty';
   map_source_kind: 'knowledge_graph' | 'none';
   source_node_count: number;
@@ -115,15 +151,70 @@ export interface EnterpriseMapMeta {
   depth_requested?: number | null;
   depth_effective?: number | null;
   node_cap?: number | null;
+  node_limit?: number | null;
+  edge_limit?: number | null;
+  event_limit?: number | null;
+  next_cursor?: string | null;
+  warnings?: string[];
+  feature_flags?: Record<string, boolean>;
 }
 
-export interface ProjectionData {
+export interface EnterpriseMapPermissionSummary {
+  level: PermissionLevel;
+  redacted_nodes: number;
+  redacted_edges: number;
+  notice: string;
+}
+
+export interface EnterpriseMapProjectionResponse {
   nodes: EnterpriseMapNode[];
   edges: EnterpriseMapEdge[];
   layers: { id: string; label: string; order: number }[];
   abstraction_levels: { id: string; label: string; order: number }[];
   stats: EnterpriseMapStats;
   meta: EnterpriseMapMeta;
+  groups?: unknown[];
+  object_sets?: unknown[];
+  facets?: unknown[];
+  events?: unknown[];
+  permissions?: EnterpriseMapPermissionSummary;
+}
+
+export type ProjectionData = EnterpriseMapProjectionResponse;
+
+export interface ExplorerSearchResult {
+  id: string;
+  label: string;
+  object_type: string;
+  description: string;
+  properties?: Record<string, unknown>;
+  provenance_refs?: string[];
+  validation_issues?: string[];
+  permissions?: EnterpriseMapPermission;
+  redacted?: boolean;
+}
+
+export interface ExplorerSearchResponse {
+  results: ExplorerSearchResult[];
+  meta: {
+    query: string;
+    truncated: boolean;
+    limit?: number | null;
+    filters?: Record<string, unknown>;
+    warnings?: string[];
+    fixture?: string;
+  };
+}
+
+export interface ExplorerNodeDetailResponse {
+  id: string;
+  label: string;
+  properties: Record<string, unknown>;
+  relationships: { id: string; label: string; target: string; direction: 'in' | 'out' }[];
+  validation_issues: string[];
+  provenance_refs: string[];
+  permissions: EnterpriseMapPermission & { allowed_actions: string[] };
+  redacted?: boolean;
 }
 
 export type OntologyVisualExtensions = Pick<EnterpriseMapNode,

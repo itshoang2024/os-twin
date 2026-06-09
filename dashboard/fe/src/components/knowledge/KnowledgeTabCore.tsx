@@ -273,6 +273,12 @@ export default function KnowledgeTabCore({
   // Get the full metadata for the selected namespace
   const selectedNsMeta = (namespaces ?? []).find(ns => ns.name === selectedNamespace);
 
+  // EPIC-002 QA fixture bypass: when defaultNamespace='ontology-fixture' and
+  // defaultTab='ontology', skip the namespaces API loading/empty guards so
+  // OntologyPanel renders as a stable client-side fixture without requiring a
+  // running backend with valid auth or the backing namespace to exist.
+  const isOntologyFixture = defaultNamespace === 'ontology-fixture' && defaultTab === 'ontology';
+
   // Detail-view tabs for the selected namespace
   const detailTabs: { id: DetailView; label: string; icon: string }[] = [
     { id: 'overview', label: 'Overview', icon: 'dashboard' },
@@ -288,7 +294,7 @@ export default function KnowledgeTabCore({
     : detailTabs;
 
   // Loading state
-  if (namespacesLoading && !namespaces) {
+  if (namespacesLoading && !namespaces && !isOntologyFixture) {
     return (
       <div className={`h-full flex items-center justify-center ${className}`}>
         <div className="text-center space-y-3">
@@ -305,7 +311,7 @@ export default function KnowledgeTabCore({
   }
 
   // Empty state — no namespaces at all
-  if (!namespaces || namespaces.length === 0 || (filterNamespace && displayNamespaces?.length === 0)) {
+  if (!isOntologyFixture && (!namespaces || namespaces.length === 0 || (filterNamespace && displayNamespaces?.length === 0))) {
     return (
       <div className={`h-full flex items-center justify-center ${className}`}>
         <div className="text-center space-y-4 max-w-md">

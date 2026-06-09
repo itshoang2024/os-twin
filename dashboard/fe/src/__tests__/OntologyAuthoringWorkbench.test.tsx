@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import OntologyPanel from '@/components/knowledge/ontology/OntologyPanel';
 import { createObjectType, createRelationshipType, makeBlankOntologyProfile, removeObjectTypeSafely } from '@/components/knowledge/ontology/ontology-draft-commands';
 
@@ -32,6 +32,31 @@ describe('Ontology authoring workbench', () => {
     expect(screen.getByDisplayValue('one_to_many')).toBeInTheDocument();
   });
 
+  it('stages both template Object Types from one local draft action', () => {
+    render(<OntologyPanel selectedNamespace="ontology-fixture" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use Template' }));
+
+    expect(screen.getAllByText('Risk').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Control').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Staged template Object Types Risk and Control locally/)).toBeInTheDocument();
+  });
+
+  it('resets the draft when the source profile changes', async () => {
+    const first = makeBlankOntologyProfile('first');
+    const second = makeBlankOntologyProfile('second');
+    second.updatedAt = new Date(Date.now() + 1000).toISOString();
+    const { rerender } = render(<OntologyPanel selectedNamespace="first" initialProfile={first} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Object Type' }).at(-1)!);
+    expect(screen.getAllByText('Feature').length).toBeGreaterThan(0);
+
+    rerender(<OntologyPanel selectedNamespace="second" initialProfile={second} />);
+
+    await waitFor(() => expect(screen.getByText('No local authoring events yet.')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Object Type editor')).not.toBeInTheDocument();
+    expect(screen.getByText('Design Object Types before editing arrays')).toBeInTheDocument();
+  });
+
   it('supports keyboard accessible canvas connect mode', () => {
     render(<OntologyPanel selectedNamespace="ontology-fixture" />);
     fireEvent.click(screen.getAllByRole('button', { name: 'Add Object Type' }).at(-1)!);
@@ -40,10 +65,12 @@ describe('Ontology authoring workbench', () => {
     const connectButtons = screen.getAllByRole('button', { name: /Connect from/ });
     fireEvent.click(connectButtons[0]);
     expect(screen.getByText(/Connect mode/)).toBeInTheDocument();
-    const canvas = screen.getByLabelText('Ontology object relationship canvas');
-    fireEvent.click(canvas.querySelectorAll('rect')[1]);
+    expect(screen.getByRole('button', { name: /selected as relationship source/ })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /Use .* as relationship target/ })[0]);
 
     expect(screen.getByLabelText('Relationship Type editor')).toBeInTheDocument();
+    expect(screen.queryByText(/Connect mode/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('depends on').length).toBeGreaterThan(0);
   });
 
   it('routes validation issues to the offending relationship section', () => {

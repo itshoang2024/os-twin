@@ -1,0 +1,389 @@
+{
+  "abstraction_levels": {},
+  "aliases": {
+    "addresses": "mitigates",
+    "proves": "evidences",
+    "remediates": "mitigates"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "control": {
+      "abstraction_level": "feature",
+      "color": "#2563eb",
+      "default_layer": "control",
+      "description": "Preventive or detective control.",
+      "id": "control",
+      "label": "Control",
+      "metadata_schema": {},
+      "shape": "rounded_rectangle"
+    },
+    "finding": {
+      "abstraction_level": "feature",
+      "color": "#ea580c",
+      "default_layer": "assurance",
+      "description": "Audit or assessment finding.",
+      "id": "finding",
+      "label": "Finding",
+      "metadata_schema": {},
+      "shape": "diamond"
+    },
+    "obligation": {
+      "abstraction_level": "portfolio",
+      "color": "#7c2d12",
+      "default_layer": "governance",
+      "description": "Policy, legal, or regulatory obligation.",
+      "id": "obligation",
+      "label": "Obligation",
+      "metadata_schema": {},
+      "shape": "document"
+    },
+    "remediation": {
+      "abstraction_level": "implementation",
+      "color": "#16a34a",
+      "default_layer": "remediation",
+      "description": "Action plan used to mitigate findings or risks.",
+      "id": "remediation",
+      "label": "Remediation",
+      "metadata_schema": {},
+      "shape": "rectangle"
+    },
+    "risk": {
+      "abstraction_level": "capability",
+      "color": "#dc2626",
+      "default_layer": "risk",
+      "description": "Risk scenario or exposure requiring treatment.",
+      "id": "risk",
+      "label": "Risk",
+      "metadata_schema": {},
+      "shape": "hexagon"
+    }
+  },
+  "fixtures": [
+    {
+      "description": "Risk-control-obligation-evidence-remediation spine.",
+      "edges": [
+        {
+          "relation_type": "mitigates",
+          "source": "c1",
+          "target": "r1"
+        },
+        {
+          "relation_type": "evidences",
+          "source": "e1",
+          "target": "c1"
+        },
+        {
+          "relation_type": "obligates",
+          "source": "o1",
+          "target": "c1"
+        },
+        {
+          "relation_type": "mitigates",
+          "source": "rm1",
+          "target": "f1"
+        }
+      ],
+      "id": "audit_risk_spine",
+      "nodes": [
+        {
+          "id": "r1",
+          "type": "risk"
+        },
+        {
+          "id": "c1",
+          "type": "control"
+        },
+        {
+          "id": "o1",
+          "type": "obligation"
+        },
+        {
+          "id": "e1",
+          "type": "evidence"
+        },
+        {
+          "id": "f1",
+          "type": "finding"
+        },
+        {
+          "id": "rm1",
+          "type": "remediation"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "control": {
+        "color": "#2563eb",
+        "concept_type": "control",
+        "default_layer": "control",
+        "label_template": "{label}",
+        "shape": "rounded_rectangle"
+      },
+      "finding": {
+        "color": "#ea580c",
+        "concept_type": "finding",
+        "default_layer": "assurance",
+        "label_template": "{label}",
+        "shape": "diamond"
+      },
+      "obligation": {
+        "color": "#7c2d12",
+        "concept_type": "obligation",
+        "default_layer": "governance",
+        "label_template": "{label}",
+        "shape": "document"
+      },
+      "remediation": {
+        "color": "#16a34a",
+        "concept_type": "remediation",
+        "default_layer": "remediation",
+        "label_template": "{label}",
+        "shape": "rectangle"
+      },
+      "risk": {
+        "color": "#dc2626",
+        "concept_type": "risk",
+        "default_layer": "risk",
+        "label_template": "{label}",
+        "shape": "hexagon"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "Audit Risk Map",
+        "filters": {},
+        "id": "audit_risk",
+        "label": "Audit Risk Map",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [
+      {
+        "description": "Risk-control-obligation-evidence-remediation spine.",
+        "edges": [
+          {
+            "relation_type": "mitigates",
+            "source": "c1",
+            "target": "r1"
+          },
+          {
+            "relation_type": "evidences",
+            "source": "e1",
+            "target": "c1"
+          },
+          {
+            "relation_type": "obligates",
+            "source": "o1",
+            "target": "c1"
+          },
+          {
+            "relation_type": "mitigates",
+            "source": "rm1",
+            "target": "f1"
+          }
+        ],
+        "id": "audit_risk_spine",
+        "nodes": [
+          {
+            "id": "r1",
+            "type": "risk"
+          },
+          {
+            "id": "c1",
+            "type": "control"
+          },
+          {
+            "id": "o1",
+            "type": "obligation"
+          },
+          {
+            "id": "e1",
+            "type": "evidence"
+          },
+          {
+            "id": "f1",
+            "type": "finding"
+          },
+          {
+            "id": "rm1",
+            "type": "remediation"
+          }
+        ]
+      }
+    ],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "evidences": {
+        "group": "traceability",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "evidences",
+        "weight": 0.7
+      },
+      "mitigated_by": {
+        "dash": "6 4",
+        "group": "validation",
+        "label_template": "{label}",
+        "map_direction": "reversed",
+        "relationship_type": "mitigated_by",
+        "weight": 0.8
+      },
+      "mitigates": {
+        "group": "validation",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "mitigates",
+        "weight": 0.8
+      },
+      "obligates": {
+        "group": "traceability",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "obligates",
+        "weight": 0.7
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "relationship_endpoints_known"
+    ]
+  },
+  "layers": {
+    "assurance": {
+      "description": "Findings and evidence",
+      "id": "assurance",
+      "label": "Assurance",
+      "order": 3
+    },
+    "control": {
+      "description": "Control activities",
+      "id": "control",
+      "label": "Control",
+      "order": 2
+    },
+    "governance": {
+      "description": "Obligations and policy drivers",
+      "id": "governance",
+      "label": "Governance",
+      "order": 0
+    },
+    "remediation": {
+      "description": "Corrective actions",
+      "id": "remediation",
+      "label": "Remediation",
+      "order": 4
+    },
+    "risk": {
+      "description": "Risk exposure lane",
+      "id": "risk",
+      "label": "Risk",
+      "order": 1
+    }
+  },
+  "metadata_fields": {},
+  "migration_notes": [
+    "Adds audit risk concepts, relationship direction, lane hints, and validation fixtures."
+  ],
+  "name": "Audit Risk Management",
+  "pack_id": "audit-risk",
+  "relationship_types": {
+    "evidences": {
+      "allowed_source_types": [
+        "evidence",
+        "finding"
+      ],
+      "allowed_target_types": [
+        "control",
+        "obligation",
+        "risk"
+      ],
+      "family": "traceability",
+      "id": "evidences",
+      "label": "Evidences",
+      "map_direction": "forward",
+      "style": "solid",
+      "weight": 0.7
+    },
+    "mitigated_by": {
+      "allowed_source_types": [
+        "risk",
+        "finding"
+      ],
+      "allowed_target_types": [
+        "control",
+        "remediation"
+      ],
+      "family": "validation",
+      "id": "mitigated_by",
+      "inverse": "mitigates",
+      "label": "Mitigated by",
+      "map_direction": "reversed",
+      "style": "dashed",
+      "weight": 0.8
+    },
+    "mitigates": {
+      "allowed_source_types": [
+        "control",
+        "remediation"
+      ],
+      "allowed_target_types": [
+        "risk",
+        "finding"
+      ],
+      "family": "validation",
+      "id": "mitigates",
+      "inverse": "mitigated_by",
+      "label": "Mitigates",
+      "map_direction": "forward",
+      "style": "bold",
+      "weight": 0.8
+    },
+    "obligates": {
+      "allowed_source_types": [
+        "obligation"
+      ],
+      "allowed_target_types": [
+        "control",
+        "risk"
+      ],
+      "family": "traceability",
+      "id": "obligates",
+      "label": "Obligates",
+      "map_direction": "forward",
+      "style": "solid",
+      "weight": 0.7
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "audit_control_mitigates_risk",
+      "label": "Control mitigates risk",
+      "message": "Controls and remediations should mitigate risks or findings.",
+      "params": {
+        "relationship_type": "mitigates"
+      },
+      "rule_type": "allowed_relationship",
+      "severity": "warning"
+    }
+  ],
+  "version": "1.0.0"
+}

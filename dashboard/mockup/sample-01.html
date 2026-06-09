@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ontology Graph Workspace</title>
+<!-- Tailwind CSS v3 with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style data-purpose="typography">
+    body {
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+  </style>
+<style data-purpose="layout-and-scroll">
+    /* Hide scrollbar for Chrome, Safari and Opera */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    /* Hide scrollbar for IE, Edge and Firefox */
+    .no-scrollbar {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+    }
+
+    .canvas-background {
+      background-color: #f8fafc;
+      background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    .node-shadow {
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+  </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
+<!-- BEGIN: TopNavigationBar -->
+<header class="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 shrink-0 z-50">
+<div class="flex items-center gap-4">
+<button class="p-2 hover:bg-gray-100 rounded-md">
+<svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<h1 class="text-xl font-semibold text-gray-800">Ontology Graph Workspace</h1>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-1.5 px-3 py-1.5 bg-[#2563eb] text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">
+<span class="text-lg leading-none">+</span> New Object
+      </button>
+<button class="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors">
+<span class="text-lg leading-none">→</span> New Relation
+      </button>
+<button class="flex items-center gap-1.5 px-3 py-1.5 bg-[#eff6ff] text-blue-700 text-sm font-medium rounded-md hover:bg-blue-100 transition-colors">
+<span class="w-4 h-4">🧠</span> Run Reasoner
+      </button>
+<button class="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+        Export Schema
+      </button>
+<div class="ml-2 w-8 h-8 rounded-full overflow-hidden border border-gray-200 cursor-pointer">
+<img alt="User Profile" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBL1lYX7qtDDGfEw273yWM4hlHg-DNHgjQqGYZkO6o7ehi_OWEUXsbmbNulxcmum-yj01bpZ2XdD5fi10wDkE0ns--_aBlXW3QNeErgb78ixojEB8IvvD7EIjW4XnBZRIPnaLxNWDPGR8K4ULvX48mFtKaACCPvOltYRJu43u-r3I9i2x3AIF8Wy1LU55CgtBiKng2R0DXLO54sMXgCcI-4V65G2OQ6z9ovWIXvy4qUd1PhQOyUankeJ_C7TpRhBkYqph0LCMdstQkw"/>
+</div>
+</div>
+</header>
+<!-- END: TopNavigationBar -->
+<main class="flex-1 flex overflow-hidden">
+<!-- BEGIN: LeftSidebar -->
+<aside class="w-64 bg-white border-r border-gray-200 flex flex-col shrink-0">
+<!-- Sidebar Tabs -->
+<div class="flex border-b border-gray-200">
+<button class="flex-1 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600">Object Types</button>
+<button class="flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700">Relations</button>
+</div>
+<div class="flex-1 overflow-y-auto no-scrollbar p-3 space-y-6">
+<!-- Drafts Section -->
+<div data-purpose="drafts-section">
+<div class="flex items-center justify-between px-2 py-1.5 bg-blue-50 rounded-md border border-blue-100 mb-4">
+<div class="flex items-center gap-2">
+<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-sm font-medium text-blue-900">Drafts</span>
+</div>
+<button class="text-blue-600 hover:text-blue-800">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+</div>
+<!-- Categories -->
+<div class="space-y-4">
+<!-- Transportation -->
+<div data-purpose="category-transportation">
+<div class="flex items-center gap-2 px-1 mb-2">
+<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Transportation</span>
+</div>
+<ul class="space-y-1 ml-4">
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-gray-400 rounded-sm flex items-center justify-center text-[10px] text-white">📍</div> Airport
+              </li>
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-blue-500 rounded-sm flex items-center justify-center text-[10px] text-white">✈️</div> Flight
+              </li>
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-teal-500 rounded-sm flex items-center justify-center text-[10px] text-white">✈️</div> Aircraft
+              </li>
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-purple-600 rounded-sm overflow-hidden flex items-center justify-center">
+<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZvbUz9dljjOJEV8zR0DnrkC7HIk0-w7jarZht4131RB0pDlHeoqwtu9vw_ht_NGa2NPaUdt3vxLZH52rpn0zJd6ZSi8e7gH8HmLMqbES_UyPIA6bFniMJVA9citYcL5_hhwrSxr5VXWr1yDK9i-HAd3tnrF1XeeG3GrY2RuwcCOe_Ihx1XGXWn3yOylnMcLqexmkE3HNKFlND4bKFqpzkZ7yHNXi5JMEiB4vfr9LZRXZCb-ApWZ58CTMW9WmcLuNrsFEZwxkObime"/>
+</div> Airline
+              </li>
+</ul>
+</div>
+<!-- People -->
+<div data-purpose="category-people">
+<div class="flex items-center gap-2 px-1 mb-2">
+<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-xs font-bold text-gray-500 uppercase tracking-wider">People</span>
+</div>
+<ul class="space-y-1 ml-4">
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-orange-400 rounded-sm flex items-center justify-center text-[10px] text-white">👤</div> Passenger
+              </li>
+<li class="flex items-center gap-2 py-1.5 px-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer">
+<div class="w-4 h-4 bg-slate-500 rounded-sm flex items-center justify-center text-[10px] text-white">👥</div> Crew Member
+              </li>
+</ul>
+</div>
+</div>
+<!-- Search Bar -->
+<div class="mt-4 relative">
+<input class="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Search..." type="text"/>
+<svg class="w-4 h-4 text-gray-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<button class="absolute right-2.5 top-2.5">
+<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+<!-- Relations Footer -->
+<div class="pt-4 border-t border-gray-100">
+<h3 class="text-sm font-semibold text-gray-800 mb-3 px-1 flex justify-between items-center">
+            Relations
+            <div class="flex gap-2 text-xs font-normal text-gray-400">
+<span>Search/Query</span>
+</div>
+</h3>
+<div class="space-y-2">
+<div class="flex items-center justify-between p-2 bg-white border border-gray-200 rounded-md shadow-sm">
+<div class="flex items-center gap-2 text-sm text-gray-700">
+<span class="w-4 h-4 flex items-center justify-center">📍</span> Airport
+              </div>
+<div class="text-gray-300">⋮⋮</div>
+</div>
+<div class="flex items-center justify-between p-2 bg-white border border-gray-200 rounded-md shadow-sm">
+<div class="flex items-center gap-2 text-sm text-gray-700">
+<span class="w-4 h-4 flex items-center justify-center">✈️</span> Flight
+              </div>
+<div class="text-gray-300">⋮⋮</div>
+</div>
+<div class="flex items-center justify-between p-2 bg-white border border-gray-200 rounded-md shadow-sm">
+<div class="flex items-center gap-2 text-sm text-gray-700">
+<span class="w-4 h-4 flex items-center justify-center">📅</span> Maintenance Event
+              </div>
+<div class="text-gray-300">⋮⋮</div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: LeftSidebar -->
+<!-- BEGIN: MainCanvas -->
+<section class="flex-1 relative canvas-background overflow-hidden">
+<!-- Canvas Toolbar -->
+<div class="absolute top-4 right-4 flex items-center gap-2 z-10">
+<div class="flex items-center bg-white border border-gray-200 rounded-md shadow-sm">
+<button class="px-3 py-1.5 text-xs font-medium text-gray-600 border-r border-gray-200 flex items-center gap-1.5">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Time
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<button class="px-3 py-1.5 text-xs font-medium text-gray-600 flex items-center gap-1.5">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h16M4 18h16" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Property
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+<button class="p-2 bg-white border border-gray-200 rounded-md shadow-sm text-gray-600">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+<!-- Graph Nodes & Connections (Static Representation) -->
+<div class="relative w-full h-full p-20" data-purpose="graph-viewport">
+<!-- Connections (SVG Overlay) -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrowhead" markerheight="7" markerwidth="10" orient="auto" refx="9" refy="3.5">
+<polygon fill="#94a3b8" points="0 0, 10 3.5, 0 7"></polygon>
+</marker>
+</defs>
+<!-- Simplified Paths -->
+<path d="M360 230 L450 310" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<path d="M360 460 L450 460" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<path d="M570 460 L650 460" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<path d="M510 420 L510 360" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<path d="M570 330 L650 330" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<path d="M720 280 L720 230" fill="none" marker-end="url(#arrowhead)" stroke="#94a3b8" stroke-width="1"></path>
+<!-- Labels for connections -->
+<text fill="#475569" font-size="11" x="380" y="270">originatesFrom</text>
+<text fill="#475569" font-size="11" x="380" y="450">flight_origin</text>
+<text fill="#475569" font-size="11" x="580" y="450">departsTo</text>
+<text fill="#475569" font-size="11" x="600" y="320">flight_destination</text>
+</svg>
+<!-- Node: Airport DFW (Top Left) -->
+<div class="absolute left-60 top-20 bg-gray-100 border border-gray-300 rounded-lg p-2.5 flex items-center gap-3 w-40 node-shadow">
+<div class="w-8 h-8 bg-gray-400 rounded-md flex items-center justify-center text-white">📍</div>
+<div>
+<div class="text-[10px] text-gray-500 font-bold uppercase">[Airport]</div>
+<div class="text-xs font-semibold text-gray-800">DFW (350)</div>
+</div>
+<div class="ml-auto w-2 h-2 rounded-full border border-gray-400"></div>
+</div>
+<!-- Node: Airport DFW (Bottom Left) -->
+<div class="absolute left-60 top-44 bg-gray-100 border border-gray-300 rounded-lg p-2.5 flex items-center gap-3 w-40 node-shadow">
+<div class="w-8 h-8 bg-gray-400 rounded-md flex items-center justify-center text-white">✈️</div>
+<div>
+<div class="text-[10px] text-gray-500 font-bold uppercase">[Airport]</div>
+<div class="text-xs font-semibold text-gray-800">DFW (350)</div>
+</div>
+<div class="ml-auto w-2 h-2 rounded-full border border-gray-400"></div>
+</div>
+<!-- Node: Flight AA1004 (Center) -->
+<div class="absolute left-[450px] top-[320px] bg-blue-100 border-2 border-blue-400 rounded-lg p-2.5 flex items-center gap-3 w-48 node-shadow ring-4 ring-blue-50">
+<div class="w-10 h-10 bg-blue-600 rounded-md flex items-center justify-center text-white shadow-sm text-lg">✈️</div>
+<div>
+<div class="text-[10px] text-blue-600 font-bold uppercase">[Flight]</div>
+<div class="text-xs font-bold text-gray-900">AA1004 (120)</div>
+</div>
+<div class="ml-auto flex flex-col gap-1">
+<div class="w-2 h-2 rounded-full bg-blue-400"></div>
+<div class="w-2 h-2 rounded-full border border-blue-300"></div>
+</div>
+</div>
+<!-- Node: Aircraft B737-800 (Right) -->
+<div class="absolute left-[700px] top-[320px] bg-teal-50 border border-teal-300 rounded-lg p-2.5 flex items-center gap-3 w-44 node-shadow">
+<div class="w-8 h-8 bg-teal-500 rounded-md flex items-center justify-center text-white text-sm">✈️</div>
+<div>
+<div class="text-[10px] text-teal-600 font-bold uppercase">[Aircraft]</div>
+<div class="text-xs font-semibold text-gray-800">B737-800 (50)</div>
+</div>
+</div>
+<!-- Node: Airport SFO (Top Right) -->
+<div class="absolute left-[700px] top-20 bg-gray-100 border border-gray-300 rounded-lg p-2.5 flex items-center gap-3 w-40 node-shadow">
+<div class="w-8 h-8 bg-gray-400 rounded-md flex items-center justify-center text-white">📍</div>
+<div>
+<div class="text-[10px] text-gray-500 font-bold uppercase">[Airport]</div>
+<div class="text-xs font-semibold text-gray-800">SFO (350)</div>
+</div>
+</div>
+<!-- Node: Airline (Bottom Left of center) -->
+<div class="absolute left-60 top-[640px] bg-purple-50 border border-purple-300 rounded-lg p-2.5 flex items-center gap-3 w-44 node-shadow">
+<div class="w-10 h-10 bg-purple-900 rounded-md overflow-hidden flex items-center justify-center">
+<img class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZvbUz9dljjOJEV8zR0DnrkC7HIk0-w7jarZht4131RB0pDlHeoqwtu9vw_ht_NGa2NPaUdt3vxLZH52rpn0zJd6ZSi8e7gH8HmLMqbES_UyPIA6bFniMJVA9citYcL5_hhwrSxr5VXWr1yDK9i-HAd3tnrF1XeeG3GrY2RuwcCOe_Ihx1XGXWn3yOylnMcLqexmkE3HNKFlND4bKFqpzkZ7yHNXi5JMEiB4vfr9LZRXZCb-ApWZ58CTMW9WmcLuNrsFEZwxkObime"/>
+</div>
+<div>
+<div class="text-[10px] text-purple-600 font-bold uppercase">[Airline]</div>
+<div class="text-xs font-semibold text-gray-800">Airline (20)</div>
+</div>
+</div>
+<!-- Node: Passenger John Doe (Bottom Center) -->
+<div class="absolute left-[450px] top-[640px] bg-orange-50 border border-orange-300 rounded-lg p-2.5 flex items-center gap-3 w-44 node-shadow">
+<div class="w-8 h-8 bg-orange-400 rounded-md flex items-center justify-center text-white">👤</div>
+<div>
+<div class="text-[10px] text-orange-600 font-bold uppercase">[Passenger]</div>
+<div class="text-xs font-semibold text-gray-800">John Doe (25)</div>
+</div>
+</div>
+</div>
+<!-- Zoom Controls -->
+<div class="absolute bottom-6 right-6 flex flex-col bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-10">
+<button class="p-2.5 hover:bg-gray-50 border-b border-gray-100 text-gray-600">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<button class="p-2.5 hover:bg-gray-50 border-b border-gray-100 text-gray-600 font-bold">+</button>
+<button class="p-2.5 hover:bg-gray-50 text-gray-600 font-bold">-</button>
+</div>
+</section>
+<!-- END: MainCanvas -->
+<!-- BEGIN: RightSidebar (Properties) -->
+<aside class="w-72 bg-white border-l border-gray-200 flex flex-col shrink-0 overflow-y-auto no-scrollbar">
+<div class="p-5 border-b border-gray-100">
+<h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Properties</h2>
+<!-- Selection Header -->
+<div class="flex items-start gap-3 mb-6">
+<div class="w-10 h-10 bg-blue-600 rounded-md flex items-center justify-center text-white shrink-0 shadow-sm">✈️</div>
+<div>
+<h3 class="text-base font-bold text-gray-900">[Flight] AA1004 (120)</h3>
+</div>
+</div>
+<!-- Property List -->
+<div class="space-y-3.5">
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Flight Number</span>
+<span class="text-gray-900 font-medium">AA1004</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Origin</span>
+<span class="text-gray-900 font-medium">SFO</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Destination</span>
+<span class="text-gray-900 font-medium">DFW</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Departure Time</span>
+<span class="text-gray-900 font-medium">2018-06-09T07:32</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Arrival Time</span>
+<span class="text-gray-900 font-medium">2018-06-09T12:45</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Status</span>
+<span class="text-green-600 font-semibold">On Time</span>
+</div>
+<div class="flex justify-between text-sm">
+<span class="text-gray-500">Aircraft ID</span>
+<span class="text-gray-900 font-medium underline decoration-gray-300 underline-offset-2">N123AA</span>
+</div>
+</div>
+</div>
+<!-- Reasoning Insights -->
+<div class="p-5">
+<h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Reasoning Insights</h2>
+<div class="space-y-6">
+<div>
+<div class="flex items-center justify-between mb-1.5">
+<span class="text-xs font-semibold text-gray-700">Inferred Type</span>
+<button class="text-[10px] px-2 py-0.5 border border-blue-200 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1">
+                🔍 Explain
+              </button>
+</div>
+<div class="text-sm text-gray-800">International Flight</div>
+</div>
+<div>
+<div class="flex items-center justify-between mb-1.5">
+<span class="text-xs font-semibold text-gray-700">Derived Relation</span>
+<button class="text-[10px] px-2 py-0.5 border border-blue-200 text-blue-600 rounded hover:bg-blue-50 flex items-center gap-1">
+                🔍 Explain
+              </button>
+</div>
+<div class="text-sm font-mono text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">connects(SFO, DFW)</div>
+</div>
+<div>
+<div class="flex items-center justify-between mb-1.5">
+<span class="text-xs font-semibold text-gray-700">Potential Conflict</span>
+</div>
+<div class="flex items-center gap-2 text-sm text-gray-500 italic">
+<svg class="w-4 h-4 text-green-500" fill="currentColor" viewbox="0 0 20 20"><path clip-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" fill-rule="evenodd"></path></svg>
+              None detected
+            </div>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: RightSidebar -->
+</main>
+</body></html><!-- MISSING_IMAGES:
+- User profile avatar icon
+- Airline company logo
+-->

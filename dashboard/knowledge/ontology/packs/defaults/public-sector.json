@@ -1,0 +1,156 @@
+{
+  "aliases": {
+    "accountable_to": "depends_on",
+    "authorized_by": "mandated_by",
+    "statutory_basis": "mandated_by"
+  },
+  "compatible_profile_versions": [
+    "1.x",
+    "1.0.0"
+  ],
+  "concept_types": {
+    "policy_mandate": {
+      "abstraction_level": "implementation",
+      "color": "#334155",
+      "description": "Law, policy, or mandate that governs delivery",
+      "id": "policy_mandate",
+      "label": "Policy Mandate",
+      "metadata_schema": {},
+      "shape": "document"
+    },
+    "public_service": {
+      "abstraction_level": "capability",
+      "color": "#475569",
+      "description": "Government service delivered to constituents",
+      "id": "public_service",
+      "label": "Public Service",
+      "metadata_schema": {},
+      "shape": "rounded_rectangle"
+    }
+  },
+  "fixtures": [
+    {
+      "edges": [
+        {
+          "relation_type": "mandated_by",
+          "source": "permit_service",
+          "source_type": "public_service",
+          "target": "permit_mandate",
+          "target_type": "policy_mandate"
+        }
+      ],
+      "id": "permit_fixture",
+      "nodes": [
+        {
+          "id": "permit_service",
+          "type": "public_service"
+        },
+        {
+          "id": "permit_mandate",
+          "type": "policy_mandate"
+        }
+      ]
+    }
+  ],
+  "graph_instruction": {
+    "concept_type_defaults": {
+      "policy_mandate": {
+        "color": "#334155",
+        "concept_type": "policy_mandate",
+        "label_template": "{label}",
+        "shape": "document"
+      },
+      "public_service": {
+        "color": "#475569",
+        "concept_type": "public_service",
+        "label_template": "{label}",
+        "shape": "rounded_rectangle"
+      }
+    },
+    "default_lane_dimension": "default_layer",
+    "default_views": [
+      {
+        "description": "",
+        "filters": {},
+        "id": "public_sector",
+        "label": "Public Sector",
+        "lane_dimension": "default_layer"
+      }
+    ],
+    "examples": [],
+    "layout_hints": {
+      "density": "comfortable",
+      "group_by": [
+        "default_layer",
+        "concept_type"
+      ],
+      "lane_dimension": "default_layer",
+      "orientation": "horizontal",
+      "sort_by": [
+        "layer_order",
+        "label"
+      ]
+    },
+    "relationship_type_defaults": {
+      "mandated_by": {
+        "group": "validation",
+        "label_template": "{label}",
+        "map_direction": "forward",
+        "relationship_type": "mandated_by",
+        "weight": 0.8
+      }
+    },
+    "schema_version": 1,
+    "validation_rules": [
+      "public_sector_jurisdiction_recommended"
+    ]
+  },
+  "metadata_fields": {
+    "jurisdiction": {
+      "description": "Applicable government jurisdiction",
+      "field_type": "string",
+      "id": "jurisdiction",
+      "label": "Jurisdiction"
+    }
+  },
+  "migration_notes": [
+    "Adds domain-specific concept, relationship aliases, metadata, validation, and seed fixtures."
+  ],
+  "name": "Public Sector",
+  "pack_id": "public-sector",
+  "relationship_types": {
+    "mandated_by": {
+      "allowed_source_types": [
+        "public_service",
+        "capability",
+        "feature"
+      ],
+      "allowed_target_types": [
+        "policy_mandate",
+        "evidence"
+      ],
+      "description": "Service, capability, or feature is required by a mandate",
+      "family": "validation",
+      "id": "mandated_by",
+      "is_directed": true,
+      "is_system": false,
+      "label": "Mandated by",
+      "style": "bold",
+      "weight": 0.8
+    }
+  },
+  "validation_rules": [
+    {
+      "enabled": true,
+      "id": "public_sector_jurisdiction_recommended",
+      "label": "Public sector jurisdiction recommended",
+      "message": "Public sector items should include jurisdiction metadata.",
+      "params": {
+        "field": "jurisdiction"
+      },
+      "rule_type": "required_metadata",
+      "severity": "warning"
+    }
+  ],
+  "version": "1.0.0"
+}

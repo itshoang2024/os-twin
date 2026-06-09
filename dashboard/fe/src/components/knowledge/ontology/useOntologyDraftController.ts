@@ -10,7 +10,17 @@ export function useOntologyDraftController(sourceProfile: OntologyProfile) {
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]);
   const [lastDiff, setLastDiff] = useState<string>('No diff preview yet.');
+  const sourceKey = `${sourceProfile.id}:${sourceProfile.updatedAt}`;
+  const [activeSourceKey, setActiveSourceKey] = useState(sourceKey);
 
+  if (activeSourceKey !== sourceKey) {
+    setActiveSourceKey(sourceKey);
+    setDraftState(cloneProfile(sourceProfile));
+    setUndoStack([]);
+    setRedoStack([]);
+    setValidationIssues([]);
+    setLastDiff('No diff preview yet.');
+  }
 
   const isDirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(sourceProfile), [draft, sourceProfile]);
 

@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useKnowledgeExplorer, useKnowledgeExplorerSummary } from '../use-knowledge-explorer';
-import type { ExplorerGraphData, ExplorerPathData, ExplorerNodeDetail, ExplorerSummary } from '../use-knowledge-explorer';
+import type { ExplorerGraphData, ExplorerPathData, ExplorerNodeDetail } from '../use-knowledge-explorer';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -331,11 +331,41 @@ describe('useKnowledgeExplorer', () => {
 
     expect(mockApiPost).toHaveBeenCalledWith(
       expect.stringContaining('/explorer/search'),
-      { query: 'test', limit: 10 }
+      { query: 'test', limit: 10, filters: {} }
     );
 
     // Original node still present + search result = 2
     expect(result.current.nodes).toHaveLength(2);
+  });
+
+  it('search accepts Scenario 02 ExplorerSearchResponse and normalizes results into graph nodes', async () => {
+    const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
+
+    mockApiPost.mockResolvedValueOnce({
+      results: [{
+        id: 'object.contract-result',
+        label: 'Contract Result',
+        object_type: 'Knowledge Object',
+        description: 'Scenario 02 search result shape.',
+        properties: { owner: 'Knowledge Ops' },
+        validation_issues: [],
+        provenance_refs: [],
+        permissions: { level: 'read', allowed_actions: ['view'] },
+      }],
+      meta: { query: 'contract', truncated: false, limit: 20, filters: {}, warnings: [] },
+    });
+
+    await act(async () => {
+      await result.current.search('contract');
+    });
+
+    expect(result.current.nodes).toHaveLength(1);
+    expect(result.current.nodes[0]).toMatchObject({
+      id: 'object.contract-result',
+      name: 'Contract Result',
+      label: 'Knowledge Object',
+      properties: { owner: 'Knowledge Ops' },
+    });
   });
 
   it('search does nothing with empty query', async () => {
@@ -493,16 +523,44 @@ describe('useKnowledgeExplorer', () => {
 
     const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
 
-    let detail: ExplorerNodeDetail | null = null;
+    const detailRef: { current: ExplorerNodeDetail | null } = { current: null };
     await act(async () => {
-      detail = await result.current.getNodeDetail('n1');
+      detailRef.current = await result.current.getNodeDetail('n1');
     });
 
     expect(mockApiGet).toHaveBeenCalledWith(
       expect.stringContaining('/explorer/node/n1')
     );
-    expect(detail?.node?.id).toBe('n1');
-    expect(detail?.stats?.degree).toBe(5);
+    const returnedDetail = detailRef.current;
+    if (returnedDetail === null) throw new Error('Expected node detail response');
+    expect(returnedDetail.node?.id).toBe('n1');
+    expect(returnedDetail.stats.degree).toBe(5);
+  });
+
+  it('getNodeDetail accepts Scenario 02 normalized object detail shape', async () => {
+    mockApiGet.mockReset();
+    mockApiGet.mockResolvedValueOnce({
+      id: 'object.customer',
+      label: 'Customer Account',
+      properties: { owner: 'Data Stewardship' },
+      relationships: [{ id: 'rel.customer-policy', label: 'owns policy', target: 'object.policy', direction: 'out' }],
+      validation_issues: [],
+      provenance_refs: [],
+      permissions: { level: 'read', allowed_actions: ['view'] },
+    });
+
+    const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
+
+    const detailRef: { current: ExplorerNodeDetail | null } = { current: null };
+    await act(async () => {
+      detailRef.current = await result.current.getNodeDetail('object.customer');
+    });
+
+    const returnedDetail = detailRef.current;
+    if (returnedDetail === null) throw new Error('Expected Scenario 02 node detail response');
+    expect(returnedDetail.node).toMatchObject({ id: 'object.customer', name: 'Customer Account' });
+    expect(returnedDetail.edges[0]).toMatchObject({ source: 'object.customer', target: 'object.policy', direction: 'outgoing' });
+    expect(returnedDetail.stats.degree).toBe(1);
   });
 
   it('getNodeDetail returns null on error', async () => {
@@ -512,7 +570,7 @@ describe('useKnowledgeExplorer', () => {
 
     const { result } = renderHook(() => useKnowledgeExplorer(NAMESPACE));
 
-    let detail: ExplorerNodeDetail | null = 'not-null' as any;
+    let detail: ExplorerNodeDetail | null = { node: makeNode('placeholder'), edges: [], stats: {} };
     await act(async () => {
       detail = await result.current.getNodeDetail('missing');
     });
@@ -523,7 +581,7 @@ describe('useKnowledgeExplorer', () => {
   it('getNodeDetail returns null when namespace is null', async () => {
     const { result } = renderHook(() => useKnowledgeExplorer(null));
 
-    let detail: ExplorerNodeDetail | null = 'not-null' as any;
+    let detail: ExplorerNodeDetail | null = { node: makeNode('placeholder'), edges: [], stats: {} };
     await act(async () => {
       detail = await result.current.getNodeDetail('n1');
     });
