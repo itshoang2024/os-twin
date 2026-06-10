@@ -1,7 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlanLogStream, PlanLogLine } from '@/hooks/use-plan-log-stream';
+import { getApiBaseUrl } from '@/lib/runtime-config';
+
+interface FullLogPayload {
+  plan_id: string;
+  room_id: string;
+  epic_ref: string;
+  status: string;
+  path: string;
+  size: number;
+  truncated: boolean;
+  content: string;
+  updated_at: string | null;
+}
 
 function statusTone(status: string) {
   if (status === 'failed') return 'text-red-500 bg-red-500/10 border-red-500/20';
@@ -32,7 +45,11 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
   const [activeOnly, setActiveOnly] = useState(true);
   const [followTail, setFollowTail] = useState(true);
+  const [wrapLines, setWrapLines] = useState(true);
   const [query, setQuery] = useState('');
+  const [fullLog, setFullLog] = useState<FullLogPayload | null>(null);
+  const [fullLogLoading, setFullLogLoading] = useState(false);
+  const [fullLogError, setFullLogError] = useState<string | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
 
   const { status, rooms, lines, linesByRoom, lastError, clear } = usePlanLogStream(planId, {
@@ -55,7 +72,30 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
 
   const activeRoomCount = rooms.filter((room) => room.active).length;
   const roomsWithLogs = rooms.filter((room) => room.exists).length;
+  const totalBufferedLines = lines.length;
+  const selectedRoom = rooms.find((room) => room.room_id === selectedRoomId) ?? null;
   const tone = connectionTone(status);
+
+  const loadFullLog = useCallback(async (roomId: string) => {
+    if (!roomId || roomId === 'all') return;
+    setFullLogLoading(true);
+    setFullLogError(null);
+    try {
+      const apiBase = getApiBaseUrl().replace(/\/$/, '');
+      const response = await fetch(`${apiBase}/plans/${encodeURIComponent(planId)}/logs/${encodeURIComponent(roomId)}/content`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(detail?.detail || `Failed to load log (${response.status})`);
+      }
+      setFullLog(await response.json() as FullLogPayload);
+    } catch (error) {
+      setFullLogError(error instanceof Error ? error.message : 'Failed to load full log');
+    } finally {
+      setFullLogLoading(false);
+    }
+  }, [planId]);
 
   useEffect(() => {
     if (!followTail) return;
@@ -70,6 +110,11 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
     }
   }, [selectedRoomId, rooms]);
 
+  useEffect(() => {
+    setFullLog(null);
+    setFullLogError(null);
+  }, [selectedRoomId]);
+
   return (
     <div className="h-full flex flex-col bg-background overflow-hidden">
       <div className="p-6 pb-4 border-b border-border bg-surface/60">
@@ -77,14 +122,14 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="material-symbols-outlined text-primary text-[22px]">terminal</span>
-              <h2 className="text-xl font-extrabold text-text-main">Live EPIC Logs</h2>
+              <h2 className="text-xl font-extrabold text-text-main">Live log reader</h2>
               <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${tone.className}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
                 {tone.label}
               </span>
             </div>
             <p className="text-xs text-text-muted">
-              Streaming <code className="font-mono text-[11px] bg-surface-alt border border-border rounded px-1">~/.ostwin/.agents/plans/{planId}.&lt;room_id&gt;.log</code>
+              Streaming from <code className="font-mono text-[11px] bg-surface-alt border border-border rounded px-1">~/.ostwin/.agents/plans/{planId}/&lt;room_id&gt;.log</code>
             </p>
           </div>
 
@@ -201,22 +246,66 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
         </aside>
 
         <main className="min-h-0 flex flex-col bg-[#070a0f]">
-          <div className="px-4 py-2 border-b border-white/10 flex items-center justify-between bg-black/40">
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <span className="material-symbols-outlined text-[14px]">data_object</span>
-              {selectedRoomId === 'all' ? 'Merged stream' : selectedRoomId}
+          <div className="px-4 py-3 border-b border-white/10 flex flex-wrap items-center justify-between gap-3 bg-black/40">
+            <div>
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span className="material-symbols-outlined text-[14px]">data_object</span>
+                {selectedRoomId === 'all' ? 'Merged live stream' : `${selectedRoom?.epic_ref ?? selectedRoomId} · ${selectedRoomId}`}
+              </div>
+              <div className="mt-1 text-[10px] font-mono text-slate-500">
+                {selectedRoomId === 'all' ? `${totalBufferedLines} buffered merged lines` : (fullLog?.path ?? `~/.ostwin/.agents/plans/${planId}/${selectedRoomId}.log`)}
+              </div>
             </div>
-            <div className="text-[10px] font-mono text-slate-500">{currentLines.length} visible lines</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setWrapLines((value) => !value)}
+                className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:bg-white/[0.07] transition-colors"
+              >
+                {wrapLines ? 'Wrap on' : 'No wrap'}
+              </button>
+              <button
+                onClick={() => loadFullLog(selectedRoomId)}
+                disabled={selectedRoomId === 'all' || fullLogLoading}
+                className="px-3 py-1.5 rounded-lg border border-cyan-400/30 bg-cyan-400/10 text-[10px] font-bold uppercase tracking-wider text-cyan-200 hover:bg-cyan-400/15 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {fullLogLoading ? 'Loading full log' : 'Load full file'}
+              </button>
+              <div className="text-[10px] font-mono text-slate-500">{currentLines.length} visible</div>
+            </div>
           </div>
 
+          {(fullLog || fullLogError) && (
+            <div className="border-b border-white/10 bg-slate-950/80 px-4 py-3">
+              {fullLogError ? (
+                <div className="flex items-center gap-2 text-xs text-amber-300">
+                  <span className="material-symbols-outlined text-[16px]">warning</span>
+                  {fullLogError}
+                </div>
+              ) : fullLog ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-cyan-300">article</span>
+                    Full file loaded · {(fullLog.size / 1024).toFixed(1)} KiB · updated {fullLog.updated_at ?? 'unknown'}
+                    {fullLog.truncated && <span className="text-amber-300">Showing newest 10 MiB</span>}
+                  </div>
+                  <button onClick={() => setFullLog(null)} className="text-[10px] uppercase tracking-wider text-slate-400 hover:text-white">
+                    return to live buffer
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
+
           <div ref={terminalRef} className="flex-1 overflow-auto custom-scrollbar p-4 font-mono text-[12px] leading-5">
-            {currentLines.length === 0 ? (
+            {fullLog ? (
+              <pre className={`m-0 text-slate-200 ${wrapLines ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}>{fullLog.content || ' '}</pre>
+            ) : currentLines.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 gap-3">
                 <span className="material-symbols-outlined text-[44px] opacity-50">terminal</span>
                 <div>
                   <p className="text-sm font-bold text-slate-300">Waiting for EPIC log output</p>
                   <p className="text-xs mt-1 max-w-md">
-                    Launch or select a running EPIC and the dashboard will stream appended log lines over SSE.
+                    Launch or select a running EPIC to stream appended lines. Select one room and choose “Load full file” to read the complete log artifact.
                   </p>
                 </div>
               </div>
@@ -226,7 +315,7 @@ export default function PlanLogsTab({ planId }: { planId: string }) {
                   <div key={lineKey(line, index)} className="grid grid-cols-[auto_auto_1fr] gap-2 text-slate-300 hover:bg-white/[0.03] px-1 rounded">
                     <span className="text-slate-600 select-none">{String(index + 1).padStart(4, '0')}</span>
                     <span className="text-cyan-400 select-none">[{line.epic_ref}/{line.room_id}]</span>
-                    <span className="whitespace-pre-wrap break-words">{line.text || ' '}</span>
+                    <span className={wrapLines ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}>{line.text || ' '}</span>
                   </div>
                 ))}
               </div>

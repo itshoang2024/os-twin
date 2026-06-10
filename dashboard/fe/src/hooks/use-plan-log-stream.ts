@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 
 export interface PlanLogRoom {
@@ -42,7 +42,7 @@ interface InitEventPayload {
   rooms?: PlanLogRoom[];
 }
 
-interface LineEventPayload extends Omit<PlanLogLine, 'id' | 'receivedAt'> {}
+type LineEventPayload = Omit<PlanLogLine, 'id' | 'receivedAt'>;
 
 interface RoomStatusPayload {
   room_id: string;
@@ -84,7 +84,6 @@ export function usePlanLogStream(planId: string, options: PlanLogStreamOptions =
     maxTotalLines = 5000,
   } = options;
 
-  const roomKey = rooms?.join(',') ?? '';
   const [status, setStatus] = useState<ConnectionStatus>(planId ? 'connecting' : 'idle');
   const [logRooms, setLogRooms] = useState<PlanLogRoom[]>([]);
   const [linesByRoom, setLinesByRoom] = useState<Record<string, PlanLogLine[]>>({});
@@ -92,24 +91,22 @@ export function usePlanLogStream(planId: string, options: PlanLogStreamOptions =
   const [lastError, setLastError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const url = useMemo(() => {
-    if (!planId) return null;
-    return buildStreamUrl(planId, {
-      activeOnly,
-      rooms,
-      tailLines,
-      pollMs,
-      stripAnsi,
-    });
-  }, [planId, activeOnly, roomKey, tailLines, pollMs, stripAnsi]);
+  const url = planId ? buildStreamUrl(planId, {
+    activeOnly,
+    rooms,
+    tailLines,
+    pollMs,
+    stripAnsi,
+  }) : null;
 
   const clear = useCallback(() => {
     setLines([]);
     setLinesByRoom({});
-  }, []);
+  }, [setLines, setLinesByRoom]);
 
   useEffect(() => {
     if (!url) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronize hook state when streaming is disabled.
       setStatus('idle');
       setLogRooms([]);
       clear();

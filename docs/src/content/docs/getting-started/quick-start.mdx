@@ -1,147 +1,83 @@
 ---
 title: Quick Start
-description: Run your first OSTwin plan in under 5 minutes.
+description: Install OSTwin, create plan.md, and start the work.
 sidebar:
   order: 3
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-This guide gets you from zero to a running multi-agent plan in under 5 minutes. You'll write a simple plan, execute it, and watch agents collaborate in real-time.
-
-## Run a Plan
+Use this page when you only need the shortest path: install OSTwin, create a
+`plan.md` markdown file, then start the work.
 
 <Steps>
 
-1. **Create a plan directory**
-
-   Every plan lives in its own directory. The engine reads `PLAN.md` as the entry point.
+1. **Install OSTwin**
 
    ```bash
-   mkdir -p my-first-plan
+   curl -fsSL https://twin.igot.ai/installer.sh | bash
    ```
 
-2. **Write your plan**
+   For a non-interactive install:
 
-   Create `my-first-plan/PLAN.md` with the following content:
+   ```bash
+   curl -fsSL https://twin.igot.ai/installer.sh | bash -s -- --yes
+   ```
 
-   ```markdown
-   # Build a CLI Todo App
+2. **Create `plan.md`**
+
+   ```bash
+   mkdir -p test-project-xipat
+   cd test-project-xipat
+
+   cat > plan.md << 'EOF'
+   # Qualification Form in Shopify New Customer Accounts
 
    ## Config
    provider: anthropic
    model: claude-sonnet-4-20250514
 
    ## Goal
-   Build a command-line todo application in Python with add, list,
-   complete, and delete operations. Data persists to a JSON file.
+   Build a Shopify new customer account qualification form that collects
+   business details, validates required fields, and routes the submission
+   into a review workflow.
 
-   ## Epic 1: Core Todo Logic
+   ## Epic 1: Qualification Form UI
+   Roles: engineer, qa
+
    ### Definition of Done
-   - Todo CRUD operations working with JSON persistence
+   - Customer account page shows the qualification form
+   - Form captures business name, tax ID, contact email, and review notes
+
    ### Acceptance Criteria
-   - Can add a todo with a title
-   - Can list all todos with status
-   - Can mark a todo as complete
-   - Can delete a todo by ID
+   - Required fields block submission when empty
+   - Valid submissions show a confirmation state
+   - Form state is testable locally
+
    ### Tasks
-   - TASK-001: Implement Todo model and JSON storage layer
-   - TASK-002: Implement add, list, complete, delete operations
-   - TASK-003: Write unit tests for all operations
-
-   ## Epic 2: CLI Interface
-   **depends_on: Epic 1**
-   ### Definition of Done
-   - CLI accepts commands and delegates to core logic
-   ### Tasks
-   - TASK-001: Build argparse-based CLI with subcommands
-   - TASK-002: Add colored output and error handling
+   - TASK-001: Add the customer account form UI
+   - TASK-002: Implement validation and submit handling
+   - TASK-003: Add tests for required fields and success state
+   EOF
    ```
 
-3. **Run the engine**
-
-   ```bash
-   pwsh Engine.ps1 -PlanPath ./my-first-plan/PLAN.md
-   ```
-
-   The engine will parse your plan, build a dependency graph, and start executing.
-
-4. **Watch the execution**
-
-   The engine logs progress to the terminal. You'll see output like:
-
-   ```
-    [PRE-FLIGHT] Checking skill coverage...
-    [PRE-FLIGHT] All required skills and roles verified.
-
-    === Ostwin Plan Launcher ===]
-      Plan: /Users/paulaan/bk.ostwin/.agents/plans/11b7dcac8cc8.md
-      Plan ID: 11b7dcac8cc8
-      Project: /Users/paulaan/.ostwin/projects/kiemtoan-dvctt
-      War-rooms to create: 4
-
-      room-000 → PLAN-REVIEW — Unified Plan Negotiation (Roles: architect)
-      room-001 → EPIC-001 — Quét & Phân loại Kho `/audit-docs` (Roles: engineer, audit, DoD: 0, AC: 0) [depends_on: PLAN-REVIEW]
-      room-002 → EPIC-002 — ETL & Tổng hợp Dữ liệu PL02–PL06 (Roles: engineer, audit, DoD: 0, AC: 0) [depends_on: PLAN-REVIEW, EPIC-001]
-      room-003 → EPIC-003 — Dashboard & Kết x
-    ```
 </Steps>
 
-## What Happens Under the Hood
+## Start The Work
 
-When you run `Engine.ps1`, the following pipeline executes:
+Create the plan record, then launch it:
 
-```
-PLAN.md
-  │
-  ▼
-Parse ── extract epics, config, goal
-  │
-  ▼
-DAG ──── resolve depends_on → topological sort
-  │
-  ▼
-Waves ── group independent epics for parallel execution
-  │        Wave 1: [Epic 1]     ← no dependencies
-  │        Wave 2: [Epic 2]     ← depends on Epic 1
-  ▼
-War-Rooms ── create isolated directory per epic
-  │            ├── channel.jsonl   (message log)
-  │            ├── status          (lifecycle state)
-  │            ├── progress.json   (completion %)
-  │            ├── brief.md        (epic brief)
-  │            └── lifecycle.json  (state machine)
-  ▼
-Agents ── compose Role + Skills + MCP tools
-  │         manager → assigns tasks
-  │         engineer → implements
-  │         qa → reviews
-  ▼
-Done ──── all rooms passed → plan complete
+```console
+$ ostwin plan create plan.md
+✓ Plan created: f055e125de07
+  Title:  Qualification Form in Shopify New Customer Accounts
+  Dir:    /Users/xxxx/Downloads/test-project-xipat
+  Source: plan.md
+  Editor: http://localhost:3366/plans/f055e125de07
+
+$ ostwin run f055e125de07
 ```
 
-## Plan Anatomy
+The editor shows the plan flow as a dependency graph:
 
-| Section | Required | Purpose |
-|---------|----------|---------|
-| `# Title` | Yes | Plan name, used in dashboard and logs |
-| `## Config` | Yes | Provider, model, and engine settings |
-| `## Goal` | Yes | High-level objective guiding all agents |
-| `## Epic N: Name` | Yes | Unit of work assigned to a war-room |
-| `### Definition of Done` | Yes | Definition of Done — when is the epic complete? |
-| `### Acceptance Criteria` | No | Specific testable conditions for QA |
-| `### Tasks` | Yes | Ordered task list for the engineer |
-| `**depends_on:**` | No | Declares dependency on another epic |
-
-:::tip
-Start with 1–3 epics in your first plan. Each epic should be a self-contained unit of work that one agent can complete in a single session. If an epic takes more than 15 minutes, it's too big — split it.
-:::
-
-:::note
-The engine creates war-rooms under `.agents/war-rooms/`. Each run generates new room directories. Previous runs are not automatically cleaned up — you can inspect them for debugging.
-:::
-
-## Next Steps
-
-- Set up the full development environment with live monitoring in [Dev Mode](/getting-started/dev-mode/)
-- Learn how to write detailed plans in [Your First Plan](/getting-started/first-plan/)
+![Completed plan DAG view showing the execution flow from PLAN-REVIEW through EPIC-003.](/assets/complete-plan.png)

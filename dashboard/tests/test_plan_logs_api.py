@@ -43,8 +43,10 @@ def test_list_plan_logs_discovers_plan_scoped_log_files(client):
     _make_room(warrooms_dir, "room-001", plan_id="planA", epic_ref="EPIC-001", status="developing")
     _make_room(warrooms_dir, "room-002", plan_id="planA", epic_ref="EPIC-002", status="pending")
     _make_room(warrooms_dir, "room-999", plan_id="otherPlan", epic_ref="EPIC-999", status="developing")
-    (plans_dir / "planA.room-001.log").write_text("line one\nline two\n", encoding="utf-8")
-    (plans_dir / "planA.room-002.log").write_text("pending line\n", encoding="utf-8")
+    plan_log_dir = plans_dir / "planA"
+    plan_log_dir.mkdir()
+    (plan_log_dir / "room-001.log").write_text("line one\nline two\n", encoding="utf-8")
+    (plan_log_dir / "room-002.log").write_text("pending line\n", encoding="utf-8")
     (plans_dir / "planA.room-999.log").write_text("must not leak\n", encoding="utf-8")
     (warrooms_dir / "progress.json").write_text(json.dumps({
         "rooms": [
@@ -59,6 +61,7 @@ def test_list_plan_logs_discovers_plan_scoped_log_files(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 2
+    assert payload["logs_dir"].endswith("/planA")
     assert [room["room_id"] for room in payload["rooms"]] == ["room-001", "room-002"]
     assert payload["rooms"][0]["exists"] is True
     assert payload["rooms"][0]["active"] is True
@@ -70,9 +73,11 @@ def test_list_plan_logs_active_only_follows_non_terminal_logs_and_filters_done(c
     _make_room(warrooms_dir, "room-001", plan_id="planA", epic_ref="EPIC-001", status="developing")
     _make_room(warrooms_dir, "room-002", plan_id="planA", epic_ref="EPIC-002", status="pending")
     _make_room(warrooms_dir, "room-003", plan_id="planA", epic_ref="EPIC-003", status="done")
-    (plans_dir / "planA.room-001.log").write_text("active\n", encoding="utf-8")
-    (plans_dir / "planA.room-002.log").write_text("pending-but-writing\n", encoding="utf-8")
-    (plans_dir / "planA.room-003.log").write_text("done\n", encoding="utf-8")
+    plan_log_dir = plans_dir / "planA"
+    plan_log_dir.mkdir()
+    (plan_log_dir / "room-001.log").write_text("active\n", encoding="utf-8")
+    (plan_log_dir / "room-002.log").write_text("pending-but-writing\n", encoding="utf-8")
+    (plan_log_dir / "room-003.log").write_text("done\n", encoding="utf-8")
 
     response = c.get("/api/plans/planA/logs?active_only=true")
 
@@ -87,7 +92,8 @@ def test_list_plan_logs_active_only_follows_non_terminal_logs_and_filters_done(c
 def test_stream_plan_logs_once_emits_init_tail_and_done(client):
     c, plans_dir, warrooms_dir = client
     _make_room(warrooms_dir, "room-001", plan_id="planA", epic_ref="EPIC-001", status="developing")
-    (plans_dir / "planA.room-001.log").write_text("old line\nlatest line\n", encoding="utf-8")
+    (plans_dir / "planA").mkdir()
+    (plans_dir / "planA" / "room-001.log").write_text("old line\nlatest line\n", encoding="utf-8")
 
     response = c.get("/api/plans/planA/logs/stream?once=true&tail_lines=1")
 
@@ -104,7 +110,8 @@ def test_stream_plan_logs_once_emits_init_tail_and_done(client):
 def test_list_plan_logs_discovers_direct_log_without_runtime_metadata(client, monkeypatch):
     c, plans_dir, _ = client
     monkeypatch.setattr(plan_logs, "resolve_runtime_plan_warrooms_dir", lambda plan_id: None)
-    (plans_dir / "planA.room-001.log").write_text("log-only source\n", encoding="utf-8")
+    (plans_dir / "planA").mkdir()
+    (plans_dir / "planA" / "room-001.log").write_text("log-only source\n", encoding="utf-8")
 
     response = c.get("/api/plans/planA/logs?active_only=true")
 
@@ -119,7 +126,8 @@ def test_list_plan_logs_discovers_direct_log_without_runtime_metadata(client, mo
 def test_stream_plan_logs_default_active_only_tails_pending_log_file(client):
     c, plans_dir, warrooms_dir = client
     _make_room(warrooms_dir, "room-001", plan_id="planA", epic_ref="EPIC-001", status="pending")
-    (plans_dir / "planA.room-001.log").write_text("old line\ncurrent pending line\n", encoding="utf-8")
+    (plans_dir / "planA").mkdir()
+    (plans_dir / "planA" / "room-001.log").write_text("old line\ncurrent pending line\n", encoding="utf-8")
 
     response = c.get("/api/plans/planA/logs/stream?once=true&tail_lines=1")
 
@@ -136,3 +144,33 @@ def test_plan_logs_reject_invalid_identifiers(client):
     response = c.get("/api/plans/../secret/logs")
 
     assert response.status_code in {404, 422}
+
+
+def test_list_plan_logs_migrates_legacy_flat_log_files(client, monkeypatch):
+    c, plans_dir, _ = client
+    monkeypatch.setattr(plan_logs, "resolve_runtime_plan_warrooms_dir", lambda plan_id: None)
+    legacy = plans_dir / "planA.room-001.log"
+    legacy.write_text("legacy line\n", encoding="utf-8")
+
+    response = c.get("/api/plans/planA/logs?active_only=true")
+
+    assert response.status_code == 200
+    canonical = plans_dir / "planA" / "room-001.log"
+    assert canonical.exists()
+    assert not legacy.exists()
+    assert response.json()["rooms"][0]["exists"] is True
+
+
+def test_get_plan_room_log_returns_full_content(client):
+    c, plans_dir, warrooms_dir = client
+    _make_room(warrooms_dir, "room-001", plan_id="planA", epic_ref="EPIC-001", status="developing")
+    (plans_dir / "planA").mkdir()
+    (plans_dir / "planA" / "room-001.log").write_text("first\nsecond\nthird\n", encoding="utf-8")
+
+    response = c.get("/api/plans/planA/logs/room-001/content")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["room_id"] == "room-001"
+    assert payload["content"] == "first\nsecond\nthird\n"
+    assert payload["truncated"] is False

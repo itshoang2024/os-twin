@@ -7,6 +7,12 @@ sidebar:
 
 The `ostwin` CLI is the unified entry point for all OSTwin operations — plan creation, execution, monitoring, skill management, and more. It lives at `.agents/bin/ostwin` and is a pure PowerShell script (requires `pwsh` 7+).
 
+:::note[Verification snapshot]
+This reference was reviewed against `.agents/bin/ostwin`, `.agents/mcp/mcp-extension.sh`, `.agents/bin/channel_cmd.py`, `.agents/search-engine.sh`, the macOS role `subcommands.json`, the bot `COMMAND_REGISTRY`, and the `ostwin` MCP server on 2026-06-10. Safe smoke checks covered help/version output, read-only status/log commands, role listing, macOS help commands, and MCP catalog/list behavior with a temporary `OSTWIN_HOME`.
+:::
+
+For a cross-surface inventory that includes bot slash commands and MCP tools, see [Command Support Inventory](command-support.md).
+
 ## Global Options
 
 | Flag | Description |
@@ -41,6 +47,7 @@ When a plan ID is provided and the dashboard is reachable, `ostwin run` automati
 | `--review` | Run in review-only mode |
 | `--max-rooms N` | Limit concurrent war-rooms |
 | `--working-dir PATH` | Override the working directory for the plan |
+| `--workspace-isolation shared\|room-worktree` | Choose shared workspace execution or per-room Git worktrees |
 | `--non-interactive`, `-n` | Skip all interactive prompts |
 
 ### Auto Role Scaffolding
@@ -138,6 +145,7 @@ ostwin sync /path/to/project
 ```
 
 Updates `.agents/` scripts and configuration to match the installed version.
+The target directory must already be initialized with `.agents/`; run `ostwin init /path/to/project` first for a new project.
 
 ## ostwin status
 
@@ -200,6 +208,8 @@ ostwin dashboard restart
 ostwin dashboard status
 ostwin dashboard logs
 ostwin dashboard logs --follow
+ostwin dashboard autostart
+ostwin dashboard autostart --uninstall
 ```
 
 | Subcommand | Description |
@@ -209,38 +219,37 @@ ostwin dashboard logs --follow
 | `restart` | Stop and start the dashboard |
 | `status` | Show running state, URL, and memory pool health |
 | `logs` | Show the last 50 log lines (use `-f` to follow) |
+| `autostart` | Register or remove dashboard startup on login |
 
 The dashboard runs on port 3366 by default (overridable via `DASHBOARD_PORT` env var).
+
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--port PORT` | `start`, `restart`, `status`, `logs`, `autostart` | Override the dashboard port for the command invocation. Can appear before or after the subcommand. |
+| `--project-dir PATH` | `start`, `restart`, `autostart` | Project directory the dashboard should monitor. Defaults to `OSTWIN_HOME`. |
 
 ## ostwin channel
 
 Manage communication channel integrations (Telegram, Discord, Slack).
 
 ```bash
-ostwin channel start
-ostwin channel stop
-ostwin channel status
-ostwin channel logs
 ostwin channel list
-ostwin channel connect
-ostwin channel disconnect
-ostwin channel test
-ostwin channel pair
-ostwin channel deploy
+ostwin channel connect telegram
+ostwin channel disconnect telegram
+ostwin channel test telegram
+ostwin channel pair telegram
+ostwin channel pair telegram --regenerate
 ```
 
 | Subcommand | Description |
 |------------|-------------|
-| `start` | Start the channel service |
-| `stop` | Stop the channel service |
-| `status` | Show channel connection status |
-| `logs` | View channel service logs |
 | `list` | List configured channels |
 | `connect` | Connect a channel integration |
 | `disconnect` | Disconnect a channel integration |
 | `test` | Test channel connectivity |
 | `pair` | Pair a channel with a war-room |
-| `deploy` | Deploy channel configuration |
+
+All channel commands delegate to the dashboard REST API. `connect` prompts for platform credentials when existing credentials are not available; `pair --regenerate` rotates the pairing code.
 
 ## ostwin skills
 
@@ -295,8 +304,13 @@ ostwin mcp install --http https://stitch.googleapis.com/mcp
 ostwin mcp list
 ostwin mcp catalog
 ostwin mcp remove chrome-devtools
-ostwin mcp credentials set API_KEY
 ostwin mcp test chrome-devtools
+ostwin mcp test --all
+ostwin mcp compile
+ostwin mcp credentials set chrome-devtools API_KEY
+ostwin mcp credentials list
+ostwin mcp migrate
+ostwin mcp init-project /path/to/project
 ```
 
 | Subcommand | Description |
@@ -308,6 +322,19 @@ ostwin mcp test chrome-devtools
 | `remove` | Uninstall an extension |
 | `credentials` | Manage credentials in the vault (`set`, `list`, `delete`) |
 | `test` | Test MCP server connectivity |
+| `compile` | Compile the home MCP configuration for a project-local runtime |
+| `migrate` | Move plaintext secrets from MCP configs into the vault where possible |
+| `init-project` | Scaffold a per-project MCP directory |
+
+### mcp options
+
+| Flag | Description |
+|------|-------------|
+| `--project-dir DIR` | Target project for MCP extension operations; defaults to the current project when `.agents/mcp` exists, otherwise `~/.ostwin`. |
+| `--name NAME` | Override the installed extension name for git/HTTP installs. |
+| `--branch BRANCH` | Git branch for git installs. |
+| `--http URL` | Register a remote HTTP MCP server instead of a local stdio server. |
+| `--header K=V` | Add a header to an HTTP MCP server; repeatable. |
 
 ### mcp sync
 
@@ -316,6 +343,30 @@ ostwin mcp sync
 ```
 
 Resolves MCP server references from `role.json` `mcp_refs` and generates the agent permission configuration in `~/.ostwin/.opencode/opencode.json`. Run this after installing new MCP extensions or updating role configurations.
+
+## ostwin search-engine
+
+Install and run the local SearXNG search engine under `~/.ostwin/search-engine`.
+
+```bash
+ostwin search-engine install --start
+ostwin search-engine configure --port 6633 --bind 127.0.0.1
+ostwin search-engine start
+ostwin search-engine stop
+ostwin search-engine status
+ostwin search-engine settings
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `install` | Install the managed local SearXNG source, venv, and config |
+| `configure` | Write managed SearXNG settings |
+| `start` | Start the local search engine |
+| `stop` | Stop the local search engine |
+| `status` | Show runtime status |
+| `settings` | Print the managed settings file path and contents |
+
+If the settings file has not been created yet, `settings` prints the expected path and suggests `ostwin search-engine configure` instead of failing.
 
 ## ostwin memory
 
@@ -359,21 +410,6 @@ ostwin role <name> <sub> [args]   # Run a role subcommand
 
 Roles define their subcommands in `subcommands.json`. Each subcommand has an `invoke` template that is resolved and executed in the role's module root directory.
 
-## ostwin clone-role
-
-Clone a global role to a project-local directory for customization.
-
-```bash
-ostwin clone-role engineer
-ostwin clone-role engineer --project-dir /path/to/project
-```
-
-| Flag | Description |
-|------|-------------|
-| `--project-dir PATH` | Target project directory (default: current directory) |
-
-This is a shortcut for `ostwin role manager clone -RoleName <role> -ProjectDir <path>`.
-
 ## ostwin config
 
 View or update configuration.
@@ -410,14 +446,16 @@ Run test suites.
 ```bash
 ostwin test
 ostwin test --suite NAME --verbose
+ostwin test --path .agents/tests/plan/Start-Plan.Tests.ps1
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--suite NAME` | Run a specific test suite |
+| `--suite NAME` | Run a specific Pester suite (`all`, `cli`, `plan`, `roles`, `manager`, `workspace`, etc.) |
+| `--path PATH` | Run a specific test file or directory |
 | `--verbose` | Verbose output |
 
-Executes Pester tests across `lib/`, `channel/`, `war-rooms/`, `roles/`, and `plan/` modules.
+Executes Pester tests under `.agents/tests/` and `.agents/bin/tests/`.
 
 ## ostwin reload-env
 
@@ -435,13 +473,26 @@ macOS desktop automation shorthand. Delegates to the `macos-automation-engineer`
 
 ```bash
 ostwin mac app help
-ostwin mac window list
-ostwin mac capture screen
-ostwin mac type "Hello World"
-ostwin mac click 100 200
+ostwin mac app list
+ostwin mac window get-bounds Finder
+ostwin mac capture full /tmp/screen.png
+ostwin mac type text "Hello World"
+ostwin mac click help
 ```
 
 Available scripts: `app`, `window`, `click`, `type`, `capture`, `system`, `finder`, `axbridge`, `devtools`. Run `ostwin mac <script> help` for per-script usage.
+
+| Script | Safe/read-only commands | State-changing or permission-gated commands |
+|--------|--------------------------|---------------------------------------------|
+| `app` | `frontmost`, `list`, `is-running <AppName>` | `launch`, `kill` |
+| `window` | `get-bounds <AppName>` | `move`, `resize`, `set-bounds`, `minimize`, `restore`, `fullscreen` (Accessibility permission) |
+| `capture` | _None; help is safe_ | `full`, `region`, `window`, `clipboard` (Screen Recording permission) |
+| `click` | _None; help is safe_ | `click`, `double-click`, `right-click`, `move` (Accessibility permission for click actions) |
+| `type` | _None; help is safe_ | `text`, `key`, `combo`, `hold` (Accessibility permission) |
+| `system` | `volume-get`, `dark-mode-get`, `wifi-status`, `clipboard-get`, `default-read` | `volume-set`, `mute`, `dark-mode-set`, `clipboard-set`, `notifications`, `default-write` |
+| `finder` | `search`, `search-name`, `search-kind`, `preview`, `reveal`, `xattr-list`, `xattr-get` | `copy`, `trash`, `xattr-set`, `xattr-rm` |
+| `axbridge` | `window-list`, `read-focused`, `ui-tree` | `click-button`, `menu-click` (Accessibility permission) |
+| `devtools` | `brew-list`, `simctl-list`, `codesign-verify`, `keychain-list`, `xcrun` | `xcode-build`, `xcode-test`, `keychain-get` depending on target/tooling |
 
 This is a shortcut for `ostwin role macos-automation-engineer <script> <command>`.
 

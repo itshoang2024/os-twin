@@ -25,6 +25,7 @@ _IDLE_STATUSES = {"pending", "blocked", "unknown", "paused"}
 _TERMINAL_OR_IDLE_STATUSES = _TERMINAL_STATUSES | _IDLE_STATUSES
 _MAX_TAIL_BYTES = 512 * 1024
 _MAX_INCREMENTAL_READ_BYTES = 256 * 1024
+_MAX_FULL_LOG_BYTES = 10 * 1024 * 1024
 
 
 def _validate_identifier(value: str, field: str) -> str:
@@ -103,7 +104,7 @@ def _is_followable_log(status: str, path: Path) -> bool:
 
     Runtime progress can lag behind the process writing the per-room log.  In
     practice a room may still be marked ``pending`` while its
-    ``{plan_id}.{room_id}.log`` file is actively appended by the runner.  The
+    ``{plan_id}/{room_id}.log`` file is actively appended by the runner.  The
     default SSE stream therefore follows all non-terminal rooms that have a log
     file, plus rooms explicitly marked active by lifecycle status.
     """
@@ -114,7 +115,39 @@ def _is_followable_log(status: str, path: Path) -> bool:
 def _log_path(plan_id: str, room_id: str) -> Path:
     # The path is constructed only from validated identifiers; no user-provided
     # slashes are accepted, so this cannot escape PLANS_DIR.
+    return PLANS_DIR / plan_id / f"{room_id}.log"
+
+
+def _legacy_log_path(plan_id: str, room_id: str) -> Path:
     return PLANS_DIR / f"{plan_id}.{room_id}.log"
+
+
+def _ensure_plan_log_dir(plan_id: str) -> Path:
+    log_dir = PLANS_DIR / plan_id
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+
+def _resolve_log_path(plan_id: str, room_id: str) -> Path:
+    """Return the canonical nested log path, migrating old flat files on read.
+
+    Older runners wrote room logs as ``~/.ostwin/.agents/plans/{plan_id}.{room_id}.log``.
+    The dashboard now treats ``~/.ostwin/.agents/plans/{plan_id}/{room_id}.log`` as the
+    source of truth so plan artifacts are grouped together and a full-log UI can address
+    one stable file per room.  If only the legacy file exists, move it into the plan
+    folder; if both exist during a rollout, prefer the nested file and leave the legacy
+    file untouched to avoid racing an older writer.
+    """
+    canonical = _log_path(plan_id, room_id)
+    legacy = _legacy_log_path(plan_id, room_id)
+    if canonical.exists() or not legacy.exists():
+        return canonical
+    try:
+        _ensure_plan_log_dir(plan_id)
+        legacy.replace(canonical)
+    except OSError:
+        return legacy
+    return canonical
 
 
 def _source_public_payload(source: dict[str, Any]) -> dict[str, Any]:
@@ -171,13 +204,21 @@ def _build_log_sources(
                 "status": _room_status(room_dir, rooms_by_id.get(room_id, {}).get("status", "unknown")),
             }
 
-    # The canonical stream source is now ~/.ostwin/.agents/plans/{plan_id}.{room_id}.log.
+    # The canonical stream source is now ~/.ostwin/.agents/plans/{plan_id}/{room_id}.log.
     # Discovering log files directly makes ``tail -f`` behavior work even when
     # progress.json/status files are stale or a room has not been projected yet.
-    for log_file in sorted(PLANS_DIR.glob(f"{plan_id}.room-*.log")):
-        prefix = f"{plan_id}."
-        suffix = ".log"
-        room_id = log_file.name[len(prefix):-len(suffix)]
+    plan_log_dir = PLANS_DIR / plan_id
+    discovered_logs = list(plan_log_dir.glob("room-*.log")) if plan_log_dir.exists() else []
+    # Backward compatibility: discover and lazily migrate flat log files created
+    # before the nested plan log directory became canonical.
+    discovered_logs.extend(PLANS_DIR.glob(f"{plan_id}.room-*.log"))
+    for log_file in sorted(discovered_logs):
+        if log_file.parent == plan_log_dir:
+            room_id = log_file.stem
+        else:
+            prefix = f"{plan_id}."
+            suffix = ".log"
+            room_id = log_file.name[len(prefix):-len(suffix)]
         if not room_id or not _SAFE_IDENTIFIER_RE.match(room_id):
             continue
         if room_id in excluded_room_ids:
@@ -196,7 +237,7 @@ def _build_log_sources(
         if room_filter and room_id not in room_filter:
             continue
         status = canonical_room_status(entry.get("status"))
-        path = _log_path(plan_id, room_id)
+        path = _resolve_log_path(plan_id, room_id)
         exists = path.exists()
         size = path.stat().st_size if exists else 0
         active = _is_active_status(status)
@@ -258,9 +299,56 @@ async def list_plan_logs(
     sources = _build_log_sources(plan_id, active_only=active_only, room_filter=room_filter)
     return {
         "plan_id": plan_id,
-        "logs_dir": str(PLANS_DIR),
+        "logs_dir": str(_ensure_plan_log_dir(plan_id)),
         "rooms": [_source_public_payload(source) for source in sources],
         "count": len(sources),
+    }
+
+
+@router.get("/api/plans/{plan_id}/logs/{room_id}/content")
+async def get_plan_room_log(
+    plan_id: str,
+    room_id: str,
+    strip_ansi: bool = Query(True),
+    max_bytes: int = Query(_MAX_FULL_LOG_BYTES, ge=1024, le=_MAX_FULL_LOG_BYTES),
+    user: dict = Depends(get_current_user),
+):
+    """Return a room's full log content for the expanded reader view.
+
+    The endpoint intentionally caps the response at 10 MiB to protect the UI and
+    API worker.  When a file is larger, it returns the newest ``max_bytes`` and
+    marks the payload as truncated so users still see the current failure/output
+    context without loading an unbounded file into the browser.
+    """
+    _validate_identifier(plan_id, "plan_id")
+    _validate_identifier(room_id, "room_id")
+    sources = _build_log_sources(plan_id, active_only=False, room_filter={room_id})
+    if not sources:
+        raise HTTPException(status_code=404, detail="Log source not found")
+    source = sources[0]
+    path: Path = source["path"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Log file not found")
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            start = max(0, size - max_bytes)
+            handle.seek(start)
+            content = handle.read(max_bytes).decode("utf-8", errors="replace")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read log: {exc}") from exc
+    if strip_ansi:
+        content = _ANSI_RE.sub("", content)
+    return {
+        "plan_id": plan_id,
+        "room_id": room_id,
+        "epic_ref": source.get("epic_ref"),
+        "status": source.get("status"),
+        "path": str(path),
+        "size": size,
+        "truncated": size > max_bytes,
+        "content": content,
+        "updated_at": _utc_from_mtime(path),
     }
 
 

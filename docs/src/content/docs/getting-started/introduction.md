@@ -19,6 +19,14 @@ Building with AI agents today means fighting three unsolved problems:
 
 Most multi-agent systems treat agents as long-running processes with hardcoded capabilities. OSTwin inverts this: agents are **ephemeral sessions** assembled on demand from composable building blocks. The building blocks are portable, the sessions are disposable, and the coordination is filesystem-native.
 
+The composition chain is the heart of the design:
+
+```text
+Plan -> Epics -> War-Rooms -> Roles -> Skills -> Artifacts
+```
+
+A plan defines the outcome. Epics divide that outcome into executable promises. Each epic becomes one war-room. The war-room launches the roles named by the epic, and each role receives only the skills that make sense for that room. Downstream epics inherit useful outputs through the DAG and shared memory, but they still run with their own role instances, tools, channel, lifecycle, and skill set.
+
 ## Three Axes of Agent Identity
 
 OSTwin defines every agent through three orthogonal axes. This is the core abstraction that makes the system composable:
@@ -42,7 +50,7 @@ OSTwin defines every agent through three orthogonal axes. This is the core abstr
                             │   isolated per war-room
 ```
 
-**Identity** is stable — an architect role always reasons like an architect. **Expertise** is swappable — the same architect can load Unity skills or web skills. **Execution** is isolated — each war-room gets its own tool sandbox.
+**Identity** is stable — an architect role always reasons like an architect. **Expertise** is swappable — the same architect can load Unity skills or web skills. **Execution** is isolated — each war-room gets its own filesystem boundary, lifecycle, message channel, memory view, and tool sandbox.
 
 ## Core Flow
 
@@ -53,18 +61,33 @@ PLAN.md → Parse → DAG → Schedule Waves → Spawn War-Rooms → Execute →
                    │         │                  │
                    │    Topological sort    Each room gets:
                    │    into parallel       - channel.jsonl
-                   │    waves               - progress.json
+                   │    waves               - skills/
                    │                        - status file
-                   ▼                        - memory ledger
+                   ▼                        - artifacts/
               Dependencies                  - lifecycle.json
-              between epics
+              between epics                 - optional worktree
 ```
 
-1. The **Engine** (`Engine.ps1`) parses your `PLAN.md` into structured epics
-2. A **DAG** resolves dependencies between epics and sorts them into execution waves
-3. Each epic gets a **War-Room** — an isolated directory with its own coordination files
-4. **Agents** are composed at runtime (Role + Skills + MCP tools) and execute inside their war-room
-5. A **lifecycle state machine** governs each room's progress: `developing → review → fixing → passed/failed`
+1. The **Engine** parses your `PLAN.md` into structured epics.
+2. A **DAG** resolves the logical flow between epics and sorts them into execution waves.
+3. Each epic gets a **War-Room**: an isolated team room with its own channel, lifecycle, artifacts, memory view, and optional Git worktree.
+4. **Agents** are composed at runtime from roles, relevant skills, and scoped MCP tools, then execute inside their war-room.
+5. A **lifecycle state machine** governs each room's progress: work, review, retry, triage, and final `done` or `failed` outcome.
+
+## Flow Concepts
+
+The DAG is the plan's delivery map. It is not just a visual dependency chart; it tells the manager which epics can run in parallel, which epics must wait for upstream outputs, and which downstream rooms should be blocked if an upstream dependency cannot be completed. A DAG edge means "this room needs that room's result before it can safely start."
+
+An epic is a team, not a single prompt. When OSTwin starts an epic, it creates a war-room where the assigned roles collaborate under the manager. The engineer may implement, QA may review, an architect or specialist may advise, and the manager coordinates the handoffs. When roles disagree or a review fails, the manager routes the conflict through retry or triage, weighs the evidence in the room channel, and decides whether to fix, revise, block descendants, or continue.
+
+The flow also keeps code and assets inside the delivery path. In room-worktree isolation, each epic works in its own Git worktree. When a room reaches a successful terminal outcome, its code changes, generated assets, research reports, and other durable artifacts can be committed on that room branch and integrated before dependent epics begin. Downstream teams then inherit real repository state, not just a chat summary.
+
+During epic ramp-up, OSTwin resolves the team's expertise before work begins. Role defaults, plan-level skill references, room-level needs, and discovered task keywords are merged into a skill set for that room. The agent sees a lean skill index first, then loads full skill instructions on demand, so a backend epic, UI epic, audit epic, or deep-research epic can all use the same role identity with different runtime expertise.
+
+Because role identity and skill expertise are separate, two epics can use the
+same role differently. `engineer` can be a backend implementer in EPIC-002, a
+frontend maintainer in EPIC-003, and a release fixer in EPIC-004 simply by
+changing the skills resolved for that room.
 
 ## Key Design Decisions
 
@@ -73,7 +96,7 @@ Every design decision in OSTwin optimizes for one thing: **letting AI agents col
 :::
 
 - **Filesystem coordination** — JSONL channels, JSON status files, markdown plans. No database required. Git-friendly. Every agent can read/write with basic file I/O.
-- **Scale on depth, not width** — Instead of many shallow agents, OSTwin uses fewer agents with deep skill injection. Quality over quantity.
+- **Scale on depth, not width** — Instead of many shallow agents, OSTwin uses fewer stable roles with deeper, room-specific skill resolution.
 - **Config over code** — Agents are defined by `role.json` + `ROLE.md` + `SKILL.md`, not Python classes. Non-engineers can modify agent behavior.
 - **Ephemeral agents** — No persistent agent processes. Each session is composed fresh from its role, skills, and tools. No state leaks between runs.
 
@@ -81,7 +104,7 @@ Every design decision in OSTwin optimizes for one thing: **letting AI agents col
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| **Engine** | PowerShell | Parses plans, builds DAG, orchestrates war-rooms, manages lifecycle |
+| **Engine** | Local orchestration runtime | Parses plans, builds DAG, orchestrates war-rooms, manages lifecycle |
 | **Dashboard** | FastAPI + Next.js | Real-time monitoring, plan status, war-room inspection, memory search |
 | **Bot** | TypeScript | Conversational interface for plan management and agent interaction |
 | **MCP Servers** | Python (FastAPI) | Tool providers scoped per war-room — filesystem, memory, channel ops |
@@ -103,7 +126,7 @@ Every design decision in OSTwin optimizes for one thing: **letting AI agents col
 - **Solo developers** — get an entire engineering team (architect, engineer, QA) from a single plan file
 
 :::tip
-The fastest way to evaluate OSTwin is the [Quick Start](/getting-started/quick-start/). You'll have a running plan in under 5 minutes.
+The fastest way to start is the [Quick Start](/getting-started/quick-start/). It gets you from install to `plan.md`, then shows the create/run flow.
 :::
 
 ## Next Steps

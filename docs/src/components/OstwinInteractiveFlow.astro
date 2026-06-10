@@ -1,0 +1,645 @@
+---
+const flowSteps = [
+  {
+    id: 'plan',
+    index: '01',
+    label: 'Plan',
+    title: 'Plan as contract',
+    summary:
+      'A markdown plan captures the goal, provider settings, epics, dependencies, acceptance criteria, and the definition of done.',
+    automation:
+      'OSTwin reads the plan as structured intent instead of treating it as one long prompt.',
+    composition:
+      'The plan decides which epics exist and what each room must prove before it can pass.',
+    output: 'PLAN.md -> parsed epics',
+  },
+  {
+    id: 'dag',
+    index: '02',
+    label: 'DAG',
+    title: 'Dependency graph',
+    summary:
+      'The engine turns epics into a DAG, resolves dependencies, and schedules independent work into executable waves.',
+    automation:
+      'Parallel work is discovered from the graph, while blocked epics wait for upstream artifacts.',
+    composition:
+      'Each epic keeps its own contract, roles, and skill needs instead of sharing one global context.',
+    output: 'DAG.json + execution waves',
+  },
+  {
+    id: 'room',
+    index: '03',
+    label: 'War-room',
+    title: 'Isolated execution room',
+    summary:
+      'Every epic receives a war-room with its own channel, lifecycle state, artifacts, memory view, and scoped runtime files.',
+    automation:
+      'The room becomes the unit of execution, observation, retry, and review.',
+    composition:
+      'Isolation lets many composed agent sessions run without leaking context or tool state across epics.',
+    output: '.agents/war-rooms/EPIC-*',
+  },
+  {
+    id: 'role',
+    index: '04',
+    label: 'Roles',
+    title: 'Stable agent identity',
+    summary:
+      'A role supplies responsibility, constraints, communication style, and quality gates through role.json and ROLE.md.',
+    automation:
+      'The runner can invoke architect, engineer, QA, reporter, or manager behavior without custom agent code.',
+    composition:
+      'Role identity stays stable while each room changes the skills and tools attached to that identity.',
+    output: 'Role + room contract',
+  },
+  {
+    id: 'skill',
+    index: '05',
+    label: 'Skills',
+    title: 'Portable expertise',
+    summary:
+      'Skills are focused SKILL.md workflows that load only when the epic and role need that expertise.',
+    automation:
+      'OSTwin assembles a mission-specific prompt bundle instead of creating a new hardcoded agent for every task.',
+    composition:
+      'The same engineer can become a frontend implementer, release fixer, or test writer by changing the skill pack.',
+    output: 'Resolved skill bundle',
+  },
+  {
+    id: 'tools',
+    index: '06',
+    label: 'Tools',
+    title: 'Scoped MCP and memory',
+    summary:
+      'MCP servers expose filesystem, memory, channel, and knowledge tools through room-scoped boundaries.',
+    automation:
+      'Agents receive the tools needed to act, report, and query context while blast radius stays bounded.',
+    composition:
+      'Execution is role identity plus skill expertise plus the exact tool surface allowed in that room.',
+    output: 'MCP tools + ledger view',
+  },
+  {
+    id: 'artifact',
+    index: '07',
+    label: 'Artifacts',
+    title: 'Reviewable output',
+    summary:
+      'Agents write code, reports, test notes, status messages, and handoff artifacts back into the room.',
+    automation:
+      'Lifecycle transitions turn work into review, fixing, passed, or failed states that the dashboard can inspect.',
+    composition:
+      'Downstream epics consume useful artifacts and memory without collapsing room-level isolation.',
+    output: 'Artifacts + lifecycle state',
+  },
+];
+
+const formulaParts = ['Role identity', 'Skill pack', 'Scoped MCP tools', 'War-room memory'];
+---
+
+<section class="interactive-flow" data-ostwin-flow aria-labelledby="interactive-flow-title">
+  <div class="interactive-flow__intro">
+    <div>
+      <p class="section-kicker">Interactive runtime map</p>
+      <h3 id="interactive-flow-title">How OSTwin automates composable agent work</h3>
+    </div>
+    <p>
+      Click each node to see how a plan becomes isolated rooms, then how each room composes roles, skills, tools, and memory into a disposable agent session.
+    </p>
+  </div>
+
+  <div class="interactive-flow__formula" aria-label="OSTwin composition formula">
+    <span>Agent session</span>
+    {
+      formulaParts.map((part, index) => (
+        <>
+          <strong>{part}</strong>
+          {index < formulaParts.length - 1 && <em>+</em>}
+        </>
+      ))
+    }
+  </div>
+
+  <div class="interactive-flow__surface">
+    <div class="interactive-flow__rail" role="tablist" aria-label="OSTwin automation flow">
+      {
+        flowSteps.map((step, index) => (
+          <button
+            type="button"
+            class="flow-node"
+            data-flow-step={step.id}
+            role="tab"
+            aria-selected={index === 0 ? 'true' : 'false'}
+            aria-controls={`flow-panel-${step.id}`}
+            id={`flow-tab-${step.id}`}
+          >
+            <span>{step.index}</span>
+            <strong>{step.label}</strong>
+            <small>{step.output}</small>
+          </button>
+        ))
+      }
+    </div>
+
+    <div class="interactive-flow__details">
+      <div class="flow-pulse" aria-hidden="true">
+        <span data-flow-pulse></span>
+      </div>
+      {
+        flowSteps.map((step, index) => (
+          <article
+            class="flow-panel"
+            id={`flow-panel-${step.id}`}
+            data-flow-panel={step.id}
+            role="tabpanel"
+            aria-labelledby={`flow-tab-${step.id}`}
+            hidden={index !== 0}
+          >
+            <div class="flow-panel__label">{step.index} / {step.label}</div>
+            <h4>{step.title}</h4>
+            <p>{step.summary}</p>
+            <dl>
+              <div>
+                <dt>Automation</dt>
+                <dd>{step.automation}</dd>
+              </div>
+              <div>
+                <dt>Composition</dt>
+                <dd>{step.composition}</dd>
+              </div>
+            </dl>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+
+  <div class="interactive-flow__controls">
+    <button type="button" class="flow-play" data-flow-play aria-pressed="false">
+      Play flow
+    </button>
+    <span data-flow-status aria-live="polite">Step 01 active: Plan</span>
+  </div>
+</section>
+
+<script>
+  const roots = document.querySelectorAll('[data-ostwin-flow]');
+
+  roots.forEach((root) => {
+    const nodes = Array.from(root.querySelectorAll('[data-flow-step]'));
+    const panels = Array.from(root.querySelectorAll('[data-flow-panel]'));
+    const playButton = root.querySelector('[data-flow-play]');
+    const status = root.querySelector('[data-flow-status]');
+    const pulse = root.querySelector('[data-flow-pulse]');
+    let activeIndex = 0;
+    let timer = 0;
+
+    const activate = (nextIndex) => {
+      activeIndex = (nextIndex + nodes.length) % nodes.length;
+      const activeNode = nodes[activeIndex];
+      const activeId = activeNode?.getAttribute('data-flow-step');
+      const label = activeNode?.querySelector('strong')?.textContent || '';
+      const step = activeNode?.querySelector('span')?.textContent || '';
+
+      nodes.forEach((node, index) => {
+        const selected = index === activeIndex;
+        node.setAttribute('aria-selected', String(selected));
+        node.toggleAttribute('data-active', selected);
+      });
+
+      panels.forEach((panel) => {
+        panel.toggleAttribute('hidden', panel.getAttribute('data-flow-panel') !== activeId);
+      });
+
+      if (status) status.textContent = `Step ${step} active: ${label}`;
+      if (pulse) pulse.style.setProperty('--flow-progress', String(activeIndex));
+    };
+
+    const stopPlayback = () => {
+      window.clearInterval(timer);
+      timer = 0;
+      playButton?.setAttribute('aria-pressed', 'false');
+      if (playButton) playButton.textContent = 'Play flow';
+    };
+
+    const startPlayback = () => {
+      activate(activeIndex + 1);
+      timer = window.setInterval(() => activate(activeIndex + 1), 1900);
+      playButton?.setAttribute('aria-pressed', 'true');
+      if (playButton) playButton.textContent = 'Pause flow';
+    };
+
+    nodes.forEach((node, index) => {
+      node.addEventListener('click', () => {
+        stopPlayback();
+        activate(index);
+      });
+    });
+
+    playButton?.addEventListener('click', () => {
+      if (timer) {
+        stopPlayback();
+      } else {
+        startPlayback();
+      }
+    });
+
+    root.addEventListener('keydown', (event) => {
+      if (!(event instanceof KeyboardEvent)) return;
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      event.preventDefault();
+      stopPlayback();
+      activate(activeIndex + (event.key === 'ArrowRight' ? 1 : -1));
+      nodes[activeIndex]?.focus();
+    });
+
+    activate(0);
+  });
+</script>
+
+<style>
+  .interactive-flow {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .interactive-flow__intro {
+    display: grid;
+    grid-template-columns: minmax(0, 0.72fr) minmax(16rem, 1fr);
+    gap: 1rem;
+    align-items: end;
+  }
+
+  .interactive-flow__intro h3 {
+    margin: 0;
+    max-width: 13ch;
+    color: var(--sl-color-gray-1);
+    font-size: 2rem;
+    line-height: 1.04;
+    letter-spacing: 0;
+  }
+
+  .interactive-flow__intro p:not(.section-kicker) {
+    margin: 0;
+    max-width: 46rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.75;
+  }
+
+  .interactive-flow__formula {
+    display: flex;
+    gap: 0.55rem;
+    align-items: center;
+    overflow-x: auto;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.2);
+    border-radius: 8px;
+    padding: 0.75rem;
+    color: #eaf8ff;
+    background: rgba(12, 16, 22, 0.86);
+    scrollbar-width: none;
+  }
+
+  .interactive-flow__formula span,
+  .interactive-flow__formula strong,
+  .interactive-flow__formula em {
+    flex: 0 0 auto;
+  }
+
+  .interactive-flow__formula span {
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.22);
+    border-radius: 8px;
+    padding: 0.45rem 0.6rem;
+    color: rgba(220, 246, 255, 0.72);
+    font-family: var(--sl-font-mono);
+    font-size: 0.75rem;
+  }
+
+  .interactive-flow__formula strong {
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.22);
+    border-radius: 8px;
+    padding: 0.45rem 0.6rem;
+    color: #f3fbff;
+    background: rgba(var(--ostwin-cyan-rgb), 0.08);
+    font-size: 0.85rem;
+  }
+
+  .interactive-flow__formula em {
+    color: rgba(var(--ostwin-acid-rgb), 0.5);
+    font-family: var(--sl-font-mono);
+    font-style: normal;
+  }
+
+  .interactive-flow__surface {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.22);
+    border-radius: 8px;
+    padding: 1rem;
+    background:
+      linear-gradient(rgba(var(--ostwin-cyan-rgb), 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--ostwin-acid-rgb), 0.05) 1px, transparent 1px),
+      rgba(12, 16, 22, 0.86);
+    background-size: 34px 34px;
+    box-shadow: 0 26px 60px rgba(3, 8, 14, 0.28);
+  }
+
+  .interactive-flow__rail {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(6.5rem, 1fr));
+    gap: 0.55rem;
+    min-width: 0;
+    overflow: visible;
+    padding-bottom: 0.25rem;
+    scrollbar-color: rgba(var(--ostwin-cyan-rgb), 0.32) transparent;
+  }
+
+  .flow-node {
+    position: relative;
+    display: grid;
+    align-content: space-between;
+    gap: 0.7rem;
+    min-height: 8.8rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.18);
+    border-radius: 8px;
+    padding: 0.9rem;
+    color: #f3fbff;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+      rgba(13, 18, 26, 0.84);
+    cursor: pointer;
+    text-align: left;
+    transition:
+      border-color 260ms cubic-bezier(0.32, 0.72, 0, 1),
+      background-color 260ms cubic-bezier(0.32, 0.72, 0, 1),
+      transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .flow-node::after {
+    position: absolute;
+    inset: 0.55rem 0.55rem auto auto;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 1px solid rgba(var(--ostwin-amber-rgb), 0.24);
+    border-radius: 8px;
+    content: '';
+    transform: rotate(8deg);
+    transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .flow-node::before {
+    position: absolute;
+    top: 50%;
+    right: -0.58rem;
+    width: 0.58rem;
+    height: 1px;
+    content: '';
+    background: rgba(var(--ostwin-cyan-rgb), 0.28);
+    transform: translateY(-50%);
+  }
+
+  .flow-node:last-child::before {
+    display: none;
+  }
+
+  .flow-node:hover {
+    border-color: rgba(var(--ostwin-cyan-rgb), 0.46);
+    transform: translateY(-3px);
+  }
+
+  .flow-node:active {
+    transform: translateY(1px) scale(0.995);
+  }
+
+  .flow-node[data-active] {
+    border-color: rgba(var(--ostwin-acid-rgb), 0.76);
+    background:
+      linear-gradient(180deg, rgba(var(--ostwin-cyan-rgb), 0.2), transparent),
+      linear-gradient(120deg, rgba(var(--ostwin-acid-rgb), 0.12), transparent 60%),
+      rgba(13, 24, 32, 0.94);
+  }
+
+  .flow-node[data-active]::after {
+    transform: rotate(0deg) scale(1.08);
+  }
+
+  .flow-node[data-active]::before {
+    background: rgba(var(--ostwin-acid-rgb), 0.76);
+  }
+
+  .flow-node span,
+  .flow-node small {
+    color: rgba(220, 246, 255, 0.64);
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .flow-node strong {
+    color: #f3fbff;
+    font-size: 1rem;
+    line-height: 1.1;
+  }
+
+  .interactive-flow__details {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.18);
+    border-radius: 8px;
+    background: rgba(9, 13, 20, 0.9);
+  }
+
+  .flow-pulse {
+    position: relative;
+    height: 0.45rem;
+    overflow: hidden;
+    background: rgba(var(--ostwin-cyan-rgb), 0.08);
+  }
+
+  .flow-pulse span {
+    --flow-progress: 0;
+    display: block;
+    width: calc(100% / 7);
+    height: 100%;
+    background: rgb(var(--ostwin-acid-rgb));
+    transform: translate3d(calc(var(--flow-progress) * 100%), 0, 0);
+    transition: transform 360ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .flow-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(18rem, 1.2fr);
+    gap: 1rem 1.25rem;
+    padding: 1rem;
+    animation: flow-panel-in 360ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .flow-panel[hidden] {
+    display: none;
+  }
+
+  .flow-panel__label {
+    grid-column: 1 / -1;
+    width: fit-content;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.22);
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    color: rgba(220, 246, 255, 0.74);
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+  }
+
+  .flow-panel h4 {
+    grid-column: 1;
+    margin: 0;
+    color: #f3fbff;
+    font-size: 1.45rem;
+    line-height: 1.12;
+  }
+
+  .flow-panel p {
+    grid-column: 1;
+    margin: 0;
+    color: rgba(220, 246, 255, 0.72);
+    line-height: 1.7;
+  }
+
+  .flow-panel dl {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+  }
+
+  .flow-panel dl > div {
+    display: grid;
+    gap: 0.35rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: rgba(var(--ostwin-cyan-rgb), 0.06);
+  }
+
+  .flow-panel dt {
+    color: #eaf8ff;
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .flow-panel dd {
+    margin: 0;
+    color: rgba(243, 251, 255, 0.82);
+    line-height: 1.6;
+  }
+
+  .interactive-flow__controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .flow-play {
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.32);
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    color: #101318;
+    background: rgb(var(--ostwin-acid-rgb));
+    cursor: pointer;
+    font-weight: 700;
+    transition:
+      transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+      background-color 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .flow-play:hover {
+    background: #cbff68;
+    transform: translateY(-2px);
+  }
+
+  .flow-play:active {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .interactive-flow__controls span {
+    color: var(--sl-color-gray-3);
+    font-family: var(--sl-font-mono);
+    font-size: 0.78rem;
+  }
+
+  @keyframes flow-panel-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 0.5rem, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @media (max-width: 72rem) {
+    .interactive-flow__intro,
+    .interactive-flow__surface {
+      grid-template-columns: 1fr;
+    }
+
+    .interactive-flow__rail {
+      grid-template-columns: repeat(7, minmax(9rem, 1fr));
+      overflow-x: auto;
+    }
+
+    .flow-node {
+      min-height: 9.5rem;
+    }
+
+    .flow-node::before {
+      display: none;
+    }
+
+    .flow-panel {
+      grid-template-columns: 1fr;
+    }
+
+    .flow-panel h4,
+    .flow-panel p,
+    .flow-panel dl {
+      grid-column: auto;
+      grid-row: auto;
+    }
+  }
+
+  @media (max-width: 52rem) {
+    .interactive-flow__intro h3 {
+      font-size: 1.8rem;
+    }
+
+    .interactive-flow__surface {
+      padding: 0.75rem;
+    }
+
+    .interactive-flow__rail {
+      grid-template-columns: 1fr;
+      overflow: visible;
+    }
+
+    .flow-node {
+      min-height: auto;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flow-panel {
+      animation: none;
+    }
+
+    .flow-pulse span,
+    .flow-node,
+    .flow-play {
+      transition-duration: 1ms;
+    }
+  }
+</style>

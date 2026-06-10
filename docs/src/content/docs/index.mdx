@@ -3,128 +3,179 @@ title: OSTwin
 description: The role operating system for composable AI engineering teams.
 template: splash
 hero:
-  title: OSTwin
-  tagline: The role operating system for composable AI engineering teams.
+  title: |
+    <span class="hero-kicker">Runtime documentation</span>
+    <span>Compose AI teams from plans, roles, and isolated rooms.</span>
+  tagline: >-
+    OSTwin turns a markdown plan into coordinated engineering work: epics become war-rooms, roles load the right skills, and every artifact leaves a trace you can inspect.
+  image:
+    html: |
+      <div class="hero-command-map" aria-hidden="true">
+        <div class="hero-command-map__chrome">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="hero-command-map__body">
+          <div class="hero-command-map__row">
+            <span>PLAN</span>
+            <strong>qualification-form.md</strong>
+          </div>
+          <div class="hero-command-map__route">
+            <div>
+              <span>EPIC-001</span>
+              <strong>engineer</strong>
+            </div>
+            <div>
+              <span>EPIC-002</span>
+              <strong>qa</strong>
+            </div>
+            <div>
+              <span>EPIC-003</span>
+              <strong>release</strong>
+            </div>
+          </div>
+          <div class="hero-command-map__ledger">
+            <span>room/channel.jsonl</span>
+            <span>memory/ledger.jsonl</span>
+            <span>artifacts/report.md</span>
+          </div>
+        </div>
+      </div>
   actions:
-    - text: Get Started
-      link: /getting-started/introduction/
+    - text: Start with Quick Start
+      link: /getting-started/quick-start/
       icon: right-arrow
       variant: primary
-    - text: View on GitHub
-      link: https://github.com/igot-ai/os-twin
-      icon: external
+    - text: Read the architecture
+      link: /concepts/architecture/
+      icon: open-book
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import OstwinInteractiveFlow from '../../components/OstwinInteractiveFlow.astro';
 
-<iframe src="/ostwin-flow-light.html" style="width: 100%; height: 420px; border: none; overflow: hidden; margin: 2rem 0; border-radius: 12px; box-shadow: var(--sl-shadow-md);" scrolling="no"></iframe>
+<div className="ostwin-home">
+  <section className="home-section home-section--map" aria-labelledby="home-map-title">
+    <div className="section-copy">
+      <p className="section-kicker">The operating model</p>
+      <h2 id="home-map-title">A plan is not a prompt. It is a work graph.</h2>
+      <div className="section-text">
+        OSTwin keeps the orchestration surface small: plans define the goal and dependency graph, epics become isolated war-rooms, and roles receive only the skills and scoped MCP tools needed for that room.
+      </div>
+    </div>
+    <OstwinInteractiveFlow />
+  </section>
 
-## How It Works
+  <section className="home-intent-grid" aria-label="Primary documentation paths">
+    <a className="intent-card intent-card--large" href="/getting-started/installation/">
+      <span className="intent-card__index">01</span>
+      <span className="intent-card__label">Install</span>
+      <strong>Get the CLI running and create your first local runtime.</strong>
+      <span className="intent-card__meta">Installer, shell setup, local paths</span>
+    </a>
+    <a className="intent-card" href="/getting-started/first-plan/">
+      <span className="intent-card__index">02</span>
+      <span className="intent-card__label">Plan</span>
+      <strong>Write a plan file that OSTwin can decompose into epics.</strong>
+      <span className="intent-card__meta">Goals, tasks, acceptance criteria</span>
+    </a>
+    <a className="intent-card" href="/guides/dashboard-setup/">
+      <span className="intent-card__index">03</span>
+      <span className="intent-card__label">Observe</span>
+      <strong>Use the dashboard to inspect DAGs, rooms, and live logs.</strong>
+      <span className="intent-card__meta">Runtime view, plan status, channels</span>
+    </a>
+    <a className="intent-card intent-card--dark" href="/reference/cli-commands/">
+      <span className="intent-card__index">04</span>
+      <span className="intent-card__label">Operate</span>
+      <strong>Run the command surface with predictable inputs and outputs.</strong>
+      <span className="intent-card__meta">CLI inventory and reference</span>
+    </a>
+  </section>
 
-OSTwin turns a markdown plan into a fully-orchestrated multi-agent execution. No custom agent code required.
+  <section className="home-section home-section--composition" aria-labelledby="composition-title">
+    <div className="section-copy">
+      <p className="section-kicker">Composition chain</p>
+      <h2 id="composition-title">Agents stay disposable. Capabilities stay portable.</h2>
+      <div className="section-text">
+        The docs are organized around the same chain the runtime uses. Follow it left to right when you are learning the system, then jump directly into the reference pages when you need exact contracts.
+      </div>
+    </div>
+    <div className="composition-rail" aria-label="OSTwin composition chain">
+      <a href="/concepts/plans-epics-dag/">
+        <span>Plan</span>
+        <strong>Dependency graph</strong>
+      </a>
+      <a href="/concepts/war-rooms/">
+        <span>War-room</span>
+        <strong>Execution boundary</strong>
+      </a>
+      <a href="/concepts/role-pattern/">
+        <span>Role</span>
+        <strong>Stable identity</strong>
+      </a>
+      <a href="/concepts/skills/">
+        <span>Skill</span>
+        <strong>Loaded expertise</strong>
+      </a>
+      <a href="/concepts/mcp-isolation/">
+        <span>MCP</span>
+        <strong>Scoped tools</strong>
+      </a>
+      <a href="/concepts/memory/">
+        <span>Memory</span>
+        <strong>Bounded context</strong>
+      </a>
+    </div>
+  </section>
 
-## Three Axes of Agent Identity
+  <section className="home-console" aria-labelledby="quickstart-title">
+    <div className="console-copy">
+      <p className="section-kicker">Quick start</p>
+      <h2 id="quickstart-title">Three commands, then the work has a room.</h2>
+      <div className="section-text">
+        Start small: install the CLI, create a plan, and run it. From there, the documentation branches into plan design, role design, dashboard setup, and runtime reference.
+      </div>
+      <a className="text-link" href="/getting-started/quick-start/">Open the guided quick start</a>
+    </div>
+    <div className="console-window" aria-label="OSTwin quick start commands">
+      <div className="console-window__bar">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <pre><code><span className="console-line">$ curl -fsSL https:&#47;&#47;twin.igot.ai&#47;installer.sh | bash</span>
+<span className="console-line">$ ostwin plan create plan.md</span>
+<span className="console-line">$ ostwin run f055e125de07</span>
+<span className="console-output">room: .agents/war-rooms/EPIC-001</span>
+<span className="console-output">channel: channel.jsonl</span>
+<span className="console-output">state: developing</span></code></pre>
+    </div>
+  </section>
 
-Every agent in OSTwin is defined by three orthogonal axes. This is what makes agents composable rather than monolithic.
-
-<CardGrid>
-  <Card title="Identity (WHO)" icon="pencil">
-    Defined by `role.json` + `ROLE.md`. Sets personality, constraints, and communication style. An architect thinks differently than an engineer.
-  </Card>
-  <Card title="Expertise (WHAT)" icon="open-book">
-    Loaded from `SKILL.md` files on demand. Domain knowledge injected into context only when needed. Skills are portable across roles.
-  </Card>
-  <Card title="Execution (HOW)" icon="rocket">
-    MCP servers provide isolated tool access. Each war-room gets its own tool boundary. No agent can reach outside its sandbox.
-  </Card>
-</CardGrid>
-
-## Five Architectural Pillars
-
-<CardGrid>
-  <LinkCard
-    title="Role Pattern"
-    description="No persistent agent processes. Agents are ephemeral sessions composed at runtime from Role + Skills + Tools."
-    href="/concepts/role/"
-  />
-  <LinkCard
-    title="Composable Skills"
-    description="Modular SKILL.md files that inject domain expertise into any agent session. Portable, testable, versionable."
-    href="/concepts/skills/"
-  />
-  <LinkCard
-    title="MCP Isolation"
-    description="Each war-room gets dedicated MCP server instances. Tool access is scoped. No cross-contamination between execution contexts."
-    href="/concepts/mcp-isolation/"
-  />
-  <LinkCard
-    title="War-Rooms"
-    description="Isolated execution environments for each epic. Own filesystem, channel, memory, lifecycle. The unit of parallelism."
-    href="/concepts/war-rooms/"
-  />
-  <LinkCard
-    title="Layered Memory"
-    description="Three-tier memory: session (context window), war-room (shared ledger), global (cross-room). Publish/query/search API."
-    href="/concepts/memory/"
-  />
-</CardGrid>
-
-## Quick Start
-
-Write a plan, run it, watch agents collaborate:
-
-```bash
-# 1. Install OSTwin
-curl -fsSL https://twin.igot.ai/installer.sh | bash
-
-# Or from a local checkout:
-git clone https://github.com/igot-ai/os-twin.git
-cd os-twin && .agents/install.sh
-
-# 2. Set your API key
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# 3. Write a plan
-cat > my-plan/PLAN.md << 'EOF'
-# My First Plan
-## Config
-provider: anthropic
-model: claude-sonnet-4-20250514
-## Goal
-Build a REST API with authentication and tests.
-## Epic 1: Auth System
-### Definition of Done
-- JWT auth working with login/register endpoints
-### Tasks
-- TASK-001: Implement user model and auth routes
-EOF
-
-# 4. Run it
-pwsh Engine.ps1 -PlanPath ./my-plan/PLAN.md
-```
-
-## Explore the Docs
-
-<CardGrid>
-  <LinkCard
-    title="Installation"
-    description="Get OSTwin running locally in under 5 minutes."
-    href="/getting-started/installation/"
-  />
-  <LinkCard
-    title="Quick Start"
-    description="Run your first plan and watch agents collaborate."
-    href="/getting-started/quick-start/"
-  />
-  <LinkCard
-    title="Dev Mode"
-    description="Set up the full development environment with dashboard and live monitoring."
-    href="/getting-started/dev-mode/"
-  />
-  <LinkCard
-    title="Architecture"
-    description="Deep dive into the engine internals, DAG execution, and coordination model."
-    href="/internals/architecture/"
-  />
-</CardGrid>
+  <section className="home-route-board" aria-labelledby="routes-title">
+    <div className="section-copy">
+      <p className="section-kicker">Reader routes</p>
+      <h2 id="routes-title">Pick the path that matches the job in front of you.</h2>
+    </div>
+    <div className="route-grid">
+      <a href="/getting-started/introduction/" className="route-card">
+        <span>New to OSTwin</span>
+        <strong>Learn the mental model before touching the CLI.</strong>
+      </a>
+      <a href="/guides/creating-plans/" className="route-card">
+        <span>Writing a plan</span>
+        <strong>Shape epics, tasks, dependencies, and definitions of done.</strong>
+      </a>
+      <a href="/guides/defining-roles/" className="route-card">
+        <span>Designing roles</span>
+        <strong>Compose identity from role files and focused skill loading.</strong>
+      </a>
+      <a href="/internals/installer-release-flow/" className="route-card">
+        <span>Shipping the runtime</span>
+        <strong>Understand installer sync, release flow, and internal checks.</strong>
+      </a>
+    </div>
+  </section>
+</div>

@@ -6,7 +6,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'OSTwin',
-      description: 'A zero-agent operating system for composable AI engineering teams.',
+      description: 'Operational documentation for composing AI engineering teams with plans, roles, skills, and isolated war-rooms.',
       logo: {
         light: './src/assets/logo-light.svg',
         dark: './src/assets/logo-dark.svg',
@@ -20,6 +20,18 @@ export default defineConfig({
       },
       customCss: ['./src/styles/custom.css'],
       head: [
+        {
+          tag: 'link',
+          attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        },
+        {
+          tag: 'link',
+          attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', content: '#07100e' },
+        },
         {
           tag: 'meta',
           attrs: { property: 'og:url', content: 'https://twin.igot.ai' },
@@ -45,11 +57,11 @@ export default defineConfig({
             {
               label: 'The Five Pillars',
               items: [
-                { label: '🚀 1. Role Pattern', slug: 'concepts/role-pattern' },
-                { label: '🚀 2. Skills as Expertise', slug: 'concepts/skills' },
-                { label: '🚀 3. MCP Isolation', slug: 'concepts/mcp-isolation' },
-                { label: '🚀 4. War-Rooms', slug: 'concepts/war-rooms' },
-                { label: '🚀 5. Layered Memory', slug: 'concepts/memory' },
+                { label: '1. Role Pattern', slug: 'concepts/role-pattern' },
+                { label: '2. Skills as Expertise', slug: 'concepts/skills' },
+                { label: '3. MCP Isolation', slug: 'concepts/mcp-isolation' },
+                { label: '4. War-Rooms', slug: 'concepts/war-rooms' },
+                { label: '5. Layered Memory', slug: 'concepts/memory' },
               ],
             },
             { label: 'Plans, Epics & DAG', slug: 'concepts/plans-epics-dag' },
@@ -73,6 +85,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'CLI Commands', slug: 'reference/cli-commands' },
+            { label: 'Command Support Inventory', slug: 'reference/command-support' },
             { label: 'Configuration', slug: 'reference/configuration' },
             { label: 'Plan Format', slug: 'reference/plan-format' },
             { label: 'Role Schema', slug: 'reference/role-schema' },
