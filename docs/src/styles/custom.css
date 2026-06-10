@@ -71,10 +71,13 @@ html {
 
 body {
   background:
-    radial-gradient(circle at 14% -4%, rgba(var(--ostwin-cyan-rgb), 0.24), transparent 21rem),
-    radial-gradient(circle at 86% 10%, rgba(var(--ostwin-acid-rgb), 0.14), transparent 22rem),
-    linear-gradient(180deg, rgba(var(--ostwin-blue-rgb), 0.12), transparent 24rem),
-    repeating-linear-gradient(135deg, rgba(var(--ostwin-ink-rgb), 0.035) 0 1px, transparent 1px 12px),
+    url('/assets/agent-os-background.svg') top center / min(120rem, 170vw) auto no-repeat,
+    linear-gradient(115deg, transparent 0 24%, rgba(var(--ostwin-cyan-rgb), 0.08) 24.1% 24.18%, transparent 24.26% 100%),
+    linear-gradient(64deg, transparent 0 67%, rgba(var(--ostwin-acid-rgb), 0.08) 67.08% 67.18%, transparent 67.26% 100%),
+    radial-gradient(ellipse at 18% -2%, rgba(var(--ostwin-cyan-rgb), 0.22), transparent 24rem),
+    radial-gradient(ellipse at 84% 8%, rgba(var(--ostwin-acid-rgb), 0.13), transparent 24rem),
+    linear-gradient(180deg, rgba(var(--ostwin-blue-rgb), 0.1), transparent 27rem),
+    repeating-linear-gradient(135deg, rgba(var(--ostwin-ink-rgb), 0.03) 0 1px, transparent 1px 12px),
     var(--sl-color-bg);
   font-variant-numeric: tabular-nums;
 }
@@ -85,12 +88,42 @@ body::before {
   z-index: 1;
   pointer-events: none;
   content: '';
-  opacity: 0.06;
+  opacity: 0.09;
   background-image:
-    linear-gradient(rgba(var(--ostwin-cyan-rgb), 0.72) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--ostwin-acid-rgb), 0.5) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(to bottom, rgba(var(--ostwin-ink-rgb), 1) 0, transparent 70%);
+    linear-gradient(rgba(var(--ostwin-cyan-rgb), 0.62) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.46) 1px, transparent 1px),
+    linear-gradient(rgba(var(--ostwin-acid-rgb), 0.4) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ostwin-acid-rgb), 0.24) 1px, transparent 1px);
+  background-position:
+    0 0,
+    0 0,
+    18px 18px,
+    18px 18px;
+  background-size:
+    42px 42px,
+    42px 42px,
+    168px 168px,
+    168px 168px;
+  mask-image:
+    linear-gradient(to bottom, rgba(var(--ostwin-ink-rgb), 0.95) 0, transparent 76%),
+    linear-gradient(90deg, transparent 0, rgba(var(--ostwin-ink-rgb), 0.75) 12%, rgba(var(--ostwin-ink-rgb), 0.75) 88%, transparent 100%);
+  mask-composite: intersect;
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  content: '';
+  opacity: 0.24;
+  background:
+    linear-gradient(90deg, transparent 0 calc(50% - 33rem), rgba(var(--ostwin-cyan-rgb), 0.72) calc(50% - 33rem) calc(50% - 32.94rem), transparent calc(50% - 32.94rem) 100%),
+    linear-gradient(90deg, transparent 0 calc(50% + 28rem), rgba(var(--ostwin-acid-rgb), 0.5) calc(50% + 28rem) calc(50% + 28.06rem), transparent calc(50% + 28.06rem) 100%),
+    linear-gradient(180deg, transparent 7.35rem, rgba(var(--ostwin-cyan-rgb), 0.54) 7.35rem calc(7.35rem + 1px), transparent calc(7.35rem + 1px) 100%),
+    repeating-linear-gradient(90deg, transparent 0 8rem, rgba(var(--ostwin-cyan-rgb), 0.2) 8rem calc(8rem + 1px), transparent calc(8rem + 1px) 16rem),
+    repeating-linear-gradient(180deg, transparent 0 6rem, rgba(var(--ostwin-ink-rgb), 0.18) 6rem calc(6rem + 1px), transparent calc(6rem + 1px) 12rem);
+  mask-image: linear-gradient(to bottom, rgba(var(--ostwin-ink-rgb), 0.95) 0, rgba(var(--ostwin-ink-rgb), 0.65) 34rem, transparent 78rem);
 }
 
 body * {
@@ -176,8 +209,26 @@ main:has(.ostwin-home) .sl-container {
 
 main:has(.ostwin-home) .hero {
   position: relative;
+  isolation: isolate;
   gap: 2rem;
   padding-block: 2.5rem 3.5rem;
+}
+
+main:has(.ostwin-home) .hero::before {
+  position: absolute;
+  inset: -4.5rem -12rem -3rem -8rem;
+  z-index: -1;
+  pointer-events: none;
+  content: '';
+  opacity: 0.56;
+  background:
+    url('/assets/agent-os-background.svg') top right / min(92rem, 156vw) auto no-repeat,
+    linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.1), transparent 64%),
+    repeating-linear-gradient(90deg, transparent 0 8rem, rgba(var(--ostwin-ink-rgb), 0.05) 8rem calc(8rem + 1px), transparent calc(8rem + 1px) 16rem);
+  mask-image:
+    linear-gradient(to bottom, rgba(var(--ostwin-ink-rgb), 0.9) 0, rgba(var(--ostwin-ink-rgb), 0.7) 62%, transparent 100%),
+    linear-gradient(90deg, transparent 0, rgba(var(--ostwin-ink-rgb), 0.72) 16%, rgba(var(--ostwin-ink-rgb), 0.9) 100%);
+  mask-composite: intersect;
 }
 
 main:has(.ostwin-home) .hero .stack {
@@ -551,6 +602,159 @@ main:has(.ostwin-home) .hero .actions a:active {
   line-height: 1.25;
 }
 
+.capability-stack {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.capability-panel {
+  position: relative;
+  display: grid;
+  gap: 1rem;
+  min-height: 18rem;
+  overflow: hidden;
+  border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.2);
+  border-radius: 8px;
+  padding: 1.1rem;
+  color: #f3fbff;
+  background:
+    linear-gradient(rgba(var(--ostwin-cyan-rgb), 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.05) 1px, transparent 1px),
+    radial-gradient(circle at 96% 0%, rgba(var(--ostwin-acid-rgb), 0.14), transparent 12rem),
+    rgba(12, 17, 25, 0.82);
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto,
+    auto;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 42px rgba(3, 8, 14, 0.18);
+}
+
+.capability-panel::after {
+  position: absolute;
+  inset: auto 1rem 1rem auto;
+  width: 6rem;
+  height: 6rem;
+  border: 1px solid rgba(var(--ostwin-amber-rgb), 0.2);
+  border-radius: 8px;
+  content: '';
+  transform: rotate(7deg);
+}
+
+.capability-panel--wide {
+  grid-column: span 2;
+  min-height: 15rem;
+}
+
+.capability-panel__top {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--sl-font-mono);
+}
+
+.capability-panel__top span {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgba(var(--ostwin-acid-rgb), 0.32);
+  border-radius: 8px;
+  color: rgb(var(--ostwin-acid-rgb));
+  background: rgba(var(--ostwin-acid-rgb), 0.08);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.capability-panel__top strong {
+  color: rgba(220, 246, 255, 0.72);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.capability-panel h3 {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  max-width: 34rem;
+  color: #f3fbff;
+  font-size: 1.28rem;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.capability-panel p {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  max-width: 56rem;
+  color: rgba(220, 246, 255, 0.72);
+  line-height: 1.68;
+}
+
+.capability-panel dl {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.capability-panel dl > div {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+  border-radius: 8px;
+  padding: 0.72rem;
+  background: rgba(var(--ostwin-cyan-rgb), 0.06);
+}
+
+.capability-panel dt {
+  color: rgb(var(--ostwin-acid-rgb));
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.capability-panel dd {
+  margin: 0;
+  color: rgba(243, 251, 255, 0.78);
+  line-height: 1.5;
+}
+
+.capability-flow {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  align-self: end;
+}
+
+.capability-flow--metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.capability-flow span {
+  border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.18);
+  border-radius: 8px;
+  padding: 0.72rem;
+  color: rgba(220, 246, 255, 0.78);
+  background:
+    linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.1), rgba(var(--ostwin-acid-rgb), 0.06)),
+    rgba(9, 13, 20, 0.64);
+  font-family: var(--sl-font-mono);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .home-console {
   grid-template-columns: minmax(0, 0.82fr) minmax(19rem, 1.18fr);
   align-items: center;
@@ -726,6 +930,19 @@ main:has(.ostwin-home) .hero .actions a:active {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .capability-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-panel--wide {
+    grid-column: auto;
+  }
+
+  .capability-flow,
+  .capability-flow--metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .composition-rail a:nth-child(even),
   .composition-rail a:nth-child(even):hover {
     transform: none;
@@ -737,8 +954,18 @@ main:has(.ostwin-home) .hero .actions a:active {
 }
 
 @media (max-width: 52rem) {
+  body::after {
+    opacity: 0.14;
+  }
+
   main:has(.ostwin-home) .hero h1 {
     font-size: 2.55rem;
+  }
+
+  main:has(.ostwin-home) .hero::before {
+    inset: -3rem -4rem -2rem -3rem;
+    opacity: 0.34;
+    background-size: 68rem auto, auto, auto;
   }
 
   .ostwin-home {
@@ -762,6 +989,11 @@ main:has(.ostwin-home) .hero .actions a:active {
 
   .composition-rail,
   .route-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .capability-flow,
+  .capability-flow--metrics {
     grid-template-columns: 1fr;
   }
 
