@@ -307,7 +307,7 @@ export function GitHubCopilotPanel({
           )}
           {authMethod === 'device' && (
             <div className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-700">
-              Device code uses OpenCode native GitHub Copilot login and writes the OpenCode credential directly.
+              Device code uses GitHub device authorization and writes the credential in OpenCode format.
             </div>
           )}
         </div>

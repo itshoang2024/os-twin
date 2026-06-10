@@ -214,47 +214,64 @@ class _FakeProcess:
         return self.returncode
 
 
-def test_start_device_auth_runs_opencode_and_selects_github_dot_com(tmp_path, monkeypatch):
-    calls = {}
-    writes = []
+def test_start_device_auth_requests_github_device_code(tmp_path, monkeypatch):
+    calls = []
     auth_path = tmp_path / "auth.json"
-    output = iter(
-        [
-            "Select GitHub deployment type\n  GitHub.com\n  GitHub Enterprise\n",
-            "Go to: https://github.com/login/device\nEnter code: C73C-CD17\n",
-        ]
-    )
 
-    def fake_popen(command, **kwargs):
-        calls["command"] = command
-        calls["kwargs"] = kwargs
-        return _FakeProcess()
+    def fake_post(url, data, **kwargs):
+        calls.append((url, data, kwargs))
+        return {
+            "device_code": "device-secret",
+            "user_code": "C73C-CD17",
+            "verification_uri": "https://github.com/login/device",
+            "interval": 1,
+            "expires_in": 900,
+        }
 
     monkeypatch.setattr(copilot, "_clear_broken_copilot_auth", lambda: None)
-    monkeypatch.setattr(copilot.pty, "openpty", lambda: (10, 11))
-    monkeypatch.setattr(copilot.os, "close", lambda fd: None)
-    monkeypatch.setattr(copilot.os, "write", lambda fd, data: writes.append((fd, data)) or len(data))
-    monkeypatch.setattr(copilot.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(copilot, "_read_pty", lambda fd, timeout=0.2: next(output, ""))
-    monkeypatch.setattr(copilot.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(copilot, "_post_github_form", fake_post)
     monkeypatch.setattr(copilot.threading.Thread, "start", lambda self: None)
     monkeypatch.setattr(copilot, "OPENCODE_AUTH_JSON", auth_path)
     copilot._device_auth_session = None
 
     response = copilot.start_github_copilot_device_auth()
 
-    assert calls["command"] == [
-        copilot.OPENCODE_BIN,
-        "auth",
-        "login",
-        "-p",
-        "github-copilot",
-        "-m",
-        "Login with GitHub Copilot",
+    assert calls == [
+        (
+            "https://github.com/login/device/code",
+            {"client_id": copilot.OPENCODE_COPILOT_CLIENT_ID, "scope": "read:user"},
+            {},
+        )
     ]
-    assert writes == [(10, b"\r")]
     assert response.status == "pending"
     assert response.verification_url == "https://github.com/login/device"
     assert response.user_code == "C73C-CD17"
 
+    copilot._device_auth_session = None
+
+
+def test_poll_github_device_auth_saves_oauth_token(monkeypatch):
+    saved = []
+    payloads = iter(
+        [
+            {"error": "authorization_pending"},
+            {"access_token": "gho_secret"},
+        ]
+    )
+    session = {
+        "status": "pending",
+        "interval": 1,
+        "expires_at": copilot.time.time() + 60,
+    }
+
+    monkeypatch.setattr(copilot, "_poll_github_device_token", lambda device_code: next(payloads))
+    monkeypatch.setattr(copilot, "_save_github_oauth_token", lambda token: saved.append(token))
+    monkeypatch.setattr(copilot.time, "sleep", lambda seconds: None)
+
+    copilot._device_auth_session = session
+    copilot._poll_github_device_auth(session, "device-secret")
+
+    assert saved == ["gho_secret"]
+    assert session["status"] == "connected"
+    assert session["connected"] is True
     copilot._device_auth_session = None

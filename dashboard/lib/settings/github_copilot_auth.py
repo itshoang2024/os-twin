@@ -47,8 +47,11 @@ COPILOT_MODELS_URL = f"{COPILOT_API_BASE_URL}/models"
 OPENCODE_BIN = os.environ.get("OSTWIN_OPENCODE_BIN") or shutil.which("opencode") or "opencode"
 COPILOT_LOGIN_METHOD = "Login with GitHub Copilot"
 GITHUB_DEVICE_URL = "https://github.com/login/device"
+GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
+OPENCODE_COPILOT_CLIENT_ID = os.environ.get("OSTWIN_OPENCODE_COPILOT_CLIENT_ID", "Ov23li8tweQw6odWQebz")
 GITHUB_OAUTH_CLIENT_ID = os.environ.get("OSTWIN_GITHUB_CLIENT_ID", "Ov23liQTivczXRzkXA1E")
 GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("OSTWIN_GITHUB_CLIENT_SECRET", "b98f41f175ae05f2ec527ac8509abd2826afa26b")
 GITHUB_OAUTH_REDIRECT_URI = os.environ.get(
@@ -57,6 +60,7 @@ GITHUB_OAUTH_REDIRECT_URI = os.environ.get(
 )
 # add scope for copilot access
 GITHUB_OAUTH_SCOPE = os.environ.get("OSTWIN_GITHUB_SCOPE", "read:user read:repo_hook read:org read:public_key read:gpg_key")
+GITHUB_DEVICE_SCOPE = os.environ.get("OSTWIN_GITHUB_DEVICE_SCOPE", "read:user")
 OPENCODE_SCHEMA = "https://opencode.ai/config.json"
 FALLBACK_COPILOT_MODELS = [
     "gpt-4o-mini-2024-07-18",
@@ -321,7 +325,7 @@ def _validate_github_copilot_token(access_token: str) -> None:
         ) from exc
 
 
-def _post_github_form(url: str, data: Dict[str, str]) -> Dict[str, Any]:
+def _post_github_form(url: str, data: Dict[str, str], *, raise_on_error: bool = True) -> Dict[str, Any]:
     req = urllib.request.Request(
         url,
         data=urllib.parse.urlencode(data).encode("utf-8"),
@@ -339,10 +343,22 @@ def _post_github_form(url: str, data: Dict[str, str]) -> Dict[str, Any]:
 
     if not isinstance(payload, dict):
         raise RuntimeError("GitHub OAuth response was not a JSON object.")
-    if payload.get("error"):
+    if raise_on_error and payload.get("error"):
         desc = payload.get("error_description") or payload.get("error")
         raise RuntimeError(f"GitHub OAuth error: {desc}")
     return payload
+
+
+def _poll_github_device_token(device_code: str) -> Dict[str, Any]:
+    return _post_github_form(
+        GITHUB_ACCESS_TOKEN_URL,
+        {
+            "client_id": OPENCODE_COPILOT_CLIENT_ID,
+            "device_code": device_code,
+            "grant_type": GITHUB_DEVICE_GRANT_TYPE,
+        },
+        raise_on_error=False,
+    )
 
 
 def _clear_broken_copilot_auth() -> None:
@@ -555,6 +571,11 @@ def _drain_initial_login_output(session: Dict[str, Any], *, seconds: float = 20)
 
 
 def _poll_device_auth(session: Dict[str, Any]) -> None:
+    device_code = session.get("device_code")
+    if isinstance(device_code, str) and device_code:
+        _poll_github_device_auth(session, device_code)
+        return
+
     process = session.get("process")
     master_fd = session.get("master_fd")
     if not _is_process(process) or not isinstance(master_fd, int):
@@ -590,7 +611,110 @@ def _poll_device_auth(session: Dict[str, Any]) -> None:
             pass
 
 
+def _poll_github_device_auth(session: Dict[str, Any], device_code: str) -> None:
+    interval = max(1, int(session.get("interval") or 5))
+    expires_at = float(session.get("expires_at") or (time.time() + 900))
+
+    while time.time() < expires_at:
+        try:
+            payload = _poll_github_device_token(device_code)
+        except Exception as exc:  # noqa: BLE001
+            _update_device_session(
+                session,
+                status="error",
+                message=f"GitHub device authorization failed: {exc}",
+            )
+            return
+
+        access_token = payload.get("access_token")
+        if isinstance(access_token, str) and access_token:
+            try:
+                _save_github_oauth_token(access_token)
+            except Exception as exc:  # noqa: BLE001
+                _update_device_session(
+                    session,
+                    status="error",
+                    message=str(exc),
+                )
+                return
+            _update_device_session(
+                session,
+                status="connected",
+                connected=True,
+                message="GitHub Copilot credential saved for OpenCode.",
+            )
+            return
+
+        error = str(payload.get("error") or "")
+        if error == "authorization_pending":
+            _update_device_session(session, message="Waiting for GitHub authorization.")
+            time.sleep(interval)
+            continue
+        if error == "slow_down":
+            interval += 5
+            _update_device_session(session, message="Waiting for GitHub authorization.")
+            time.sleep(interval)
+            continue
+
+        description = payload.get("error_description") or error or "GitHub did not return an access token."
+        _update_device_session(
+            session,
+            status="error",
+            message=f"GitHub device authorization failed: {description}",
+        )
+        return
+
+    _update_device_session(
+        session,
+        status="error",
+        message="GitHub device authorization expired. Start login again.",
+    )
+
+
 def start_github_copilot_device_auth() -> GitHubCopilotDeviceAuthResponse:
+    global _device_auth_session
+
+    with _auth_lock:
+        if _device_auth_session and _device_auth_session.get("status") == "pending":
+            return _device_auth_response_locked()
+
+    _clear_broken_copilot_auth()
+
+    payload = _post_github_form(
+        GITHUB_DEVICE_CODE_URL,
+        {
+            "client_id": OPENCODE_COPILOT_CLIENT_ID,
+            "scope": GITHUB_DEVICE_SCOPE,
+        },
+    )
+    device_code = str(payload.get("device_code") or "")
+    user_code = str(payload.get("user_code") or "")
+    verification_url = str(payload.get("verification_uri") or payload.get("verification_url") or GITHUB_DEVICE_URL)
+    if not device_code or not user_code:
+        raise RuntimeError("GitHub did not return a device code.")
+
+    interval = int(payload.get("interval") or 5)
+    expires_in = int(payload.get("expires_in") or 900)
+    session: Dict[str, Any] = {
+        "status": "pending",
+        "connected": False,
+        "user_code": user_code,
+        "verification_url": verification_url,
+        "message": "Enter the GitHub device code, then authorize GitHub Copilot.",
+        "device_code": device_code,
+        "interval": interval,
+        "expires_at": time.time() + expires_in,
+        "output": "",
+    }
+    with _auth_lock:
+        _device_auth_session = session
+
+    thread = threading.Thread(target=_poll_device_auth, args=(session,), name="github-copilot-device-auth", daemon=True)
+    thread.start()
+    return _device_auth_response_locked()
+
+
+def start_github_copilot_device_auth_via_opencode() -> GitHubCopilotDeviceAuthResponse:
     global _device_auth_session
 
     with _auth_lock:
