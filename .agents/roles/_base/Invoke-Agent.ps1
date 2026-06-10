@@ -433,6 +433,16 @@ if (-not $ProjectDir) {
     if (-not $ProjectDir -and $env:PROJECT_DIR) { $ProjectDir = $env:PROJECT_DIR }
 }
 
+# --- WorkingDir always scopes the agent execution dir (worktree isolation) ---
+# Runs unconditionally — must NOT depend on .agents/config.json existing.
+# The room's working_dir (set by Ensure-RoomWorktree) is the isolation boundary.
+if (-not $WorkingDir -and $roomCfg -and $roomCfg.PSObject.Properties['working_dir'] -and $roomCfg.working_dir) {
+    $WorkingDir = $roomCfg.working_dir
+}
+if ($WorkingDir) {
+    $ProjectDir = $WorkingDir
+}
+
 # --- Skill Staging: project-local .agents/skills/ (shared across rooms) ---
 # Use the *project's* .agents/skills/, not the ostwin install tree ($agentsDir).
 # This ensures skills appear at $project_dir/.agents/skills/ regardless of
@@ -440,15 +450,20 @@ if (-not $ProjectDir) {
 $projectAgentsDir = if ($ProjectDir) { Join-Path $ProjectDir ".agents" } else { $agentsDir }
 $isolatedSkillsDir = Join-Path $projectAgentsDir "skills"
 
+# Never materialize a missing working dir as a side effect of skill staging.
+# A missing dir is an isolation breach and must fail fast in the wrapper
+# (exit 86), not be silently created here and run against an empty tree.
+$projectDirMissing = [bool]($ProjectDir -and -not (Test-Path $ProjectDir -PathType Container))
+
 # Ensure project-level skills dir exists
-if (-not (Test-Path $isolatedSkillsDir)) {
+if (-not $projectDirMissing -and -not (Test-Path $isolatedSkillsDir)) {
     New-Item -ItemType Directory -Path $isolatedSkillsDir -Force | Out-Null
 }
 
 $rolePath = Join-Path $agentsDir "roles" $RoleName
 $resolveSkillsScript = Join-Path $PSScriptRoot "Resolve-RoleSkills.ps1"
 
-if (Test-Path $resolveSkillsScript) {
+if (-not $projectDirMissing -and (Test-Path $resolveSkillsScript)) {
     try {
         $skills = & $resolveSkillsScript -RoleName $RoleName -RolePath $rolePath -RoomDir $absRoomDir -ErrorAction Stop
         foreach ($skill in $skills) {
@@ -477,12 +492,14 @@ if (Test-Path $resolveSkillsScript) {
     }
 }
 
+# --- Consolidated logs: plans/<plan_id>/<room_id>.log ---
 $planLogsDir = Join-Path (Join-Path $OstwinHome ".agents") "plans"
-New-Item -ItemType Directory -Path $planLogsDir -Force | Out-Null
 $outputPlanId = if ([string]::IsNullOrWhiteSpace($roomPlanId)) { "no-plan" } else { $roomPlanId }
 $safeOutputPlanId = $outputPlanId -replace '[^A-Za-z0-9._-]', '_'
 $safeOutputRoomId = $roomId -replace '[^A-Za-z0-9._-]', '_'
-$outputFile = Join-Path $planLogsDir "$safeOutputPlanId.$safeOutputRoomId.log"
+$planLogDir = Join-Path $planLogsDir $safeOutputPlanId
+New-Item -ItemType Directory -Path $planLogDir -Force | Out-Null
+$outputFile = Join-Path $planLogDir "$safeOutputRoomId.log"
 $pidFile = Join-Path $pidsDir "$RoleName.pid"
 
 # --- PID is written by bin/agent via AGENT_OS_PID_FILE env var ---
@@ -615,7 +632,8 @@ if ($ShareSession) { $extraCliArgs += "--share" }
 if ($Command) { $extraCliArgs += "--command"; $extraCliArgs += $Command }
 if ($AttachUrl) { $extraCliArgs += "--attach"; $extraCliArgs += $AttachUrl }
 if ($Port -gt 0) { $extraCliArgs += "--port"; $extraCliArgs += $Port.ToString() }
-if ($ProjectDir) { $extraCliArgs += "--dir"; $extraCliArgs += $ProjectDir }
+# NOTE: no --dir arg. The wrapper cds into $ProjectDir before exec so the agent
+# CLI resolves its project from the real cwd — one source of truth for scoping.
 foreach ($f in $Files) { $extraCliArgs += "--file"; $extraCliArgs += $f }
 
 # --- MCP config: use pre-compiled .opencode/opencode.json if available ---
@@ -656,12 +674,17 @@ for ($processAttempt = 1; $processAttempt -le $maxProcessRetries; $processAttemp
         # Build paths with proper escaping for the target platform
         $safeOutput = $outputFile -replace "'", "'\''"
         $safePrompt = $promptFileAbsolute -replace "'", "'\''"
-        $safeCwd = if ($WorkingDir) { $WorkingDir -replace "'", "'\''" } else { "" }
         $safeRoomDir = $absRoomDir.Replace('\', '/').Replace("'", "'\''")
         $safeSkillsDir = $isolatedSkillsDir.Replace('\', '/').Replace("'", "'\''")
         $safeRole = $RoleName -replace "'", "'\''"
 
-        $cwdLine = if ($safeCwd) { "cd '$safeCwd' 2>/dev/null || true" } else { "" }
+        # exec-in-dir: cd into the scoped dir; a failed cd is an isolation
+        # breach (agent would run against the wrong tree) so it must be fatal.
+        $execDir = if ($ProjectDir) { $ProjectDir } else { $WorkingDir }
+        $safeExecDir = if ($execDir) { $execDir -replace "'", "'\''" } else { "" }
+        $cwdLine = if ($safeExecDir) {
+            "cd '$safeExecDir' || { echo `"[wrapper] FATAL: cannot cd into '$safeExecDir'`" >> '$safeOutput'; exit 86; }"
+        } else { "" }
         $safePidFile = $pidFile -replace "'", "'\''"
         $safeOstwinHome = $OstwinHome.Replace('\', '/').Replace("'", "'\''")
         $opencodeConfigLine = ""
@@ -693,6 +716,7 @@ export OSTWIN_PYTHON='$venvPythonUnix'
             $winSkillsDir = $isolatedSkillsDir.Replace('/', '\')
             $winOstwinHome = $OstwinHome.Replace('/', '\')
             $winOpencodeConfig = if ($tempMcpConfig) { $tempMcpConfig.Replace('/', '\') } else { "" }
+            $winExecDir = if ($execDir) { $execDir.Replace('/', '\').Replace("'", "''") } else { "" }
 
             # Tokenize AgentCmd and args for PowerShell execution
             # $AgentCmd may be "opencode run", "'/path/to/agent'", or "/path/to/mock.ps1"
@@ -752,6 +776,15 @@ if ('$winOpencodeConfig') { `$env:OPENCODE_CONFIG = '$winOpencodeConfig' }
 `$envSh = Join-Path `$env:USERPROFILE '.ostwin' '.env.sh'
 if (Test-Path `$envSh) { . `$envSh }
 `$env:OPENCODE_DISABLE_CLAUDE_CODE = '1'
+
+# exec-in-dir: run inside the scoped dir; failure to cd is fatal (isolation breach)
+if ('$winExecDir') {
+    try { Set-Location -LiteralPath '$winExecDir' -ErrorAction Stop }
+    catch {
+        "[wrapper] FATAL: cannot cd into '$winExecDir'" | Out-File -FilePath '$winOutput' -Encoding utf8 -Append
+        exit 86
+    }
+}
 
 # Write PID
 `$PID | Out-File -FilePath '$winPidFile' -Encoding ascii -NoNewline

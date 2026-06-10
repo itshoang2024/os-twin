@@ -523,25 +523,46 @@ while (-not $script:shuttingDown) {
                                 Complete-PlanApproval -TaskRef $taskRef
                                 "1" | Out-File -FilePath $planApprovedFlag -Encoding utf8 -NoNewline
                             }
-                            if (Get-Command Invoke-RoomWorkspaceMerge -ErrorAction SilentlyContinue) {
+                            # Commit room work, then merge all currently committed
+                            # rooms into the source branch. That advances the plan
+                            # integration head before dependent rooms leave pending.
+                            if (Get-Command Complete-RoomWorkspaceCommit -ErrorAction SilentlyContinue) {
                                 try {
-                                    $mergeResult = Invoke-RoomWorkspaceMerge -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
-                                    if (-not $mergeResult.Integrated) {
-                                        Write-Log "ERROR" "[$taskRef] Workspace merge failed: $($mergeResult.Status)"
+                                    $commitResult = Complete-RoomWorkspaceCommit -RoomDir $roomDir -WarRoomsDir $WarRoomsDir
+                                    if (-not $commitResult.Committed) {
+                                        Write-Log "ERROR" "[$taskRef] Workspace commit failed: $($commitResult.Status)"
                                         $allPassed = $false
                                         $failedCount++
                                         Write-RoomStatus $roomDir 'failed'
                                         Set-BlockedDescendants $taskRef
-                                        $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason "workspace_merge_$($mergeResult.Status)" -Role $baseRole -State $status -Summary "$taskRef workspace merge failed: $($mergeResult.Status)."
+                                        $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason "workspace_commit_$($commitResult.Status)" -Role $baseRole -State $status -Summary "$taskRef workspace commit failed: $($commitResult.Status)."
                                         $script:shuttingDown = $true
+                                    } elseif ((Get-Command Complete-PlanWorkspaceMerge -ErrorAction SilentlyContinue) -and $commitResult.Status -eq 'committed') {
+                                        $roundMergeResult = Complete-PlanWorkspaceMerge -WarRoomsDir $WarRoomsDir -Force
+                                        $roundMergeOk = $roundMergeResult.Integrated -or "$($roundMergeResult.Status)" -eq 'partial'
+                                        if (-not $roundMergeOk) {
+                                            $mergeDetail = "status=$($roundMergeResult.Status)"
+                                            if ($roundMergeResult.Conflicted) { $mergeDetail += " conflicted=$($roundMergeResult.Conflicted)" }
+                                            if (@($roundMergeResult.Pending).Count -gt 0) { $mergeDetail += " pending=$(@($roundMergeResult.Pending) -join ',')" }
+                                            Write-Log "ERROR" "[$taskRef] Workspace round merge failed: $mergeDetail"
+                                            $allPassed = $false
+                                            $failedCount++
+                                            Write-RoomStatus $roomDir 'failed'
+                                            Set-BlockedDescendants $taskRef
+                                            $mergeFailRoomDir = if ($roundMergeResult.Conflicted) { Join-Path $WarRoomsDir "$($roundMergeResult.Conflicted)" } else { $roomDir }
+                                            $script:planFailed = Invoke-PlanFailFast -RoomDir $mergeFailRoomDir -Reason "workspace_merge_$($roundMergeResult.Status)" -Role $baseRole -State $status -Summary "$taskRef workspace round merge failed: $mergeDetail."
+                                            $script:shuttingDown = $true
+                                        } elseif (@($roundMergeResult.Merged).Count -gt 0) {
+                                            Write-Log "INFO" "[$taskRef] Workspace round merge integrated: $(@($roundMergeResult.Merged) -join ', ')"
+                                        }
                                     }
                                 } catch {
-                                    Write-Log "ERROR" "[$taskRef] Workspace merge failed: $($_.Exception.Message)"
+                                    Write-Log "ERROR" "[$taskRef] Workspace commit/merge failed: $($_.Exception.Message)"
                                     $allPassed = $false
                                     $failedCount++
                                     Write-RoomStatus $roomDir 'failed'
                                     Set-BlockedDescendants $taskRef
-                                    $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'workspace_merge_failed' -Role $baseRole -State $status -Summary "$taskRef workspace merge failed."
+                                    $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'workspace_commit_failed' -Role $baseRole -State $status -Summary "$taskRef workspace commit/merge failed."
                                     $script:shuttingDown = $true
                                 }
                             }
@@ -958,6 +979,33 @@ while (-not $script:shuttingDown) {
     # === Release check ===
     if ($roomCount -gt 0 -and $allPassed) {
         Write-Host ""
+
+        # Safety net: normal operation merges each completed round immediately,
+        # so by release time this should usually have nothing left to do.
+        if (Get-Command Complete-PlanWorkspaceMerge -ErrorAction SilentlyContinue) {
+            try {
+                $planMergeResult = Complete-PlanWorkspaceMerge -WarRoomsDir $WarRoomsDir
+                if (-not $planMergeResult.Integrated) {
+                    $mergeDetail = "status=$($planMergeResult.Status)"
+                    if ($planMergeResult.Conflicted) { $mergeDetail += " conflicted=$($planMergeResult.Conflicted)" }
+                    if (@($planMergeResult.Pending).Count -gt 0) { $mergeDetail += " pending=$(@($planMergeResult.Pending) -join ',')" }
+                    Write-Log "ERROR" "Plan workspace merge failed: $mergeDetail"
+                    $mergeFailRoomDir = if ($planMergeResult.Conflicted) { Join-Path $WarRoomsDir "$($planMergeResult.Conflicted)" } else { $WarRoomsDir }
+                    $script:planFailed = Invoke-PlanFailFast -RoomDir $mergeFailRoomDir -Reason "workspace_merge_$($planMergeResult.Status)" -Role 'manager' -State 'done' -Summary "Plan workspace merge failed: $mergeDetail. Resolve, then run workspace/Merge-Plan.ps1 manually."
+                    Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
+                    break
+                }
+                if (@($planMergeResult.Merged).Count -gt 0) {
+                    Write-Log "INFO" "Plan workspace merge integrated: $(@($planMergeResult.Merged) -join ', ')"
+                }
+            } catch {
+                Write-Log "ERROR" "Plan workspace merge failed: $($_.Exception.Message)"
+                $script:planFailed = Invoke-PlanFailFast -RoomDir $WarRoomsDir -Reason 'workspace_merge_failed' -Role 'manager' -State 'done' -Summary "Plan workspace merge failed: $($_.Exception.Message)"
+                Remove-Item $managerPidFile -Force -ErrorAction SilentlyContinue
+                break
+            }
+        }
+
         Write-Log "INFO" "All $roomCount rooms done. Drafting release..."
 
         $draftScript = Join-Path $releaseDir "draft.sh"

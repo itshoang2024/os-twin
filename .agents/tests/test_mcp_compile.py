@@ -45,7 +45,7 @@ class TestMCPCompile(unittest.TestCase):
 
         self.assertIn("test", compiled["mcp"])
         self.assertIn("builtin", compiled["mcp"])
-        self.assertEqual(compiled["mcp"]["test"]["environment"]["API_KEY"], "{env:MCP_TEST_API_KEY}")
+        self.assertNotIn("API_KEY", compiled["mcp"]["test"]["environment"])
         self.assertEqual(env_vars["MCP_TEST_API_KEY"], "secret-value")
 
 if __name__ == "__main__":

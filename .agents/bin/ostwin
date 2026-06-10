@@ -395,6 +395,18 @@ function Invoke-OstwinRunGitPreflight {
         Write-Host "  For non-Git experiments only, rerun with --workspace-isolation shared." -ForegroundColor Yellow
         exit 1
     }
+
+    # Untracked files never block: room worktrees fork from HEAD so this work
+    # is simply invisible to agents until committed. Surface that clearly.
+    if (($ready.PSObject.Properties.Name -contains 'UntrackedPaths') -and @($ready.UntrackedPaths).Count -gt 0) {
+        Write-Host "  [preflight] Untracked files present — NOT visible to room worktrees until committed:" -ForegroundColor Yellow
+        foreach ($p in @($ready.UntrackedPaths) | Select-Object -First 10) {
+            Write-Host "    - $p" -ForegroundColor Yellow
+        }
+        if (@($ready.UntrackedPaths).Count -gt 10) {
+            Write-Host "    ... and $(@($ready.UntrackedPaths).Count - 10) more" -ForegroundColor Yellow
+        }
+    }
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -414,7 +426,7 @@ Commands:
                               --working-dir PATH,
                                --workspace-isolation room-worktree|shared
   plan <sub>        Plan management (AI-assisted)
-                     Subcommands: create [Title|file.md] [--file FILE], start, list
+                     Subcommands: create [Title|file.md] [--file FILE], start, list, clear
   init [directory]  Scaffold Agent OS into a project
   sync [directory]  Sync framework updates to an initialized project
   status            Show war-room dashboard
@@ -427,10 +439,7 @@ Commands:
                       Options: --port PORT, --project-dir PATH
                       Subcommands: start, stop, restart, status, logs, autostart
   channel <sub>     Manage communication channels (telegram, discord, slack)
-                     Subcommands: start, stop, status, logs, deploy,
-                                  list, connect, disconnect, test, pair
-  clone-role <role> Clone a role to project-local for override
-                     Options: --project-dir PATH
+                     Subcommands: list, connect, disconnect, test, pair
   config            View or update configuration
                      Options: --get KEY, --set KEY VALUE
   mac <script> <cmd>  macOS desktop automation (shorthand for role dispatch)
@@ -446,12 +455,15 @@ Commands:
                      Subcommands: sync, install [<slug>|--from DIR], list,
                                   search <query>, update [--all|<slug>], remove <slug>
   mcp               Manage MCP extensions
-                     Subcommands: install, list, catalog, remove, sync
+                     Subcommands: install, list, catalog, remove, sync,
+                                  test, compile, credentials, migrate, init-project
   search-engine     Install and run local SearXNG search under ~/.ostwin
                      Subcommands: install, configure, start, stop, status, settings
   reload-env        Reload ~/.ostwin/.env into MCP config env blocks
+  memory <sub>      Manage agent memory namespaces
+                     Subcommands: list, stats, tree, clear, delete, archive, export
   test              Run test suites
-                     Options: --suite NAME, --verbose
+                     Options: --suite NAME, --path PATH, --verbose
   version           Show version
 
 Examples:
@@ -662,11 +674,10 @@ switch ($Command) {
             Write-Host "  Working dir override: $effectiveWorkingDir" -ForegroundColor DarkGray
         }
         if ($workspaceIsolation -eq 'room-worktree') {
+            # The .opencode/opencode.json runtime check happens AFTER the
+            # auto-init below — init generates it, so checking here would make
+            # a freshly cleaned project impossible to bootstrap.
             Invoke-OstwinRunGitPreflight -WorkingDir $effectiveWorkingDir -WorkspaceIsolation $workspaceIsolation
-            if (-not (Test-Path (Join-Path $effectiveWorkingDir ".opencode/opencode.json"))) {
-                Write-Error "Ostwin runtime is not initialized in '$effectiveWorkingDir' (.opencode/opencode.json missing). Run 'ostwin init' first, review/commit any tracked changes, then rerun."
-                exit 1
-            }
         }
         if ($effectiveWorkingDir -and $effectiveWorkingDir -ne ".") {
             if (-not (Test-Path $effectiveWorkingDir -PathType Container)) {
@@ -709,6 +720,13 @@ switch ($Command) {
             }
         } else {
             Write-Error "[ERROR] init.ps1 not found at $initPs1"
+        }
+
+        # Room-worktree mode needs the pre-compiled opencode config. Verify it
+        # exists now that auto-init has run (it scaffolds .opencode/opencode.json).
+        if ($workspaceIsolation -eq 'room-worktree' -and -not (Test-Path (Join-Path $effectiveWorkingDir ".opencode/opencode.json"))) {
+            Write-Error "Ostwin runtime initialization failed in '$effectiveWorkingDir' (.opencode/opencode.json still missing after auto-init). Run 'ostwin init $effectiveWorkingDir' manually and check its output for errors."
+            exit 1
         }
 
         # Normalize the runtime working directory passed to Start-Plan. Remove any
@@ -774,10 +792,21 @@ switch ($Command) {
 
     # ── plan ─────────────────────────────────────────────────────────────────
     "plan" {
-        $planSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "create" }
+        $planSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
         $planArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
 
         switch ($planSub) {
+            { $_ -in @("help", "--help", "-h") } {
+                Write-Host "Usage: ostwin plan <subcommand> [options]"
+                Write-Host ""
+                Write-Host "Subcommands:"
+                Write-Host "  create [Title|file.md] [--file FILE]   Create a plan via dashboard"
+                Write-Host "  start <plan_id|file> [options]         Execute a plan"
+                Write-Host "  list                                   List plans via dashboard"
+                Write-Host "  clear [--force]                        Clear local plan registry"
+                exit 0
+            }
+
             "create" {
                 $planTitle = ""
                 $initFile = ""
@@ -1085,7 +1114,7 @@ switch ($Command) {
             }
 
             default {
-                Write-Error "Unknown plan subcommand: $planSub"
+                Write-Host "Unknown plan subcommand: $planSub" -ForegroundColor Red
                 Write-Host "  Usage: ostwin plan create [Title] [--file FILE]"
                 Write-Host "         ostwin plan start [plan-file] [--enable-planning] [--workspace-isolation room-worktree|shared]"
                 Write-Host "         ostwin plan list"
@@ -1110,6 +1139,7 @@ switch ($Command) {
                 }
             }
             & pwsh -NoProfile -File $initPs1 @psArgs
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
         }
         else {
             Write-Error "[ERROR] init.ps1 not found at $initPs1"
@@ -1122,6 +1152,7 @@ switch ($Command) {
         $syncPs1 = Join-Path $AgentsDir "sync.ps1"
         if (Test-Path $syncPs1) {
             & pwsh -NoProfile -File $syncPs1 @Arguments
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
         }
         else {
             Write-Error "[ERROR] sync.ps1 not found."
@@ -1304,9 +1335,44 @@ switch ($Command) {
 
     # ── dashboard ────────────────────────────────────────────────────────────
     "dashboard" {
-        $dashSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
-        $dashArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
         $dashPort = if ($env:DASHBOARD_PORT) { $env:DASHBOARD_PORT } else { "3366" }
+        $dashProjectDir = $OstwinHome
+        $dashSub = "help"
+        $dashArgsList = [System.Collections.ArrayList]::new()
+
+        # Accept options before or after the dashboard subcommand, e.g.
+        #   ostwin dashboard --port 3377 status
+        #   ostwin dashboard start --project-dir /repo --port 3377
+        $dashIdx = 0
+        while ($dashIdx -lt $Arguments.Count) {
+            switch ($Arguments[$dashIdx]) {
+                '--port' {
+                    $dashIdx++
+                    if ($dashIdx -ge $Arguments.Count) { Write-Error "Missing value for --port"; exit 1 }
+                    $dashPort = $Arguments[$dashIdx]
+                    $dashIdx++
+                }
+                '--project-dir' {
+                    $dashIdx++
+                    if ($dashIdx -ge $Arguments.Count) { Write-Error "Missing value for --project-dir"; exit 1 }
+                    $dashProjectDir = $Arguments[$dashIdx]
+                    $dashIdx++
+                }
+                default {
+                    if ($dashSub -eq "help" -and $Arguments[$dashIdx] -notin @('-h', '--help', 'help')) {
+                        $dashSub = $Arguments[$dashIdx]
+                    }
+                    elseif ($Arguments[$dashIdx] -in @('-h', '--help', 'help') -and $dashSub -eq "help") {
+                        $dashSub = "help"
+                    }
+                    else {
+                        $null = $dashArgsList.Add($Arguments[$dashIdx])
+                    }
+                    $dashIdx++
+                }
+            }
+        }
+        $dashArgs = @($dashArgsList)
         $dashScript = Join-Path $AgentsDir "dashboard.sh"
         $logFile = Join-Path $OstwinHome "dashboard" "stdout.log"
 
@@ -1332,10 +1398,10 @@ switch ($Command) {
                 }
                 Write-Host "Starting dashboard on http://localhost:$dashPort..."
                 if (Get-Command bash -ErrorAction SilentlyContinue) {
-                    & bash $dashScript --port $dashPort --project-dir $OstwinHome --background --skip-build
+                    & bash $dashScript --port $dashPort --project-dir $dashProjectDir --background --skip-build
                 } else {
                     $dashPs1 = Join-Path $AgentsDir "dashboard.ps1"
-                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $OstwinHome -Background
+                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $dashProjectDir -Background
                 }
                 $ready = $false
                 for ($i = 0; $i -lt 15; $i++) {
@@ -1368,10 +1434,10 @@ switch ($Command) {
                 Write-Host "Restarting dashboard..."
                 # dashboard.sh handles stop+start internally, just call it
                 if (Get-Command bash -ErrorAction SilentlyContinue) {
-                    & bash $dashScript --port $dashPort --project-dir $OstwinHome --background --skip-build
+                    & bash $dashScript --port $dashPort --project-dir $dashProjectDir --background --skip-build
                 } else {
                     $dashPs1 = Join-Path $AgentsDir "dashboard.ps1"
-                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $OstwinHome -Background
+                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $dashProjectDir -Background
                 }
                 $ready = $false
                 for ($i = 0; $i -lt 15; $i++) {
@@ -1476,7 +1542,7 @@ switch ($Command) {
                         if (-not $pwshExe) { $pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
                         if (-not $pwshExe) { Write-Error "PowerShell not found"; exit 1 }
 
-                        $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$dashboardPs1`" -Background -Port $dashPort -ProjectDir `"$OstwinHome`""
+                        $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$dashboardPs1`" -Background -Port $dashPort -ProjectDir `"$dashProjectDir`""
                         try {
                             $existing = Get-ScheduledTask -TaskName "OstwinDashboard" -ErrorAction SilentlyContinue
                             if ($existing) { Unregister-ScheduledTask -TaskName "OstwinDashboard" -Confirm:$false -ErrorAction SilentlyContinue }
@@ -1543,32 +1609,9 @@ switch ($Command) {
         }
     }
 
-    # ── clone-role ───────────────────────────────────────────────────────────
-    "clone-role" {
-        if ($Arguments.Count -eq 0) {
-            Write-Host "Usage: ostwin clone-role <role> [--project-dir <path>]"
-            exit 1
-        }
-
-        $roleName = $Arguments[0]
-        $cloneProjectDir = $cwd
-        $idx = 1
-        while ($idx -lt $Arguments.Count) {
-            if ($Arguments[$idx] -eq '--project-dir' -and ($idx + 1) -lt $Arguments.Count) {
-                $idx++
-                $cloneProjectDir = $Arguments[$idx]
-            }
-            $idx++
-        }
-
-        # Delegate to: ostwin role manager clone -RoleName <role> -ProjectDir <path>
-        $ostwinExec = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $AgentsDir "bin" "ostwin" }
-        & $ostwinExec role manager clone -RoleName $roleName -ProjectDir $cloneProjectDir
-    }
-
     # ── skills ───────────────────────────────────────────────────────────────
     "skills" {
-        $skillsSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "sync" }
+        $skillsSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
         $skillsArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
 
         # Find sync-skills script (.ps1 only)
@@ -1584,6 +1627,19 @@ switch ($Command) {
         }
 
         switch ($skillsSub) {
+            { $_ -in @("help", "--help", "-h") } {
+                Write-Host "Usage: ostwin skills <subcommand> [options]"
+                Write-Host ""
+                Write-Host "Subcommands:"
+                Write-Host "  sync"
+                Write-Host "  install [<slug>|<github-url>|--from DIR] [--agent <role>]"
+                Write-Host "  search <query>"
+                Write-Host "  update [--all|<slug>]"
+                Write-Host "  remove <slug>"
+                Write-Host "  list"
+                exit 0
+            }
+
             "sync" {
                 if (-not (Test-Path $syncScript)) {
                     Write-Error ([char]0x2717 + " sync-skills.ps1 not found")
@@ -1680,8 +1736,12 @@ switch ($Command) {
                                 # Read name from frontmatter
                                 $metaName = ""
                                 $skillContent = Get-Content $skillMdPath -Raw -ErrorAction SilentlyContinue
-                                if ($skillContent -match '(?ms)^---\s*\n.*?^name:\s*[''"]?([^''"}\n]+)[''"]?.*?\n---') {
-                                    $metaName = $Matches[1].Trim()
+                                $frontmatter = [regex]::Match($skillContent, '(?s)\A---[ \t]*\r?\n(.*?)\r?\n---')
+                                if ($frontmatter.Success) {
+                                    $nameMatch = [regex]::Match($frontmatter.Groups[1].Value, '(?m)^name:[ \t]*[''"]?([^''"\r\n]*)[''"]?[ \t]*$')
+                                    if ($nameMatch.Success) {
+                                        $metaName = $nameMatch.Groups[1].Value.Trim()
+                                    }
                                 }
 
                                 $skillName = if ($metaName) { $metaName }
@@ -1851,7 +1911,7 @@ switch ($Command) {
             }
 
             default {
-                Write-Error "Unknown skills subcommand: $skillsSub"
+                Write-Host "Unknown skills subcommand: $skillsSub" -ForegroundColor Red
                 Write-Host "  Usage: ostwin skills sync"
                 Write-Host "         ostwin skills install [<slug>|<github-url>|--from DIR] [--agent <role>]"
                 Write-Host "         ostwin skills search <query>"
@@ -1914,6 +1974,7 @@ switch ($Command) {
 
             if (Test-Path $mcpSh) {
                 & bash $mcpSh @Arguments
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
             }
             else {
                 Write-Error "[ERROR] mcp-extension.sh not found."
@@ -2140,6 +2201,7 @@ switch ($Command) {
             Push-Location $resolvedRoot
             try {
                 Invoke-Expression $invokeCmd
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
             }
             finally {
                 Pop-Location
@@ -2156,6 +2218,7 @@ switch ($Command) {
         # Shorthand for: ostwin role macos-automation-engineer <sub> [args]
         $ostwinExec = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $AgentsDir "bin" "ostwin" }
         & $ostwinExec role macos-automation-engineer @Arguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
     }
 
     # ── config ───────────────────────────────────────────────────────────────
@@ -2200,30 +2263,100 @@ switch ($Command) {
 
     # ── test ─────────────────────────────────────────────────────────────────
     "test" {
-        # Prefer PowerShell test runner, fall back to Pester directly
-        $testPs1 = Join-Path $AgentsDir "tests/Run-All.ps1"
-        if (Test-Path $testPs1) {
-            & pwsh -NoProfile -File $testPs1 @Arguments
-        }
-        else {
-            # Inline Pester invocation as fallback
-            & pwsh -NoProfile -Command @"
-Invoke-Pester '$AgentsDir\lib','$AgentsDir\channel','$AgentsDir\war-rooms','$AgentsDir\roles','$AgentsDir\plan' -Output Detailed
-"@
-        }
-    }
-
-    # ── test-ps ──────────────────────────────────────────────────────────────
-    "test-ps" {
-        if (Get-Command pwsh -ErrorAction SilentlyContinue) {
-            & pwsh -NoProfile -Command @"
-Invoke-Pester '$AgentsDir\lib','$AgentsDir\channel','$AgentsDir\war-rooms','$AgentsDir\roles','$AgentsDir\plan' -Output Detailed
-"@
-        }
-        else {
-            Write-Error "[ERROR] pwsh (PowerShell) not found. Install: https://aka.ms/install-powershell"
+        if (-not (Get-Command Invoke-Pester -ErrorAction SilentlyContinue)) {
+            Write-Error "[ERROR] Pester is not installed. Install it with: Install-Module Pester -Scope CurrentUser"
             exit 1
         }
+
+        $testsRoot = Join-Path $AgentsDir "tests"
+        $binTestsRoot = Join-Path $AgentsDir "bin/tests"
+        $suiteMap = @{
+            all                 = @($testsRoot, $binTestsRoot)
+            cli                 = @($binTestsRoot)
+            bin                 = @($binTestsRoot)
+            channel             = @(Join-Path $testsRoot "channel")
+            events              = @(Join-Path $testsRoot "events")
+            installer           = @(Join-Path $testsRoot "installer")
+            lib                 = @(Join-Path $testsRoot "lib")
+            lifecycle           = @(Join-Path $testsRoot "lifecycle")
+            "lifecycle-scripts" = @(Join-Path $testsRoot "lifecycle-scripts")
+            mcp                 = @(Join-Path $testsRoot "mcp")
+            observe             = @(Join-Path $testsRoot "observe")
+            plan                = @(Join-Path $testsRoot "plan")
+            roles               = @(Join-Path $testsRoot "roles")
+            manager             = @(Join-Path $testsRoot "roles/manager")
+            workspace           = @(Join-Path $testsRoot "workspace")
+            warroom             = @(Join-Path $testsRoot "war-rooms")
+            "war-rooms"         = @(Join-Path $testsRoot "war-rooms")
+        }
+        $suiteName = "all"
+        $testPath = ""
+        $verbosity = "Minimal"
+
+        $ti = 0
+        while ($ti -lt $Arguments.Count) {
+            switch ($Arguments[$ti]) {
+                { $_ -in @('--help', '-h') } {
+                    Write-Host "Usage: ostwin test [--suite NAME] [--path PATH] [--verbose]"
+                    Write-Host ""
+                    Write-Host "Suites: $((@($suiteMap.Keys) | Sort-Object) -join ', ')"
+                    exit 0
+                }
+                '--suite' {
+                    $ti++
+                    if ($ti -ge $Arguments.Count) {
+                        Write-Error "Missing value for --suite"
+                        exit 1
+                    }
+                    $suiteName = $Arguments[$ti].ToLowerInvariant()
+                    $ti++
+                }
+                '--path' {
+                    $ti++
+                    if ($ti -ge $Arguments.Count) {
+                        Write-Error "Missing value for --path"
+                        exit 1
+                    }
+                    $testPath = $Arguments[$ti]
+                    $ti++
+                }
+                '--verbose' {
+                    $verbosity = "Detailed"
+                    $ti++
+                }
+                default {
+                    Write-Error "Unknown option for test: $($Arguments[$ti])"
+                    Write-Host "Run 'ostwin test --help' for usage."
+                    exit 1
+                }
+            }
+        }
+
+        if ($testPath) {
+            $selectedPaths = @($testPath)
+        }
+        elseif ($suiteMap.ContainsKey($suiteName)) {
+            $selectedPaths = @($suiteMap[$suiteName])
+        }
+        else {
+            Write-Error "Unknown test suite: $suiteName"
+            Write-Host "Available suites: $((@($suiteMap.Keys) | Sort-Object) -join ', ')"
+            exit 1
+        }
+
+        $existingPaths = @($selectedPaths | Where-Object { Test-Path $_ })
+        if ($existingPaths.Count -eq 0) {
+            Write-Error "No test paths found for suite '$suiteName'."
+            exit 1
+        }
+
+        $config = New-PesterConfiguration
+        $config.Run.Path = $existingPaths
+        $config.Run.Exit = $false
+        $config.Output.Verbosity = $verbosity
+        $result = Invoke-Pester -Configuration $config
+        if ($result.FailedCount -gt 0) { exit 1 }
+        exit 0
     }
 
     # ── version ──────────────────────────────────────────────────────────────
@@ -2396,7 +2529,7 @@ Invoke-Pester '$AgentsDir\lib','$AgentsDir\channel','$AgentsDir\war-rooms','$Age
             Show-OstwinHelp
         }
         else {
-            Write-Error "Unknown command: $Command"
+            Write-Host "Unknown command: $Command" -ForegroundColor Red
             Write-Host "Run 'ostwin --help' for usage."
             exit 1
         }

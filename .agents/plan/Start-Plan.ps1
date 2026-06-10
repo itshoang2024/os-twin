@@ -134,6 +134,10 @@ if (Test-Path $workspaceModule) {
     $workspaceModule = (Resolve-Path $workspaceModule).Path
     Import-Module $workspaceModule -Force -DisableNameChecking
 }
+$roomAuditModule = Join-Path $agentsDir "workspace" "RoomAudit.psm1"
+if (Test-Path $roomAuditModule) {
+    Import-Module (Resolve-Path $roomAuditModule).Path -Force -DisableNameChecking
+}
 
 # --- Helper Functions ---
 # (Test-Underspecified now in Utils.psm1)
@@ -794,6 +798,13 @@ if ($Resume) {
                 } elseif ($status -eq "blocked") {
                     Write-Host "  → Resetting $($rd.Name) to pending (was: $status)" -ForegroundColor Yellow
                     "pending" | Out-File -FilePath $statusFile -Encoding utf8 -NoNewline
+                } elseif ($status -notin @("done", "pending") -and (Get-Command Restore-RoomStateFromAudit -ErrorAction SilentlyContinue)) {
+                    # In-flight state (developing, optimize, reviewing, ...) —
+                    # revert to the previous state recorded in audit.log.
+                    $reverted = Restore-RoomStateFromAudit -RoomDir $rd.FullName
+                    if ($reverted) {
+                        Write-Host "  → Reverted $($rd.Name) from $($reverted.From) to $($reverted.To) (audit.log)" -ForegroundColor Yellow
+                    }
                 }
 
                 $normalizedStatus = (Get-Content $statusFile -Raw).Trim()

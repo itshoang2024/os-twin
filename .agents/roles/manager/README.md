@@ -85,9 +85,9 @@ When a plan runs with `room-worktree` isolation, `Start-Plan.ps1` initializes `w
 Dependency readiness has two layers:
 
 1. `DAG.json` says the upstream room's lifecycle work is complete.
-2. `workspace.json` says the upstream room's branch has been merged into the plan integration worktree.
+2. `workspace.json` says the upstream room's branch has been merged into the source branch for the current plan round.
 
-That means a dependent room waits for `EPIC-001:done` and `EPIC-001:merged`, not just a `done` room status. Merge conflicts are recorded in `artifacts/workspace-merge-conflict.json`, the room is marked `failed`, and descendants are blocked through the DAG.
+When a room reaches `done`, the manager commits that room worktree to its room branch and immediately force-integrates all currently committed room branches into the source branch. That advances `integration_head`, so the next dependent room forks from the latest merged code. Merge conflicts are recorded in `artifacts/workspace-merge-conflict.json`, the room is marked `failed`, and descendants are blocked through the DAG.
 
 ---
 
@@ -241,7 +241,8 @@ When a signal matches, the manager executes its `actions` array before transitio
 |---|---|
 | `Get-WorkspaceDependencyState` | Requires each dependency to be lifecycle `done` and workspace `merged` before a dependent room starts |
 | `Ensure-RoomWorktree` | Creates or reuses the room-specific Git worktree and rewrites the room working directory |
-| `Invoke-RoomWorkspaceMerge` | Queues the reviewed room branch into the integration worktree and records merge status |
+| `Complete-RoomWorkspaceCommit` | Commits a completed room's worktree onto its room branch |
+| `Complete-PlanWorkspaceMerge` | Merges committed room branches into the current source branch and updates `integration_head` |
 
 ### Skill resolution
 

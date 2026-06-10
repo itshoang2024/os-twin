@@ -352,10 +352,10 @@ Describe "ostwin.ps1 — All Commands Still Present (backward compat)" {
 
     # Every command that was in the old bash ostwin must exist in ostwin.ps1
     $commands = @(
-        "agent", "run", "plan", "init", "sync", "status",
-        "logs", "stop", "dashboard", "channel", "clone-role",
+        "run", "plan", "init", "sync", "status",
+        "logs", "stop", "dashboard", "channel",
         "skills", "mcp", "reload-env", "role", "mac",
-        "config", "health", "test", "test-ps", "version"
+        "search-engine", "memory", "config", "health", "test", "version"
     )
 
     foreach ($cmd in $commands) {

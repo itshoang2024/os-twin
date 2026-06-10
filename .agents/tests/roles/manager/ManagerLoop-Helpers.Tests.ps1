@@ -29,7 +29,13 @@ BeforeAll {
         # task-ref
         "TASK-TEST" | Out-File -FilePath (Join-Path $roomDir "task-ref") -Encoding utf8 -NoNewline
         # config.json
-        @{ task_ref = "TASK-TEST"; assignment = @{ assigned_role = "engineer" } } |
+        @{
+            room_id    = (Split-Path $roomDir -Leaf)
+            task_ref   = "TASK-TEST"
+            plan_id    = "plan-test"
+            run_id     = "run-test"
+            assignment = @{ assigned_role = "engineer" }
+        } |
             ConvertTo-Json | Out-File -FilePath (Join-Path $roomDir "config.json") -Encoding utf8
         # lifecycle.json
         if (-not $Lc) {

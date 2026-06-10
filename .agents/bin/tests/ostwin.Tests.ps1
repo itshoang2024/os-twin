@@ -64,7 +64,6 @@ Describe "ostwin.ps1 — Help Output" {
     It "Should list all major commands in help" {
         $output = & pwsh -NoProfile -File $script:OstwinPs1 help 2>&1
         $text = $output -join "`n"
-        $text | Should -Match "agent"
         $text | Should -Match "run"
         $text | Should -Match "plan"
         $text | Should -Match "status"
@@ -75,10 +74,11 @@ Describe "ostwin.ps1 — Help Output" {
         $text | Should -Match "version"
         $text | Should -Match "channel"
         $text | Should -Match "mcp"
+        $text | Should -Match "search-engine"
         $text | Should -Match "reload-env"
+        $text | Should -Match "memory"
         $text | Should -Match "health"
         $text | Should -Match "config"
-        $text | Should -Match "clone-role"
         $text | Should -Match "init"
         $text | Should -Match "sync"
         $text | Should -Match "logs"
@@ -274,10 +274,10 @@ Describe "ostwin.ps1 — Subcommand Coverage" {
 
     # List of all subcommands from the bash ostwin CLI
     $subcommands = @(
-        "agent", "run", "plan", "init", "sync", "status",
-        "logs", "stop", "dashboard", "channel", "clone-role",
+        "run", "plan", "init", "sync", "status",
+        "logs", "stop", "dashboard", "channel",
         "skills", "mcp", "reload-env", "role", "mac",
-        "config", "health", "test", "test-ps", "version"
+        "search-engine", "memory", "config", "health", "test", "version"
     )
 
     foreach ($sub in $subcommands) {
@@ -312,6 +312,25 @@ Describe "ostwin.ps1 — Skills Subcommands" {
         It "Should handle 'skills $sub' subcommand" {
             $script:Content | Should -Match "`"$sub`""
         }
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+Describe "ostwin.ps1 — Namespace Help Defaults" {
+    It "Should show plan usage when invoked without a plan subcommand" {
+        $output = & pwsh -NoProfile -File $script:OstwinPs1 plan 2>&1
+        $text = $output -join "`n"
+        $text | Should -Match "Usage: ostwin plan <subcommand>"
+        $text | Should -Match "create"
+        $text | Should -Match "clear"
+    }
+
+    It "Should show skills usage when invoked without a skills subcommand" {
+        $output = & pwsh -NoProfile -File $script:OstwinPs1 skills 2>&1
+        $text = $output -join "`n"
+        $text | Should -Match "Usage: ostwin skills <subcommand>"
+        $text | Should -Match "install"
+        $text | Should -Match "sync"
     }
 }
 

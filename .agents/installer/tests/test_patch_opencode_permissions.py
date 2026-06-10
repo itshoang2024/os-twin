@@ -37,6 +37,7 @@ def test_adds_read_and_external_directory_permissions(tmp_path):
         "*.env": "allow",
         "*.env.*": "allow",
         "*.env.example": "allow",
+        ".codegraph": "deny",
     }
     assert permission["external_directory"] == {"*": "allow"}
 
@@ -74,6 +75,7 @@ def test_does_not_rewrite_when_permissions_are_current(tmp_path):
                 "*.env": "allow",
                 "*.env.*": "allow",
                 "*.env.example": "allow",
+                ".codegraph": "deny",
             },
             "external_directory": {"*": "allow"},
         },

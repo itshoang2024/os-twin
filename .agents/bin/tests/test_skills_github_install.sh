@@ -183,13 +183,24 @@ exit 0
 STUBEOF
 chmod +x "$FAKE_HOME/.ostwin/sync-skills.sh"
 
+# GitHub install tests stay offline by rewriting https://github.com/local/*.git
+# to the local bare repos created under $FIXTURE_DIR.
+GIT_CONFIG_FILE="$FIXTURE_DIR/gitconfig"
+git config --file "$GIT_CONFIG_FILE" url."file://$FIXTURE_DIR/".insteadOf "https://github.com/local/"
+
+repo_url() {
+  printf 'https://github.com/local/%s\n' "$(basename "$1")"
+}
+
 # Helper: run install with sandboxed HOME, unreachable dashboard,
 #         and AGENTS_DIR pointing at the real bin directory's parent.
 run_install() {
   HOME="$FAKE_HOME" \
+  OSTWIN_HOME="$FAKE_HOME/.ostwin" \
   AGENTS_DIR="$BIN_DIR/.." \
   DASHBOARD_URL="http://localhost:1" \
-  bash "$OSTWIN_CLI" skills install "$@" 2>&1
+  GIT_CONFIG_GLOBAL="$GIT_CONFIG_FILE" \
+  pwsh -NoProfile -File "$OSTWIN_CLI" skills install "$@" 2>&1
 }
 
 # =============================================================================
@@ -277,25 +288,7 @@ section "4. Full install: SKILL.md at root with frontmatter name"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-# The implementation only accepts github.com URLs, so for local testing
-# we create a patched copy that also accepts file:// URLs.
-PATCHED_OSTWIN="$FIXTURE_DIR/ostwin-patched"
-awk '{
-  if ($0 ~ /\^git@github\\.com:/) {
-    sub(/; then$/, " || [[ \"$first_arg\" =~ ^file:/// ]]; then")
-  }
-  print
-}' "$OSTWIN_CLI" > "$PATCHED_OSTWIN"
-chmod +x "$PATCHED_OSTWIN"
-
-run_patched() {
-  HOME="$FAKE_HOME" \
-  AGENTS_DIR="$BIN_DIR/.." \
-  DASHBOARD_URL="http://localhost:1" \
-  bash "$PATCHED_OSTWIN" skills install "$@" 2>&1
-}
-
-OUT_A="$(run_patched "file://$REPO_A_BARE")"
+OUT_A="$(run_install "$(repo_url "$REPO_A_BARE")")"
 RC_A=$?
 
 assert_ok "$RC_A" "exit code 0 for valid repo"
@@ -320,7 +313,7 @@ assert_file "$DEST_A2/origin.json" "dest2 has origin.json"
 # Verify origin.json content
 ORIGIN_JSON="$(cat "$DEST_A1/origin.json")"
 assert_contains "$ORIGIN_JSON" '"source": "github"' "origin source is github"
-assert_contains "$ORIGIN_JSON" "file://$REPO_A_BARE" "origin has URL"
+assert_contains "$ORIGIN_JSON" "$(repo_url "$REPO_A_BARE")" "origin has URL"
 assert_contains "$ORIGIN_JSON" "$REPO_A_COMMIT" "origin has commit SHA"
 assert_contains "$ORIGIN_JSON" '"installed_at":' "origin has timestamp"
 
@@ -332,7 +325,7 @@ section "5. Full install: nested SKILL.md, no name in frontmatter"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_B="$(run_patched "file://$REPO_B_BARE")"
+OUT_B="$(run_install "$(repo_url "$REPO_B_BARE")")"
 RC_B=$?
 
 assert_ok "$RC_B" "exit code 0"
@@ -352,7 +345,7 @@ rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
 # Capture exit code without || true swallowing it
 RC_C=0
-OUT_C="$(run_patched "file://$REPO_C_BARE" 2>&1)" || RC_C=$?
+OUT_C="$(run_install "$(repo_url "$REPO_C_BARE")" 2>&1)" || RC_C=$?
 
 assert_fail "$RC_C" "non-zero exit for missing SKILL.md"
 assert_contains "$OUT_C" "No SKILL.md found" "error message mentions SKILL.md"
@@ -363,7 +356,7 @@ assert_contains "$OUT_C" "No SKILL.md found" "error message mentions SKILL.md"
 section "7. Error: invalid URL (clone fails)"
 
 RC_D=0
-OUT_D="$(run_patched "file:///nonexistent/path/repo.git" 2>&1)" || RC_D=$?
+OUT_D="$(run_install "https://github.com/local/not-found.git" 2>&1)" || RC_D=$?
 
 assert_fail "$RC_D" "non-zero exit for bad URL"
 assert_contains "$OUT_D" "clone" "mentions clone in output"
@@ -377,7 +370,7 @@ section "8. Temp directory cleanup"
 # (We can't directly check since mktemp names are random, but we verify
 #  the trap cleared the directory by checking nothing new exists.)
 BEFORE_COUNT="$(find /tmp -maxdepth 1 -name 'tmp.*' -type d 2>/dev/null | wc -l)"
-run_patched "file://$REPO_A_BARE" >/dev/null 2>&1 || true
+run_install "$(repo_url "$REPO_A_BARE")" >/dev/null 2>&1 || true
 AFTER_COUNT="$(find /tmp -maxdepth 1 -name 'tmp.*' -type d 2>/dev/null | wc -l)"
 # The after count should be <= before count (our temp was cleaned up)
 if [[ "$AFTER_COUNT" -le "$BEFORE_COUNT" ]]; then
@@ -396,10 +389,10 @@ rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
 # Install twice
-run_patched "file://$REPO_A_BARE" >/dev/null 2>&1
+run_install "$(repo_url "$REPO_A_BARE")" >/dev/null 2>&1
 FIRST_ORIGIN="$(cat "$FAKE_HOME/.ostwin/.agents/skills/global/test-skill-alpha/origin.json")"
 sleep 1
-run_patched "file://$REPO_A_BARE" >/dev/null 2>&1
+run_install "$(repo_url "$REPO_A_BARE")" >/dev/null 2>&1
 SECOND_ORIGIN="$(cat "$FAKE_HOME/.ostwin/.agents/skills/global/test-skill-alpha/origin.json")"
 
 # Both should have the same commit but potentially different timestamps
@@ -412,9 +405,9 @@ assert_file "$FAKE_HOME/.ostwin/.agents/skills/global/test-skill-alpha/helper.tx
 # =============================================================================
 section "10. Help text"
 
-HELP_OUT="$(HOME="$FAKE_HOME" AGENTS_DIR="$BIN_DIR/.." bash "$OSTWIN_CLI" skills bogus 2>&1)" || true
+HELP_OUT="$(HOME="$FAKE_HOME" OSTWIN_HOME="$FAKE_HOME/.ostwin" AGENTS_DIR="$BIN_DIR/.." pwsh -NoProfile -File "$OSTWIN_CLI" skills bogus 2>&1)" || true
 assert_contains "$HELP_OUT" "github-url" "help mentions github-url"
-assert_contains "$HELP_OUT" "GitHub install examples" "help has GitHub examples section"
+assert_contains "$HELP_OUT" "https://github.com/user/skill-repo" "help has GitHub examples"
 
 # =============================================================================
 # 11. MULTI-SKILL REPO — ALL SKILL.MD FILES INSTALLED (integration)
@@ -427,7 +420,7 @@ section "11. Multi-skill: flat scan installs all top-level SKILL.md folders"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_D="$(run_patched "file://$REPO_D_BARE")"
+OUT_D="$(run_install "$(repo_url "$REPO_D_BARE")")"
 RC_D=$?
 
 assert_ok "$RC_D" "exit code 0"
@@ -448,7 +441,7 @@ section "12. Nested SKILL.md in references/ skipped"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_E="$(run_patched "file://$REPO_E_BARE")"
+OUT_E="$(run_install "$(repo_url "$REPO_E_BARE")")"
 RC_E=$?
 
 assert_ok "$RC_E" "exit code 0"
@@ -468,7 +461,7 @@ section "13. Empty name: field falls back to repo name"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_F="$(run_patched "file://$REPO_F_BARE")"
+OUT_F="$(run_install "$(repo_url "$REPO_F_BARE")")"
 RC_F=$?
 
 assert_ok "$RC_F" "exit code 0"
@@ -485,7 +478,7 @@ section "14. Flat scan: skills at different depths both installed"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_G="$(run_patched "file://$REPO_G_BARE")"
+OUT_G="$(run_install "$(repo_url "$REPO_G_BARE")")"
 RC_G=$?
 
 assert_ok "$RC_G" "exit code 0"
@@ -503,11 +496,11 @@ rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
 # Install V1 (has old-asset.txt, no new-asset.txt)
-run_patched "file://$REPO_H1_BARE" >/dev/null 2>&1
+run_install "$(repo_url "$REPO_H1_BARE")" >/dev/null 2>&1
 assert_file "$FAKE_HOME/.ostwin/.agents/skills/global/evolving-skill/old-asset.txt" "v1 has old-asset"
 
 # Install V2 (has new-asset.txt, no old-asset.txt)
-run_patched "file://$REPO_H2_BARE" >/dev/null 2>&1
+run_install "$(repo_url "$REPO_H2_BARE")" >/dev/null 2>&1
 if [[ -f "$FAKE_HOME/.ostwin/.agents/skills/global/evolving-skill/old-asset.txt" ]]; then
   _fail "stale old-asset.txt NOT removed after re-install"
 else
@@ -539,7 +532,7 @@ section "17. Multi-skill without names uses directory names"
 rm -rf "$FAKE_HOME/.ostwin/.agents/skills/global/"*
 rm -rf "$FAKE_HOME/.ostwin/skills/global/"*
 
-OUT_J="$(run_patched "file://$REPO_J_BARE")"
+OUT_J="$(run_install "$(repo_url "$REPO_J_BARE")")"
 RC_J=$?
 
 assert_ok "$RC_J" "exit code 0"
@@ -612,7 +605,7 @@ printf -- '---\nname: deep-skill\ndescription: generic deep\n---\n# Deep\n' \
 git -C "$REPO_BMAD_WORK" add -A && git -C "$REPO_BMAD_WORK" commit -q -m "bmad-like init"
 git clone -q --bare "$REPO_BMAD_WORK" "$REPO_BMAD_BARE"
 
-OUT_BMAD="$(run_patched "file://$REPO_BMAD_BARE")"
+OUT_BMAD="$(run_install "$(repo_url "$REPO_BMAD_BARE")")"
 RC_BMAD=$?
 
 assert_ok   "$RC_BMAD" "19: exit code 0 for deep-folder repo"

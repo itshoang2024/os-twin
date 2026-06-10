@@ -15,4 +15,14 @@ function Invoke-RoomWorkspaceMerge {
     return (Complete-RoomWorkspaceMerge -RoomDir $RoomDir -WarRoomsDir $WarRoomsDir)
 }
 
-Export-ModuleMember -Function Invoke-RoomWorkspaceMerge
+function Invoke-PlanWorkspaceMergeAll {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WarRoomsDir,
+        [switch]$Force
+    )
+
+    return (Complete-PlanWorkspaceMerge -WarRoomsDir $WarRoomsDir -Force:$Force)
+}
+
+Export-ModuleMember -Function Invoke-RoomWorkspaceMerge, Invoke-PlanWorkspaceMergeAll

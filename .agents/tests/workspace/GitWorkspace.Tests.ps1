@@ -134,12 +134,12 @@ Describe 'GitWorkspace lazy room worktrees' {
         $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
 
         $result.Ready | Should -BeTrue
-        $manifest.worktree_root | Should -Be (Join-Path $repo '.worktree')
+        $manifest.worktree_root | Should -Be (Join-Path (Join-Path $repo '.worktree') 'plan-test')
         $config.PSObject.Properties.Name | Should -Not -Contain 'workspace'
-        $config.working_dir | Should -Be (Join-Path (Join-Path $repo '.worktree') 'room-001')
+        $config.working_dir | Should -Be (Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001')
         $record.status | Should -Be 'ready'
         $record.base_ref | Should -Be $sourceHead
-        $record.worktree_dir | Should -Be (Join-Path (Join-Path $repo '.worktree') 'room-001')
+        $record.worktree_dir | Should -Be (Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001')
         Test-Path (Join-Path $roomDir 'lifecycle.json') | Should -BeTrue
     }
 
@@ -154,7 +154,7 @@ Describe 'GitWorkspace lazy room worktrees' {
 
         $manifest = Initialize-PlanIntegrationWorkspace -WarRoomsDir $warRoomsDir -PlanId 'plan-test' -RunId 'run-test' -SourceWorkingDir $sourceDir -WorkspaceIsolation room-worktree
 
-        $manifest.worktree_root | Should -Be (Join-Path $sourceDir '.worktree')
+        $manifest.worktree_root | Should -Be (Join-Path (Join-Path $sourceDir '.worktree') 'plan-test')
         $manifest.source_git_root | Should -Be $repo
         $manifest.source_working_dir | Should -Be $sourceDir
         $manifest.source_relative_dir | Should -Be 'app'
@@ -176,7 +176,7 @@ Describe 'GitWorkspace lazy room worktrees' {
             depends_on = @()
             assignment = @{ title = 'Provision stale worktree' }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
-        $expectedWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        $expectedWorktree = Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001'
         Set-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001' -TaskRef 'EPIC-001' -Status 'ready' -Fields @{
             worktree_dir = $expectedWorktree
             working_dir = $expectedWorktree
@@ -197,7 +197,7 @@ Describe 'GitWorkspace lazy room worktrees' {
 
         $roomDir = Join-Path $warRoomsDir 'room-001'
         New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
-        $roomWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        $roomWorktree = Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001'
         $nestedWorkingDir = Join-Path $roomWorktree '.worktree/room-001'
         @{
             room_id = 'room-001'
@@ -235,7 +235,7 @@ Describe 'GitWorkspace lazy room worktrees' {
             depends_on = @()
             assignment = @{ title = 'Replace stale generated dir' }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
-        $roomWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        $roomWorktree = Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001'
         New-Item -ItemType Directory -Path (Join-Path $roomWorktree '.worktree/room-001') -Force | Out-Null
 
         $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
@@ -262,7 +262,7 @@ Describe 'GitWorkspace lazy room worktrees' {
             depends_on = @()
             assignment = @{ title = 'Do not replace user files' }
         } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir 'config.json') -Encoding utf8
-        $roomWorktree = Join-Path (Join-Path $repo '.worktree') 'room-001'
+        $roomWorktree = Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') 'room-001'
         New-Item -ItemType Directory -Path $roomWorktree -Force | Out-Null
         'keep me' | Out-File -FilePath (Join-Path $roomWorktree 'user-file.txt') -Encoding utf8
 
@@ -300,7 +300,7 @@ Describe 'GitWorkspace lazy room worktrees' {
         $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         $config = Get-Content (Join-Path $roomDir 'config.json') -Raw | ConvertFrom-Json
         $record = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
-        $expectedRoomWorktree = Join-Path (Join-Path $planDir '.worktree') 'room-001'
+        $expectedRoomWorktree = Join-Path (Join-Path (Join-Path $planDir '.worktree') 'plan-test') 'room-001'
         $expectedAgentDir = Join-Path $expectedRoomWorktree 'b/c'
 
         $result.WorkingDir | Should -Be $expectedAgentDir
@@ -339,7 +339,7 @@ Describe 'GitWorkspace lazy room worktrees' {
 
         $result = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
         $config = Get-Content (Join-Path $roomDir 'config.json') -Raw | ConvertFrom-Json
-        $expectedRoomWorktree = Join-Path (Join-Path $planDir '.worktree') 'room-001'
+        $expectedRoomWorktree = Join-Path (Join-Path (Join-Path $planDir '.worktree') 'plan-test') 'room-001'
         $expectedAgentDir = Join-Path $expectedRoomWorktree 'b'
 
         $result.WorkingDir | Should -Be $expectedAgentDir
@@ -410,7 +410,7 @@ Describe 'GitWorkspace lazy room worktrees' {
             'pending' | Out-File (Join-Path $roomDir 'status') -Encoding utf8 -NoNewline
 
             $ready = Ensure-RoomWorktree -RoomDir $roomDir -WarRoomsDir $warRoomsDir
-            $ready.WorkingDir | Should -Be (Join-Path (Join-Path $repo '.worktree') $roomSpec.RoomId)
+            $ready.WorkingDir | Should -Be (Join-Path (Join-Path (Join-Path $repo '.worktree') 'plan-test') $roomSpec.RoomId)
             $roomSpec.Content | Out-File -FilePath (Join-Path $ready.WorkingDir $roomSpec.File) -Encoding utf8
             "agent wrapper" | Out-File -FilePath (Join-Path $roomDir 'artifacts/run-agent.sh') -Encoding utf8
 
@@ -421,8 +421,8 @@ Describe 'GitWorkspace lazy room worktrees' {
             Test-Path (Join-Path $roomDir 'artifacts/run-agent.sh') | Should -BeTrue
         }
 
-        Test-Path (Join-Path $repo '.worktree/room-001/.git') | Should -BeTrue
-        Test-Path (Join-Path $repo '.worktree/room-002/.git') | Should -BeTrue
+        Test-Path (Join-Path $repo '.worktree/plan-test/room-001/.git') | Should -BeTrue
+        Test-Path (Join-Path $repo '.worktree/plan-test/room-002/.git') | Should -BeTrue
         $record1 = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-001'
         $record2 = Get-RoomWorkspaceRecord -WarRoomsDir $warRoomsDir -RoomId 'room-002'
         $record1.status | Should -Be 'merged'

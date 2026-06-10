@@ -15,10 +15,28 @@ BeforeAll {
 
 Describe "Invoke-Agent" {
     BeforeEach {
+        $script:priorOstwinPlanId = $env:OSTWIN_PLAN_ID
+        $script:priorOstwinRunId = $env:OSTWIN_RUN_ID
+        $script:priorOstwinEventsPath = $env:OSTWIN_EVENTS_PATH
+        Remove-Item Env:OSTWIN_PLAN_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue
+
         $script:roomDir = Join-Path $TestDrive "room-$(Get-Random)"
         New-Item -ItemType Directory -Path $script:roomDir -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $script:roomDir "pids") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $script:roomDir "artifacts") -Force | Out-Null
+    }
+
+    AfterEach {
+        if ($script:priorOstwinPlanId) { $env:OSTWIN_PLAN_ID = $script:priorOstwinPlanId }
+        else { Remove-Item Env:OSTWIN_PLAN_ID -ErrorAction SilentlyContinue }
+
+        if ($script:priorOstwinRunId) { $env:OSTWIN_RUN_ID = $script:priorOstwinRunId }
+        else { Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue }
+
+        if ($script:priorOstwinEventsPath) { $env:OSTWIN_EVENTS_PATH = $script:priorOstwinEventsPath }
+        else { Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue }
     }
 
     Context "With mock agent command" {
@@ -71,12 +89,12 @@ Describe "Invoke-Agent" {
             $result.PSObject.Properties.Name | Should -Contain "TimedOut"
         }
 
-        It "writes output to per-room plan log" {
+        It "writes output to per-room plan log (plans/<plan_id>/<room_id>.log)" {
             $result = & $script:InvokeAgent -RoomDir $script:roomDir `
                 -RoleName "qa" -Prompt "review test" `
                 -AgentCmd "echo" -TimeoutSeconds 5
 
-            $result.OutputFile | Should -Match "\.ostwin[/\\]\.agents[/\\]plans[/\\].+\.$([regex]::Escape((Split-Path $script:roomDir -Leaf)))\.log$"
+            $result.OutputFile | Should -Match "\.ostwin[/\\]\.agents[/\\]plans[/\\]no-plan[/\\]$([regex]::Escape((Split-Path $script:roomDir -Leaf)))\.log$"
         }
 
 
@@ -708,7 +726,7 @@ Write-Output "PROJDIR_CHECK:`$val"
             $args | Should -Contain "8080"
         }
 
-        It "passes --dir flag with resolved project directory" {
+        It "execs inside the resolved project directory instead of passing --dir" {
             # Create project structure with .war-rooms so ProjectDir resolves
             $projectDir = Join-Path $TestDrive "project-dir-$(Get-Random)"
             $roomDir = Join-Path $projectDir ".war-rooms" "room-dir"
@@ -721,8 +739,10 @@ Write-Output "PROJDIR_CHECK:`$val"
 
             Test-Path $script:argsDump | Should -BeTrue -Because "mock should capture args"
             $capturedArgs = Get-Content $script:argsDump
-            $capturedArgs | Should -Contain "--dir"
-            $capturedArgs | Should -Contain $projectDir
+            $capturedArgs | Should -Not -Contain "--dir" `
+                -Because "scoping is done by cd in the wrapper, never by a --dir arg"
+            $wrapper = Get-Content (Join-Path $roomDir "artifacts" "run-agent.sh") -Raw
+            $wrapper | Should -Match ([regex]::Escape("cd '$projectDir'"))
         }
 
         It "does not pass --dir when ProjectDir cannot be resolved" {
@@ -1038,23 +1058,24 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             # Verify exact argument order:
             # [0,1] --model <model>
             # [2,3] --agent <role>
-            # [4,5] --dir <project-dir>
-            # [6] --dangerously-skip-permissions
+            # [4] --dangerously-skip-permissions
+            # (no --dir: scoping happens via cd in the wrapper)
             $capturedArgs[0] | Should -Be "--model"
             $capturedArgs[1] | Should -Be "google-vertex/zai-org/glm-5-maas"
             $capturedArgs[2] | Should -Be "--agent"
             $capturedArgs[3] | Should -Be "engineer"
-            $capturedArgs[4] | Should -Be "--dir"
-            $capturedArgs[5] | Should -Be $script:projectDir
-            $capturedArgs[6] | Should -Be "--dangerously-skip-permissions"
+            $capturedArgs[4] | Should -Be "--dangerously-skip-permissions"
+            $capturedArgs | Should -Not -Contain "--dir"
             $capturedArgs | Should -Not -Contain "--file" `
                 -Because "compiled prompt is stdin only unless caller explicitly passes -Files"
+
+            $wrapper = Get-Content (Join-Path $script:safeRoomDir "artifacts" "run-agent.sh") -Raw
+            $wrapper | Should -Match ([regex]::Escape("cd '$($script:projectDir)'"))
         }
 
-        It "--dir value is never concatenated with adjacent arguments" {
-            # This is the exact regression test for the bug where Start-Process
-            # with array-based -ArgumentList concatenated --dir path with 'run':
-            #   "/path/to/project/runExecute the task..."
+        It "the project directory never leaks into CLI arguments" {
+            # Regression guard for the old --dir concatenation bug — now the
+            # project dir must not appear in args at all (cd-based scoping).
             $result = & $script:InvokeAgent -RoomDir $script:safeRoomDir `
                 -RoleName "engineer" -Prompt "test isolation" `
                 -Model "test-model" `
@@ -1063,30 +1084,18 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
 
-            # The --dir value must be EXACTLY the project dir — no trailing junk
-            $dirIdx = [array]::IndexOf($capturedArgs, "--dir")
-            $dirIdx | Should -BeGreaterOrEqual 0 -Because "--dir flag must be present"
-            $dirValue = $capturedArgs[$dirIdx + 1]
-
-            $dirValue | Should -Be $script:projectDir `
-                -Because "--dir value must be the exact project path, not concatenated with other args"
-
-            # The arg BEFORE --dir must not end with the project dir (concatenation bug)
-            if ($dirIdx -gt 0) {
-                $prevArg = $capturedArgs[$dirIdx - 1]
-                $prevArg | Should -Not -Match ([regex]::Escape($script:projectDir)) `
-                    -Because "--dir value must not be concatenated with the previous argument"
+            $capturedArgs | Should -Not -Contain "--dir"
+            foreach ($arg in $capturedArgs) {
+                $arg | Should -Not -Match ([regex]::Escape($script:projectDir)) `
+                    -Because "the project dir is carried by the wrapper cd, never by args"
             }
-            # The arg AFTER --dir value must be its own token (not appended to dir path)
-            if ($dirIdx + 2 -lt $capturedArgs.Count) {
-                $nextArg = $capturedArgs[$dirIdx + 2]
-                $nextArg | Should -Match '^--' `
-                    -Because "the arg after --dir value must be a flag, not concatenated text"
-            }
+            $wrapper = Get-Content (Join-Path $script:safeRoomDir "artifacts" "run-agent.sh") -Raw
+            $wrapper | Should -Match ([regex]::Escape("cd '$($script:projectDir)'"))
         }
 
         It "handles spaces in project directory path" {
-            # Paths with spaces are a classic Start-Process quoting pitfall
+            # Paths with spaces are a classic shell quoting pitfall — the
+            # wrapper cd must carry the full path as one quoted token.
             $spacedProject = Join-Path $TestDrive "My Project $(Get-Random)"
             $spacedRoom = Join-Path $spacedProject ".war-rooms" "room-spaced"
             New-Item -ItemType Directory -Path (Join-Path $spacedRoom "artifacts") -Force | Out-Null
@@ -1097,15 +1106,10 @@ Write-Output "ARGS: `$(`$args -join ' ')"
                 -Model "test-model" `
                 -AgentCmd $script:safeArgsMockCmd -TimeoutSeconds 5
 
-            Test-Path $script:safeArgsDump | Should -BeTrue
-            $capturedArgs = Get-Content $script:safeArgsDump
-
-            $dirIdx = [array]::IndexOf($capturedArgs, "--dir")
-            $dirIdx | Should -BeGreaterOrEqual 0
-            $dirValue = $capturedArgs[$dirIdx + 1]
-
-            $dirValue | Should -Be $spacedProject `
-                -Because "spaces in path must be preserved as a single argument, not split"
+            $result.ExitCode | Should -Be 0 -Because "wrapper cd must succeed for a spaced path"
+            $wrapper = Get-Content (Join-Path $spacedRoom "artifacts" "run-agent.sh") -Raw
+            $wrapper | Should -Match ([regex]::Escape("cd '$spacedProject'")) `
+                -Because "spaces in path must be preserved inside one quoted cd target"
         }
 
         It "prompt text is never inlined and prompt file is not implicitly attached" {
@@ -1160,9 +1164,9 @@ Write-Output "ARGS: `$(`$args -join ' ')"
             Test-Path $script:safeArgsDump | Should -BeTrue
             $capturedArgs = Get-Content $script:safeArgsDump
 
-            # Expected: --model(2) + --agent(2) + --dir(2) + --dangerously-skip-permissions(1) = 7
-            $capturedArgs.Count | Should -Be 7 `
-                -Because "exactly 7 args: --model X + --agent X + --dir X + --dangerously-skip-permissions"
+            # Expected: --model(2) + --agent(2) + --dangerously-skip-permissions(1) = 5
+            $capturedArgs.Count | Should -Be 5 `
+                -Because "exactly 5 args: --model X + --agent X + --dangerously-skip-permissions (no --dir)"
         }
 
         It "without ProjectDir, --dir is omitted and arg count adjusts" {

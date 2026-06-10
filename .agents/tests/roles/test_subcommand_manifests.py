@@ -2,14 +2,15 @@ import unittest
 import json
 import os
 import subprocess
+from pathlib import Path
 
 class TestSubcommandManifest(unittest.TestCase):
     def setUp(self):
-        self.schema_path = "/Users/paulaan/PycharmProjects/agent-os/.agents/schemas/subcommands-schema.json"
-        self.validate_script = "/Users/paulaan/PycharmProjects/agent-os/.agents/bin/validate-subcommands.sh"
-        self.reporter_manifest = "/Users/paulaan/PycharmProjects/agent-os/.agents/roles/reporter/subcommands.json"
-        self.manager_manifest = "/Users/paulaan/PycharmProjects/agent-os/.agents/roles/manager/subcommands.json"
-        self.template_manifest = "/Users/paulaan/PycharmProjects/agent-os/.agents/roles/_base/subcommands.json.template"
+        agents_root = Path(__file__).resolve().parents[2]
+        self.schema_path = agents_root / "schemas" / "subcommands-schema.json"
+        self.validate_script = agents_root / "bin" / "validate-subcommands.sh"
+        self.manifests = sorted((agents_root / "roles").glob("*/subcommands.json"))
+        self.template_manifest = agents_root / "roles" / "_base" / "subcommands.json.template"
 
     def test_schema_exists(self):
         self.assertTrue(os.path.exists(self.schema_path))
@@ -17,13 +18,12 @@ class TestSubcommandManifest(unittest.TestCase):
     def test_validate_script_exists(self):
         self.assertTrue(os.path.exists(self.validate_script))
 
-    def test_validate_reporter(self):
-        result = subprocess.run(["bash", self.validate_script, self.reporter_manifest], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, f"Reporter manifest validation failed: {result.stderr}")
-
-    def test_validate_manager(self):
-        result = subprocess.run(["bash", self.validate_script, self.manager_manifest], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, f"Manager manifest validation failed: {result.stderr}")
+    def test_validate_role_manifests(self):
+        self.assertGreater(len(self.manifests), 0)
+        for manifest in self.manifests:
+            with self.subTest(manifest=str(manifest)):
+                result = subprocess.run(["bash", self.validate_script, manifest], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, f"{manifest} validation failed: {result.stderr}")
 
     def test_validate_template(self):
         # We need to replace placeholder for it to be valid if role name has constraints, 

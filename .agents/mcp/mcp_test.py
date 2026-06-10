@@ -257,6 +257,11 @@ def test_stdio_server(
                 process.kill()
 
 
+test_sse_server.__test__ = False
+test_http_server.__test__ = False
+test_stdio_server.__test__ = False
+
+
 if __name__ == "__main__":
     # Simple CLI for the module itself to test it
     if len(sys.argv) < 2:

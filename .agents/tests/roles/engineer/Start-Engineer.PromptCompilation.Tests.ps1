@@ -27,13 +27,16 @@ Describe "Engineer Prompt Compilation" {
     }
 
     Context "Task prompt structure" {
-        It "contains ROLE.md content at the top" {
+        It "starts with compact role identity and current prompt scaffolding" {
             $prompt = & $script:BuildPrompt -RolePath $script:engineerRolePath `
                 -RoomDir $script:roomDir -TaskRef "TASK-E001"
 
-            # ROLE.md frontmatter is stripped, but content should be present
-            $prompt | Should -Match "Your Responsibilities"
-            $prompt | Should -Match "Phase 1"
+            $prompt | Should -Match "^# engineer"
+            $prompt | Should -Match "You are a Software engineer"
+            $prompt | Should -Match "Your Capabilities"
+            $prompt | Should -Match "Quality Gates"
+            $prompt | Should -Match "Workspace Boundaries"
+            $prompt | Should -Match "Task Assignment"
         }
 
         It "contains capabilities from role.json" {
