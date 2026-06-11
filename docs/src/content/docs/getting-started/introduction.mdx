@@ -5,6 +5,8 @@ sidebar:
   order: 1
 ---
 
+import LegacyDeliveryFlow from '../../../components/LegacyDeliveryFlow';
+
 OSTwin is an **operating system for AI agents**. It takes a markdown plan, decomposes it into a dependency graph of epics, spins up isolated war-rooms, and orchestrates role-based agents to execute each epic — all without writing a single line of agent code.
 
 ## The Problem
@@ -16,6 +18,12 @@ Building with AI agents today means fighting three unsolved problems:
 | **Agent sprawl** | Every task gets a new bespoke agent. Config drifts. Nothing is reusable. | Roles + Skills compose agents from portable building blocks |
 | **Context explosion** | Agents share one massive context. Prompt pollution kills quality. | War-rooms isolate each epic's context, memory, and tools |
 | **No isolation** | One agent's bad tool call corrupts another's state. No blast radius control. | MCP servers are scoped per war-room. Filesystem boundaries enforced |
+
+Agile improved software delivery by shortening feedback loops, but many teams still run a waterfall-shaped decomposition pattern inside their Agile ceremonies. One person or a small group writes a large plan, the team breaks it into many isolated tasks, and the results are merged back together later with a new round of coordination effort.
+
+<LegacyDeliveryFlow client:visible />
+
+With AI agents, that pattern becomes more fragile. Agents can produce work quickly, but if the plan is too large, the task boundaries are too thin, and the merge point is late, small misunderstandings multiply into buggy artifacts that are hard for people to control. OSTwin replaces that late-merge loop with explicit epic boundaries, dependency-aware rooms, role-scoped context, and review evidence at every handoff.
 
 Most multi-agent systems treat agents as long-running processes with hardcoded capabilities. OSTwin inverts this: agents are **ephemeral sessions** assembled on demand from composable building blocks. The building blocks are portable, the sessions are disposable, and the coordination is filesystem-native.
 

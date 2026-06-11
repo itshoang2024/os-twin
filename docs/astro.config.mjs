@@ -1,9 +1,11 @@
 import { defineConfig } from 'astro/config';
+import react from '@astrojs/react';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://twin.igot.ai',
   integrations: [
+    react(),
     starlight({
       title: 'OSTwin',
       description: 'Operational documentation for composing AI engineering teams with plans, roles, skills, and isolated war-rooms.',
@@ -45,6 +47,7 @@ export default defineConfig({
           label: 'Getting Started',
           items: [
             { label: 'Introduction', slug: 'getting-started/introduction' },
+            { label: 'Playbook', slug: 'getting-started/playbook' },
             { label: 'Installation', slug: 'getting-started/installation' },
             { label: 'Quick Start', slug: 'getting-started/quick-start' },
             { label: 'Your First Plan', slug: 'getting-started/first-plan' },

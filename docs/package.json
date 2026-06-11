@@ -13,8 +13,11 @@
     "deploy": "npm run build"
   },
   "dependencies": {
+    "@astrojs/react": "^5.0.7",
     "@astrojs/starlight": "0.33.0",
     "astro": "^5.18.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "sharp": "^0.33.0"
   },
   "devDependencies": {
