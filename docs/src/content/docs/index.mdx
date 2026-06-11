@@ -10,14 +10,41 @@ hero:
     OSTwin is a harnessing platform for agentic engineering: plans express intent, roles and skills assemble capability, memory and search extend reasoning, and isolated rooms keep every action reviewable.
   image:
     html: |
-      <figure class="hero-agent-team">
-        <img
-          src="/assets/ostwin-agent-team-hero.png"
-          alt="A friendly team of desktop-window agents connected through one operating-system workspace."
-          loading="eager"
-          decoding="async"
-        />
-      </figure>
+      <div class="hero-cli-shell" role="img" aria-label="Animated OSTwin command line streaming plan, DAG, manager, role, tool, artifact, and git worktree events.">
+        <div class="hero-cli-shell__chrome">
+          <span></span>
+          <span></span>
+          <span></span>
+          <strong>agent-os/runtime | channel.jsonl</strong>
+        </div>
+        <div class="hero-cli-shell__body">
+          <div class="hero-cli-shell__terminal" aria-hidden="true">
+            <p class="cli-prompt"><span>operator@ostwin</span><code>ostwin run PLAN.md --stream --worktree</code><i></i></p>
+            <div class="agent-stream" aria-hidden="true">
+              <p><time>11:12:04.221</time><span>plan</span><code>PLAN.md parsed -> 7 epics</code></p>
+              <p><time>11:12:04.338</time><span>dag</span><code>wave=01 ready [EPIC-001, EPIC-002]</code></p>
+              <p><time>11:12:04.617</time><span>room</span><code>mkdir .agents/war-rooms/EPIC-001</code></p>
+              <p><time>11:12:04.884</time><span>manager</span><code>conflict: API contract -> debate</code></p>
+              <p><time>11:12:05.102</time><span>role</span><code>@engineer loaded skills: build-verify, audit</code></p>
+              <p><time>11:12:05.431</time><span>tool</span><code>mcp.fs.write artifacts/patch.diff</code></p>
+              <p><time>11:12:05.780</time><span>memory</span><code>ledger append merkle:9f4c2a</code></p>
+              <p><time>11:12:06.033</time><span>git</span><code>worktree commit EPIC-001 artifacts</code></p>
+            </div>
+          </div>
+          <div class="hero-cli-shell__inspect" aria-hidden="true">
+            <strong>tail -f channel.jsonl</strong>
+            <p><span>{</span>"type":"agent.stream","from":"manager"<span>}</span></p>
+            <p><span>{</span>"decision":"assign","room":"EPIC-001"<span>}</span></p>
+            <p><span>{</span>"tool":"searxng","state":"grounded"<span>}</span></p>
+            <p><span>{</span>"artifact":"report.md","state":"review"<span>}</span></p>
+          </div>
+        </div>
+        <div class="hero-cli-shell__statusbar" aria-hidden="true">
+          <span>worktree: .ostwin/worktrees/EPIC-001</span>
+          <span>stream: 24 events/s</span>
+          <span>state: developing</span>
+        </div>
+      </div>
   actions:
     - text: Start with Quick Start
       link: /getting-started/quick-start/
