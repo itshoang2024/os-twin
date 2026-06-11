@@ -1,13 +1,13 @@
 ---
 title: Publishing Skills
-description: How to author, test, version, and publish skills to ClawhHub.
+description: How to author, test, version, and publish skills to ClawHub.
 sidebar:
   order: 3
 ---
 
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
-Skills are the primary extension mechanism for OSTwin agents. This guide covers authoring, testing, versioning, and publishing to the ClawhHub marketplace.
+Skills are the primary extension mechanism for OSTwin agents. This guide covers authoring, testing, versioning, and publishing to the ClawHub marketplace.
 
 ## Skill Structure
 
@@ -121,7 +121,7 @@ my-skill/
 
 ## Versioning
 
-Skills use semantic versioning in their ClawhHub metadata:
+Skills use semantic versioning in their ClawHub metadata:
 
 | Version | Meaning |
 |---------|---------|
@@ -141,7 +141,7 @@ Version is tracked in `.clawhub-meta.json`:
 }
 ```
 
-## Publishing to ClawhHub
+## Publishing to ClawHub
 
 <Steps>
 1. **Validate the skill structure**
@@ -158,18 +158,18 @@ Version is tracked in `.clawhub-meta.json`:
    python .agents/bin/skills/package.py my-skill/ --version 1.0.0
    ```
 
-3. **Submit to ClawhHub**
+3. **Submit to ClawHub**
 
    ```bash
    .agents/clawhub-install.sh publish my-skill-1.0.0.tar.gz
    ```
 
-4. **Wait for review** — ClawhHub maintainers review submissions within 72 hours
+4. **Wait for review** — ClawHub maintainers review submissions within 72 hours
 </Steps>
 
 ## API Endpoints
 
-The ClawhHub API provides skill discovery and installation:
+The ClawHub API provides skill discovery and installation:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

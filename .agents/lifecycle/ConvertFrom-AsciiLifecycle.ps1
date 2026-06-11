@@ -7,7 +7,7 @@
 
         pending → engineer → qa ─┬─► done
                      ▲           │
-                     └─ engineer ◄┘ (on fail → optimize)
+                    └─ manager triage (on fail)
 
     into a structured lifecycle.json object that the manager loop can consume.
 
@@ -35,7 +35,7 @@
     $text = @"
     pending → engineer → qa ─┬─► done
                  ▲           │
-                 └─ engineer ◄┘ (on fail → optimize)
+                 └─ manager triage (on fail)
     "@
     $lifecycle = ConvertFrom-AsciiLifecycle -Text $text
     $lifecycle | ConvertTo-Json -Depth 10
@@ -59,7 +59,7 @@ function ConvertFrom-AsciiLifecycle {
     $mainLine = $lines[0]
 
     # Detect if there's a fork (─┬─► or ┬) — the stage before the fork is a reviewer
-    # It decides done/pass (forward) or fail (loop back to optimize)
+    # It decides done/pass (forward) or fail (manager triage)
     $hasFork = $mainLine -match '[┬]'
 
     # Find which segment sits immediately before the fork character
@@ -122,8 +122,8 @@ function ConvertFrom-AsciiLifecycle {
     # STEP 3: Detect the fail target from secondary lines
     # ──────────────────────────────────────────────────────────────────────
     # Look for patterns like:
-    #   └─ engineer ◄┘ (on fail → optimize)
-    #   └── ui-designer ◄───────────┘ (on fail → optimize)
+    #   └─ manager triage (on fail)
+    #   └── manager triage (on fail)
     # The role name between └─ and ◄ is the optimize role (who does the rework)
     $optimizeRole = $stages[0].Role  # Default: primary worker does the optimization pass
     $failTarget = $null
@@ -137,14 +137,14 @@ function ConvertFrom-AsciiLifecycle {
         # Also look for explicit "on fail" annotation
         if ($line -match 'on\s+fail') {
             # The fail pattern confirms the fork loops back
-            $failTarget = 'optimize'
+            $failTarget = 'triage'
         }
     }
 
     # If we detected a fork (┬) but no explicit fail annotation,
-    # the fork itself implies: done/pass → forward, fail → back to optimize
+    # the fork itself implies: done/pass → forward, fail → manager triage
     if ($hasFork -and -not $failTarget) {
-        $failTarget = 'optimize'
+        $failTarget = 'triage'
     }
 
     # ──────────────────────────────────────────────────────────────────────
@@ -165,11 +165,11 @@ function ConvertFrom-AsciiLifecycle {
 
         $transitions = [ordered]@{}
         if ($stage.Type -eq 'review') {
-            # Review stages: done goes forward, fail goes through optimize.
+            # Review stages: done goes forward, fail goes through manager triage.
             # pass remains accepted for legacy generated lifecycles.
             $transitions['done'] = $nextState
             $transitions['pass'] = $nextState
-            $transitions['fail'] = if ($failTarget) { $failTarget } else { 'optimize' }
+            $transitions['fail'] = if ($failTarget) { $failTarget } else { 'triage' }
             $transitions['escalate'] = 'triage'
         } else {
             # Worker stages: done goes to next; pass remains legacy-compatible.

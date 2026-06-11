@@ -99,6 +99,7 @@ $managerRuntime = if (Get-Command Get-OstwinManagerRuntimeSettings -ErrorAction 
 $maxConcurrent = $managerRuntime.max_concurrent_rooms
 $pollInterval = $managerRuntime.poll_interval_seconds
 $maxRetries = $managerRuntime.max_engineer_retries
+$maxCrashRespawns = $maxRetries
 $stateTimeout = $managerRuntime.state_timeout_seconds
 
 # --- Resolve war-rooms dir ---
@@ -138,6 +139,7 @@ else {
 Write-Host "  Max concurrent rooms: $maxConcurrent"
 Write-Host "  Poll interval: ${pollInterval}s"
 Write-Host "  Max retries per task: $maxRetries"
+Write-Host "  Max crash respawns per task: $maxCrashRespawns"
 Write-Host "  State timeout: ${stateTimeout}s"
 Write-Host ""
 
@@ -753,7 +755,7 @@ while (-not $script:shuttingDown) {
                             if ($transitionDef.actions) { $actions = @($transitionDef.actions) }
 
                             # --- Retry exhaustion guard ---
-                            # Signals with increment_retries (e.g. review.fail → optimize) must
+                            # Signals with increment_retries (manager triage fix/redesign) must
                             # check against max_retries. Without this, the review→optimize loop
                             # runs indefinitely because the 'failed' decision state is never reached.
                             if ($actions -contains 'increment_retries' -and $retries -ge ($v2MaxRetries - 1)) {
@@ -777,8 +779,12 @@ while (-not $script:shuttingDown) {
                             Invoke-SignalActions -RoomDir $roomDir -Actions $actions -TaskRef $taskRef -BaseRole $targetRoleForActions
                             Write-RoomStatus $roomDir $targetState
 
-                            if ($matchedSignal -eq 'fail' -and $actions -contains 'increment_retries') {
-                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'epic.retrying' -Summary "$taskRef semantic QA fail routed to retry/optimize." -Payload @{ signal = $matchedSignal; retries = ($retries + 1); max_retries = $v2MaxRetries; target_state = $targetState } -Role $baseRole -State $status -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $roomDir -Role $baseRole) | Out-Null
+                            if ($targetState -eq 'triage' -and $baseRole -ne 'manager') {
+                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'lifecycle.escalated' -Summary "$taskRef $baseRole signal '$matchedSignal' routed to manager triage." -Payload @{ signal = $matchedSignal; retries = $retries; max_retries = $v2MaxRetries; target_state = $targetState } -Role $baseRole -State $status -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $roomDir -Role $baseRole) | Out-Null
+                            }
+
+                            if ($v2StateDef.type -eq 'triage' -and $actions -contains 'increment_retries') {
+                                Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'epic.retrying' -Summary "$taskRef manager triage routed to retry." -Payload @{ signal = $matchedSignal; retries = ($retries + 1); max_retries = $v2MaxRetries; target_state = $targetState } -Role $baseRole -State $status -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $roomDir -Role $baseRole) | Out-Null
                             }
 
                             # Reset crash-respawn counter on successful transition
@@ -826,10 +832,12 @@ while (-not $script:shuttingDown) {
 
                                 $failedRoleRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role $stateBaseRole
                                 if ($failedRoleRun) {
-                                    Write-Log "ERROR" "[$taskRef] Role '$stateBaseRole' reported failed in '$status'. Marking room as failed for manager decision handling."
+                                    Write-Log "ERROR" "[$taskRef] Role '$stateBaseRole' reported failed in '$status'. Routing to manager triage."
+                                    $syntheticSignal = Write-SyntheticRoleFailureSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName $status -Role $stateBaseRole -TaskRef $taskRef -FailedRoleRun $failedRoleRun
+                                    Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.failed' -Summary "$stateBaseRole reported failed in $status; routing to manager triage." -Payload @{ reason = 'role_run_failed'; source_state = $status; target_state = 'triage'; role_config = $failedRoleRun.ConfigFile; synthetic_signal = if ($syntheticSignal) { $syntheticSignal.Signal } else { '' }; synthetic_message_posted = if ($syntheticSignal) { [bool]$syntheticSignal.Posted } else { $false } } -Role $stateBaseRole -State $status -Severity 'error' | Out-Null
                                     Remove-Item (Join-Path $roomDir "crash_respawns") -Force -ErrorAction SilentlyContinue
-                                    $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'role_run_failed' -Role $stateBaseRole -State $status -Summary "$taskRef role '$stateBaseRole' failed in '$status'."
-                                    $script:shuttingDown = $true
+                                    if (-not $pidAlive -and $spawnLocked) { Clear-SpawnLock -RoomDir $roomDir -Role $stateBaseRole | Out-Null }
+                                    Write-RoomStatus $roomDir 'triage'
                                     continue
                                 }
 
@@ -845,12 +853,11 @@ while (-not $script:shuttingDown) {
                                         $crashFile = Join-Path $roomDir "crash_respawns"
                                         $crashCount = if (Test-Path $crashFile) { [int](Get-Content $crashFile -Raw).Trim() } else { 0 }
                                         $crashCount++
-                                        $maxCrashRespawns = 3
                                         if ($crashCount -gt $maxCrashRespawns) {
-                                            Write-Log "ERROR" "[$taskRef] Agent '$stateRole' crashed $crashCount times in '$status' without producing a signal. Marking as failed."
-                                            Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.failed' -Summary "$stateBaseRole exhausted crash respawns in $status." -Payload @{ reason = 'crash_respawn_exhausted'; crash_count = $crashCount; max_crash_respawns = $maxCrashRespawns } -Role $stateBaseRole -State $status -Severity 'error' | Out-Null
-                                            $script:planFailed = Invoke-PlanFailFast -RoomDir $roomDir -Reason 'crash_respawn_exhausted' -Role $stateBaseRole -State $status -Summary "$taskRef exhausted crash respawns in '$status'."
-                                            $script:shuttingDown = $true
+                                            Write-Log "ERROR" "[$taskRef] Agent '$stateRole' crashed $crashCount times in '$status' without producing a signal. Routing to manager triage."
+                                            $syntheticSignal = Write-SyntheticRoleFailureSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName $status -Role $stateBaseRole -TaskRef $taskRef -FailedRoleRun ([pscustomobject]@{ ConfigFile = ''; StatusUpdatedEpoch = '' })
+                                            Write-ManagerOrchestrationEvent -RoomDir $roomDir -EventType 'agent.run.failed' -Summary "$stateBaseRole exhausted crash respawns in $status; routing to manager triage." -Payload @{ reason = 'crash_respawn_exhausted'; crash_count = $crashCount; max_crash_respawns = $maxCrashRespawns; target_state = 'triage'; synthetic_signal = if ($syntheticSignal) { $syntheticSignal.Signal } else { '' }; synthetic_message_posted = if ($syntheticSignal) { [bool]$syntheticSignal.Posted } else { $false } } -Role $stateBaseRole -State $status -Severity 'error' | Out-Null
+                                            Write-RoomStatus $roomDir 'triage'
                                             # Reset the crash counter for the next lifecycle attempt
                                             Remove-Item $crashFile -Force -ErrorAction SilentlyContinue
                                         } else {
@@ -946,7 +953,8 @@ while (-not $script:shuttingDown) {
                     Stop-RoomProcesses $rd
 
                     # Risk 3+4 fix: DO NOT increment retries here.
-                    # Retries should only be incremented by lifecycle signal actions (e.g. increment_retries on QA fail).
+                    # Retries should only be incremented by manager triage decisions
+                    # (e.g. increment_retries on triage.fix or triage.redesign).
                     # Incrementing retries during deadlock recovery corrupts the done-count gate (Risk 3)
                     # and compounds into QA cascade deadlocks (Risk 4).
                     # Exhaustion is handled by the deadlock_recoveries cap (line 1113), not by lifecycle retries.
@@ -1143,7 +1151,11 @@ while (-not $script:shuttingDown) {
     Get-Job -Name "ostwin-triage-*-manager" -ErrorAction SilentlyContinue | Where-Object State -eq 'Failed' | ForEach-Object {
         $failedOutput = $null
         try { $failedOutput = Receive-Job $_ -ErrorAction SilentlyContinue 2>&1 } catch { }
-        Write-Log "ERROR" "Manager triage job '$($_.Name)' failed: $failedOutput"
+        $triageFailureResult = Complete-ManagerTriageJobFailure -Job $_ -FailedOutput $failedOutput -MaxRetries $maxRetries
+        if ($triageFailureResult -and $triageFailureResult.Exhausted) {
+            $script:planFailed = [bool]$triageFailureResult.PlanFailed
+            $script:shuttingDown = $true
+        }
         Remove-Job $_ -Force -ErrorAction SilentlyContinue
     }
 

@@ -47,8 +47,8 @@ BeforeAll {
 	                    developing = @{ role = "engineer"; type = "work";
 	                        signals = @{ done = @{ target = "review" } }
 		                    }
-		            review = @{ role = "qa"; type = "review";
-		                signals = [ordered]@{ done = @{ target = "done" }; pass = @{ target = "done" }; fail = @{ target = "optimize"; actions = @("increment_retries","post_fix") }; escalate = @{ target = "triage" } }
+			            review = @{ role = "qa"; type = "review";
+			                signals = [ordered]@{ done = @{ target = "done" }; pass = @{ target = "done" }; fail = @{ target = "triage" }; escalate = @{ target = "triage" } }
 		            }
                     optimize = @{ role = "engineer"; type = "work";
                         signals = @{ done = @{ target = "review" } }
@@ -672,6 +672,24 @@ Describe "Invoke-TriageMediation" {
         $result.Started | Should -BeFalse
         $result.Reason | Should -Be "spawn-lock"
     }
+
+    It "uses failed role status as fallback triage context when no lifecycle channel signal exists" {
+        '2026-06-11T08:13:34Z STATUS review -> triage' | Out-File -FilePath (Join-Path $script:rd 'audit.log') -Encoding utf8
+        @{
+            role = 'qa-automation-engineer'
+            instance_id = '001'
+            status = 'failed'
+            status_updated_epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $script:rd 'qa-automation-engineer_001.json') -Encoding utf8
+
+        $result = Invoke-TriageMediation -RoomDir $script:rd -Lifecycle $script:lc -TaskRef 'TASK-TEST'
+
+        $result.Signal | Should -Be 'manager-triage'
+        $result.RaisedBy | Should -Be 'qa-automation-engineer'
+        $prompt = Get-Content $result.PromptPath -Raw
+        $prompt | Should -Match 'SYSTEM-GENERATED TRIAGE CONTEXT'
+        $prompt | Should -Match 'role runtime failure'
+    }
 }
 
 # ===========================================================================
@@ -701,11 +719,40 @@ Describe "Role run status orchestration failure detection" {
         $cfg.status_state | Should -Be "review"
     }
 
-    It "detects fresh failed role config for manager-owned failed routing" {
+    It "detects fresh failed role config for manager-owned triage routing" {
         Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "failed" | Out-Null
         $failedRun = Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa"
         $failedRun | Should -Not -BeNullOrEmpty
         $failedRun.Role | Should -Be "qa"
+    }
+
+    It "prefers fail over escalate when synthesizing a failed review role signal" {
+        $lc = Get-Content (Join-Path $script:rd "lifecycle.json") -Raw | ConvertFrom-Json
+        Resolve-RoleFailureLifecycleSignal -Lifecycle $lc -StateName "review" -TargetState "triage" | Should -Be "fail"
+    }
+
+    It "posts a synthetic fail message for a fresh failed QA run" {
+        $lc = Get-Content (Join-Path $script:rd "lifecycle.json") -Raw | ConvertFrom-Json
+        Set-RoleRunStatus -RoomDir $script:rd -Role "qa" -Status "failed" | Out-Null
+        $failedRun = Get-FreshFailedRoleRun -RoomDir $script:rd -Role "qa"
+
+        $result = Write-SyntheticRoleFailureSignal -RoomDir $script:rd -Lifecycle $lc -StateName "review" -Role "qa" -TaskRef "TASK-TEST" -FailedRoleRun $failedRun
+
+        $result.Signal | Should -Be "fail"
+        $result.Posted | Should -BeTrue
+        $msgs = & $script:readMsg -RoomDir $script:rd -FilterType "fail" -AsObject
+        $msgs.Count | Should -Be 1
+        $msgs[0].from | Should -Be "qa"
+        $msgs[0].body | Should -Match "SYSTEM-GENERATED FAILURE"
+    }
+
+    It "clears a role spawn lock after a failed process is detected" {
+        Write-SpawnLock -RoomDir $script:rd -Role "qa"
+        Test-SpawnLock -RoomDir $script:rd -Role "qa" | Should -BeTrue
+
+        Clear-SpawnLock -RoomDir $script:rd -Role "qa" | Should -BeTrue
+
+        Test-Path (Join-Path $script:rd "pids/qa.spawned_at") | Should -BeFalse
     }
 
     It "ignores stale failed role config from a previous state attempt" {

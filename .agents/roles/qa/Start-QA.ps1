@@ -480,4 +480,11 @@ if (Test-Path $qaRoleConfigFile) {
 
 Write-Host "[QA] Finished $taskRef in $roomName — verdict: $(if ($displayVerdict) { $displayVerdict } else { 'UNPARSED' }), signal: $(if ($signalType) { $signalType } else { 'none' }), exitCode: $($result.ExitCode)"
 
-exit $result.ExitCode
+$runnerExitCode = if ($result.ExitCode -ne 0) {
+    $result.ExitCode
+} elseif (-not $signalType) {
+    1
+} else {
+    0
+}
+exit $runnerExitCode

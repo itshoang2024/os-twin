@@ -14,8 +14,8 @@ BeforeAll {
     # Helper: write a minimal v2 lifecycle.json into a room.
     # NOTE: generic role names ('engineer'/'qa') are used here for unit-test isolation.
     # Game-specific lifecycles (sample/room-001) use 'engineer'/'qa'.
-    # review.fail → 'optimize' matches the real lifecycle design: QA failures route
-    # to incremental optimization, NOT back to 'developing' (full restart).
+    # review.fail routes to manager triage. Only manager triage decisions spend
+    # retry budget and route back to optimize/developing.
     function Write-V2Lifecycle {
         param([string]$RoomDir, [hashtable]$Override)
         $lc = @{
@@ -43,7 +43,7 @@ BeforeAll {
 	                    signals = [ordered]@{
 	                        done     = @{ target = "done" }
 		                        pass     = @{ target = "done" }
-		                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
+			                        fail     = @{ target = "triage" }
 	                        escalate = @{ target = "triage" }
 	                    }
 	                }
@@ -160,15 +160,15 @@ Describe "Start-ManagerLoop — V2 Lifecycle Unit Tests" {
             $status | Should -Be "done"
         }
 
-        It "review → developing (fail signal with retries)" {
+        It "review → triage (fail signal without retries)" {
             & $script:NewWarRoom -RoomId "room-013" -TaskRef "TASK-013" `
                                  -TaskDescription "Test" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-013"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus "review"
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "developing"
+            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "triage"
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "developing"
+            $status | Should -Be "triage"
         }
 
         It "developing → failed (retries exhausted)" {
@@ -447,16 +447,17 @@ Classified as implementation bug. Engineer should fix.
 	            $lc.states.optimize.signals.PSObject.Properties.Name | Should -Not -Contain "error"
         }
 
-        It "pipeline review.fail targets optimize (incremental fix)" {
+        It "pipeline review.fail targets triage for manager decision" {
             & $script:NewWarRoom -RoomId "room-136" -TaskRef "TASK-136" `
                                  -TaskDescription "Pipeline fail path" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-136"
-            # Base Write-V2Lifecycle already sets review.fail → optimize.
-            # This test validates that behavior is inherited without override.
+            # Base Write-V2Lifecycle already sets review.fail → triage.
+            # Only manager triage decisions can spend retry budget.
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.triage.signals.done.target | Should -Be "review"
-            $lc.states.review.signals.fail.target | Should -Be "optimize"
+            $lc.states.review.signals.fail.target | Should -Be "triage"
+            $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
             $lc.states.triage.signals.fix.target  | Should -Be "optimize"
         }
 
@@ -468,21 +469,21 @@ Classified as implementation bug. Engineer should fix.
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
             $lc.states.review.signals.done.target     | Should -Be "done"
             $lc.states.review.signals.pass.target     | Should -Be "done" -Because "pass remains a legacy accepted success signal"
-	            # review.fail → optimize (incremental fix cycle, NOT full developing restart)
-	            $lc.states.review.signals.fail.target     | Should -Be "optimize"
+	            # review.fail → triage; manager decides whether to retry.
+	            $lc.states.review.signals.fail.target     | Should -Be "triage"
+	            $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
 	            $lc.states.review.signals.escalate.target | Should -Be "triage"
 	            $lc.states.review.signals.PSObject.Properties.Name | Should -Not -Contain "error"
         }
 
-        It "fail signal includes retry bookkeeping and post_fix compatibility action" {
+        It "fail signal does not spend retry budget before manager triage" {
             & $script:NewWarRoom -RoomId "room-133" -TaskRef "TASK-133" `
                                  -TaskDescription "Fail actions" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-133"
             Write-V2Lifecycle -RoomDir $roomDir
             $lc = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
-            $actions = $lc.states.review.signals.fail.actions
-            $actions | Should -Contain "increment_retries"
-            $actions | Should -Contain "post_fix"
+            $lc.states.review.signals.fail.target | Should -Be "triage"
+            $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
         }
 
         It "failed is terminal, not a worktree or retry decision state" {
@@ -1414,9 +1415,10 @@ Context "PLAN-REVIEW Verdict Logic" {
                         signals = @{
 	                            done = @{ target = "done" }
 	                            pass = @{ target = "done" }
-                            fail = @{ target = "failed"; actions = @("increment_retries") }
+                            fail = @{ target = "triage" }
                         }
                     }
+                    triage = @{ role = "manager"; type = "triage"; signals = @{ fix = @{ target = "developing"; actions = @("increment_retries") }; reject = @{ target = "failed" } } }
                     done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
@@ -1470,8 +1472,8 @@ Context "PLAN-REVIEW Verdict Logic" {
         }
     }
 
-    Context "Full architect lifecycle: review → failed" {
-        It "architect fail signal transitions room to failed" {
+    Context "Full architect lifecycle: review → triage" {
+        It "architect fail signal transitions room to manager triage without spending retries" {
             & $script:NewWarRoom -RoomId "room-430" -TaskRef "TASK-430" `
                                  -TaskDescription "Full fail lifecycle" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-430"
@@ -1483,9 +1485,10 @@ Context "PLAN-REVIEW Verdict Logic" {
                         role = "architect"; type = "review"
                         signals = @{
                             pass = @{ target = "done" }
-                            fail = @{ target = "failed"; actions = @("increment_retries") }
+                            fail = @{ target = "triage" }
                         }
                     }
+                    triage = @{ role = "manager"; type = "triage"; signals = @{ fix = @{ target = "developing"; actions = @("increment_retries") }; reject = @{ target = "failed" } } }
                     done = @{ type = "terminal" }
                     failed = @{ type = "terminal" }
                 }
@@ -1528,10 +1531,12 @@ Context "PLAN-REVIEW Verdict Logic" {
 
             $matchedSignal | Should -Be "fail"
             $targetState = $lc.states.review.signals.$matchedSignal.target
-            $targetState | Should -Be "failed"
+            $targetState | Should -Be "triage"
+            $lc.states.review.signals.$matchedSignal.PSObject.Properties.Name | Should -Not -Contain "actions"
             Set-WarRoomStatus -RoomDir $roomDir -NewStatus $targetState
             $finalStatus = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $finalStatus | Should -Be "failed"
+            $finalStatus | Should -Be "triage"
+            (Get-Content (Join-Path $roomDir "retries") -Raw).Trim() | Should -Be "0"
         }
     }
 
@@ -1681,7 +1686,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             [int](Get-Content $crashFile -Raw).Trim() | Should -Be 3
         }
 
-        It "exceeding max crash-respawns triggers failed state" {
+        It "exceeding max crash-respawns routes to manager triage" {
             & $script:NewWarRoom -RoomId "room-cr-03" -TaskRef "TASK-CR03" `
                                  -TaskDescription "Crash exhaust" -WarRoomsDir $script:warRoomsDir
             $roomDir = Join-Path $script:warRoomsDir "room-cr-03"
@@ -1689,19 +1694,19 @@ Context "PLAN-REVIEW Verdict Logic" {
             $crashFile = Join-Path $roomDir "crash_respawns"
 
             # Simulate the guard logic: 4th crash exceeds max of 3
-            $maxCrashRespawns = 3
+            $maxCrashRespawns = (Get-Content $script:configFile -Raw | ConvertFrom-Json).manager.max_engineer_retries
             "3" | Out-File -FilePath $crashFile -Encoding utf8 -NoNewline
             $crashCount = [int](Get-Content $crashFile -Raw).Trim()
             $crashCount++
 
             if ($crashCount -gt $maxCrashRespawns) {
-                Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
+                Set-WarRoomStatus -RoomDir $roomDir -NewStatus "triage"
                 Remove-Item $crashFile -Force -ErrorAction SilentlyContinue
             }
 
             $status = (Get-Content (Join-Path $roomDir "status") -Raw).Trim()
-            $status | Should -Be "failed"
-            Test-Path $crashFile | Should -BeFalse -Because "crash counter is cleaned up after triggering failure"
+            $status | Should -Be "triage"
+            Test-Path $crashFile | Should -BeFalse -Because "crash counter is cleaned up after handing the failure to manager triage"
         }
 
         It "crash counter does not prevent re-spawn within limit" {
@@ -1712,7 +1717,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             $crashFile = Join-Path $roomDir "crash_respawns"
 
             # Simulate: 2 crashes so far (under the max of 3)
-            $maxCrashRespawns = 3
+            $maxCrashRespawns = (Get-Content $script:configFile -Raw | ConvertFrom-Json).manager.max_engineer_retries
             "2" | Out-File -FilePath $crashFile -Encoding utf8 -NoNewline
             $crashCount = [int](Get-Content $crashFile -Raw).Trim()
             $crashCount++
@@ -1801,7 +1806,7 @@ Context "PLAN-REVIEW Verdict Logic" {
             Remove-Module ManagerLoop-Helpers -ErrorAction SilentlyContinue
         }
 
-        It "fresh failed role config is detected for manager failed-state routing" {
+        It "fresh failed role config is detected for manager triage routing" {
             $helpersModule = Join-Path $script:agentsDir "roles" "manager" "ManagerLoop-Helpers.psm1"
             Import-Module $helpersModule -Force
 
@@ -1822,10 +1827,82 @@ Context "PLAN-REVIEW Verdict Logic" {
 
             $failedRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role "qa"
             $failedRun | Should -Not -BeNullOrEmpty
-            Set-WarRoomStatus -RoomDir $roomDir -NewStatus "failed"
-            (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
+            $failedRun.Role | Should -Be "qa"
+            $failedRun.StatusUpdatedEpoch | Should -BeGreaterOrEqual $changedAt
 
             Remove-Module ManagerLoop-Helpers -ErrorAction SilentlyContinue
+        }
+
+        It "manager loop routes fresh non-manager failed role runs to triage without lifecycle retries" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+            $runtimeFailureBranch = [regex]::Match(
+                $content,
+                '(?s)\$failedRoleRun\s*=\s*Get-FreshFailedRoleRun.*?if \(\$failedRoleRun\) \{(?<branch>.*?)continue\s*\}'
+            )
+
+            $runtimeFailureBranch.Success | Should -BeTrue
+            $branch = $runtimeFailureBranch.Groups['branch'].Value
+            $branch | Should -Match 'agent\.run\.failed'
+            $branch | Should -Match "Write-RoomStatus\s+\`$roomDir\s+['""]triage['""]"
+            $branch | Should -Not -Match 'Invoke-PlanFailFast'
+            $branch | Should -Not -Match "Join-Path\s+\`$roomDir\s+['""]retries['""]"
+        }
+
+        It "manager loop records non-manager fail-signal triage without retrying" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+            $signalBranch = [regex]::Match(
+                $content,
+                '(?s)Write-RoomStatus\s+\$roomDir\s+\$targetState(?<branch>.*?)if \(\$v2StateDef\.type -eq ''triage'' -and \$actions -contains ''increment_retries''\)'
+            )
+
+            $signalBranch.Success | Should -BeTrue
+            $branch = $signalBranch.Groups['branch'].Value
+            $branch | Should -Match "targetState -eq 'triage'"
+            $branch | Should -Match "baseRole -ne 'manager'"
+            $branch | Should -Match "lifecycle\.escalated"
+            $branch | Should -Match 'retries = \$retries'
+            $branch | Should -Not -Match "epic\.retrying"
+            $branch | Should -Not -Match 'retries = \(\$retries \+ 1\)'
+        }
+
+        It "manager loop routes crash-respawn exhaustion to triage without plan fail-fast" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+            $crashExhaustionBranch = [regex]::Match(
+                $content,
+                '(?s)if \(\$crashCount -gt \$maxCrashRespawns\) \{(?<branch>.*?)\n\s*\}\s*else\s*\{'
+            )
+
+            $crashExhaustionBranch.Success | Should -BeTrue
+            $branch = $crashExhaustionBranch.Groups['branch'].Value
+            $branch | Should -Match 'agent\.run\.failed'
+            $branch | Should -Match "Write-RoomStatus\s+\`$roomDir\s+['""]triage['""]"
+            $branch | Should -Not -Match 'Invoke-PlanFailFast'
+            $branch | Should -Not -Match "Write-RoomStatus\s+\`$roomDir\s+['""]failed['""]"
+            $branch | Should -Not -Match "Join-Path\s+\`$roomDir\s+['""]retries['""]"
+            $branch | Should -Not -Match '\$maxCrashRespawns\s*=\s*3'
+        }
+
+        It "manager triage job failures delegate lifecycle retry handling to the helper" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+            $triageFailureBranch = [regex]::Match(
+                $content,
+                '(?s)Get-Job -Name "ostwin-triage-\*-manager".*?Where-Object State -eq ''Failed''.*?ForEach-Object \{(?<branch>.*?)\n\s*\}\s*\n\s*# Prune completed PowerShell background jobs'
+            )
+
+            $triageFailureBranch.Success | Should -BeTrue -Because "manager triage failed-job cleanup must be asserted as a distinct branch"
+            $branch = $triageFailureBranch.Groups['branch'].Value
+            $branch | Should -Match 'Complete-ManagerTriageJobFailure'
+            $branch | Should -Match '-MaxRetries\s+\$maxRetries'
+            $branch | Should -Match '\$triageFailureResult\.Exhausted'
+            $branch | Should -Match '\$script:planFailed\s*=\s*\[bool\]\$triageFailureResult\.PlanFailed'
+            $branch | Should -Match '\$script:shuttingDown\s*=\s*\$true'
+            $branch | Should -Match 'Remove-Job'
+            $branch | Should -Not -Match 'manager_triage_retries'
+            $branch | Should -Not -Match 'Increment-ManagerTriageRetryCount'
         }
     }
 
@@ -1843,6 +1920,16 @@ Context "PLAN-REVIEW Verdict Logic" {
                 -Because "dashboard-compatible explicit config overrides must be honored"
             $content | Should -Match 'OSTWIN_PROJECT_DIR' `
                 -Because "project-scoped dashboard runs must still be able to select project config"
+        }
+
+        It "Start-ManagerLoop.ps1 derives crash-respawn budget from manager.max_engineer_retries" {
+            $managerScript = Join-Path $script:agentsDir "roles" "manager" "Start-ManagerLoop.ps1"
+            $content = Get-Content $managerScript -Raw
+
+            $content | Should -Match '\$maxCrashRespawns\s*=\s*\$maxRetries' `
+                -Because "crash-respawn exhaustion should use the manager runtime budget from ~/.ostwin/.agents/config.json"
+            $content | Should -Not -Match '\$maxCrashRespawns\s*=\s*3' `
+                -Because "the crash-respawn budget must not be hardcoded"
         }
     }
 
@@ -2729,13 +2816,12 @@ Describe "Integration — ManagerLoop helpers against tests/sample/room-001" {
     }
 
     # -----------------------------------------------------------------------
-    It "review.fail signal triggers optimize route per sample lifecycle (schema)" {
-        # Validate the lifecycle.json schema maps fail→optimize
+    It "review.fail signal triggers manager triage per sample lifecycle (schema)" {
+        # Validate the lifecycle.json schema maps fail→triage
         $rd = Copy-SampleRoom "lifecycle-routing"
         $lc = Get-Content (Join-Path $rd "lifecycle.json") -Raw | ConvertFrom-Json
-        $lc.states.review.signals.fail.target | Should -Be "optimize" -Because "review.fail must route to optimize, not back to developing"
-        $lc.states.review.signals.fail.actions | Should -Contain "post_fix" -Because "review.fail keeps the compatibility action; manager treats channel writes as MCP-only"
-        $lc.states.review.signals.fail.actions | Should -Contain "increment_retries"
+        $lc.states.review.signals.fail.target | Should -Be "triage" -Because "review.fail must route to manager triage before retry budget is spent"
+        $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
     }
 
     # -----------------------------------------------------------------------

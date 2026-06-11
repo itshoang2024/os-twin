@@ -46,7 +46,7 @@ BeforeAll {
 	                    signals = @{
 	                        done     = @{ target = "passed" }
 		                        pass     = @{ target = "passed" }
-		                        fail     = @{ target = "optimize"; actions = @("increment_retries", "post_fix") }
+		                        fail     = @{ target = "triage" }
 	                        escalate = @{ target = "triage" }
 	                    }
 	                }
@@ -151,14 +151,13 @@ Describe "Lifecycle Role Transition — engineer to qa" {
             $lc.states.review.signals.done.target | Should -Be "passed"
         }
 
-        It "review.fail signal targets 'optimize' with increment_retries and post_fix actions" {
+        It "review.fail signal targets triage without retry actions" {
             $d = Join-Path $TestDrive "room-schema5-$(Get-Random)"
             New-Item -ItemType Directory -Path $d -Force | Out-Null
             Write-GameLifecycle -RoomDir $d
             $lc = Get-Content (Join-Path $d "lifecycle.json") -Raw | ConvertFrom-Json
-            $lc.states.review.signals.fail.target          | Should -Be "optimize"
-            $lc.states.review.signals.fail.actions         | Should -Contain "increment_retries"
-            $lc.states.review.signals.fail.actions         | Should -Contain "post_fix"
+            $lc.states.review.signals.fail.target          | Should -Be "triage"
+            $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
         }
     }
 

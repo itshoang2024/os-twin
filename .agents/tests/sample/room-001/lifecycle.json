@@ -32,11 +32,7 @@
           "target": "done"
         },
         "fail": {
-          "target": "optimize",
-          "actions": [
-            "increment_retries",
-            "post_fix"
-          ]
+          "target": "triage"
         },
         "escalate": {
           "target": "triage"

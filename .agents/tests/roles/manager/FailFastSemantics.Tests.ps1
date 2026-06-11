@@ -75,16 +75,19 @@ Describe 'Manager fail-fast event semantics' {
         $failFastEvents[1].payload.failed_epic.run_id | Should -Be 'run-failfast'
     }
 
-    It 'allows semantic QA fail to route to retry without plan.run.failed' {
+    It 'routes semantic QA fail to manager triage without spending retry budget or plan fail-fast' {
         $ctx = New-FailFastTestRoom -RoomId 'room-ff-002' -TaskRef 'EPIC-004' -Status 'review'
         & $script:PostMessage -RoomDir $ctx.RoomDir -From 'qa' -To 'manager' -Type 'fail' -Ref 'EPIC-004' -Body 'Implementation defect; retry is allowed.' | Out-Null
 
-        Write-ManagerOrchestrationEvent -RoomDir $ctx.RoomDir -EventType 'epic.retrying' -Summary 'EPIC-004 semantic QA fail routed to retry/optimize.' -Payload @{ signal = 'fail'; retries = 1; max_retries = 3; target_state = 'optimize' } -Role 'qa' -State 'review' -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $ctx.RoomDir -Role 'qa') | Out-Null
+        Write-ManagerOrchestrationEvent -RoomDir $ctx.RoomDir -EventType 'lifecycle.escalated' -Summary 'EPIC-004 semantic QA fail routed to manager triage.' -Payload @{ signal = 'fail'; retries = 0; max_retries = 3; target_state = 'triage' } -Role 'qa' -State 'review' -Severity 'warn' -LastMessage (Get-LatestFailureMessage -RoomDir $ctx.RoomDir -Role 'qa') | Out-Null
 
         $events = Read-OrchestrationEvents -EventsPath $ctx.EventsPath
         $events.Count | Should -Be 1
-        $events[0].event_type | Should -Be 'epic.retrying'
+        $events[0].event_type | Should -Be 'lifecycle.escalated'
+        $events[0].payload.retries | Should -Be 0
+        $events[0].payload.target_state | Should -Be 'triage'
         $events[0].run_id | Should -Be 'run-failfast'
+        @($events | Where-Object event_type -eq 'epic.retrying').Count | Should -Be 0
         @($events | Where-Object event_type -eq 'plan.run.failed').Count | Should -Be 0
     }
 
@@ -121,31 +124,17 @@ Describe 'Manager fail-fast event semantics' {
         $statusEvent.last_message.body_preview | Should -Be 'Manager context for transition.'
     }
 
-    It 'preserves crash-respawn exhaustion as agent.run.failed before fail-fast events' {
+    It 'keeps non-manager crash exhaustion observable without immediate fail-fast' {
         $ctx = New-FailFastTestRoom -RoomId 'room-ff-003' -TaskRef 'EPIC-005' -Status 'developing'
 
         Write-ManagerOrchestrationEvent -RoomDir $ctx.RoomDir -EventType 'agent.run.failed' -Summary 'engineer exhausted crash respawns in developing.' -Payload @{ reason = 'crash_respawn_exhausted'; crash_count = 4; max_crash_respawns = 3 } -Role 'engineer' -State 'developing' -Severity 'error' | Out-Null
-        Invoke-PlanFailFast -RoomDir $ctx.RoomDir -Reason 'crash_respawn_exhausted' -Role 'engineer' -State 'developing' -Summary 'EPIC-005 exhausted crash respawns.' | Should -BeTrue
 
         $events = Read-OrchestrationEvents -EventsPath $ctx.EventsPath
         $failureEvents = @($events | Where-Object { $_.event_type -in @('agent.run.failed', 'epic.failed', 'plan.run.failed') })
-        ($failureEvents | Select-Object -ExpandProperty event_type) | Should -Be @('agent.run.failed', 'epic.failed', 'plan.run.failed')
+        ($failureEvents | Select-Object -ExpandProperty event_type) | Should -Be @('agent.run.failed')
         $failureEvents[0].payload.reason | Should -Be 'crash_respawn_exhausted'
+        @($events | Where-Object event_type -eq 'epic.failed').Count | Should -Be 0
+        @($events | Where-Object event_type -eq 'plan.run.failed').Count | Should -Be 0
     }
 
-    It 'does not stop runtime-failed room processes before fail-fast events are emitted' {
-        $managerScript = Join-Path $script:agentsDir 'roles' 'manager' 'Start-ManagerLoop.ps1'
-        $content = Get-Content $managerScript -Raw
-
-        $runtimeFailureBranch = [regex]::Match(
-            $content,
-            '(?s)\$failedRoleRun\s*=\s*Get-FreshFailedRoleRun.*?if \(\$failedRoleRun\) \{(?<branch>.*?)continue\s*\}'
-        )
-
-        $runtimeFailureBranch.Success | Should -BeTrue
-        $branch = $runtimeFailureBranch.Groups['branch'].Value
-        $branch | Should -Match 'Invoke-PlanFailFast'
-        $branch | Should -Not -Match 'Stop-RoomProcesses' `
-            -Because 'runtime role failure must append epic.failed and plan.run.failed before any room process stop; Invoke-PlanFailFast owns post-event shutdown order'
-    }
 }

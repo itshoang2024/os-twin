@@ -97,6 +97,39 @@ Describe "Invoke-Agent" {
             $result.OutputFile | Should -Match "\.ostwin[/\\]\.agents[/\\]plans[/\\]no-plan[/\\]$([regex]::Escape((Split-Path $script:roomDir -Leaf)))\.log$"
         }
 
+        It "returns only the latest wrapper segment from append-only room logs" {
+            $fakeHome = Join-Path $TestDrive "ostwin-home-$(Get-Random)"
+            $savedOstwinHome = $env:OSTWIN_HOME
+            try {
+                $env:OSTWIN_HOME = $fakeHome
+                $roomName = Split-Path $script:roomDir -Leaf
+                $planLogDir = Join-Path $fakeHome ".agents/plans/no-plan"
+                New-Item -ItemType Directory -Path $planLogDir -Force | Out-Null
+                @"
+[wrapper] PID=111, CMD=opencode run, CWD=/old
+VERDICT: DONE
+old engineer success
+"@ | Out-File (Join-Path $planLogDir "$roomName.log") -Encoding utf8
+
+                $mock = Join-Path $TestDrive "current-error-$(Get-Random).ps1"
+                "Write-Output 'Error: invalid_grant'; exit 0" | Out-File $mock -Encoding utf8
+
+                $result = & $script:InvokeAgent -RoomDir $script:roomDir `
+                    -RoleName "qa" -Prompt "review" `
+                    -AgentCmd (Get-PwshAgentCmd $mock) -TimeoutSeconds 5
+
+                $result.ExitCode | Should -Be 0
+                $result.Output | Should -Match "Error: invalid_grant"
+                $result.Output | Should -Not -Match "VERDICT: DONE"
+                (Get-Content $result.OutputFile -Raw) | Should -Match "VERDICT: DONE" `
+                    -Because "diagnostic log stays append-only even though returned output is scoped"
+            }
+            finally {
+                if ($savedOstwinHome) { $env:OSTWIN_HOME = $savedOstwinHome }
+                else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+            }
+        }
+
 
         It "forces Claude Code skills off for launched agent commands" {
             $envMock = Join-Path $TestDrive "env-mock-$(Get-Random).ps1"

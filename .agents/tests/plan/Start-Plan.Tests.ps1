@@ -858,6 +858,247 @@ working_dir: $script:projectDir
         }
     }
 
+    Context "Mock manager lifecycle flow" {
+        It "runs a folder plan where unknown QA model failure is retried by manager triage lifecycle counter" {
+            $savedHome = $env:HOME
+            $savedAgentOsConfig = $env:AGENT_OS_CONFIG
+            $savedOstwinHome = $env:OSTWIN_HOME
+            $savedWarRooms = $env:WARROOMS_DIR
+            $savedSkipPlanReview = $env:OSTWIN_SKIP_PLAN_REVIEW
+            $savedEventFileEnabled = $env:OSTWIN_EVENT_FILE_ENABLED
+            $savedEventWsDisabled = $env:OSTWIN_EVENT_WS_DISABLED
+            $savedPlanId = $env:OSTWIN_PLAN_ID
+            $savedRunId = $env:OSTWIN_RUN_ID
+            $savedEventsPath = $env:OSTWIN_EVENTS_PATH
+
+            $helpersModule = Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "roles/manager/ManagerLoop-Helpers.psm1"
+            $eventsModule = Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "events/OrchestrationEvents.psm1"
+            $readMessages = Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "channel/Read-Messages.ps1"
+            $channelHelpers = Join-Path (Resolve-Path "$PSScriptRoot/../..").Path "tests/TestChannelHelpers.ps1"
+
+            try {
+                $flowRoot = Join-Path $TestDrive "unknown-qa-model-flow-$(Get-Random)"
+                $flowProjectDir = Join-Path $flowRoot "project"
+                $fakeHome = Join-Path $flowRoot "home"
+                $planId = "0badc0ffee12"
+                $badQaModel = "unknown/provider-that-does-not-exist"
+                New-Item -ItemType Directory -Path $flowProjectDir -Force | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $fakeHome ".ostwin/.agents/plans") -Force | Out-Null
+
+                $env:HOME = $fakeHome
+                $env:OSTWIN_HOME = Join-Path $fakeHome ".ostwin"
+                $env:OSTWIN_SKIP_PLAN_REVIEW = "true"
+                $env:OSTWIN_EVENT_FILE_ENABLED = "1"
+                $env:OSTWIN_EVENT_WS_DISABLED = "1"
+                Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue
+                Remove-Item Env:OSTWIN_PLAN_ID -ErrorAction SilentlyContinue
+                Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue
+                Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue
+
+                $configPath = Join-Path $flowRoot "config.json"
+                [ordered]@{
+                    version = "0.1.0"
+                    manager = [ordered]@{
+                        poll_interval_seconds = 1
+                        max_concurrent_rooms  = 10
+                        max_engineer_retries  = 2
+                        auto_expand_plan      = $false
+                        auto_approve_tools    = $true
+                        state_timeout_seconds = 900
+                    }
+                    engineer = [ordered]@{
+                        cli              = "echo"
+                        default_model    = "config-engineer-model"
+                        timeout_seconds  = 10
+                        max_prompt_bytes = 102400
+                    }
+                    qa = [ordered]@{
+                        cli             = "echo"
+                        default_model   = "config-qa-model"
+                        approval_mode   = "auto-approve"
+                        timeout_seconds = 10
+                    }
+                    channel = [ordered]@{
+                        format                 = "jsonl"
+                        max_message_size_bytes = 65536
+                    }
+                } | ConvertTo-Json -Depth 8 | Out-File $configPath -Encoding utf8
+                $env:AGENT_OS_CONFIG = $configPath
+
+                [ordered]@{
+                    engineer = [ordered]@{
+                        default_model  = "opencode/big-pickle"
+                        timeout_seconds = 10
+                    }
+                    qa = [ordered]@{
+                        default_model  = $badQaModel
+                        timeout_seconds = 10
+                    }
+                    manager = [ordered]@{
+                        default_model  = "opencode/big-pickle"
+                        timeout_seconds = 10
+                    }
+                } | ConvertTo-Json -Depth 8 |
+                    Out-File (Join-Path $fakeHome ".ostwin/.agents/plans/$planId.roles.json") -Encoding utf8
+
+                $planFile = Join-Path $flowRoot "$planId.md"
+                @"
+# Plan: Unknown QA Model Flow
+working_dir: $flowProjectDir
+
+## EPIC-001 - QA model fails into manager triage
+
+Roles: @engineer, @qa
+
+Build a small deterministic fixture where engineer succeeds but QA receives an unknown model and reports failed.
+
+#### Definition of Done
+- [ ] Engineer room uses opencode/big-pickle.
+- [ ] QA failure is routed to manager triage.
+- [ ] Manager triage failure increments lifecycle retries.
+
+#### Acceptance Criteria
+- [ ] Room status moves review -> triage after QA runtime failure.
+- [ ] First manager triage failure keeps the room in triage.
+- [ ] Second manager triage failure exhausts manager.max_engineer_retries.
+
+depends_on: []
+"@ | Out-File $planFile -Encoding utf8
+
+                $startOutput = & pwsh -NoProfile -File $script:StartPlan `
+                    -PlanFile $planFile `
+                    -ProjectDir $flowProjectDir `
+                    -SkipLoop `
+                    -NonInteractive *>&1
+                $LASTEXITCODE | Should -Be 0 -Because ($startOutput -join "`n")
+
+                $warRoomsDir = Join-Path $flowProjectDir ".war-rooms"
+                $roomDir = Join-Path $warRoomsDir "room-001"
+                Test-Path $roomDir | Should -BeTrue
+
+                $engineerConfig = Get-Content (Join-Path $roomDir "engineer_001.json") -Raw | ConvertFrom-Json
+                $engineerConfig.model | Should -Be "opencode/big-pickle"
+                $lifecycle = Get-Content (Join-Path $roomDir "lifecycle.json") -Raw | ConvertFrom-Json
+                $lifecycle.states.review.role | Should -Be "qa"
+                $lifecycle.states.triage.role | Should -Be "manager"
+                $lifecycle.states.review.signals.fail.target | Should -Be "triage"
+                $lifecycle.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
+
+                $eventsPath = Join-Path $warRoomsDir "events.jsonl"
+                $roomConfigPath = Join-Path $roomDir "config.json"
+                $roomConfig = Get-Content $roomConfigPath -Raw | ConvertFrom-Json
+                $roomConfig | Add-Member -NotePropertyName events_path -NotePropertyValue $eventsPath -Force
+                $roomConfig.status.current = "review"
+                $roomConfig | ConvertTo-Json -Depth 10 | Out-File $roomConfigPath -Encoding utf8
+
+                $reviewChangedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 5
+                "review" | Out-File (Join-Path $roomDir "status") -Encoding utf8 -NoNewline
+                $reviewChangedAt.ToString() | Out-File (Join-Path $roomDir "state_changed_at") -Encoding utf8 -NoNewline
+                [ordered]@{
+                    role                 = "qa"
+                    instance_id          = "001"
+                    instance_type        = ""
+                    display_name         = "qa #001"
+                    model                = $badQaModel
+                    timeout_seconds      = 10
+                    assigned_at          = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    status               = "failed"
+                    status_state         = "review"
+                    status_updated_epoch = $reviewChangedAt + 1
+                    status_updated_at    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    failure_reason       = "unknown_model"
+                } | ConvertTo-Json -Depth 8 | Out-File (Join-Path $roomDir "qa_001.json") -Encoding utf8
+                "opencode rejected model '$badQaModel'" | Out-File (Join-Path $roomDir "artifacts/qa-output.txt") -Encoding utf8
+
+                Import-Module $eventsModule -Force
+                Import-Module $helpersModule -Force
+                . $channelHelpers
+                $postMessage = New-TestChannelWriter
+                Set-ManagerLoopContext -Context @{
+                    agentsDir        = (Resolve-Path "$PSScriptRoot/../..").Path
+                    WarRoomsDir      = $warRoomsDir
+                    dagFile          = Join-Path $warRoomsDir "DAG.json"
+                    hasDag           = (Test-Path (Join-Path $warRoomsDir "DAG.json"))
+                    dagCache         = $null
+                    dagMtime         = $null
+                    config           = (Get-Content $configPath -Raw | ConvertFrom-Json)
+                    stateTimeout     = 900
+                    maxRetries       = 2
+                    postMessage      = $null
+                    readMessages     = $readMessages
+                    dashboardBaseUrl = "http://localhost:9999"
+                }
+
+                & $postMessage -RoomDir $roomDir -From "qa" -To "manager" -Type "fail" -Ref "EPIC-001" -Body "VERDICT: FAIL`nUnknown QA model should be triaged by manager." | Out-Null
+                $matchedFailSignal = Find-LatestSignal -RoomDir $roomDir -Lifecycle $lifecycle -StateName "review"
+                $matchedFailSignal | Should -Be "fail"
+                $failTransition = $lifecycle.states.review.signals.$matchedFailSignal
+                $failTransition.target | Should -Be "triage"
+                $failTransition.PSObject.Properties.Name | Should -Not -Contain "actions"
+                $failActions = if ($failTransition.PSObject.Properties['actions']) { @($failTransition.actions) } else { @() }
+                Invoke-SignalActions -RoomDir $roomDir -Actions $failActions -TaskRef "EPIC-001" -BaseRole "manager"
+                (Get-Content (Join-Path $roomDir "retries") -Raw).Trim() | Should -Be "0"
+                Write-RoomStatus -RoomDir $roomDir -NewStatus $failTransition.target
+                (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "triage"
+
+                "review" | Out-File (Join-Path $roomDir "status") -Encoding utf8 -NoNewline
+                $reviewChangedAt.ToString() | Out-File (Join-Path $roomDir "state_changed_at") -Encoding utf8 -NoNewline
+
+                $failedRun = Get-FreshFailedRoleRun -RoomDir $roomDir -Role "qa"
+                $failedRun | Should -Not -BeNullOrEmpty
+                $failedRun.Role | Should -Be "qa"
+                (Get-Content $failedRun.ConfigFile -Raw | ConvertFrom-Json).model | Should -Be $badQaModel
+
+                Write-RoomStatus -RoomDir $roomDir -NewStatus "triage"
+                (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "triage"
+
+                New-Item -ItemType Directory -Path (Join-Path $roomDir "pids") -Force | Out-Null
+                "999999" | Out-File (Join-Path $roomDir "pids/manager.pid") -Encoding utf8 -NoNewline
+                $reviewChangedAt.ToString() | Out-File (Join-Path $roomDir "pids/manager.spawned_at") -Encoding utf8 -NoNewline
+
+                $failedTriageJob = [pscustomobject]@{ Name = "ostwin-triage-room-001-manager" }
+                $firstManagerFailure = Complete-ManagerTriageJobFailure -Job $failedTriageJob -FailedOutput "manager could not classify unknown QA model" -MaxRetries 2
+                $firstManagerFailure.Handled | Should -BeTrue
+                $firstManagerFailure.Retries | Should -Be 1
+                $firstManagerFailure.Exhausted | Should -BeFalse
+                (Get-Content (Join-Path $roomDir "retries") -Raw).Trim() | Should -Be "1"
+                (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "triage"
+                Test-Path (Join-Path $roomDir "pids/manager.pid") | Should -BeFalse
+                Test-Path (Join-Path $roomDir "pids/manager.spawned_at") | Should -BeFalse
+
+                $secondManagerFailure = Complete-ManagerTriageJobFailure -Job $failedTriageJob -FailedOutput "manager still cannot resolve unknown QA model" -MaxRetries 2
+                $secondManagerFailure.Handled | Should -BeTrue
+                $secondManagerFailure.Retries | Should -Be 2
+                $secondManagerFailure.Exhausted | Should -BeTrue
+                $secondManagerFailure.PlanFailed | Should -BeTrue
+                (Get-Content (Join-Path $roomDir "retries") -Raw).Trim() | Should -Be "2"
+                (Get-Content (Join-Path $roomDir "status") -Raw).Trim() | Should -Be "failed"
+
+                $events = Read-OrchestrationEvents -EventsPath $eventsPath
+                @($events | Where-Object event_type -eq "agent.run.failed").Count | Should -Be 2
+                @($events | Where-Object event_type -eq "lifecycle.retry.exhausted").Count | Should -Be 1
+                @($events | Where-Object event_type -eq "epic.failed").Count | Should -Be 1
+                @($events | Where-Object event_type -eq "plan.run.failed").Count | Should -Be 1
+                ($events | Where-Object event_type -eq "lifecycle.retry.exhausted" | Select-Object -Last 1).payload.max_retries | Should -Be 2
+            }
+            finally {
+                Remove-Module ManagerLoop-Helpers -ErrorAction SilentlyContinue
+                Remove-Module OrchestrationEvents -ErrorAction SilentlyContinue
+
+                if ($savedHome) { $env:HOME = $savedHome } else { Remove-Item Env:HOME -ErrorAction SilentlyContinue }
+                if ($savedAgentOsConfig) { $env:AGENT_OS_CONFIG = $savedAgentOsConfig } else { Remove-Item Env:AGENT_OS_CONFIG -ErrorAction SilentlyContinue }
+                if ($savedOstwinHome) { $env:OSTWIN_HOME = $savedOstwinHome } else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+                if ($savedWarRooms) { $env:WARROOMS_DIR = $savedWarRooms } else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+                if ($savedSkipPlanReview) { $env:OSTWIN_SKIP_PLAN_REVIEW = $savedSkipPlanReview } else { Remove-Item Env:OSTWIN_SKIP_PLAN_REVIEW -ErrorAction SilentlyContinue }
+                if ($savedEventFileEnabled) { $env:OSTWIN_EVENT_FILE_ENABLED = $savedEventFileEnabled } else { Remove-Item Env:OSTWIN_EVENT_FILE_ENABLED -ErrorAction SilentlyContinue }
+                if ($savedEventWsDisabled) { $env:OSTWIN_EVENT_WS_DISABLED = $savedEventWsDisabled } else { Remove-Item Env:OSTWIN_EVENT_WS_DISABLED -ErrorAction SilentlyContinue }
+                if ($savedPlanId) { $env:OSTWIN_PLAN_ID = $savedPlanId } else { Remove-Item Env:OSTWIN_PLAN_ID -ErrorAction SilentlyContinue }
+                if ($savedRunId) { $env:OSTWIN_RUN_ID = $savedRunId } else { Remove-Item Env:OSTWIN_RUN_ID -ErrorAction SilentlyContinue }
+                if ($savedEventsPath) { $env:OSTWIN_EVENTS_PATH = $savedEventsPath } else { Remove-Item Env:OSTWIN_EVENTS_PATH -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
     Context "Mixed epic and task plan" {
         BeforeEach {
             $script:mixedPlan = Join-Path $TestDrive "mixed-plan.md"

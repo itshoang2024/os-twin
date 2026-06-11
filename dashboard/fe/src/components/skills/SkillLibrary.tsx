@@ -169,11 +169,11 @@ export const SkillLibrary: React.FC<SkillLibraryProps> = ({ onEdit }) => {
           }}
         >
           <span className="material-symbols-outlined text-sm">store</span>
-          ClawhHub Marketplace
+          ClawHub Marketplace
         </button>
       </div>
 
-      {/* ClawhHub tab */}
+      {/* ClawHub tab */}
       {activeTab === 'clawhub' && (
         <ClawhubMarketplace onInstalled={() => syncWithDisk()} />
       )}
