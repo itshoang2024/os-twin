@@ -126,9 +126,9 @@ The `registry.json` contains an `available` array under `skills`:
 
 When `auto_discover` is `true`, the system scans `skills_dir` for any directory containing a `SKILL.md` file, regardless of whether it appears in `available`.
 
-## ClawhHub Skills
+## ClawHub Skills
 
-Skills installed from ClawhHub are placed in the standard directory structure. The `clawhub-install.sh` script handles downloading and placing them:
+Skills installed from ClawHub are placed in the standard directory structure. The `clawhub-install.sh` script handles downloading and placing them:
 
 ```bash
 .agents/clawhub-install.sh <skill-name>
