@@ -8,7 +8,9 @@ set -euo pipefail
 OSTWIN_HOME="${OSTWIN_HOME:-$HOME/.ostwin}"
 SEARCH_HOME="${OSTWIN_SEARCH_HOME:-$OSTWIN_HOME/search-engine}"
 SRC_DIR="$SEARCH_HOME/searxng-src"
-VENV_DIR="$SEARCH_HOME/searx-pyenv"
+SHARED_VENV_DIR="${OSTWIN_VENV_DIR:-$OSTWIN_HOME/.venv}"
+SHARED_PYTHON="$SHARED_VENV_DIR/bin/python"
+UV_BIN="${OSTWIN_UV_BIN:-$SHARED_VENV_DIR/bin/uv}"
 CONFIG_DIR="$SEARCH_HOME/etc"
 SETTINGS_PATH="${SEARXNG_SETTINGS_PATH:-$CONFIG_DIR/settings.yml}"
 PID_FILE="$SEARCH_HOME/searxng.pid"
@@ -31,7 +33,8 @@ Usage:
 
 Files:
   source:   ~/.ostwin/search-engine/searxng-src
-  venv:     ~/.ostwin/search-engine/searx-pyenv
+  venv:     ~/.ostwin/.venv
+  uv:       ~/.ostwin/.venv/bin/uv
   config:   ~/.ostwin/search-engine/etc/settings.yml
   logs:     ~/.ostwin/logs/searxng.log
 EOF
@@ -95,6 +98,23 @@ ensure_prereqs() {
   command -v python3 >/dev/null 2>&1 || { fail "python3 is required"; exit 1; }
 }
 
+ensure_shared_uv() {
+  ensure_prereqs
+  if [[ ! -x "$SHARED_PYTHON" ]]; then
+    info "Creating shared Ostwin virtualenv: $SHARED_VENV_DIR"
+    python3 -m venv "$SHARED_VENV_DIR"
+  fi
+  if [[ ! -x "$UV_BIN" ]]; then
+    info "Installing uv into shared Ostwin virtualenv: $SHARED_VENV_DIR"
+    "$SHARED_PYTHON" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    "$SHARED_PYTHON" -m pip install -U pip uv
+  fi
+  if [[ ! -x "$UV_BIN" ]]; then
+    fail "uv is required at $UV_BIN"
+    exit 1
+  fi
+}
+
 ensure_dirs() {
   mkdir -p "$SEARCH_HOME" "$CONFIG_DIR" "$LOG_DIR"
 }
@@ -146,8 +166,8 @@ EOF
 }
 
 settings_python() {
-  if [[ -x "$VENV_DIR/bin/python" ]]; then
-    printf '%s\n' "$VENV_DIR/bin/python"
+  if [[ -x "$SHARED_PYTHON" ]]; then
+    printf '%s\n' "$SHARED_PYTHON"
   else
     printf '%s\n' "python3"
   fi
@@ -264,25 +284,18 @@ install_source() {
   fi
 }
 
-install_venv() {
-  ensure_prereqs
-  if [[ ! -d "$VENV_DIR" ]]; then
-    info "Creating virtualenv: $VENV_DIR"
-    python3 -m venv "$VENV_DIR"
+install_runtime_dependencies() {
+  ensure_shared_uv
+  local requirements="$SRC_DIR/requirements.txt"
+  if [[ ! -f "$requirements" ]]; then
+    fail "SearXNG requirements.txt not found: $requirements"
+    exit 1
   fi
 
-  local pip="$VENV_DIR/bin/pip"
-  info "Installing SearXNG build requirements"
-  "$pip" install -U pip
-  "$pip" install -U setuptools
-  "$pip" install -U wheel
-  "$pip" install -U pyyaml
-  "$pip" install -U msgspec
-  "$pip" install -U typing-extensions
-  "$pip" install -U pybind11
-
-  info "Installing SearXNG editable package"
-  (cd "$SRC_DIR" && "$pip" install --use-pep517 --no-build-isolation -e .)
+  info "Installing SearXNG requirements with $UV_BIN"
+  TMPDIR=/tmp "$UV_BIN" pip install --upgrade --prerelease=if-necessary \
+    --python "$SHARED_PYTHON" \
+    -r "$requirements"
 }
 
 is_running() {
@@ -311,10 +324,11 @@ is_serving() {
 
 start_server() {
   parse_port_bind "$@"
-  if [[ ! -x "$VENV_DIR/bin/python" || ! -d "$SRC_DIR" ]]; then
+  if [[ ! -d "$SRC_DIR" ]]; then
     fail "SearXNG is not installed. Run: ostwin search-engine install"
     exit 1
   fi
+  ensure_shared_uv
   if [[ ! -f "$SETTINGS_PATH" ]]; then
     write_settings
   fi
@@ -335,7 +349,9 @@ start_server() {
     export SEARXNG_SETTINGS_PATH="$SETTINGS_PATH"
     export SEARXNG_PORT="$PORT"
     export SEARXNG_BIND_ADDRESS="$BIND"
-    nohup "$VENV_DIR/bin/python" -m searx.webapp > "$LOG_DIR/searxng.log" 2>&1 &
+    export VIRTUAL_ENV="$SHARED_VENV_DIR"
+    export PATH="$SHARED_VENV_DIR/bin:$PATH"
+    nohup "$UV_BIN" run --active --no-sync -m searx.webapp > "$LOG_DIR/searxng.log" 2>&1 &
     echo $! > "$PID_FILE"
   )
 
@@ -398,6 +414,8 @@ status_server() {
     info "SearXNG is not running"
   fi
   info "Home: $SEARCH_HOME"
+  info "Venv: $SHARED_VENV_DIR"
+  info "uv: $UV_BIN"
   info "Settings: $SETTINGS_PATH"
   info "URL: $(server_url)"
 }
@@ -409,7 +427,7 @@ case "$cmd" in
   install)
     parse_port_bind "$@"
     install_source
-    install_venv
+    install_runtime_dependencies
     write_settings
     ok "Search engine installed under $SEARCH_HOME"
     info "Start it with: ostwin search-engine start"

@@ -346,7 +346,7 @@ Resolves MCP server references from `role.json` `mcp_refs` and generates the age
 
 ## ostwin search-engine
 
-Install and run the local SearXNG search engine under `~/.ostwin/search-engine`.
+Install and run the local SearXNG search engine under `~/.ostwin/search-engine` using `~/.ostwin/.venv/bin/uv`.
 
 ```bash
 ostwin search-engine install --start
@@ -359,7 +359,7 @@ ostwin search-engine settings
 
 | Subcommand | Description |
 |------------|-------------|
-| `install` | Install the managed local SearXNG source, venv, and config |
+| `install` | Install the managed local SearXNG source, install `requirements.txt` with `~/.ostwin/.venv/bin/uv`, and write config |
 | `configure` | Write managed SearXNG settings |
 | `start` | Start the local search engine |
 | `stop` | Stop the local search engine |
