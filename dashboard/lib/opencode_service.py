@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
+from dashboard.opencode_tools import DEFAULT_OPENCODE_MODEL
 from dashboard.lib.opencode_paths import get_managed_opencode_config_path
 
 logger = logging.getLogger(__name__)
@@ -277,6 +278,14 @@ def _merge_mapping(base: object, override: object) -> object:
     return override
 
 
+def _is_valid_opencode_model(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    model = value.strip()
+    provider, sep, model_id = model.partition("/")
+    return bool(provider and sep and model_id)
+
+
 def _merge_managed_opencode_config(project_dir: Path) -> None:
     """Fold Ostwin-managed config into the server-local opencode.json.
 
@@ -286,11 +295,15 @@ def _merge_managed_opencode_config(project_dir: Path) -> None:
     without touching the user's global OpenCode config.
     """
     runtime_config = project_dir / "opencode.json"
-    if not MANAGED_OPENCODE_CONFIG.exists() or not runtime_config.exists():
+    if not runtime_config.exists():
         return
 
     try:
-        managed = json.loads(MANAGED_OPENCODE_CONFIG.read_text())
+        managed = (
+            json.loads(MANAGED_OPENCODE_CONFIG.read_text())
+            if MANAGED_OPENCODE_CONFIG.exists()
+            else {}
+        )
         runtime = json.loads(runtime_config.read_text())
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("[OPENCODE_SERVICE] could not merge managed config: %s", exc)
@@ -305,9 +318,14 @@ def _merge_managed_opencode_config(project_dir: Path) -> None:
         runtime.get("$schema", "https://opencode.ai/config.json"),
     )
 
-    for key in ("mcp", "tools", "provider", "model"):
+    for key in ("mcp", "tools", "provider"):
         if key in managed:
             runtime[key] = managed[key]
+
+    if _is_valid_opencode_model(managed.get("model")):
+        runtime["model"] = managed["model"].strip()
+    elif not _is_valid_opencode_model(runtime.get("model")):
+        runtime["model"] = DEFAULT_OPENCODE_MODEL
 
     if "agent" in managed:
         runtime["agent"] = _merge_mapping(

@@ -12,6 +12,7 @@ const flowSteps = [
     composition:
       'The plan decides which epics exist and what each room must prove before it can pass.',
     output: 'PLAN.md -> parsed epics',
+    background: '/assets/ostwin-flow-plan-bg.webp',
   },
   {
     id: 'dag',
@@ -25,32 +26,35 @@ const flowSteps = [
     composition:
       'Each epic keeps its own contract, roles, and skill needs instead of sharing one global context.',
     output: 'DAG.json + execution waves',
+    background: '/assets/ostwin-flow-dag-bg.webp',
   },
   {
     id: 'room',
     index: '03',
     label: 'War-room',
-    title: 'Isolated execution room',
+    title: 'Manager-led execution room',
     summary:
-      'Every epic receives a war-room with its own channel, lifecycle state, artifacts, memory view, and scoped runtime files.',
+      'Every epic receives a war-room led by a manager role, with its own channel, lifecycle state, artifacts, memory view, and scoped runtime files.',
     automation:
-      'The room becomes the unit of execution, observation, retry, and review.',
+      'The manager acts like the team lead: assigning work, routing review, resolving feedback, and deciding the next lifecycle move.',
     composition:
-      'Isolation lets many composed agent sessions run without leaking context or tool state across epics.',
+      'Isolation lets many composed agent sessions run while the manager keeps worker and evaluator feedback coherent inside each epic.',
     output: '.agents/war-rooms/EPIC-*',
+    background: '/assets/ostwin-flow-war-room-bg.webp',
   },
   {
     id: 'role',
     index: '04',
     label: 'Roles',
-    title: 'Stable agent identity',
+    title: 'Worker ↔ Evaluator roles',
     summary:
-      'A role supplies responsibility, constraints, communication style, and quality gates through role.json and ROLE.md.',
+      'Every role is designed for one side of the loop: Workers create the artifact, while Evaluators inspect it against the epic contract and return actionable feedback.',
     automation:
-      'The runner can invoke architect, engineer, QA, reporter, or manager behavior without custom agent code.',
+      'OSTwin can compose worker roles such as architect, engineer, designer, researcher, or reporter with evaluator roles such as QA, staff review, security, or accessibility.',
     composition:
-      'Role identity stays stable while each room changes the skills and tools attached to that identity.',
-    output: 'Role + room contract',
+      'The manager acts as team leadership: it routes worker output to evaluators, consolidates review feedback, and turns that signal into the next worker task so the epic design flow stays coherent.',
+    output: 'Worker output -> evaluator feedback -> manager synthesis',
+    background: '/assets/ostwin-flow-roles-bg.webp',
   },
   {
     id: 'skill',
@@ -212,6 +216,7 @@ const formulaParts = ['Role identity', 'Skill pack', 'Scoped MCP tools', 'War-ro
             role="tabpanel"
             aria-labelledby={`flow-tab-${step.id}`}
             hidden={index !== 0}
+            style={step.background ? `--flow-panel-bg: url(${step.background});` : undefined}
           >
             <div class="flow-panel__label">{step.index} / {step.label}</div>
             <h4>{step.title}</h4>
@@ -568,7 +573,16 @@ const formulaParts = ['Role identity', 'Skill pack', 'Scoped MCP tools', 'War-ro
     display: grid;
     grid-template-columns: minmax(0, 0.8fr) minmax(18rem, 1.2fr);
     gap: 1rem 1.25rem;
+    min-height: 18rem;
     padding: 1rem;
+    background:
+      linear-gradient(90deg, rgba(9, 13, 20, 0.98) 0%, rgba(9, 13, 20, 0.9) 42%, rgba(9, 13, 20, 0.62) 70%, rgba(9, 13, 20, 0.88) 100%),
+      linear-gradient(180deg, rgba(var(--ostwin-cyan-rgb), 0.08), transparent 52%),
+      var(--flow-panel-bg, none),
+      rgba(9, 13, 20, 0.9);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: auto, auto, cover, auto;
     animation: flow-panel-in 360ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
