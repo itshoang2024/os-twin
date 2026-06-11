@@ -62,10 +62,32 @@ import SkillEvolutionStudio from '../../components/SkillEvolutionStudio.astro';
 <div className="ostwin-home">
   <section className="home-section home-section--map" aria-labelledby="home-map-title">
     <div className="section-copy">
-      <p className="section-kicker">The operating model</p>
-      <h2 id="home-map-title">A plan is not a prompt. It is a work graph.</h2>
+      <p className="section-kicker">Autonomous orchestration layer</p>
+      <h2 id="home-map-title">OSTwin grows the context around every agent.</h2>
       <div className="section-text">
-        OSTwin keeps the orchestration surface small: plans define the goal and dependency graph, epics become manager-led war-rooms, and roles receive only the skills and scoped MCP tools needed for that room.
+        OSTwin is not about hand-designing a permanent agent for every workflow. It creates the smallest isolated environment an agent needs, records what happens, and turns memory, artifacts, skills, and tool results into better context for the next run.
+      </div>
+      <div className="orchestration-principles" aria-label="OSTwin orchestration principles">
+        <div>
+          <span>01</span>
+          <strong>Environment over agent design</strong>
+          <p>Users define intent and constraints. OSTwin shapes the runtime around the work instead of asking teams to prebuild every agent personality.</p>
+        </div>
+        <div>
+          <span>02</span>
+          <strong>Context develops over time</strong>
+          <p>Plans, channel events, decisions, artifacts, and review outcomes become a memory layer that makes future rooms sharper.</p>
+        </div>
+        <div>
+          <span>03</span>
+          <strong>Self-isolated execution</strong>
+          <p>Each epic gets its own room, tools, memory view, and evidence trail so the agent has the best local environment without cross-room noise.</p>
+        </div>
+        <div>
+          <span>04</span>
+          <strong>Manager-led evolution</strong>
+          <p>The orchestration layer schedules rooms, loads roles and skills, watches signals, and feeds useful outcomes back into the capability system.</p>
+        </div>
       </div>
     </div>
     <OstwinInteractiveFlow />
