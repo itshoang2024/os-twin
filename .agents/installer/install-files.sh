@@ -110,16 +110,10 @@ _seed_mcp_config() {
     else
       warn "No mcp-builtin.json found in $SCRIPT_DIR/mcp/ — skipping seed"
     fi
+    _sync_mcp_runtime_files
   else
+    _sync_mcp_runtime_files
     # Re-install - preserve existing config, merge new built-in servers
-    # Always update the builtin template so new built-in servers are available
-    if [[ -f "$seed_src" ]]; then
-      cp "$seed_src" "$INSTALL_DIR/.agents/mcp/mcp-builtin.json"
-    fi
-    # Always update catalog so new packages are available
-    if [[ -f "$SCRIPT_DIR/mcp/mcp-catalog.json" ]]; then
-      cp "$SCRIPT_DIR/mcp/mcp-catalog.json" "$INSTALL_DIR/.agents/mcp/mcp-catalog.json"
-    fi
     # Merge new built-in servers into config.json (never overwrite existing)
     local mcp_cfg="$INSTALL_DIR/.agents/mcp/config.json"
     local mcp_builtin="$INSTALL_DIR/.agents/mcp/mcp-builtin.json"
@@ -131,15 +125,23 @@ _seed_mcp_config() {
         "$mcp_cfg" "$mcp_builtin" \
         && ok "Merged new built-in MCP servers" || true
     fi
-    # Sync MCP server scripts (channel-server.py, warroom-server.py, etc.)
-    for f in "$SCRIPT_DIR"/mcp/*.py "$SCRIPT_DIR"/mcp/*.sh "$SCRIPT_DIR"/mcp/requirements.txt; do
-      [[ -f "$f" ]] && cp "$f" "$INSTALL_DIR/.agents/mcp/"
-    done
-    rm -f \
-      "$INSTALL_DIR/.agents/mcp/obscura-browser-server.py" \
-      "$INSTALL_DIR/.agents/mcp/test_obscura_browser.py"
     ok "mcp/ preserved (scripts + catalog updated, new servers merged)"
   fi
+}
+
+_sync_mcp_runtime_files() {
+  mkdir -p "$INSTALL_DIR/.agents/mcp"
+  for f in \
+    "$SCRIPT_DIR"/mcp/mcp-builtin.json \
+    "$SCRIPT_DIR"/mcp/mcp-catalog.json \
+    "$SCRIPT_DIR"/mcp/*.py \
+    "$SCRIPT_DIR"/mcp/*.sh \
+    "$SCRIPT_DIR"/mcp/requirements.txt; do
+    [[ -f "$f" ]] && cp "$f" "$INSTALL_DIR/.agents/mcp/"
+  done
+  rm -f \
+    "$INSTALL_DIR/.agents/mcp/obscura-browser-server.py" \
+    "$INSTALL_DIR/.agents/mcp/test_obscura_browser.py"
 }
 
 _setup_mcp_symlink() {

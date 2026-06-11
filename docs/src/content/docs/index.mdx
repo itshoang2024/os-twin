@@ -57,6 +57,7 @@ hero:
 ---
 
 import OstwinInteractiveFlow from '../../components/OstwinInteractiveFlow.astro';
+import SkillEvolutionStudio from '../../components/SkillEvolutionStudio.astro';
 
 <div className="ostwin-home">
   <section className="home-section home-section--map" aria-labelledby="home-map-title">
@@ -64,7 +65,7 @@ import OstwinInteractiveFlow from '../../components/OstwinInteractiveFlow.astro'
       <p className="section-kicker">The operating model</p>
       <h2 id="home-map-title">A plan is not a prompt. It is a work graph.</h2>
       <div className="section-text">
-        OSTwin keeps the orchestration surface small: plans define the goal and dependency graph, epics become isolated war-rooms, and roles receive only the skills and scoped MCP tools needed for that room.
+        OSTwin keeps the orchestration surface small: plans define the goal and dependency graph, epics become manager-led war-rooms, and roles receive only the skills and scoped MCP tools needed for that room.
       </div>
     </div>
     <OstwinInteractiveFlow />
@@ -112,11 +113,11 @@ import OstwinInteractiveFlow from '../../components/OstwinInteractiveFlow.astro'
       </a>
       <a href="/concepts/war-rooms/">
         <span>War-room</span>
-        <strong>Execution boundary</strong>
+        <strong>Manager-led execution</strong>
       </a>
       <a href="/concepts/role-pattern/">
         <span>Role</span>
-        <strong>Stable identity</strong>
+        <strong>Worker or evaluator</strong>
       </a>
       <a href="/concepts/skills/">
         <span>Skill</span>
@@ -131,70 +132,7 @@ import OstwinInteractiveFlow from '../../components/OstwinInteractiveFlow.astro'
         <strong>Bounded context</strong>
       </a>
     </div>
-    <div className="capability-stack" aria-label="Agent OS capability stack">
-      <article className="capability-panel capability-panel--wide">
-        <div className="capability-panel__top">
-          <span>01</span>
-          <strong>Composable Skill Runtime</strong>
-        </div>
-        <h3>Skills can be discovered by intent or pinned by contract.</h3>
-        <p>
-          During epic ramp-up, the room can auto-discover matching SKILL.md workflows from the task, repo signals, and role needs. For controlled work, a role or plan can deterministically pin required skills so the same agent identity always boots with the same operating envelope.
-        </p>
-        <div className="capability-flow" aria-label="Composable skill flow">
-          <span>Epic intent</span>
-          <span>Skill match</span>
-          <span>Agent contract</span>
-        </div>
-      </article>
-
-      <article className="capability-panel">
-        <div className="capability-panel__top">
-          <span>02</span>
-          <strong>Memory Stack</strong>
-        </div>
-        <h3>Merkle history plus graph context extends multi-hop reasoning.</h3>
-        <p>
-          Memory is not just a transcript cache. A Merkle-style ledger can preserve artifact lineage and decision history, while a graph connects plans, rooms, skills, code paths, research, and outcomes into retrievable multi-hop context.
-        </p>
-        <dl>
-          <div><dt>Integrity</dt><dd>Hash-linked records show what changed.</dd></div>
-          <div><dt>Reasoning</dt><dd>Graph traversal finds related evidence.</dd></div>
-        </dl>
-      </article>
-
-      <article className="capability-panel">
-        <div className="capability-panel__top">
-          <span>03</span>
-          <strong>Deep Search Stack</strong>
-        </div>
-        <h3>SearXNG-backed search becomes a first-class skill substrate.</h3>
-        <p>
-          Deep search can sit beside memory and tools as a connected capability. Skills request search plans, SearXNG gathers source candidates, and the room records what was used so research can flow back into artifacts, review, and downstream epics.
-        </p>
-        <dl>
-          <div><dt>Search</dt><dd>Query plans and source discovery.</dd></div>
-          <div><dt>Grounding</dt><dd>Evidence attached to room outputs.</dd></div>
-        </dl>
-      </article>
-
-      <article className="capability-panel capability-panel--wide">
-        <div className="capability-panel__top">
-          <span>04</span>
-          <strong>SkillOS Enterprise</strong>
-        </div>
-        <h3>Skill performance becomes observable, comparable, and governable.</h3>
-        <p>
-          In the enterprise layer, each skill can leave performance telemetry: where it helped, where it slowed the room, which prompts or tools produced poor outcomes, and which versions consistently pass review. That turns skills into managed operational assets, not static prompt snippets.
-        </p>
-        <div className="capability-flow capability-flow--metrics" aria-label="SkillOS performance loop">
-          <span>Run evidence</span>
-          <span>Review signal</span>
-          <span>Skill tuning</span>
-          <span>Governed release</span>
-        </div>
-      </article>
-    </div>
+    <SkillEvolutionStudio />
   </section>
 
   <section className="home-console" aria-labelledby="quickstart-title">

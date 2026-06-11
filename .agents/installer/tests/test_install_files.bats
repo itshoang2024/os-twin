@@ -24,6 +24,7 @@ setup() {
 
 @test "internal helpers are defined" {
   declare -f _seed_mcp_config > /dev/null
+  declare -f _sync_mcp_runtime_files > /dev/null
   declare -f _setup_mcp_symlink > /dev/null
   declare -f _migrate_mcp_config > /dev/null
   declare -f _sync_dashboard > /dev/null
@@ -65,6 +66,37 @@ EOF
   [[ "$cfg_content" == *"memory"* ]]
   [[ "$cfg_content" == *"local"* ]]
   
+  rm -rf "$tmp_install" "$tmp_script"
+}
+
+@test "_seed_mcp_config: copies MCP runtime files on fresh install" {
+  local tmp_install="$(mktemp -d)"
+  local tmp_script="$(mktemp -d)"
+
+  mkdir -p "$tmp_script/mcp"
+  cat > "$tmp_script/mcp/mcp-builtin.json" <<'EOF'
+{
+  "mcp": {
+    "memory": { "type": "local", "command": ["python", "server.py"] }
+  }
+}
+EOF
+  echo "mcp[cli]>=1.1.3,<2.0" > "$tmp_script/mcp/requirements.txt"
+  echo "# runtime server" > "$tmp_script/mcp/warroom-server.py"
+  echo "#!/usr/bin/env bash" > "$tmp_script/mcp/mcp-extension.sh"
+
+  SCRIPT_DIR="$tmp_script"
+  INSTALL_DIR="$tmp_install"
+
+  run _seed_mcp_config
+  [ "$status" -eq 0 ]
+
+  [ -f "$tmp_install/.agents/mcp/config.json" ]
+  [ -f "$tmp_install/.agents/mcp/mcp-builtin.json" ]
+  [ -f "$tmp_install/.agents/mcp/requirements.txt" ]
+  [ -f "$tmp_install/.agents/mcp/warroom-server.py" ]
+  [ -f "$tmp_install/.agents/mcp/mcp-extension.sh" ]
+
   rm -rf "$tmp_install" "$tmp_script"
 }
 

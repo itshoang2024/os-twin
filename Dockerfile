@@ -55,7 +55,7 @@ RUN TMPDIR=/tmp UV_PROJECT_ENVIRONMENT=/root/.ostwin/.venv \
         --no-install-project --frozen --all-extras \
         --extra-index-url https://download.pytorch.org/whl/cpu \
         --index-strategy unsafe-best-match \
-        --prerelease=allow
+        --prerelease=if-necessary
 
 # 6. Cache Bun Dependencies (Frontend)
 COPY dashboard/fe/package.json dashboard/fe/bun.lock /app/dashboard/fe/
