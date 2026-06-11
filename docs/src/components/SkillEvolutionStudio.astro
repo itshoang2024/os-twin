@@ -1,0 +1,1138 @@
+---
+const skillModes = [
+  {
+    id: 'resolve',
+    index: '01',
+    label: 'Resolve',
+    title: 'Declare the expertise, then let runtime fulfill it.',
+    body:
+      'A plan or role declares skill needs. At room start, OSTwin resolves local, role-scoped, global, and discovered skills into a lean index the agent can inspect without loading every instruction up front.',
+    signal: 'role.json + plan skill_refs',
+  },
+  {
+    id: 'apply',
+    index: '02',
+    label: 'Apply',
+    title: 'The worker loads only the skill needed for this step.',
+    body:
+      'The Worker uses the current room goal, repo evidence, memory context, and tool surface to select the skill that can move the artifact forward.',
+    signal: 'skill tool -> full SKILL.md',
+  },
+  {
+    id: 'evaluate',
+    index: '03',
+    label: 'Evaluate',
+    title: 'The evaluator turns output into useful pressure.',
+    body:
+      'The Evaluator reviews behavior against the role contract, test evidence, and acceptance criteria. Feedback is routed through the manager instead of becoming disconnected agent chatter.',
+    signal: 'review verdict + fix notes',
+  },
+  {
+    id: 'evolve',
+    index: '04',
+    label: 'Evolve',
+    title: 'SkillOS learns which skills should change.',
+    body:
+      'Run evidence, review signals, search citations, and memory lineage show where a skill helped or failed. That makes skill updates governable rather than anecdotal.',
+    signal: 'telemetry -> skill version',
+  },
+];
+
+const flowNodes = [
+  { label: 'Epic intent', meta: 'goal + DAG' },
+  { label: 'Worker', meta: 'produce' },
+  { label: 'Skill runtime', meta: 'load expertise' },
+  { label: 'Memory stack', meta: 'retrieve context' },
+  { label: 'Deep search', meta: 'ground evidence' },
+  { label: 'Evaluator', meta: 'review' },
+  { label: 'Skill evolves', meta: 'release signal' },
+];
+
+const agentMemoryBranches = [
+  {
+    label: 'worker',
+    hash: '7eaed0df',
+    agentX: 18,
+    agentY: 18,
+    branchX: 51,
+    branchY: 18,
+    state: '+',
+    records: [
+      { label: 'artifact leaf', hash: 'eabf8ad4', x: 31, y: 10 },
+      { label: 'code note', hash: 'a0e687ad', x: 36, y: 27 },
+      { label: 'war-room event', hash: '747d79d1', x: 42, y: 17 },
+    ],
+  },
+  {
+    label: 'evaluator',
+    hash: '04f881ec',
+    agentX: 18,
+    agentY: 39,
+    branchX: 51,
+    branchY: 39,
+    state: '~',
+    records: [
+      { label: 'review verdict', hash: 'bf9da85d', x: 31, y: 35 },
+      { label: 'fix note', hash: '186f72c5', x: 41, y: 45 },
+    ],
+  },
+  {
+    label: 'search',
+    hash: 'e4adaabf',
+    agentX: 18,
+    agentY: 60,
+    branchX: 51,
+    branchY: 60,
+    state: '=',
+    records: [
+      { label: 'citation', hash: '0d466c3c', x: 31, y: 55 },
+      { label: 'accepted source', hash: '4013857e', x: 41, y: 66 },
+    ],
+  },
+  {
+    label: 'tests',
+    hash: 'c096d021',
+    agentX: 18,
+    agentY: 81,
+    branchX: 51,
+    branchY: 81,
+    state: '-',
+    records: [
+      { label: 'channel leaf', hash: '50e24f7d', x: 30, y: 76 },
+      { label: 'runtime check', hash: '31a0c583', x: 38, y: 88 },
+      { label: 'removed stale note', hash: 'f8b8ca32', x: 44, y: 78 },
+    ],
+  },
+];
+
+const merkleRoot = { label: 'merged root', hash: '32cbd77e', x: 86, y: 52 };
+
+const agentLeafPaths = agentMemoryBranches.flatMap((branch) =>
+  branch.records.map(
+    (record) =>
+      `M ${branch.agentX} ${branch.agentY} C ${branch.agentX + 7} ${branch.agentY}, ${record.x - 6} ${record.y}, ${record.x} ${record.y}`,
+  ),
+);
+
+const leafBranchPaths = agentMemoryBranches.flatMap((branch) =>
+  branch.records.map(
+    (record) =>
+      `M ${record.x} ${record.y} C ${record.x + 8} ${record.y}, ${branch.branchX - 9} ${branch.branchY}, ${branch.branchX} ${branch.branchY}`,
+  ),
+);
+
+const branchRootPaths = agentMemoryBranches.map(
+  (branch) =>
+    `M ${branch.branchX} ${branch.branchY} C ${branch.branchX + 16} ${branch.branchY}, ${merkleRoot.x - 18} ${merkleRoot.y}, ${merkleRoot.x} ${merkleRoot.y}`,
+);
+
+const searchSteps = [
+  { label: 'Skill asks', meta: 'research plan' },
+  { label: 'SearXNG', meta: 'source candidates' },
+  { label: 'Evaluator', meta: 'source quality' },
+  { label: 'Memory', meta: 'evidence lineage' },
+];
+---
+
+<section class="skill-studio" data-skill-studio aria-labelledby="skill-studio-title">
+  <div class="skill-studio__header">
+    <div>
+      <p class="section-kicker">SkillOS reasoning flow</p>
+      <h3 id="skill-studio-title">Skills improve when roles, memory, and search form one loop.</h3>
+    </div>
+    <p>
+      OSTwin treats a skill as living operational knowledge: a Worker applies it, an Evaluator tests it, Memory records what happened, and Deep Search grounds what the room cannot know yet.
+    </p>
+  </div>
+
+  <div class="skill-studio__main">
+    <article class="reasoning-board" aria-labelledby="reasoning-board-title">
+      <div class="reasoning-board__top">
+        <div>
+          <span>Interactive mode</span>
+          <h4 id="reasoning-board-title">Why the skill needs to evolve</h4>
+        </div>
+        <strong data-skill-mode-status>Mode 01 active: Resolve</strong>
+      </div>
+
+      <div class="reasoning-flow" aria-label="Reasoning flow from epic intent to skill evolution">
+        {
+          flowNodes.map((node, index) => (
+            <div class="reasoning-node" data-reasoning-node={index === 0 ? 'active' : undefined}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{node.label}</strong>
+              <small>{node.meta}</small>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="skill-mode-tabs" role="tablist" aria-label="SkillOS evolution modes">
+        {
+          skillModes.map((mode, index) => (
+            <button
+              type="button"
+              class="skill-mode-tab"
+              data-skill-mode={mode.id}
+              role="tab"
+              aria-selected={index === 0 ? 'true' : 'false'}
+              aria-controls={`skill-mode-panel-${mode.id}`}
+              id={`skill-mode-tab-${mode.id}`}
+            >
+              <span>{mode.index}</span>
+              <strong>{mode.label}</strong>
+            </button>
+          ))
+        }
+      </div>
+
+      <div class="skill-mode-panels">
+        {
+          skillModes.map((mode, index) => (
+            <article
+              class="skill-mode-panel"
+              data-skill-mode-panel={mode.id}
+              id={`skill-mode-panel-${mode.id}`}
+              role="tabpanel"
+              aria-labelledby={`skill-mode-tab-${mode.id}`}
+              hidden={index !== 0}
+            >
+              <span>{mode.signal}</span>
+              <h5>{mode.title}</h5>
+              <p>{mode.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </article>
+
+    <aside class="role-loop" aria-labelledby="role-loop-title">
+      <div class="role-loop__heading">
+        <span>Two role types</span>
+        <h4 id="role-loop-title">Worker and Evaluator keep the loop honest.</h4>
+      </div>
+
+      <div class="role-lane role-lane--worker">
+        <img src="/assets/role-worker.png" alt="Worker role icon" width="96" height="96" loading="lazy" />
+        <div>
+          <strong>Worker</strong>
+          <p>Builds, researches, writes, or edits the deliverable with the active skill pack.</p>
+        </div>
+      </div>
+
+      <div class="role-loop__bridge" aria-hidden="true">
+        <span>artifact</span>
+        <i></i>
+        <span>feedback</span>
+      </div>
+
+      <div class="role-lane role-lane--evaluator">
+        <img src="/assets/role-evaluator.png" alt="Evaluator role icon" width="96" height="96" loading="lazy" />
+        <div>
+          <strong>Evaluator</strong>
+          <p>Reviews evidence, finds gaps, and returns a verdict the manager can route.</p>
+        </div>
+      </div>
+
+      <div class="manager-synthesis">
+        <span>Manager synthesis</span>
+        <strong>next action, fix request, or skill update candidate</strong>
+      </div>
+    </aside>
+  </div>
+
+  <div class="skill-studio__support">
+    <article class="memory-visual" id="memory-stack-visual" aria-labelledby="memory-visual-title">
+      <div class="support-heading">
+        <span>Memory stack</span>
+        <h4 id="memory-visual-title">Agent memories merge through one Merkle root.</h4>
+      </div>
+
+      <div class="memory-tree-art" aria-label="Abstract Merkle tree showing agent memories merging without conflicts">
+        <div class="memory-tree-art__canvas">
+          <div class="memory-strata" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <svg class="memory-tree-art__links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            {
+              agentLeafPaths.map((path) => (
+                <path class="memory-link memory-link--agent" d={path}></path>
+              ))
+            }
+            {
+              leafBranchPaths.map((path) => (
+                <path class="memory-link memory-link--leaf" d={path}></path>
+              ))
+            }
+            {
+              branchRootPaths.map((path) => (
+                <path class="memory-link memory-link--branch" d={path}></path>
+              ))
+            }
+          </svg>
+          {
+            agentMemoryBranches.map((branch) => (
+              <>
+                <div
+                  class="memory-agent-chip"
+                  style={`--x: ${branch.agentX}; --y: ${branch.agentY};`}
+                  aria-label={`${branch.label} agent memory branch`}
+                >
+                  <strong>{branch.label}</strong>
+                </div>
+                {
+                  branch.records.map((record) => (
+                    <span
+                      class="memory-leaf-dot"
+                      style={`--x: ${record.x}; --y: ${record.y};`}
+                      title={`${record.label} ${record.hash}`}
+                      aria-label={`${record.label} memory leaf ${record.hash}`}
+                    ></span>
+                  ))
+                }
+                <div
+                  class="memory-branch-chip"
+                  style={`--x: ${branch.branchX}; --y: ${branch.branchY};`}
+                  aria-label={`${branch.label} branch hash ${branch.hash}`}
+                >
+                  <strong>{branch.state}</strong>
+                  <span>{branch.hash.slice(0, 4)}</span>
+                </div>
+              </>
+            ))
+          }
+          <div
+            class="memory-root-orb"
+            style={`--x: ${merkleRoot.x}; --y: ${merkleRoot.y};`}
+            aria-label={`Merged memory root hash ${merkleRoot.hash}`}
+          >
+            <span>merge</span>
+            <strong>{merkleRoot.hash.slice(0, 4)}</strong>
+          </div>
+          <div class="memory-root-ring memory-root-ring--one" aria-hidden="true"></div>
+          <div class="memory-root-ring memory-root-ring--two" aria-hidden="true"></div>
+        </div>
+        <div class="memory-hash-flow" aria-label="Dirty agent leaves diff into branch hashes and merge into the root hash">
+          <span>dirty</span>
+          <i></i>
+          <span>diff</span>
+          <i></i>
+          <span>merge</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="search-bridge" aria-labelledby="search-bridge-title">
+      <div class="support-heading">
+        <span>Deep Search</span>
+        <h4 id="search-bridge-title">Search connects the role loop to memory.</h4>
+      </div>
+      <div class="search-pipeline" aria-label="Deep search to role and memory flow">
+        {
+          searchSteps.map((step, index) => (
+            <div class="search-step">
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{step.label}</strong>
+              <small>{step.meta}</small>
+            </div>
+          ))
+        }
+      </div>
+      <p>
+        Deep search lets a skill request outside evidence, lets the Evaluator challenge source quality, and stores the accepted grounding back into Memory for the next room.
+      </p>
+    </article>
+
+    <article class="ontology-preview" aria-labelledby="ontology-preview-title">
+      <div class="support-heading">
+        <span>Coming soon</span>
+        <h4 id="ontology-preview-title">Ontology turns project knowledge into scale structure.</h4>
+      </div>
+      <div class="ontology-map" aria-label="Future ontology knowledge map">
+        <span>Project concepts</span>
+        <span>Relationships</span>
+        <span>Skill fit</span>
+        <span>Agent evolution</span>
+      </div>
+      <p>
+        Ontology and Knowledge will add a governed concept graph on top of memory, helping agents evolve with project language, dependencies, and domain rules at larger scale.
+      </p>
+    </article>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll('[data-skill-studio]').forEach((root) => {
+    const tabs = Array.from(root.querySelectorAll('[data-skill-mode]'));
+    const panels = Array.from(root.querySelectorAll('[data-skill-mode-panel]'));
+    const nodes = Array.from(root.querySelectorAll('.reasoning-node'));
+    const status = root.querySelector('[data-skill-mode-status]');
+
+    const activate = (index) => {
+      const activeIndex = (index + tabs.length) % tabs.length;
+      const activeTab = tabs[activeIndex];
+      const activeId = activeTab?.getAttribute('data-skill-mode');
+      const modeIndex = activeTab?.querySelector('span')?.textContent || '';
+      const modeLabel = activeTab?.querySelector('strong')?.textContent || '';
+
+      tabs.forEach((tab, tabIndex) => {
+        const selected = tabIndex === activeIndex;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.toggleAttribute('data-active', selected);
+      });
+
+      panels.forEach((panel) => {
+        panel.toggleAttribute('hidden', panel.getAttribute('data-skill-mode-panel') !== activeId);
+      });
+
+      nodes.forEach((node, nodeIndex) => {
+        const selected = nodeIndex >= activeIndex && nodeIndex <= Math.min(activeIndex + 3, nodes.length - 1);
+        node.toggleAttribute('data-active', selected);
+      });
+
+      if (status) status.textContent = `Mode ${modeIndex} active: ${modeLabel}`;
+    };
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => activate(index));
+    });
+
+    root.addEventListener('keydown', (event) => {
+      if (!(event instanceof KeyboardEvent)) return;
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      const currentIndex = tabs.findIndex((tab) => tab.getAttribute('aria-selected') === 'true');
+      const nextIndex = currentIndex + (event.key === 'ArrowRight' ? 1 : -1);
+      event.preventDefault();
+      activate(nextIndex);
+      tabs[(nextIndex + tabs.length) % tabs.length]?.focus();
+    });
+
+    activate(0);
+  });
+</script>
+
+<style>
+  .skill-studio {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  .skill-studio__header {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(20rem, 1fr);
+    gap: 1.25rem;
+    align-items: end;
+  }
+
+  .skill-studio__header h3,
+  .reasoning-board h4,
+  .role-loop h4,
+  .support-heading h4 {
+    margin: 0;
+    color: #f3fbff;
+    letter-spacing: 0;
+  }
+
+  .skill-studio__header h3 {
+    max-width: 17ch;
+    font-size: 2rem;
+    line-height: 1.04;
+  }
+
+  .skill-studio__header p:not(.section-kicker),
+  .skill-studio__support p,
+  .role-lane p,
+  .skill-mode-panel p {
+    margin: 0;
+    color: rgba(220, 246, 255, 0.72);
+    line-height: 1.68;
+  }
+
+  .skill-studio__main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.24fr) minmax(19rem, 0.76fr);
+    gap: 1rem;
+  }
+
+  .reasoning-board,
+  .role-loop,
+  .memory-visual,
+  .search-bridge,
+  .ontology-preview {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.22);
+    border-radius: 8px;
+    color: #f3fbff;
+    background:
+      linear-gradient(rgba(var(--ostwin-cyan-rgb), 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.05) 1px, transparent 1px),
+      radial-gradient(circle at 100% 0%, rgba(var(--ostwin-acid-rgb), 0.14), transparent 12rem),
+      rgba(12, 17, 25, 0.84);
+    background-size:
+      32px 32px,
+      32px 32px,
+      auto,
+      auto;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 42px rgba(3, 8, 14, 0.18);
+  }
+
+  .reasoning-board {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .reasoning-board__top,
+  .role-loop__heading,
+  .support-heading {
+    display: flex;
+    gap: 1rem;
+    align-items: start;
+    justify-content: space-between;
+  }
+
+  .reasoning-board__top span,
+  .reasoning-board__top strong,
+  .role-loop__heading span,
+  .support-heading span,
+  .manager-synthesis span,
+  .skill-mode-panel span {
+    color: rgba(220, 246, 255, 0.66);
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .reasoning-board h4,
+  .role-loop h4,
+  .support-heading h4 {
+    max-width: 21rem;
+    font-size: 1.28rem;
+    line-height: 1.12;
+  }
+
+  .reasoning-board__top > strong {
+    flex: 0 0 auto;
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.28);
+    border-radius: 8px;
+    padding: 0.45rem 0.58rem;
+    color: rgb(var(--ostwin-acid-rgb));
+    background: rgba(var(--ostwin-acid-rgb), 0.08);
+  }
+
+  .reasoning-flow {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(6.25rem, 1fr));
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scrollbar-color: rgba(var(--ostwin-cyan-rgb), 0.32) transparent;
+  }
+
+  .reasoning-node {
+    position: relative;
+    display: grid;
+    align-content: space-between;
+    gap: 0.45rem;
+    min-height: 7rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+    border-radius: 8px;
+    padding: 0.75rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+      rgba(9, 13, 20, 0.72);
+    transition:
+      border-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+      background-color 240ms cubic-bezier(0.32, 0.72, 0, 1),
+      transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .reasoning-node::after {
+    position: absolute;
+    top: 50%;
+    right: -0.5rem;
+    width: 0.5rem;
+    height: 1px;
+    content: '';
+    background: rgba(var(--ostwin-cyan-rgb), 0.28);
+  }
+
+  .reasoning-node:last-child::after {
+    display: none;
+  }
+
+  .reasoning-node[data-active] {
+    border-color: rgba(var(--ostwin-acid-rgb), 0.6);
+    background:
+      linear-gradient(150deg, rgba(var(--ostwin-acid-rgb), 0.12), transparent 54%),
+      rgba(13, 24, 32, 0.9);
+    transform: translateY(-2px);
+  }
+
+  .reasoning-node span,
+  .reasoning-node small,
+  .search-step span,
+  .search-step small,
+  .memory-root-orb span,
+  .memory-agent-chip strong,
+  .memory-branch-chip span {
+    color: rgba(220, 246, 255, 0.58);
+    font-family: var(--sl-font-mono);
+    font-size: 0.68rem;
+  }
+
+  .reasoning-node strong,
+  .search-step strong,
+  .memory-root-orb strong,
+  .memory-branch-chip strong {
+    color: #f3fbff;
+    font-size: 0.92rem;
+    line-height: 1.14;
+  }
+
+  .skill-mode-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .skill-mode-tab {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.18);
+    border-radius: 8px;
+    padding: 0.68rem;
+    color: #f3fbff;
+    background: rgba(9, 13, 20, 0.76);
+    cursor: pointer;
+    text-align: left;
+    transition:
+      border-color 220ms cubic-bezier(0.32, 0.72, 0, 1),
+      background-color 220ms cubic-bezier(0.32, 0.72, 0, 1),
+      transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .skill-mode-tab:hover {
+    border-color: rgba(var(--ostwin-cyan-rgb), 0.48);
+    transform: translateY(-2px);
+  }
+
+  .skill-mode-tab:active {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .skill-mode-tab[data-active] {
+    border-color: rgba(var(--ostwin-acid-rgb), 0.64);
+    background: rgba(var(--ostwin-acid-rgb), 0.09);
+  }
+
+  .skill-mode-tab span {
+    color: rgb(var(--ostwin-acid-rgb));
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+
+  .skill-mode-tab strong {
+    font-size: 0.85rem;
+  }
+
+  .skill-mode-panel {
+    display: grid;
+    gap: 0.65rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+    border-radius: 8px;
+    padding: 1rem;
+    background: rgba(9, 13, 20, 0.72);
+    animation: skill-mode-in 300ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .skill-mode-panel[hidden] {
+    display: none;
+  }
+
+  .skill-mode-panel h5 {
+    margin: 0;
+    color: #f3fbff;
+    font-size: 1.1rem;
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  .role-loop {
+    display: grid;
+    align-content: start;
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .role-lane {
+    display: grid;
+    grid-template-columns: 5.65rem minmax(0, 1fr);
+    gap: 0.8rem;
+    align-items: center;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+    border-radius: 8px;
+    padding: 0.65rem;
+    background: rgba(9, 13, 20, 0.66);
+  }
+
+  .role-lane--evaluator {
+    border-color: rgba(var(--ostwin-amber-rgb), 0.22);
+  }
+
+  .role-lane img {
+    width: 5.65rem;
+    height: 5.65rem;
+    object-fit: contain;
+  }
+
+  .role-lane strong {
+    color: #f3fbff;
+    font-size: 1rem;
+  }
+
+  .role-lane p {
+    margin-top: 0.25rem;
+    font-size: 0.84rem;
+  }
+
+  .role-loop__bridge {
+    display: grid;
+    grid-template-columns: auto minmax(2rem, 1fr) auto;
+    gap: 0.65rem;
+    align-items: center;
+    color: rgba(220, 246, 255, 0.62);
+    font-family: var(--sl-font-mono);
+    font-size: 0.7rem;
+  }
+
+  .role-loop__bridge i {
+    height: 1px;
+    background: linear-gradient(90deg, rgb(var(--ostwin-acid-rgb)), rgb(var(--ostwin-cyan-rgb)), rgb(var(--ostwin-amber-rgb)));
+  }
+
+  .manager-synthesis {
+    display: grid;
+    gap: 0.35rem;
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.24);
+    border-radius: 8px;
+    padding: 0.85rem;
+    background:
+      linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.1), rgba(var(--ostwin-acid-rgb), 0.08)),
+      rgba(9, 13, 20, 0.72);
+  }
+
+  .manager-synthesis strong {
+    color: #f3fbff;
+    font-size: 0.92rem;
+    line-height: 1.35;
+  }
+
+  .skill-studio__support {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas:
+      'memory search'
+      'memory ontology';
+    gap: 1rem;
+  }
+
+  .memory-visual,
+  .search-bridge,
+  .ontology-preview {
+    display: grid;
+    align-content: start;
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .memory-visual {
+    grid-area: memory;
+  }
+
+  .search-bridge {
+    grid-area: search;
+  }
+
+  .ontology-preview {
+    grid-area: ontology;
+  }
+
+  .memory-tree-art {
+    position: relative;
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .memory-tree-art__canvas {
+    position: relative;
+    min-height: clamp(29rem, 46vw, 35rem);
+    overflow: hidden;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.16);
+    border-radius: 8px;
+    background:
+      radial-gradient(circle at 86% 52%, rgba(var(--ostwin-acid-rgb), 0.18), transparent 9.5rem),
+      radial-gradient(circle at 18% 52%, rgba(var(--ostwin-cyan-rgb), 0.11), transparent 10rem),
+      radial-gradient(circle at 42% 20%, rgba(var(--ostwin-amber-rgb), 0.08), transparent 8rem),
+      rgba(5, 10, 16, 0.58);
+  }
+
+  .memory-strata {
+    position: absolute;
+    inset: 0.85rem;
+    display: grid;
+    grid-template-rows: repeat(4, 1fr);
+    gap: 0.45rem;
+    opacity: 0.92;
+    pointer-events: none;
+  }
+
+  .memory-strata span {
+    border: 1px solid rgba(220, 246, 255, 0.06);
+    border-radius: 8px;
+    background:
+      linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.03), transparent 70%),
+      rgba(255, 255, 255, 0.018);
+  }
+
+  .memory-tree-art__links {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .memory-link {
+    fill: none;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .memory-link--branch {
+    stroke: rgba(var(--ostwin-acid-rgb), 0.38);
+    stroke-width: 1.15;
+  }
+
+  .memory-link--leaf {
+    stroke: rgba(220, 246, 255, 0.14);
+    stroke-width: 0.82;
+  }
+
+  .memory-link--agent {
+    stroke: rgba(var(--ostwin-cyan-rgb), 0.22);
+    stroke-width: 0.86;
+  }
+
+  .memory-root-orb,
+  .memory-agent-chip,
+  .memory-branch-chip,
+  .memory-leaf-dot,
+  .memory-root-ring {
+    position: absolute;
+    left: calc(var(--x) * 1%);
+    top: calc(var(--y) * 1%);
+    transform: translate(-50%, -50%);
+  }
+
+  .memory-root-orb {
+    display: grid;
+    place-items: center;
+    width: 5.45rem;
+    height: 5.45rem;
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.62);
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 42% 32%, rgba(255, 255, 255, 0.24), transparent 0.72rem),
+      radial-gradient(circle, rgba(var(--ostwin-acid-rgb), 0.2), rgba(7, 15, 20, 0.94) 68%);
+    box-shadow:
+      0 0 0 0.38rem rgba(var(--ostwin-acid-rgb), 0.08),
+      0 0 2.4rem rgba(var(--ostwin-acid-rgb), 0.15);
+    text-align: center;
+    z-index: 3;
+  }
+
+  .memory-root-orb span {
+    color: rgba(220, 246, 255, 0.68);
+    text-transform: uppercase;
+  }
+
+  .memory-root-orb strong {
+    color: rgb(var(--ostwin-acid-rgb));
+    font-family: var(--sl-font-mono);
+    font-size: 1.08rem;
+  }
+
+  .memory-agent-chip {
+    z-index: 2;
+    display: grid;
+    min-width: 5rem;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.22);
+    border-radius: 999px;
+    padding: 0.42rem 0.64rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent),
+      rgba(9, 17, 25, 0.86);
+    text-align: center;
+  }
+
+  .memory-agent-chip strong {
+    color: rgba(243, 251, 255, 0.82);
+    font-size: 0.7rem;
+  }
+
+  .memory-branch-chip {
+    z-index: 2;
+    display: flex;
+    gap: 0.42rem;
+    align-items: center;
+    justify-content: center;
+    min-width: 4.5rem;
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.32);
+    border-radius: 999px;
+    padding: 0.38rem 0.6rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent),
+      rgba(7, 14, 22, 0.92);
+    box-shadow: 0 0 0 0.22rem rgba(var(--ostwin-acid-rgb), 0.045);
+  }
+
+  .memory-branch-chip strong {
+    color: rgb(var(--ostwin-acid-rgb));
+    font-family: var(--sl-font-mono);
+    font-size: 0.8rem;
+  }
+
+  .memory-branch-chip span {
+    color: rgba(220, 246, 255, 0.52);
+  }
+
+  .memory-leaf-dot {
+    z-index: 2;
+    width: 0.78rem;
+    height: 0.78rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 999px;
+    background: rgb(var(--ostwin-amber-rgb));
+    box-shadow:
+      0 0 0 0.28rem rgba(var(--ostwin-amber-rgb), 0.1),
+      0 0 1.2rem rgba(var(--ostwin-amber-rgb), 0.18);
+  }
+
+  .memory-leaf-dot:nth-of-type(4n + 1) {
+    background: rgb(var(--ostwin-cyan-rgb));
+    box-shadow:
+      0 0 0 0.28rem rgba(var(--ostwin-cyan-rgb), 0.1),
+      0 0 1.2rem rgba(var(--ostwin-cyan-rgb), 0.16);
+  }
+
+  .memory-root-ring {
+    left: 86%;
+    top: 52%;
+    border: 1px solid rgba(var(--ostwin-acid-rgb), 0.18);
+    border-radius: 999px;
+    pointer-events: none;
+    animation: memory-ring 4.8s cubic-bezier(0.32, 0.72, 0, 1) infinite;
+  }
+
+  .memory-root-ring--one {
+    width: 8.4rem;
+    height: 8.4rem;
+  }
+
+  .memory-root-ring--two {
+    width: 11.6rem;
+    height: 11.6rem;
+    animation-delay: 1.1s;
+  }
+
+  .memory-hash-flow {
+    display: grid;
+    grid-template-columns: auto minmax(1.5rem, 1fr) auto minmax(1.5rem, 1fr) auto;
+    gap: 0.55rem;
+    align-items: center;
+    width: min(19rem, 100%);
+    min-width: 13rem;
+  }
+
+  .memory-hash-flow i {
+    height: 1px;
+    background: linear-gradient(90deg, rgba(var(--ostwin-amber-rgb), 0.16), rgba(var(--ostwin-acid-rgb), 0.62));
+  }
+
+  .memory-hash-flow span {
+    display: inline-grid;
+    min-width: 3.6rem;
+    min-height: 1.35rem;
+    place-items: center;
+    border: 1px solid rgba(220, 246, 255, 0.34);
+    border-radius: 999px;
+    color: rgba(220, 246, 255, 0.66);
+    background: rgba(7, 14, 22, 0.76);
+    font-family: var(--sl-font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .search-pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .search-step {
+    position: relative;
+    display: grid;
+    gap: 0.35rem;
+    min-height: 5.8rem;
+    align-content: space-between;
+    border: 1px solid rgba(var(--ostwin-cyan-rgb), 0.18);
+    border-radius: 8px;
+    padding: 0.7rem;
+    background: rgba(9, 13, 20, 0.72);
+  }
+
+  .search-step::after {
+    position: absolute;
+    top: 50%;
+    right: -0.5rem;
+    width: 0.5rem;
+    height: 1px;
+    content: '';
+    background: rgba(var(--ostwin-amber-rgb), 0.48);
+  }
+
+  .search-step:last-child::after {
+    display: none;
+  }
+
+  .ontology-map {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .ontology-map span {
+    border: 1px solid rgba(var(--ostwin-amber-rgb), 0.2);
+    border-radius: 8px;
+    padding: 0.7rem;
+    color: rgba(243, 251, 255, 0.82);
+    background: rgba(var(--ostwin-amber-rgb), 0.08);
+    font-family: var(--sl-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  @keyframes skill-mode-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 0.35rem, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes memory-ring {
+    0% {
+      opacity: 0.42;
+      transform: translate(-50%, -50%) scale(0.82);
+    }
+    76%,
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1.18);
+    }
+  }
+
+  @media (max-width: 72rem) {
+    .skill-studio__header,
+    .skill-studio__main,
+    .skill-studio__support {
+      grid-template-columns: 1fr;
+      grid-template-areas: none;
+    }
+
+    .memory-visual,
+    .search-bridge,
+    .ontology-preview {
+      grid-area: auto;
+    }
+
+    .reasoning-flow {
+      grid-template-columns: repeat(7, minmax(8rem, 1fr));
+    }
+  }
+
+  @media (max-width: 52rem) {
+    .skill-studio__header h3 {
+      font-size: 1.76rem;
+    }
+
+    .reasoning-board__top,
+    .role-loop__heading,
+    .support-heading {
+      display: grid;
+    }
+
+    .reasoning-board__top > strong {
+      width: fit-content;
+    }
+
+    .reasoning-flow,
+    .skill-mode-tabs,
+    .search-pipeline,
+    .ontology-map {
+      grid-template-columns: 1fr;
+      padding-inline: 0;
+    }
+
+    .memory-tree-art__canvas {
+      min-height: 23rem;
+    }
+
+    .memory-root-orb {
+      width: 4.4rem;
+      height: 4.4rem;
+    }
+
+    .memory-branch-chip {
+      min-width: 4.8rem;
+      padding: 0.4rem 0.56rem;
+    }
+
+    .reasoning-node::after,
+    .search-step::after {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skill-mode-panel {
+      animation: none;
+    }
+
+    .memory-root-ring {
+      animation: none;
+    }
+
+    .reasoning-node,
+    .skill-mode-tab {
+      transition-duration: 1ms;
+    }
+  }
+</style>
