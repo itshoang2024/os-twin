@@ -1126,6 +1126,7 @@ export default function MemoryTab() {
             <MerkleTreeView
               planId={planId!}
               searchQuery={searchQuery}
+              leafNotes={graphData?.nodes ?? []}
               onGoToNote={(leafName) => {
                 // Switch to graph view and try to find the note by filename
                 setMemoryView('graph');

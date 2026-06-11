@@ -543,9 +543,22 @@ function Get-CompiledPromptText {
     )
 
     $promptParts = [System.Collections.Generic.List[string]]::new()
+    $finalOverrideSection = ""
 
     if (-not [string]::IsNullOrWhiteSpace($FallbackPrompt)) {
-        $promptParts.Add($FallbackPrompt.TrimEnd())
+        $fallbackPromptText = $FallbackPrompt.TrimEnd()
+        # Build-SystemPrompt appends plan-scoped system_prompt_override to the
+        # role prompt. Move that trailing section to the end of the compiled
+        # prompt file after channel/TASKS context so it remains the final
+        # instruction the agent sees.
+        $overridePattern = '(?ms)\r?\n## System Prompt Override\r?\n\r?\n.*\z'
+        if ($fallbackPromptText -match $overridePattern) {
+            $finalOverrideSection = $Matches[0].Trim()
+            $fallbackPromptText = ($fallbackPromptText -replace $overridePattern, '').TrimEnd()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($fallbackPromptText)) {
+            $promptParts.Add($fallbackPromptText)
+        }
     }
     else {
         $briefPath = Join-Path $RoomDir "brief.md"
@@ -597,6 +610,10 @@ $($tasksContent.TrimEnd())
 "@
             $promptParts.Add($tasksSection.TrimEnd())
         }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($finalOverrideSection)) {
+        $promptParts.Add($finalOverrideSection)
     }
 
     if ($promptParts.Count -gt 0) {

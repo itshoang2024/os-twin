@@ -2230,6 +2230,7 @@ async def get_plan_roles(plan_id: str, user: dict = Depends(get_current_user)):
             "temperature": cfg.get("temperature", 0.7),
             "skill_refs": cfg.get("skill_refs", reg.get("skill_refs", [])),
             "disabled_skills": cfg.get("disabled_skills", []),
+            "system_prompt_override": cfg.get("system_prompt_override", reg.get("system_prompt_override")),
         }
 
     if effective_names:
@@ -3177,6 +3178,7 @@ async def update_plan_role_config(plan_id: str, role_name: str, request: UpdateP
     if request.cli is not None: config[role_name]["cli"] = request.cli
     if request.skill_refs is not None: config[role_name]["skill_refs"] = request.skill_refs
     if request.disabled_skills is not None: config[role_name]["disabled_skills"] = request.disabled_skills
+    if request.system_prompt_override is not None: config[role_name]["system_prompt_override"] = request.system_prompt_override
     plan_roles_file.write_text(json.dumps(config, indent=2) + "\n")
     return {"status": "updated", "plan_id": plan_id, "role": role_name, "config": config[role_name]}
 
@@ -3852,6 +3854,23 @@ async def update_epic_role_config(
     if request.disabled_skills is not None: rc["roles"][role_name]["disabled_skills"] = request.disabled_skills
 
     room_config_file.write_text(json.dumps(rc, indent=2) + "\n")
+
+    # System prompt overrides are plan-scoped runtime prompt configuration.
+    # Persist them to the canonical plan roles file so Build-SystemPrompt.ps1
+    # and the agent runtime can read the same source of truth regardless of
+    # which epic UI initiated the change. Other epic role knobs remain room
+    # overrides for backward compatibility with existing room config consumers.
+    if request.system_prompt_override is not None:
+        plan_roles_file = PLANS_DIR / f"{plan_id}.roles.json"
+        try:
+            plan_config = json.loads(plan_roles_file.read_text()) if plan_roles_file.exists() else get_plan_roles_config(plan_id)
+        except (json.JSONDecodeError, OSError):
+            plan_config = {}
+        if role_name not in plan_config:
+            plan_config[role_name] = {}
+        plan_config[role_name]["system_prompt_override"] = request.system_prompt_override
+        plan_roles_file.write_text(json.dumps(plan_config, indent=2) + "\n")
+
     return {"status": "updated", "task_ref": task_ref, "role": role_name, "config": rc["roles"][role_name]}
 
 @router.get("/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/preview")

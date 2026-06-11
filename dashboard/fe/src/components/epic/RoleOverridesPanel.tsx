@@ -11,23 +11,40 @@ interface RoleOverridesPanelProps {
   epic: Epic;
 }
 
+interface EpicRoleConfig {
+  name: string;
+  description?: string;
+  default_model?: string;
+  temperature?: number;
+  skill_refs?: string[];
+  system_prompt_override?: string;
+}
+
+interface EditingRoleConfig extends EpicRoleConfig {
+  model: string;
+  temperature: number;
+  skill_refs: string[];
+  system_prompt_override: string;
+}
+
 export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
   const { roles, roomOverrides, candidateRoles, markdownRoles, effectiveRoles, updateRoleConfig, updateEpicAssignment, isLoading } = useEpicRoles(epic.plan_id, epic.epic_ref);
   const { skills: allSkills } = useSkills();
-  const [editingRole, setEditingRole] = useState<any | null>(null);
-  const [previewRole, setPreviewRole] = useState<any | null>(null);
+  const [editingRole, setEditingRole] = useState<EditingRoleConfig | null>(null);
+  const [previewRole, setPreviewRole] = useState<EpicRoleConfig | null>(null);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [roleSearch, setRoleSearch] = useState('');
 
-  const handleEditRole = (role: any) => {
+  const handleEditRole = (role: EpicRoleConfig) => {
     const overrides = roomOverrides[role.name] || {};
     setEditingRole({
       ...role,
-      model: overrides.default_model || role.default_model,
+      model: overrides.default_model || role.default_model || '',
       temperature: overrides.temperature !== undefined ? overrides.temperature : (role.temperature || 0.7),
-      skill_refs: overrides.skill_refs || role.skill_refs || []
+      skill_refs: overrides.skill_refs || role.skill_refs || [],
+      system_prompt_override: overrides.system_prompt_override ?? role.system_prompt_override ?? ''
     });
   };
 
@@ -37,19 +54,20 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
     await updateRoleConfig(editingRole.name, {
       default_model: editingRole.model,
       temperature: editingRole.temperature,
-      skill_refs: editingRole.skill_refs
+      skill_refs: editingRole.skill_refs,
+      system_prompt_override: editingRole.system_prompt_override || ''
     });
     setEditingRole(null);
   };
 
-  const handlePreviewPrompt = async (role: any) => {
+  const handlePreviewPrompt = async (role: EpicRoleConfig) => {
     setPreviewRole(role);
     setIsPreviewLoading(true);
     try {
       const resp = await fetch(`/api/plans/${epic.plan_id}/epics/${epic.epic_ref}/roles/${role.name}/preview`);
       const data = await resp.json();
       setPreviewContent(data.prompt || 'Failed to generate preview.');
-    } catch (err) {
+    } catch {
       setPreviewContent('Error fetching preview.');
     } finally {
       setIsPreviewLoading(false);
@@ -78,13 +96,13 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
 
       {/* Role Overrides Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
-        {roles.filter(r => effectiveRoles.includes(r.name)).length === 0 && (
+        {(roles as EpicRoleConfig[]).filter(r => effectiveRoles.includes(r.name)).length === 0 && (
           <div className="text-center p-4 text-xs text-text-faint border border-dashed border-border rounded-lg bg-surface/50">
             No roles assigned to this epic yet.<br/>
-            Click the "+" button to assign roles.
+            Click the &quot;+&quot; button to assign roles.
           </div>
         )}
-        {roles.filter(r => effectiveRoles.includes(r.name)).map((role) => {
+        {(roles as EpicRoleConfig[]).filter(r => effectiveRoles.includes(r.name)).map((role) => {
           const isOverridden = !!roomOverrides[role.name];
           const isFromMarkdown = markdownRoles.includes(role.name) && !candidateRoles.includes(role.name);
           return (
@@ -152,6 +170,14 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
                     )}
                   </div>
                 </div>
+                {role.system_prompt_override && (
+                  <div className="flex flex-col">
+                    <span className="text-[9px] text-text-faint uppercase font-bold tracking-tighter">System Prompt Override</span>
+                    <div className="text-[10px] text-text-muted line-clamp-2 whitespace-pre-wrap">
+                      {role.system_prompt_override}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -214,6 +240,18 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
                 })}
               </div>
             </div>
+            <div>
+              <label className="block text-[11px] font-bold text-text-muted uppercase mb-1">System Prompt Override</label>
+              <textarea
+                className="w-full min-h-32 bg-surface border border-border rounded px-3 py-2 text-xs focus:ring-1 focus:ring-primary outline-none font-mono leading-relaxed"
+                placeholder="Additional instructions appended to the end of this role's system prompt for the whole plan..."
+                value={editingRole.system_prompt_override || ''}
+                onChange={(e) => setEditingRole({ ...editingRole, system_prompt_override: e.target.value })}
+              />
+              <p className="mt-1 text-[10px] text-text-faint">
+                Saved to the plan roles config and appended after the generated role prompt.
+              </p>
+            </div>
             <div className="flex justify-end gap-2 pt-4">
               <Button variant="ghost" onClick={() => setEditingRole(null)}>Cancel</Button>
               <Button variant="primary" onClick={handleSaveRole}>Save Overrides</Button>
@@ -251,7 +289,7 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
       {/* Assign Roles Modal */}
       {isAssignmentModalOpen && (() => {
         // Sort: markdown-declared roles first, then the rest alphabetically
-        const sortedRoles = [...(roles || [])].sort((a, b) => {
+        const sortedRoles = ([...(roles || [])] as EpicRoleConfig[]).sort((a, b) => {
           const aInMd = markdownRoles.includes(a.name) ? 0 : 1;
           const bInMd = markdownRoles.includes(b.name) ? 0 : 1;
           if (aInMd !== bInMd) return aInMd - bInMd;
@@ -367,4 +405,3 @@ export default function RoleOverridesPanel({ epic }: RoleOverridesPanelProps) {
     </div>
   );
 }
-

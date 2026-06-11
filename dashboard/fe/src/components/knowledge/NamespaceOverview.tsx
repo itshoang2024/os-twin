@@ -506,10 +506,10 @@ export default function NamespaceOverview({
                 </div>
                 <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-main)' }}>Explore Knowledge Graph</h3>
                 <p className="text-xs max-w-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  Dive into the interactive 3D Nexus Explorer to visualize relationships, discover communities, and trace paths between entities.
+                  Dive into the interactive Graph View to visualize relationships, discover communities, and trace paths between entities.
                 </p>
                 <button className="mt-4 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-colors" style={{ background: 'var(--color-primary)' }}>
-                  Open Nexus
+                  Open Graph View
                 </button>
               </div>
             )}

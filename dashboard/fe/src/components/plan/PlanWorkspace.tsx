@@ -76,7 +76,8 @@ export function usePlanContext() {
 function getInitialTab(): string {
   if (typeof window === 'undefined') return 'epics';
   const params = new URLSearchParams(window.location.search);
-  return params.get('tab') || 'epics';
+  const tab = params.get('tab');
+  return tab === 'dag' ? 'editor' : tab || 'epics';
 }
 
 export default function PlanWorkspace({ planId: propId }: { planId: string }) {
@@ -274,10 +275,6 @@ export default function PlanWorkspace({ planId: propId }: { planId: string }) {
     }
   }, [planId, planContent, addToast]);
 
-  const handleApplyAI = useCallback((newContent: string) => {
-    setPlanContent(newContent);
-    setActiveTab('editor');
-  }, []);
   // Synthesize epics from progress + DAG when the /epics API returns empty
   const epics = useMemo(() => {
     const result: Epic[] = [];
@@ -295,7 +292,7 @@ export default function PlanWorkspace({ planId: propId }: { planId: string }) {
     if (apiEpics) {
       for (const e of apiEpics) {
         // The /epics API may return 'epic_ref' or 'task_ref' depending on code path
-        const ref = e.epic_ref || (e as any).task_ref || '';
+        const ref = e.epic_ref || (e as Epic & { task_ref?: string }).task_ref || '';
         const liveRoom = progressStatusMap.get(ref);
         result.push({
           ...e,

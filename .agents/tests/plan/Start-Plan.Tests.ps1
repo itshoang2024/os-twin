@@ -1283,6 +1283,114 @@ working_dir: $script:projectDir
         }
     }
 
+    Context "Sync functionality" {
+        BeforeEach {
+            $script:oldSyncWarRoomsDir = $env:WARROOMS_DIR
+            $env:WARROOMS_DIR = Join-Path $script:projectDir ".war-rooms"
+            $script:syncPlan = Join-Path $TestDrive "sync-plan.md"
+            @"
+# Plan: Sync Test
+working_dir: $script:projectDir
+
+## EPIC-001 - Synced Room Contract
+
+New synced requirement from the latest plan.
+
+### Tasks
+- [ ] TASK-001 - Fresh synced task
+"@ | Out-File $script:syncPlan -Encoding utf8
+
+            $mockNewWarRoom = @'
+param(
+    [string]$RoomId,
+    [string]$TaskRef,
+    [string]$TaskDescription,
+    [string]$WorkingDir,
+    [string]$WarRoomsDir,
+    [string]$PlanId,
+    [string]$RunId,
+    [string]$EventsPath,
+    [string]$AssignedRole,
+    [string[]]$CandidateRoles = @(),
+    [string[]]$DefinitionOfDone = @(),
+    [string[]]$AcceptanceCriteria = @(),
+    [string[]]$DependsOn = @(),
+    [int]$MaxRetries = 3,
+    [int]$TimeoutSeconds = 900
+)
+if (-not (Test-Path $WarRoomsDir)) {
+    New-Item -ItemType Directory -Path $WarRoomsDir -Force | Out-Null
+}
+$roomDir = Join-Path $WarRoomsDir $RoomId
+New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $roomDir 'channel.jsonl') -Force | Out-Null
+$TaskDescription | Out-File -FilePath (Join-Path $roomDir 'brief.md') -Encoding utf8
+if ($TaskRef -match '^EPIC-') {
+    "# Tasks for $TaskRef`n`n$TaskDescription" | Out-File -FilePath (Join-Path $roomDir 'TASKS.md') -Encoding utf8
+}
+@{
+    room_id = $RoomId
+    task_ref = $TaskRef
+    plan_id = $PlanId
+    run_id = $RunId
+    working_dir = $WorkingDir
+    assignment = @{ assigned_role = $AssignedRole; candidate_roles = @($CandidateRoles) }
+} | ConvertTo-Json -Depth 8 | Out-File -FilePath (Join-Path $roomDir 'config.json') -Encoding utf8
+'@
+            $mockNewWarRoom | Out-File (Join-Path $script:projectDir ".agents/war-rooms/New-WarRoom.ps1") -Encoding utf8
+
+            $warRooms = $env:WARROOMS_DIR
+            New-Item -ItemType Directory -Path $warRooms -Force | Out-Null
+            $oldRoom = Join-Path $warRooms "room-001"
+            New-Item -ItemType Directory -Path $oldRoom -Force | Out-Null
+            "Old stale brief" | Out-File (Join-Path $oldRoom "brief.md") -Encoding utf8
+            "- [x] OLD-TASK - stale work" | Out-File (Join-Path $oldRoom "TASKS.md") -Encoding utf8
+            '{"type":"done","body":"old channel history"}' | Out-File (Join-Path $oldRoom "channel.jsonl") -Encoding utf8
+            "done" | Out-File (Join-Path $oldRoom "status") -Encoding utf8 -NoNewline
+            @{ task_ref = "EPIC-001"; assignment = @{ assigned_role = "engineer"; candidate_roles = @("engineer", "qa") } } |
+                ConvertTo-Json -Depth 6 | Out-File (Join-Path $oldRoom "config.json") -Encoding utf8
+        }
+
+        AfterEach {
+            if ($script:oldSyncWarRoomsDir) { $env:WARROOMS_DIR = $script:oldSyncWarRoomsDir }
+            else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+        }
+
+        It "archives existing implementation rooms and recreates them from the current plan" {
+            $output = & $script:StartPlan -PlanFile $script:syncPlan -ProjectDir $script:projectDir -Sync -SkipLoop *>&1
+            $outputStr = $output -join "`n"
+
+            $outputStr | Should -Match "Mode: SYNC"
+            $outputStr | Should -Match "\[SYNC\] Archived room-001"
+
+            $freshBrief = Get-Content (Join-Path $script:projectDir ".war-rooms/room-001/brief.md") -Raw
+            $freshTasks = Get-Content (Join-Path $script:projectDir ".war-rooms/room-001/TASKS.md") -Raw
+            $freshBrief | Should -Match "New synced requirement"
+            $freshBrief | Should -Not -Match "Old stale brief"
+            $freshTasks | Should -Match "Fresh synced task"
+            $freshTasks | Should -Not -Match "OLD-TASK"
+
+            $archiveRoot = Join-Path $script:projectDir ".war-rooms/.sync-archive"
+            $archivedRoom = Get-ChildItem -Path $archiveRoot -Directory -Recurse -Filter "room-001" |
+                Select-Object -First 1
+            $archivedRoom | Should -Not -BeNullOrEmpty
+            (Get-Content (Join-Path $archivedRoom.FullName "brief.md") -Raw) | Should -Match "Old stale brief"
+            (Get-Content (Join-Path $archivedRoom.FullName "channel.jsonl") -Raw) | Should -Match "old channel history"
+        }
+
+        It "rejects Sync and Resume together" {
+            $output = & pwsh -NoProfile -File $script:StartPlan `
+                -PlanFile $script:syncPlan `
+                -ProjectDir $script:projectDir `
+                -Sync `
+                -Resume `
+                -SkipLoop *>&1
+
+            $LASTEXITCODE | Should -Be 1
+            ($output -join "`n") | Should -Match "mutually exclusive"
+        }
+    }
+
     Context "Epic auto-generation from goal-only plan" {
         BeforeEach {
             $script:goalPlan = Join-Path $TestDrive "goal-plan-$(Get-Random).md"
@@ -1419,6 +1527,7 @@ param(
     [string]$WorktreeRoot = '',
     [switch]$NonInteractive,
     [switch]$EnablePlanning,
+    [switch]$Sync,
     [switch]$IgnorePlanWorkingDir
 )
 [ordered]@{
@@ -1427,6 +1536,7 @@ param(
     DryRun = [bool]$DryRun
     WorkspaceIsolation = $WorkspaceIsolation
     NonInteractive = [bool]$NonInteractive
+    Sync = [bool]$Sync
     IgnorePlanWorkingDir = [bool]$IgnorePlanWorkingDir
 } | ConvertTo-Json -Depth 6 | Out-File -FilePath (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'start-plan-args.json') -Encoding utf8
 '@ | Out-File (Join-Path $agentsDir "plan" "Start-Plan.ps1") -Encoding utf8
@@ -1514,5 +1624,65 @@ working_dir: $oldProject
         $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
         $captured.ProjectDir | Should -Be $explicitDir
         $captured.IgnorePlanWorkingDir | Should -BeTrue
+    }
+
+    It "passes --sync through to Start-Plan" {
+        $fixture = New-OstwinRunFixture
+        $planFile = Join-Path $fixture.ProjectDir "PLAN.md"
+        @"
+# Plan: Sync Through
+
+## EPIC-001 - Refresh room inputs
+#### Definition of Done
+- [ ] Done
+"@ | Out-File $planFile -Encoding utf8
+
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('run', $planFile, '--sync', '--dry-run', '-n')
+
+        Test-Path $fixture.CaptureFile | Should -BeTrue
+        $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
+        $captured.Sync | Should -BeTrue
+    }
+
+    It "passes plan start --sync through to Start-Plan" {
+        $fixture = New-OstwinRunFixture
+        $planFile = Join-Path $fixture.ProjectDir "PLAN.md"
+        @"
+# Plan: Plan Start Sync
+
+## EPIC-001 - Refresh room inputs
+#### Definition of Done
+- [ ] Done
+"@ | Out-File $planFile -Encoding utf8
+
+        Invoke-FixtureOstwinRun -Fixture $fixture -Args @('plan', 'start', $planFile, '--sync', '--dry-run')
+
+        Test-Path $fixture.CaptureFile | Should -BeTrue
+        $captured = Get-Content $fixture.CaptureFile -Raw | ConvertFrom-Json
+        $captured.Sync | Should -BeTrue
+    }
+
+    It "rejects --sync and --resume together before Start-Plan dispatch" {
+        $fixture = New-OstwinRunFixture
+        $planFile = Join-Path $fixture.ProjectDir "PLAN.md"
+        "# Plan: Bad Combo`n`n## EPIC-001 - Test" | Out-File $planFile -Encoding utf8
+
+        $oldOstwinHome = $env:OSTWIN_HOME
+        $oldWarRooms = $env:WARROOMS_DIR
+        $env:OSTWIN_HOME = Join-Path $TestDrive "ostwin-home-conflict-$(Get-Random)"
+        Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $env:OSTWIN_HOME -Force | Out-Null
+        Push-Location $fixture.ProjectDir
+        try {
+            $output = & pwsh -NoProfile -File $fixture.Ostwin run $planFile --sync --resume --dry-run *>&1
+            $LASTEXITCODE | Should -Be 1
+            ($output -join "`n") | Should -Match "mutually exclusive"
+            Test-Path $fixture.CaptureFile | Should -BeFalse
+        }
+        finally {
+            Pop-Location
+            if ($oldOstwinHome) { $env:OSTWIN_HOME = $oldOstwinHome } else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
+            if ($oldWarRooms) { $env:WARROOMS_DIR = $oldWarRooms } else { Remove-Item Env:WARROOMS_DIR -ErrorAction SilentlyContinue }
+        }
     }
 }

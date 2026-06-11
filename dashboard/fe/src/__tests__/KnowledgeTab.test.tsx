@@ -298,7 +298,7 @@ describe('KnowledgeTab', () => {
     // Check sub-view tabs - in plan context, Namespaces is HIDDEN
     expect(screen.queryByText('Namespaces')).not.toBeInTheDocument();
     expect(screen.getByText('Import')).toBeInTheDocument();
-    expect(screen.getByText('Nexus')).toBeInTheDocument();
+    expect(screen.getByText('Graph View')).toBeInTheDocument();
   });
 
   it('displays query view by default in plan context', async () => {
@@ -336,7 +336,7 @@ describe('KnowledgeTab', () => {
       expect(screen.getByText('Plan Knowledge')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('Nexus'));
+    fireEvent.click(screen.getByText('Graph View'));
 
     // Since plan namespace is auto-selected, the query form is shown
     // (not "Select a Namespace" anymore)

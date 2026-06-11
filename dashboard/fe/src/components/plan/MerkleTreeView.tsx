@@ -4,6 +4,8 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api-client';
 import * as d3Hierarchy from 'd3-hierarchy';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -20,6 +22,18 @@ interface MerkleData {
   note_count: number;
   vectordb_root_hash: string;
   tree: MerkleNode;
+}
+
+interface MerkleLeafNote {
+  title: string;
+  path?: string;
+  pathLabel?: string;
+  body?: string;
+  content?: string;
+  excerpt?: string;
+  summary?: string | null;
+  tags?: string[];
+  keywords?: string[];
 }
 
 type HNode = d3Hierarchy.HierarchyPointNode<MerkleNode>;
@@ -75,6 +89,31 @@ function getAncestorPath(node: HNode): HNode[] {
     current = current.parent;
   }
   return path;
+}
+
+function getNodePathLabel(node: HNode): string {
+  return getAncestorPath(node).map((a) => a.data.name).join('/');
+}
+
+function normalizeNoteTitle(name: string): string {
+  return name.replace(/\.md$/, '').replace(/-/g, ' ').toLowerCase();
+}
+
+function findLeafNote(node: HNode | null, notes: MerkleLeafNote[]): MerkleLeafNote | null {
+  if (!node || node.data.type !== 'leaf') return null;
+
+  const leafName = node.data.name;
+  const leafPath = getNodePathLabel(node);
+  const normalizedLeafTitle = normalizeNoteTitle(leafName);
+
+  return notes.find((note) => {
+    const path = note.path ?? note.pathLabel ?? '';
+    return (
+      path.endsWith(leafName) ||
+      path.endsWith(leafPath) ||
+      note.title.toLowerCase() === normalizedLeafTitle
+    );
+  }) ?? null;
 }
 
 function collectAutoCollapsedPaths(tree: MerkleNode): Set<string> {
@@ -170,9 +209,11 @@ function MerkleIntegrityBar({ data }: { data: MerkleData }) {
 
 function MerkleNodeDetail({
   node,
+  leafNote,
   onGoToNote,
 }: {
   node: HNode | null;
+  leafNote?: MerkleLeafNote | null;
   onGoToNote?: (leafName: string) => void;
 }) {
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
@@ -200,6 +241,7 @@ function MerkleNodeDetail({
   const d = node.data;
   const ancestors = getAncestorPath(node);
   const { leaves, dirs } = d.type === 'dir' ? countChildren(d) : { leaves: 0, dirs: 0 };
+  const noteBody = leafNote?.body || leafNote?.content || leafNote?.excerpt || '';
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4" style={{ scrollbarWidth: 'thin' }}>
@@ -299,6 +341,61 @@ function MerkleNodeDetail({
           ))}
         </div>
       </div>
+
+      {/* Leaf note content */}
+      {d.type === 'leaf' && (
+        <div className="space-y-3">
+          {leafNote?.summary && (
+            <div
+              className="rounded-lg border-l-2 px-3 py-2 text-xs leading-relaxed"
+              style={{
+                borderLeftColor: getDepthColor(node.depth),
+                background: 'var(--color-background)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              <p className="text-[9px] uppercase tracking-widest mb-1 font-medium opacity-70">
+                Summary
+              </p>
+              <p>{leafNote.summary}</p>
+            </div>
+          )}
+
+          {noteBody ? (
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>
+                Content
+              </p>
+              <div className="memory-markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {noteBody}
+                </ReactMarkdown>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="rounded-lg border px-3 py-2 text-xs"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+            >
+              No note content available for this leaf.
+            </div>
+          )}
+
+          {leafNote?.tags && leafNote.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {leafNote.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="px-2 py-1 rounded-md text-[10px] font-medium"
+                  style={{ background: 'var(--color-primary-muted)', color: 'var(--color-primary)' }}
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Go to note (leaves only) */}
       {d.type === 'leaf' && onGoToNote && (
@@ -586,10 +683,12 @@ function MerkleTreeDiagram({
 export default function MerkleTreeView({
   planId,
   searchQuery,
+  leafNotes = [],
   onGoToNote,
 }: {
   planId: string;
   searchQuery: string;
+  leafNotes?: MerkleLeafNote[];
   onGoToNote?: (leafName: string) => void;
 }) {
   const { data, error, isLoading } = useSWR<MerkleData>(
@@ -597,6 +696,10 @@ export default function MerkleTreeView({
     fetcher,
   );
   const [selectedNode, setSelectedNode] = useState<HNode | null>(null);
+  const selectedLeafNote = useMemo(
+    () => findLeafNote(selectedNode, leafNotes),
+    [selectedNode, leafNotes],
+  );
 
   if (isLoading) {
     return (
@@ -662,7 +765,7 @@ export default function MerkleTreeView({
             width: 280,
           }}
         >
-          <MerkleNodeDetail node={selectedNode} onGoToNote={onGoToNote} />
+          <MerkleNodeDetail node={selectedNode} leafNote={selectedLeafNote} onGoToNote={onGoToNote} />
         </div>
       </div>
     </div>

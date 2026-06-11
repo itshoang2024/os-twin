@@ -159,6 +159,50 @@ Describe "Build-SystemPrompt" {
             $prompt | Should -Match "React 19"
             $prompt | Should -Match "Additional Context"
         }
+
+        It "appends plan roles system_prompt_override at the end when present" {
+            $ostwinHome = Join-Path $TestDrive "ostwin-home-$(Get-Random)"
+            $plansDir = Join-Path $ostwinHome ".agents" "plans"
+            New-Item -ItemType Directory -Path $plansDir -Force | Out-Null
+            $roomDir = Join-Path $TestDrive "room-override-$(Get-Random)"
+            New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+            @{ plan_id = "plan-override" } | ConvertTo-Json | Out-File (Join-Path $roomDir "config.json") -Encoding utf8
+            @{
+                "ov-role" = @{
+                    system_prompt_override = "Final override instruction."
+                }
+            } | ConvertTo-Json -Depth 4 | Out-File (Join-Path $plansDir "plan-override.roles.json") -Encoding utf8
+
+            $oldOstwinHome = $env:OSTWIN_HOME
+            try {
+                $env:OSTWIN_HOME = $ostwinHome
+                $prompt = & $script:BuildPrompt -RolePath $script:rolePath -RoomDir $roomDir
+            }
+            finally {
+                $env:OSTWIN_HOME = $oldOstwinHome
+            }
+
+            $prompt | Should -Match "System Prompt Override"
+            $prompt.TrimEnd().EndsWith("Final override instruction.") | Should -BeTrue
+        }
+
+        It "does not add override section when plan roles file is absent" {
+            $ostwinHome = Join-Path $TestDrive "ostwin-home-empty-$(Get-Random)"
+            $roomDir = Join-Path $TestDrive "room-no-override-$(Get-Random)"
+            New-Item -ItemType Directory -Path $roomDir -Force | Out-Null
+            @{ plan_id = "plan-without-roles-file" } | ConvertTo-Json | Out-File (Join-Path $roomDir "config.json") -Encoding utf8
+
+            $oldOstwinHome = $env:OSTWIN_HOME
+            try {
+                $env:OSTWIN_HOME = $ostwinHome
+                $prompt = & $script:BuildPrompt -RolePath $script:rolePath -RoomDir $roomDir
+            }
+            finally {
+                $env:OSTWIN_HOME = $oldOstwinHome
+            }
+
+            $prompt | Should -Not -Match "System Prompt Override"
+        }
     }
 
     Context "Built-in roles" {

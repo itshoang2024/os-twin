@@ -30,7 +30,7 @@ export default function EmptyState({ namespaces, onSelectNamespace }: EmptyState
           <Icon name="hub" size={32} style={{ color: 'var(--color-primary)' }} />
         </div>
         <h3 className="text-lg font-bold" style={{ color: 'var(--color-text-main)' }}>
-          Nexus Explorer
+          Graph View
         </h3>
         <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
           Select a namespace to begin exploring your knowledge graph.

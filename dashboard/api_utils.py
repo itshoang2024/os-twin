@@ -921,6 +921,7 @@ def build_roles_list(config: dict, include_skills: bool = False) -> list:
             "temperature": role_config.get("temperature", defaults.get("temperature", 0.7)),
             "skill_refs": plan_skill_refs,
             "disabled_skills": role_config.get("disabled_skills", []),
+            "system_prompt_override": role_config.get("system_prompt_override", getattr(role_obj, "system_prompt_override", None)),
             "runner": "base",  # Fallback since dynamic roles don't typically have custom runners
             "capabilities": [],
             "supported_task_types": [],

@@ -188,6 +188,7 @@ class EpicSkillsManager:
             "model": resolution.effective.get("default_model", "google-vertex/gemini-3-flash-preview"),
             "temperature": resolution.effective.get("temperature", 0.7),
             "skill_refs": resolution.effective.get("skill_refs", []),
+            "system_prompt_override": resolution.effective.get("system_prompt_override", ""),
             "brief": room_brief
         }
         return merged
@@ -219,5 +220,10 @@ class EpicSkillsManager:
         asset_context = cls.build_asset_context(plan_id, task_ref)
         if asset_context:
             prompt.append("\n" + asset_context)
+
+        override_text = config.get("system_prompt_override")
+        if override_text and str(override_text).strip():
+            prompt.append("\n# System Prompt Override\n")
+            prompt.append(str(override_text).strip())
 
         return "\n\n".join(prompt)

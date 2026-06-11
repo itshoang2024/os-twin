@@ -2,8 +2,9 @@ import sys
 from pathlib import Path
 import json
 
-# Add project root to sys.path
-sys.path.insert(0, "/Users/paulaan/PycharmProjects/agent-os")
+# Add this checkout's project root to sys.path. Avoid a stale absolute path so
+# endpoint tests exercise the code under test in the current repository.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,6 +80,34 @@ def test_update_epic_role_config():
         assert written_data["roles"][role_name]["default_model"] == "claude-3-opus"
         assert written_data["roles"][role_name]["temperature"] == 0.2
         assert written_data["roles"][role_name]["skill_refs"] == ["new-skill"]
+
+
+def test_update_epic_role_config_persists_system_prompt_override_to_plan_roles(tmp_path):
+    plan_id = "plan-001"
+    task_ref = "EPIC-003"
+    role_name = "engineer"
+    room_dir = tmp_path / ".war-rooms" / "room-003"
+    room_dir.mkdir(parents=True)
+    (room_dir / "config.json").write_text(json.dumps({"roles": {}}))
+    plans_dir = tmp_path / ".ostwin" / ".agents" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / f"{plan_id}.roles.json").write_text(json.dumps({
+        "engineer": {"default_model": "existing-model"}
+    }))
+
+    with patch("dashboard.routes.plans._resolve_room_dir", return_value=room_dir), \
+         patch("dashboard.routes.plans.PLANS_DIR", plans_dir):
+        payload = {
+            "system_prompt_override": "Always append this final instruction."
+        }
+        response = client.put(f"/api/plans/{plan_id}/epics/{task_ref}/roles/{role_name}/config", json=payload, headers=HEADERS)
+
+    assert response.status_code == 200
+    room_config = json.loads((room_dir / "config.json").read_text())
+    assert room_config["roles"][role_name] == {}
+    plan_config = json.loads((plans_dir / f"{plan_id}.roles.json").read_text())
+    assert plan_config[role_name]["default_model"] == "existing-model"
+    assert plan_config[role_name]["system_prompt_override"] == "Always append this final instruction."
 
 def test_preview_epic_role_prompt():
     plan_id = "plan-001"

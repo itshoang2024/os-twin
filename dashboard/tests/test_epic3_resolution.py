@@ -137,3 +137,28 @@ def test_generate_system_prompt(mock_project, resolver_patches):
     assert "Do engineering things." in prompt
     assert "# Current Epic Context" in prompt
     assert "This is a test epic brief." in prompt
+
+
+def test_generate_system_prompt_appends_plan_system_prompt_override(mock_project, resolver_patches):
+    """Preview generation should mirror runtime prompt override append behavior."""
+    (mock_project / "plans" / "plan-001.roles.json").write_text(json.dumps({
+        "engineer": {
+            "system_prompt_override": "Final dashboard preview override."
+        }
+    }))
+    patches, factory, _ = resolver_patches
+    room_dir = mock_project / ".war-rooms" / "plan-001" / "EPIC-003"
+
+    with patches, \
+         patch("dashboard.lib.settings.resolver.get_settings_resolver", factory), \
+         patch("dashboard.epic_manager._resolve_room_dir", return_value=room_dir), \
+         patch("dashboard.epic_manager.AGENTS_DIR", mock_project / ".agents"), \
+         patch("dashboard.epic_manager.SKILLS_DIRS", [mock_project / "skills"]), \
+         patch.object(EpicSkillsManager, "build_asset_context", return_value=""), \
+         patch("dashboard.constants.ROLE_DEFAULTS", {}), \
+         patch("dashboard.api_utils.build_skills_list", return_value=[]):
+
+        prompt = EpicSkillsManager.generate_system_prompt("plan-001", "EPIC-003", "engineer")
+
+    assert "# System Prompt Override" in prompt
+    assert prompt.strip().endswith("Final dashboard preview override.")

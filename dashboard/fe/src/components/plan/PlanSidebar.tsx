@@ -19,7 +19,6 @@ export default function PlanSidebar() {
     { id: 'logs', label: 'Live Logs', icon: 'terminal', count: progress?.active },
     { id: 'assets', label: 'Assets', icon: 'attach_file' },
     { id: 'roles', label: 'Roles & Config', icon: 'group' },
-    { id: 'dag', label: 'DAG View', icon: 'account_tree' },
     { id: 'history', label: 'History', icon: 'history' },
     { id: 'architect', label: 'AI Plan', icon: 'smart_toy' },
     { id: 'memory', label: 'Memory', icon: 'psychology' },

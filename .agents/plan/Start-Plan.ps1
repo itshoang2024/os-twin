@@ -20,6 +20,9 @@
 .PARAMETER Resume
     Skip room creation, rebuild DAG from existing rooms, and restart the manager loop.
     Rooms in 'blocked' state will be reset to 'pending' if their upstream deps are no longer failed.
+.PARAMETER Sync
+    Refresh implementation war-rooms from the current plan by archiving existing rooms
+    and recreating brief.md/TASKS.md/config/lifecycle from the parsed plan.
 .PARAMETER Expand
     Automatically run plan expansion before creating rooms.
 .PARAMETER Review
@@ -43,6 +46,8 @@ param(
 
     [switch]$Resume,
 
+    [switch]$Sync,
+
     [switch]$Expand,
 
     [switch]$Review,
@@ -58,6 +63,11 @@ param(
     [ValidateSet('room-worktree','shared')]
     [string]$WorkspaceIsolation = 'shared'
 )
+
+if ($Resume -and $Sync) {
+    Write-Error "-Resume and -Sync are mutually exclusive. Use -Resume to continue existing rooms, or -Sync to archive and recreate rooms from the latest plan."
+    exit 1
+}
 
 # --- Resolve paths ---
 # The agentsDir must point to the Ostwin *installation* (where scripts like
@@ -636,6 +646,7 @@ if (-not $DryRun -and (Get-Command Write-OrchestrationEvent -ErrorAction Silentl
             project_dir  = $ProjectDir
             warrooms_dir = $warRoomsDir
             resume       = [bool]$Resume
+            sync         = [bool]$Sync
             run_id       = $runId
             skip_loop    = [bool]$SkipLoop
         }
@@ -820,6 +831,8 @@ if ($Resume) {
     if (Test-Path $updateProgressScript) {
         & $updateProgressScript -WarRoomsDir $warRoomsDir
     }
+} elseif ($Sync) {
+    Write-Host "  Mode: SYNC (refreshing war-rooms from current plan)" -ForegroundColor Yellow
 } else {
     $syntheticRoomCount = if ($skipPlanReview) { 0 } else { 1 }
     Write-Host "  War-rooms to create: $($parsed.Count + $syntheticRoomCount)"
@@ -867,8 +880,48 @@ if ($DryRun) {
 }
 
 # --- Room Creation Logic ---
+function Stop-WarRoomProcessesForSync {
+    param([Parameter(Mandatory)][string]$RoomDir)
+
+    $pidDir = Join-Path $RoomDir "pids"
+    if (-not (Test-Path $pidDir -PathType Container)) { return }
+
+    foreach ($pidFile in (Get-ChildItem -Path $pidDir -Filter "*.pid" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $pidText = (Get-Content $pidFile.FullName -Raw -ErrorAction Stop).Trim()
+            $processId = 0
+            if ([int]::TryParse($pidText, [ref]$processId) -and $processId -gt 0) {
+                Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+    }
+}
+
+function Move-WarRoomToSyncArchive {
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)][string]$ArchiveRoot
+    )
+
+    if (-not (Test-Path $RoomDir -PathType Container)) { return $null }
+
+    Stop-WarRoomProcessesForSync -RoomDir $RoomDir
+    New-Item -ItemType Directory -Path $ArchiveRoot -Force | Out-Null
+
+    $roomName = Split-Path $RoomDir -Leaf
+    $destination = Join-Path $ArchiveRoot $roomName
+    $suffix = 1
+    while (Test-Path $destination) {
+        $destination = Join-Path $ArchiveRoot "$roomName-$suffix"
+        $suffix++
+    }
+
+    Move-Item -Path $RoomDir -Destination $destination
+    return $destination
+}
+
 function New-PlanWarRooms {
-    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $runId, $eventsPath, $maxRetries, $timeoutSeconds)
+    param($PlanFile, $ProjectDir, $warRoomsDir, $agentsDir, $parsed, $planId, $runId, $eventsPath, $maxRetries, $timeoutSeconds, [switch]$Sync)
     
     # --- Re-parse plan in case it changed during negotiation (uses PlanParser module) ---
     $planContent = Get-Content $PlanFile -Raw
@@ -918,6 +971,21 @@ function New-PlanWarRooms {
         foreach ($item in $parsed) {
             if ($item.DependsOn -notcontains "PLAN-REVIEW") {
                 $item.DependsOn = @("PLAN-REVIEW") + $item.DependsOn
+            }
+        }
+    }
+
+    if ($Sync -and (Test-Path $warRoomsDir -PathType Container)) {
+        $archiveStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
+        $archiveRoot = Join-Path (Join-Path $warRoomsDir ".sync-archive") $archiveStamp
+        $roomsToArchive = @(Get-ChildItem -Path $warRoomsDir -Directory -Filter "room-*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne "room-000" } |
+            Sort-Object Name)
+
+        foreach ($room in $roomsToArchive) {
+            $archivedPath = Move-WarRoomToSyncArchive -RoomDir $room.FullName -ArchiveRoot $archiveRoot
+            if ($archivedPath) {
+                Write-Host "    [SYNC] Archived $($room.Name) -> $archivedPath" -ForegroundColor Yellow
             }
         }
     }
@@ -1109,7 +1177,7 @@ function New-PlanWarRooms {
 # Always called — even in Resume mode. New-PlanWarRooms skips existing rooms
 # internally (reconcile only) but MUST rebuild DAG.json so the manager loop
 # sees all rooms, not just room-000.
-New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -runId $runId -eventsPath $eventsPath -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds
+New-PlanWarRooms -PlanFile $PlanFile -ProjectDir $ProjectDir -warRoomsDir $warRoomsDir -agentsDir $agentsDir -parsed $parsed -planId $planId -runId $runId -eventsPath $eventsPath -maxRetries $defaultRoomMaxRetries -timeoutSeconds $defaultRoomTimeoutSeconds -Sync:$Sync
 
 # ===========================================================================
 # Phase B: Dependency review (reads actual brief.md from each war-room)

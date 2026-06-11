@@ -187,6 +187,44 @@ $ExtraContext
 "@)
 }
 
+# Section 7: Plan-scoped system prompt override
+# Overrides live in the canonical plan roles file:
+#   ~/.ostwin/.agents/plans/{plan_id}.roles.json
+# They are appended last so operators can deliberately add final, plan-specific
+# instructions without replacing the built-in role prompt and context layers.
+if ($RoomDir -and (Test-Path $RoomDir)) {
+    try {
+        $roomConfigFile = Join-Path $RoomDir "config.json"
+        if (Test-Path $roomConfigFile) {
+            $roomCfg = Get-Content $roomConfigFile -Raw | ConvertFrom-Json
+            $planId = if ($roomCfg.PSObject.Properties['plan_id']) { [string]$roomCfg.plan_id } else { '' }
+            if ($planId) {
+                $_homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
+                $_ostwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path $_homeDir ".ostwin" }
+                $planRolesFile = Join-Path $_ostwinHome ".agents" "plans" "$planId.roles.json"
+                if (Test-Path $planRolesFile) {
+                    $planRoles = Get-Content $planRolesFile -Raw | ConvertFrom-Json
+                    $roleKey = $role.Name
+                    $overrideText = ''
+                    $planRoleProperty = $planRoles.PSObject.Properties[$roleKey]
+                    if ($planRoleProperty -and $planRoleProperty.Value.PSObject.Properties['system_prompt_override']) {
+                        $overrideText = [string]$planRoleProperty.Value.system_prompt_override
+                    }
+
+                    if (-not [string]::IsNullOrWhiteSpace($overrideText)) {
+                        $sections.Add(@"
+
+## System Prompt Override
+
+$overrideText
+"@)
+                    }
+                }
+            }
+        }
+    } catch { }
+}
+
 # --- Compose final prompt ---
 $finalPrompt = $sections -join "`n"
 

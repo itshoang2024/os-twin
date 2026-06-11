@@ -224,7 +224,10 @@ function Resolve-PlanId {
         Returns a PSObject with PlanFile and WorkingDir properties, or $null on failure.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Arg)
+    param(
+        [Parameter(Mandatory)][string]$Arg,
+        [switch]$SyncFromDashboard
+    )
 
     # If it's an existing file, use directly
     if (Test-Path $Arg -PathType Leaf) {
@@ -241,6 +244,46 @@ function Resolve-PlanId {
 
     # If it looks like a hex plan_id (8-64 hex chars, no slashes/dots)
     if ($Arg -match '^[0-9a-fA-F]{8,64}$') {
+        if ($SyncFromDashboard) {
+            if (-not (Test-DashboardReachable)) {
+                Write-Error ([char]0x2717 + " Cannot sync plan '$Arg': dashboard unreachable at $DashboardUrl")
+                Write-Error "  Start dashboard with: ostwin dashboard"
+                return $null
+            }
+
+            try {
+                $apiResponse = Invoke-DashboardApi -Endpoint "/api/plans/$Arg"
+                $plan = if ($apiResponse.plan) { $apiResponse.plan } else { $apiResponse }
+                $content = if ($null -ne $plan.content) { [string]$plan.content } else { "" }
+                if ([string]::IsNullOrWhiteSpace($content)) {
+                    Write-Error ([char]0x2717 + " Cannot sync plan '$Arg': dashboard returned empty plan content")
+                    return $null
+                }
+
+                $filename = if ($plan.filename) { [string]$plan.filename } else { "$Arg.md" }
+                if ($filename -notmatch '\.md$') { $filename = "$Arg.md" }
+
+                $plansDir = Join-Path $OstwinHome ".agents/plans"
+                New-Item -ItemType Directory -Path $plansDir -Force | Out-Null
+                $planFile = Join-Path $plansDir $filename
+                $content | Out-File -FilePath $planFile -Encoding utf8
+
+                $workingDir = if ($plan.working_dir) { $plan.working_dir }
+                elseif ($plan.meta.working_dir) { $plan.meta.working_dir }
+                else { "" }
+
+                Write-Host ([char]0x2713 + " Synced latest plan_id '$Arg' -> $planFile")
+                if ($workingDir) {
+                    Write-Host "  Working dir: $workingDir"
+                }
+                return [PSCustomObject]@{ PlanFile = $planFile; WorkingDir = $workingDir }
+            }
+            catch {
+                Write-Error ([char]0x2717 + " Cannot sync plan '$Arg' from dashboard: $($_.Exception.Message)")
+                return $null
+            }
+        }
+
         $localCandidates = @(
             (Join-Path $OstwinHome ".agents/plans" "$Arg.md"),
             (Join-Path $AgentsDir "plans" "$Arg.md")
@@ -422,7 +465,7 @@ Usage:
 
 Commands:
   run <plan_id|file> Execute a plan by ID or file path
-                     Options: --dry-run, --resume, --expand, --enable-planning,
+                     Options: --dry-run, --resume, --sync, --expand, --enable-planning,
                               --working-dir PATH,
                                --workspace-isolation room-worktree|shared
   plan <sub>        Plan management (AI-assisted)
@@ -507,6 +550,12 @@ switch ($Command) {
         $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
         $expectingValueFor = ""
         $explicitWorkingDir = $false
+        $runSync = $Arguments -contains '--sync'
+
+        if ($runSync -and ($Arguments -contains '--resume')) {
+            Write-Error "--sync and --resume are mutually exclusive. Use --sync to refresh rooms from the latest plan, or --resume to continue existing rooms."
+            exit 1
+        }
 
         foreach ($a in $Arguments) {
             if ($expectingValueFor) {
@@ -518,6 +567,10 @@ switch ($Command) {
                     $deprecatedWorkspaceRootFlag { }
                 }
                 $expectingValueFor = ""
+                continue
+            }
+            if ($a -eq '--sync') {
+                $null = $runArgs.Add($a)
                 continue
             }
             if ($a -in @('--workspace-isolation', $deprecatedWorkspaceRootFlag, '--working-dir', '--plan-file', '--max-rooms')) {
@@ -537,7 +590,7 @@ switch ($Command) {
                 continue
             }
             if ((-not $planArgResolved) -and ($a -notmatch '^--')) {
-                $resolved = Resolve-PlanId -Arg $a
+                $resolved = Resolve-PlanId -Arg $a -SyncFromDashboard:$runSync
                 if (-not $resolved) { exit 1 }
                 $resolvedPlanFile = $resolved.PlanFile
                 if ($resolved.WorkingDir) {
@@ -766,6 +819,7 @@ switch ($Command) {
                 switch ($runArgs[$i]) {
                     '--dry-run' { $null = $psArgs.Add('-DryRun'); $i++ }
                     '--resume' { $null = $psArgs.Add('-Resume'); $i++ }
+                    '--sync' { $null = $psArgs.Add('-Sync'); $i++ }
                     '--expand' { $null = $psArgs.Add('-Expand'); $i++ }
                     '--review' { $null = $psArgs.Add('-Review'); $i++ }
                     '--max-rooms' { $null = $psArgs.Add('-MaxConcurrent'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
@@ -916,6 +970,12 @@ switch ($Command) {
                 $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
                 $startWorkingDir = ""
                 $startExpectingValueFor = ""
+                $startSync = $planArgs -contains '--sync'
+
+                if ($startSync -and ($planArgs -contains '--resume')) {
+                    Write-Error "--sync and --resume are mutually exclusive. Use --sync to refresh rooms from the latest plan, or --resume to continue existing rooms."
+                    exit 1
+                }
 
                 foreach ($a in $planArgs) {
                     if ($startExpectingValueFor) {
@@ -928,13 +988,17 @@ switch ($Command) {
                         $startExpectingValueFor = ""
                         continue
                     }
+                    if ($a -eq '--sync') {
+                        $null = $startArgs.Add($a)
+                        continue
+                    }
                     if ($a -in @('--workspace-isolation', $deprecatedWorkspaceRootFlag, '--working-dir')) {
                         $null = $startArgs.Add($a)
                         $startExpectingValueFor = $a
                         continue
                     }
                     if ((-not $startResolved) -and ($a -notmatch '^--')) {
-                        $resolved = Resolve-PlanId -Arg $a
+                        $resolved = Resolve-PlanId -Arg $a -SyncFromDashboard:$startSync
                         if (-not $resolved) { exit 1 }
                         $null = $startArgs.Add($resolved.PlanFile)
                         if ($resolved.WorkingDir -and -not $startWorkingDir) {
@@ -980,6 +1044,7 @@ switch ($Command) {
                         switch ($startArgs[$si]) {
                             '--dry-run' { $null = $psArgs.Add('-DryRun'); $si++ }
                             '--resume' { $null = $psArgs.Add('-Resume'); $si++ }
+                            '--sync' { $null = $psArgs.Add('-Sync'); $si++ }
                             '--expand' { $null = $psArgs.Add('-Expand'); $si++ }
                             '--review' { $null = $psArgs.Add('-Review'); $si++ }
                             '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }

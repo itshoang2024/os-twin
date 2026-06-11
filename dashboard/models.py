@@ -82,6 +82,7 @@ class UpdatePlanRoleConfigRequest(BaseModel):
     cli: str | None = None
     skill_refs: List[str] | None = None
     disabled_skills: List[str] | None = None
+    system_prompt_override: str | None = None
 
 
 class StrategyParameter(BaseModel):
