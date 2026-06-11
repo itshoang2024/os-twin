@@ -139,4 +139,5 @@ docs/plan/**
 # Ostwin generated
 .opencode/opencode.json
 .war-rooms/
+.agents/*
 .memory
