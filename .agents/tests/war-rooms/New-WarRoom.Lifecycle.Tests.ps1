@@ -93,7 +93,8 @@ Describe "New-WarRoom lifecycle.json" {
             $lc.states.'review'.role | Should -Be "qa"
             $lc.states.'review'.signals.done.target | Should -Be "done"
             $lc.states.'review'.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
-            $lc.states.'review'.signals.fail.target | Should -Be "optimize"
+            $lc.states.'review'.signals.fail.target | Should -Be "triage"
+            $lc.states.'review'.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
         }
 
         It "candidate_roles=['architect','manager'] → architect develops, manager excluded from review" {

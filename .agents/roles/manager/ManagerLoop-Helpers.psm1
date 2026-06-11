@@ -14,8 +14,11 @@
       Get-RoomOrchestrationContext, Get-LatestFailureMessage,
       Write-ManagerOrchestrationEvent, Invoke-PlanFailFast,
       Find-LatestSignal, Invoke-SignalActions, Write-Log,
-      Write-SpawnLock, Test-SpawnLock, Start-WorkerJob,
-      Get-CachedDag, Set-BlockedDescendants, Invoke-ManagerTriage,
+      Write-SpawnLock, Test-SpawnLock, Clear-SpawnLock,
+      Resolve-RoleFailureLifecycleSignal, Write-SyntheticRoleFailureSignal,
+      Start-WorkerJob,
+      Get-CachedDag, Set-BlockedDescendants,
+      Complete-ManagerTriageJobFailure, Invoke-ManagerTriage,
       Write-TriageContext, Complete-PlanApproval,
       Resolve-WorkerForState, Invoke-PlanReviewShortcut
 #>
@@ -434,6 +437,80 @@ function Invoke-PlanFailFast {
 }
 
 # ---------------------------------------------------------------------------
+# Complete-ManagerTriageJobFailure
+# Manager triage is the only actor that burns the lifecycle retry budget for
+# triage failures. Non-manager role failures are routed into triage first.
+# ---------------------------------------------------------------------------
+function Complete-ManagerTriageJobFailure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Job,
+        [AllowNull()][object]$FailedOutput = $null,
+        [int]$MaxRetries = 3
+    )
+
+    $WarRoomsDir = _ctx 'WarRoomsDir'
+    $result = [ordered]@{
+        Handled    = $false
+        RoomName   = ''
+        RoomDir    = ''
+        TaskRef    = ''
+        Retries    = 0
+        MaxRetries = $MaxRetries
+        Exhausted  = $false
+        PlanFailed = $false
+    }
+
+    $roomNameFromJob = ''
+    if ($Job.Name -match '^ostwin-triage-(?<room>.+)-manager$') {
+        $roomNameFromJob = $Matches['room']
+    }
+    $result.RoomName = $roomNameFromJob
+
+    $triageRoomDir = if ($WarRoomsDir -and $roomNameFromJob) { Join-Path $WarRoomsDir $roomNameFromJob } else { '' }
+    $result.RoomDir = $triageRoomDir
+    if (-not ($triageRoomDir -and (Test-Path $triageRoomDir))) {
+        return [pscustomobject]$result
+    }
+
+    $result.Handled = $true
+    $triageTaskRef = if (Test-Path (Join-Path $triageRoomDir 'task-ref')) {
+        (Get-Content (Join-Path $triageRoomDir 'task-ref') -Raw).Trim()
+    } else {
+        $roomNameFromJob
+    }
+    $result.TaskRef = $triageTaskRef
+
+    Write-Log "ERROR" "Manager triage job '$($Job.Name)' failed: $FailedOutput"
+
+    $triageRetriesFile = Join-Path $triageRoomDir 'retries'
+    $triageRetries = if (Test-Path $triageRetriesFile) {
+        [int](Get-Content $triageRetriesFile -Raw).Trim()
+    } else {
+        0
+    }
+    $nextRetries = $triageRetries + 1
+    $result.Retries = $nextRetries
+    $nextRetries.ToString() | Out-File -FilePath $triageRetriesFile -Encoding utf8 -NoNewline
+
+    Remove-Item (Join-Path $triageRoomDir (Join-Path 'pids' 'manager.pid')) -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $triageRoomDir (Join-Path 'pids' 'manager.spawned_at')) -Force -ErrorAction SilentlyContinue
+
+    Write-ManagerOrchestrationEvent -RoomDir $triageRoomDir -EventType 'agent.run.failed' -Summary "$triageTaskRef manager triage job failed ($nextRetries/$MaxRetries)." -Payload @{ reason = 'manager_triage_job_failed'; retries = $nextRetries; max_retries = $MaxRetries } -Role 'manager' -State 'triage' -Severity 'error' | Out-Null
+    if ($nextRetries -ge $MaxRetries) {
+        $result.Exhausted = $true
+        Write-ManagerOrchestrationEvent -RoomDir $triageRoomDir -EventType 'lifecycle.retry.exhausted' -Summary "$triageTaskRef exhausted manager triage retries." -Payload @{ retries = $nextRetries; max_retries = $MaxRetries; reason = 'manager_triage_job_failed' } -Role 'manager' -State 'triage' -Severity 'error' | Out-Null
+        Write-RoomStatus $triageRoomDir 'failed'
+        Set-BlockedDescendants $triageTaskRef
+        $result.PlanFailed = Invoke-PlanFailFast -RoomDir $triageRoomDir -Reason 'manager_triage_job_failed' -Role 'manager' -State 'triage' -Summary "$triageTaskRef manager triage failed after $nextRetries retries."
+    } else {
+        Write-Log "WARN" "[$triageTaskRef] Manager triage failed ($nextRetries/$MaxRetries); room remains in triage for retry."
+    }
+
+    return [pscustomobject]$result
+}
+
+# ---------------------------------------------------------------------------
 # Test-StateTimedOut
 # ---------------------------------------------------------------------------
 function Test-StateTimedOut {
@@ -673,6 +750,59 @@ function Resolve-LatestEscalatorMessage {
     }
 
     return $null
+}
+
+function Resolve-TriageRoleFailureFallback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [string]$TriageStateName = 'triage'
+    )
+
+    $anchor = Get-LatestAuditTransitionToState -RoomDir $RoomDir -TargetState $TriageStateName
+    $fromState = if ($anchor) { $anchor.FromState } else { 'review' }
+    $fromDef = if ($Lifecycle -and $Lifecycle.states) { $Lifecycle.states.$fromState } else { $null }
+    $expectedRole = if ($fromDef -and $fromDef.role) { ([string]$fromDef.role) -replace ':.*$', '' } else { '' }
+    if (-not $expectedRole) { return $null }
+
+    $roleConfigs = Get-ChildItem -Path $RoomDir -Filter "${expectedRole}_*.json" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    if (-not $roleConfigs) { return $null }
+
+    $cfgFile = $roleConfigs[0].FullName
+    try { $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json } catch { return $null }
+    if ($cfg.status -ne 'failed') { return $null }
+
+    $signal = Resolve-RoleFailureLifecycleSignal -Lifecycle $Lifecycle -StateName $fromState -TargetState $TriageStateName
+    if (-not $signal) { $signal = 'fail' }
+    $statusEpoch = if ($cfg.PSObject.Properties['status_updated_epoch']) { [string]$cfg.status_updated_epoch } else { '' }
+    $body = @"
+SYSTEM-GENERATED TRIAGE CONTEXT: $expectedRole previously reported failed while the room transitioned from '$fromState' to '$TriageStateName', but no lifecycle-anchored channel message was available.
+
+This fallback context prevents manager triage from looping indefinitely. Treat this as a role runtime failure and inspect the role config, artifacts, audit.log, and recent channel messages before deciding.
+
+Details:
+- role: $expectedRole
+- source_state: $fromState
+- target_state: $TriageStateName
+- role_config: $cfgFile
+- role_status_updated_epoch: $statusEpoch
+- triage_anchor_ts: $(if ($anchor) { $anchor.Timestamp } else { '' })
+"@
+
+    return [pscustomobject]@{
+        id = "system-$expectedRole-$signal-role-failure-fallback"
+        ts = if ($anchor) { $anchor.Timestamp } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+        from = $expectedRole
+        to = 'manager'
+        type = $signal
+        ref = if (Test-Path (Join-Path $RoomDir 'task-ref')) { (Get-Content (Join-Path $RoomDir 'task-ref') -Raw).Trim() } else { '' }
+        body = $body
+        triage_anchor_ts = if ($anchor) { $anchor.Timestamp } else { '' }
+        triage_anchor_from_state = $fromState
+        triage_anchor_expected_role = $expectedRole
+        synthetic = $true
+    }
 }
 
 function Get-ManagerTriageDecisionNextState {
@@ -967,6 +1097,102 @@ function Test-SpawnLock {
         Write-Log "DEBUG" "[Test-SpawnLock] Error reading spawn lock for '$Role': $($_.Exception.Message)"
         return $false
     }
+}
+
+function Clear-SpawnLock {
+    [CmdletBinding()]
+    param([string]$RoomDir, [string]$Role)
+
+    $baseRole = $Role -replace ':.*$', ''
+    $lockFile = Join-Path $RoomDir "pids" "$baseRole.spawned_at"
+    if (Test-Path $lockFile) {
+        Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+        Write-Log "DEBUG" "[Clear-SpawnLock] Cleared spawn lock for '$baseRole' in '$RoomDir'."
+        return $true
+    }
+    return $false
+}
+
+function Resolve-RoleFailureLifecycleSignal {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$StateName,
+        [string]$TargetState = 'triage'
+    )
+
+    $stateDef = if ($Lifecycle -and $Lifecycle.states) { $Lifecycle.states.$StateName } else { $null }
+    if (-not $stateDef -or -not $stateDef.signals) { return $null }
+
+    foreach ($preferred in @('fail', 'escalate')) {
+        $signal = $stateDef.signals.$preferred
+        if ($signal -and $signal.target -eq $TargetState) { return $preferred }
+    }
+
+    foreach ($prop in @($stateDef.signals.PSObject.Properties)) {
+        if ($prop.Value -and $prop.Value.target -eq $TargetState) { return $prop.Name }
+    }
+
+    return $null
+}
+
+function Write-SyntheticRoleFailureSignal {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RoomDir,
+        [Parameter(Mandatory)]$Lifecycle,
+        [Parameter(Mandatory)][string]$StateName,
+        [Parameter(Mandatory)][string]$Role,
+        [Parameter(Mandatory)][string]$TaskRef,
+        [object]$FailedRoleRun = $null,
+        [string]$TargetState = 'triage'
+    )
+
+    $baseRole = $Role -replace ':.*$', ''
+    $signal = Resolve-RoleFailureLifecycleSignal -Lifecycle $Lifecycle -StateName $StateName -TargetState $TargetState
+    if (-not $signal) {
+        Write-Log "WARN" "[$TaskRef] Cannot synthesize lifecycle signal for failed role '$baseRole' in '$StateName': no signal targets '$TargetState'."
+        return $null
+    }
+
+    $existing = Find-LatestSignal -RoomDir $RoomDir -Lifecycle $Lifecycle -StateName $StateName
+    if ($existing) {
+        return [pscustomobject]@{ Signal = $existing; Posted = $false; Reason = 'existing-signal' }
+    }
+
+    $configFile = if ($FailedRoleRun -and $FailedRoleRun.PSObject.Properties['ConfigFile']) { [string]$FailedRoleRun.ConfigFile } else { '' }
+    $statusEpoch = if ($FailedRoleRun -and $FailedRoleRun.PSObject.Properties['StatusUpdatedEpoch']) { [string]$FailedRoleRun.StatusUpdatedEpoch } else { '' }
+    $body = @"
+SYSTEM-GENERATED FAILURE: $baseRole exited non-zero or reported failed during lifecycle state '$StateName' before posting a lifecycle message.
+
+The manager loop synthesized this '$signal' signal so triage has a lifecycle-anchored escalation message instead of looping without context.
+
+Details:
+- role: $baseRole
+- state: $StateName
+- target_state: $TargetState
+- role_config: $configFile
+- status_updated_epoch: $statusEpoch
+
+Manager triage should inspect the role config, artifacts, audit.log, and the latest channel context, then post exactly one lifecycle decision.
+"@
+
+    $postMessage = _ctx 'postMessage'
+    if ($postMessage) {
+        $msgId = & $postMessage -RoomDir $RoomDir -From $baseRole -To 'manager' -Type $signal -Ref $TaskRef -Body $body
+        return [pscustomobject]@{ Signal = $signal; Posted = $true; MessageId = $msgId; Reason = 'synthetic-channel-message' }
+    }
+
+    $agentsDir = _ctx 'agentsDir'
+    $writeSignal = if ($agentsDir) { Join-Path $agentsDir (Join-Path 'channel' 'Write-LifecycleSignal.ps1') } else { '' }
+    if ($writeSignal -and (Test-Path $writeSignal)) {
+        $msg = & $writeSignal -RoomDir $RoomDir -From $baseRole -To 'manager' -Type $signal -Ref $TaskRef -Body $body -State $StateName -LifecycleSignal
+        $msgId = if ($msg -and $msg.id) { [string]$msg.id } else { '' }
+        return [pscustomobject]@{ Signal = $signal; Posted = $true; MessageId = $msgId; Reason = 'synthetic-lifecycle-signal' }
+    }
+
+    Write-Log "WARN" "[$TaskRef] Could not write synthetic '$signal' signal for failed role '$baseRole': no channel writer available."
+    return [pscustomobject]@{ Signal = $signal; Posted = $false; Reason = 'no-channel-writer' }
 }
 
 # ---------------------------------------------------------------------------
@@ -1711,8 +1937,13 @@ function Invoke-TriageMediation {
 
     $latestEscalation = Resolve-LatestEscalatorMessage -RoomDir $RoomDir -Lifecycle $Lifecycle -TriageStateName 'triage'
     if (-not $latestEscalation) {
-        Write-Log "WARN" "[$TaskRef] Triage has no lifecycle-anchored escalation message to compile for manager."
-        return $null
+        $latestEscalation = Resolve-TriageRoleFailureFallback -RoomDir $RoomDir -Lifecycle $Lifecycle -TriageStateName 'triage'
+        if ($latestEscalation) {
+            Write-Log "WARN" "[$TaskRef] Triage had no lifecycle-anchored escalation message; using system-generated role failure fallback for '$($latestEscalation.from)'."
+        } else {
+            Write-Log "WARN" "[$TaskRef] Triage has no lifecycle-anchored escalation message to compile for manager."
+            return $null
+        }
     }
     Write-Log "DEBUG" "[$TaskRef] Triage using lifecycle-anchored escalator message id='$($latestEscalation.id)' from='$($latestEscalation.from)' type='$($latestEscalation.type)' anchor='$($latestEscalation.triage_anchor_ts)'."
 
@@ -1778,6 +2009,7 @@ Export-ModuleMember -Function @(
     'Get-LatestAuditTransitionToState',
     'Get-ManagerSignalsTargetingState',
     'Resolve-LatestEscalatorMessage',
+    'Resolve-TriageRoleFailureFallback',
     'Get-ManagerTriageDecisionNextState',
     'Write-ManagerOrchestrationEvent',
     'Invoke-PlanFailFast',
@@ -1790,12 +2022,16 @@ Export-ModuleMember -Function @(
     'Write-Log',
     'Write-SpawnLock',
     'Test-SpawnLock',
+    'Clear-SpawnLock',
+    'Resolve-RoleFailureLifecycleSignal',
+    'Write-SyntheticRoleFailureSignal',
     'Set-RoleRunStatus',
     'Get-FreshFailedRoleRun',
     'Resolve-RoleTimeout',
     'Start-WorkerJob',
     'Get-CachedDag',
     'Set-BlockedDescendants',
+    'Complete-ManagerTriageJobFailure',
     'Invoke-ManagerTriage',
     'Write-TriageContext',
     'Resolve-ManagerRolePath',

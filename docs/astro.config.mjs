@@ -23,6 +23,10 @@ export default defineConfig({
       head: [
         {
           tag: 'link',
+          attrs: { rel: 'icon', type: 'image/png', href: '/favicon.png' },
+        },
+        {
+          tag: 'link',
           attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         },
         {

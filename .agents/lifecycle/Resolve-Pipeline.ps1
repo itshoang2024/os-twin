@@ -96,7 +96,7 @@ function Build-LifecycleV2 {
         signals = [ordered]@{
             done     = [ordered]@{ target = 'done' }
             pass     = [ordered]@{ target = 'done' } # legacy success signal
-            fail     = [ordered]@{ target = 'optimize'; actions = @('increment_retries', 'post_fix') }
+            fail     = [ordered]@{ target = 'triage' }
             escalate = [ordered]@{ target = 'triage' }
         }
     }

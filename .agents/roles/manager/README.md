@@ -135,7 +135,7 @@ pending → developing → review → done
       "signals": {
         "done":     { "target": "done" },
         "pass":     { "target": "done" },
-        "fail":     { "target": "optimize", "actions": ["increment_retries", "post_fix"] },
+        "fail":     { "target": "triage" },
         "escalate": { "target": "triage" }
       }
     },

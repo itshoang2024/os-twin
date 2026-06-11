@@ -169,6 +169,24 @@ function Test-AgentAdvancedRoomState {
     return $false
 }
 
+function Get-LatestWrapperOutputSegment {
+    param([AllowEmptyString()][AllowNull()][string]$OutputText)
+
+    if ([string]::IsNullOrEmpty($OutputText)) { return $OutputText }
+
+    $lines = $OutputText -split "`r?`n"
+    $startIndex = -1
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if ($lines[$i] -match '^\[wrapper\]\s+PID=\d+,\s+CMD=') {
+            $startIndex = $i
+            break
+        }
+    }
+
+    if ($startIndex -lt 0) { return $OutputText }
+    return (($lines[$startIndex..($lines.Count - 1)]) -join "`n")
+}
+
 function Write-AgentRuntimeFailureEvent {
     param(
         [Parameter(Mandatory)][int]$ExitCode,
@@ -856,7 +874,7 @@ echo "[wrapper] EXEC: cat '$safePrompt' | $AgentCmd $argsLine" >> '$safeOutput'
 exec $AgentCmd $argsLine < '$safePrompt' >> '$safeOutput' 2>&1
 agent_exit=`$?
 if [ "`$agent_exit" -ne 0 ]; then
-  echo "[wrapper] EXEC FAILED: exit=`$agent_exit" >> '$safeOutput'
+  echo "[wrapper] EXEC LAUNCH FAILED: exit=`$agent_exit" >> '$safeOutput'
 fi
 exit "`$agent_exit"
 "@
@@ -950,13 +968,15 @@ exit "`$agent_exit"
             $exitCode = $proc.ExitCode
         }
 
-        # --- Diagnostic: log output on failure ---
-        if ($exitCode -ne 0 -and (Test-Path $outputFile)) {
-            $firstLines = Get-Content $outputFile -TotalCount 5 -ErrorAction SilentlyContinue
-            if ($firstLines) {
-                Write-Warning "[Invoke-Agent] Agent exited with code $exitCode. First output lines: $($firstLines -join ' | ')"
-            }
+    # --- Diagnostic: log output on failure ---
+    if ($exitCode -ne 0 -and (Test-Path $outputFile)) {
+        $failureOutputRaw = Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
+        $failureOutput = Get-LatestWrapperOutputSegment -OutputText $failureOutputRaw
+        $firstLines = @($failureOutput -split "`r?`n" | Select-Object -First 5)
+        if ($firstLines) {
+            Write-Warning "[Invoke-Agent] Agent exited with code $exitCode. First output lines: $($firstLines -join ' | ')"
         }
+    }
     }
     catch {
         $exitCode = 1
@@ -974,7 +994,8 @@ exit "`$agent_exit"
 
     # --- Retry on transient remote errors (ClosedResourceError, RemoteException) ---
     if ($exitCode -ne 0 -and $exitCode -ne 124 -and $processAttempt -lt $maxProcessRetries) {
-        $agentOutput = if (Test-Path $outputFile) { Get-Content $outputFile -Raw -ErrorAction SilentlyContinue } else { "" }
+        $agentOutputRaw = if (Test-Path $outputFile) { Get-Content $outputFile -Raw -ErrorAction SilentlyContinue } else { "" }
+        $agentOutput = Get-LatestWrapperOutputSegment -OutputText $agentOutputRaw
         if ($agentOutput -match "ClosedResourceError|RemoteException.*ClosedResource|ReadError|WriteError") {
             $backoff = [math]::Pow(2, $processAttempt)
             Write-Host "[Invoke-Agent] Transient remote error on attempt $processAttempt/$maxProcessRetries, retrying in ${backoff}s..."
@@ -986,10 +1007,11 @@ exit "`$agent_exit"
 }
 
 # --- Read output ---
-$output = if (Test-Path $outputFile) {
+$rawOutput = if (Test-Path $outputFile) {
     Get-Content $outputFile -Raw -ErrorAction SilentlyContinue
 }
 else { "No output captured" }
+$output = Get-LatestWrapperOutputSegment -OutputText $rawOutput
 
 if ($exitCode -ne 0) {
     if (-not (Test-AgentAdvancedRoomState -ExitCode $exitCode -OutputText $output)) {

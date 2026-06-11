@@ -47,11 +47,14 @@ $TestDrive
         } | ConvertTo-Json -Depth 3 | Out-File $script:configFile -Encoding utf8
         $env:AGENT_OS_CONFIG = $script:configFile
         $env:QA_CMD = "echo"
+        $script:priorOstwinHome = $env:OSTWIN_HOME
     }
 
     AfterEach {
         Remove-Item Env:AGENT_OS_CONFIG -ErrorAction SilentlyContinue
         Remove-Item Env:QA_CMD -ErrorAction SilentlyContinue
+        if ($script:priorOstwinHome) { $env:OSTWIN_HOME = $script:priorOstwinHome }
+        else { Remove-Item Env:OSTWIN_HOME -ErrorAction SilentlyContinue }
     }
 
     Context "Room state reading" {
@@ -145,6 +148,34 @@ $TestDrive
 
             $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
             $channelRaw | Should -Not -Match '"(msg_type|type)"\s*:\s*"error"'
+        }
+
+        It "does not turn a stale prior DONE verdict into QA success when the current wrapper has no verdict" {
+            $fakeOstwinHome = Join-Path $TestDrive "qa-ostwin-home"
+            $env:OSTWIN_HOME = $fakeOstwinHome
+            $roomName = Split-Path $script:roomDir -Leaf
+            $planLogDir = Join-Path $fakeOstwinHome ".agents/plans/no-plan"
+            New-Item -ItemType Directory -Path $planLogDir -Force | Out-Null
+            @"
+[wrapper] PID=111, CMD=opencode run, CWD=/old
+VERDICT: DONE
+old engineer success
+"@ | Out-File (Join-Path $planLogDir "$roomName.log") -Encoding utf8
+
+            $authErrorAgent = Join-Path $TestDrive "qa-auth-error.ps1"
+            "Write-Output 'Error: invalid_grant'; exit 0" | Out-File $authErrorAgent -Encoding utf8
+            $escapedAuthErrorAgent = $authErrorAgent -replace "'", "'\''"
+            $env:QA_CMD = "pwsh -NoProfile -File '$escapedAuthErrorAgent'"
+
+            & pwsh -NoProfile -File $script:StartQA -RoomDir $script:roomDir -TimeoutSeconds 10 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 1
+
+            $roleConfig = Get-Content (Join-Path $script:roomDir "qa_001.json") -Raw | ConvertFrom-Json
+            $roleConfig.status | Should -Be "failed"
+
+            $channelRaw = Get-Content (Join-Path $script:roomDir "channel.jsonl") -Raw
+            $channelRaw | Should -Not -Match '"type"\s*:\s*"done"'
+            $channelRaw | Should -Not -Match "VERDICT: DONE"
         }
     }
 

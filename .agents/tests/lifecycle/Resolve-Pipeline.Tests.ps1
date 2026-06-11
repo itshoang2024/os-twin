@@ -59,8 +59,9 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         @($lc.states.Keys) | Should -Not -Contain "review-2"
 
-        # Review fail and optimize keep the worker loop.
-        $lc.states.review.signals.fail.target | Should -Be "optimize"
+        # Review fail routes to manager triage; manager decides whether to retry.
+        $lc.states.review.signals.fail.target | Should -Be "triage"
+        $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
         $lc.states.optimize.role | Should -Be "architect"
         $lc.states.optimize.type | Should -Be "work"
         $lc.states.optimize.signals.done.target | Should -Be "review"
@@ -104,7 +105,8 @@ Describe "Resolve-Pipeline.ps1 — Dynamic Lifecycle Generation" {
 
         # Single candidate → QA review injected
         $lc.states.review.role | Should -Be "qa"
-        $lc.states.review.signals.fail.target | Should -Be "optimize"
+        $lc.states.review.signals.fail.target | Should -Be "triage"
+        $lc.states.review.signals.fail.PSObject.Properties.Name | Should -Not -Contain "actions"
         $lc.states.review.signals.done.target | Should -Be "done"
         $lc.states.review.signals.pass.target | Should -Be "done" -Because "pass remains a legacy accepted success signal"
 

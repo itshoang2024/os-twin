@@ -22,7 +22,7 @@ Describe "LifecycleSignal protocol compatibility" {
                     signals = [ordered]@{
                         done = @{ target = "passed" }
                         pass = @{ target = "passed" }
-                        fail = @{ target = "optimize" }
+                        fail = @{ target = "triage" }
                     }
                 }
             }
@@ -42,7 +42,7 @@ Describe "LifecycleSignal protocol compatibility" {
                     type = "review"
                     signals = [ordered]@{
                         pass = @{ target = "passed" }
-                        fail = @{ target = "optimize" }
+                        fail = @{ target = "triage" }
                     }
                 }
             }
