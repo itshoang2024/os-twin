@@ -8,8 +8,7 @@ export default defineConfig({
       title: 'OSTwin',
       description: 'Operational documentation for composing AI engineering teams with plans, roles, skills, and isolated war-rooms.',
       logo: {
-        light: './src/assets/logo-light.svg',
-        dark: './src/assets/logo-dark.svg',
+        src: './public/assets/logo.png',
         replacesTitle: false,
       },
       social: [
