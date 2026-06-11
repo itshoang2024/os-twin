@@ -208,7 +208,7 @@ Objective: Merge `skills.md` and `roles-and-zero-agent.md` into a unified "Exten
 - [ ] Single doc covers both Skills and Roles as two sides of the same extensibility model
 - [ ] Documents the full 5-tier role discovery chain
 - [ ] Documents the 3-tier skill resolution chain
-- [ ] Includes the skill marketplace (ClawhHub) architecture
+- [ ] Includes the skill marketplace (ClawHub) architecture
 - [ ] Documents dynamic role creation (`New-DynamicRole.ps1`)
 - [ ] Includes the quality_gates system and how it integrates with lifecycle
 - [ ] Model resolution priority fully documented

@@ -334,7 +334,7 @@ ClawHub is the runtime fulfillment source for adaptive mode — when a skill can
 Invoke-SkillSearch -Query "testing" -Tags "qa,automation"
 
 # Install from marketplace
-Install-Skill -Name "performance-testing" -Source "clawhhub"
+Install-Skill -Name "performance-testing" -Source "clawhub"
 ```
 
 :::note[Community Skills]
