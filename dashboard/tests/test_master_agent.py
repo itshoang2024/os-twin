@@ -50,12 +50,11 @@ class TestMasterAgentConfig:
         assert cfg.is_explicit is False
 
     def test_default_provider_is_opencode_style(self):
-        """DEFAULT_PROVIDER must be an OpenCode-style ID, not the legacy
-        ``google-vertex`` from the old direct-LLM path. Otherwise fresh
-        installs send an unknown providerID to /session/{id}/message."""
-        from dashboard.master_agent import DEFAULT_PROVIDER
+        """Fresh installs must use the generated OpenCode server default."""
+        from dashboard.master_agent import DEFAULT_MODEL, DEFAULT_PROVIDER
 
-        assert DEFAULT_PROVIDER == "google"
+        assert DEFAULT_PROVIDER == "opencode"
+        assert DEFAULT_MODEL == "big-pickle"
         assert DEFAULT_PROVIDER not in {"google-vertex", "google-genai", "google_gemini"}
 
     def test_to_llm_config(self):
@@ -84,7 +83,7 @@ class TestResolveModelProvider:
 
         model, provider = ma.get_model_and_provider()
         assert model == ma.DEFAULT_MODEL
-        assert provider == "google"
+        assert provider == "opencode"
 
     def test_google_vertex_is_preserved(self):
         """``google-vertex`` is a real OpenCode provider for Vertex AI."""
@@ -136,7 +135,7 @@ class TestResolveModelProvider:
         ma._master_config.provider = None
 
         _, provider = ma.get_model_and_provider()
-        assert provider == ma.DEFAULT_PROVIDER == "google"
+        assert provider == ma.DEFAULT_PROVIDER == "opencode"
 
 
 class TestGetSetMasterModel:

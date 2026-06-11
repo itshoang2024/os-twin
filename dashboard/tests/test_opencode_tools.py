@@ -8,6 +8,7 @@ from dashboard import opencode_tools
 def test_ostwin_config_allows_external_directories():
     config = opencode_tools._opencode_config()
 
+    assert config["model"] == "opencode/big-pickle"
     assert config["permission"]["external_directory"] == {"*": "allow"}
     assert config["agent"]["ostwin"]["tools"]["read"] is False
     assert "model" not in config["agent"]["ostwin"]
@@ -29,6 +30,8 @@ def test_generated_helpers_bound_worker_wait_time():
     assert "--max-time" in helpers
     assert "Worker session" in helpers
     assert 'ocFetch("/session", "POST", { parentID: ctx.sessionID }, "15")' in helpers
+    assert 'const DEFAULT_OPENCODE_MODEL = "opencode/big-pickle"' in helpers
+    assert "model: ocModelParam()" in helpers
     assert "finished without text" in helpers
 
 
@@ -70,6 +73,7 @@ def test_generate_all_writes_permission_and_timeout_contract(tmp_path):
     assert ".opencode/tools/ostwin_refine_plan.ts" in written_paths
 
     config = json.loads((tmp_path / "opencode.json").read_text())
+    assert config["model"] == "google/gemini-test"
     assert config["permission"]["external_directory"] == {"*": "allow"}
     assert config["permission"]["read"] == "deny"
     assert "model" not in config["agent"]["ostwin"]
@@ -80,5 +84,6 @@ def test_generate_all_writes_permission_and_timeout_contract(tmp_path):
 
     refine_tool = (tmp_path / ".opencode/tools/ostwin_refine_plan.ts").read_text()
     assert "OSTWIN_WORKER_TIMEOUT_SECONDS" in refine_tool
+    assert 'const DEFAULT_OPENCODE_MODEL = "google/gemini-test"' in refine_tool
     assert "--max-time" in refine_tool
     assert "curl -sf" not in refine_tool

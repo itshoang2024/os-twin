@@ -28,6 +28,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 DASHBOARD_PORT_DEFAULT = "3366"
+DEFAULT_OPENCODE_MODEL = "opencode/big-pickle"
 
 
 def _resolve_project_root() -> Path:
@@ -40,7 +41,8 @@ def _resolve_project_root() -> Path:
     return this_file.parent.parent
 
 
-def _api_helpers() -> str:
+def _api_helpers(model: Optional[str] = None) -> str:
+    default_model = model or DEFAULT_OPENCODE_MODEL
     return textwrap.dedent("""\
     import { tool } from "@opencode-ai/plugin"
     import { existsSync, readFileSync } from "node:fs"
@@ -206,12 +208,26 @@ def _api_helpers() -> str:
     // We hit the local OpenCode HTTP API directly instead of importing the SDK
     // so the tool stays a single self-contained file and dependency-free.
     const OC_BASE = () => process.env.OPENCODE_BASE_URL || "http://127.0.0.1:4096"
+    const DEFAULT_OPENCODE_MODEL = "__MODEL__"
 
     function ocAuthFlags(): string[] {
       const pw = process.env.OPENCODE_SERVER_PASSWORD
       if (!pw) return []
       const user = process.env.OPENCODE_SERVER_USERNAME || "opencode"
       return ["-u", `${user}:${pw}`]
+    }
+
+    function ocModelParam(): { providerID: string; modelID: string } {
+      const raw = (
+        process.env.OSTWIN_OPENCODE_MODEL ||
+        process.env.OPENCODE_MODEL ||
+        DEFAULT_OPENCODE_MODEL
+      ).trim()
+      const idx = raw.indexOf("/")
+      if (idx > 0 && idx < raw.length - 1) {
+        return { providerID: raw.slice(0, idx), modelID: raw.slice(idx + 1) }
+      }
+      return { providerID: "opencode", modelID: "big-pickle" }
     }
 
     async function ocFetch(
@@ -253,6 +269,7 @@ def _api_helpers() -> str:
         resp = await ocFetch(`/session/${child.id}/message`, "POST", {
           agent: "ostwin-worker",
           system: systemPrompt,
+          model: ocModelParam(),
           parts: [{ type: "text", text: taskMessage }],
         }, OPENCODE_CURL_TIMEOUT_SECONDS())
       } catch (e: any) {
@@ -270,11 +287,11 @@ def _api_helpers() -> str:
       if (!text) throw new Error(`Worker session ${child.id} finished without text`)
       return { text, childSessionId: child.id }
     }
-    """)
+    """).replace('"__MODEL__"', json.dumps(default_model))
 
 
-def _api_helpers_inlined(port: str) -> str:
-    return _api_helpers().replace('"__PORT__"', f'"{port}"')
+def _api_helpers_inlined(port: str, model: Optional[str] = None) -> str:
+    return _api_helpers(model).replace('"__PORT__"', f'"{port}"')
 
 
 def _tool_list_plans() -> str:
@@ -820,9 +837,9 @@ def _agent_ostwin_worker(_model: Optional[str] = None) -> str:
     ostwin_* tools are denied to avoid the worker re-entering its parent's
     behaviour (e.g. a worker recursively calling ostwin_create_plan).
 
-    Model selection is intentionally omitted. OpenCode should inherit or fall
-    back to the current model instead of pinning generated Ostwin agents to a
-    fixed provider.
+    Agent-frontmatter model selection is intentionally omitted. The generated
+    request/config layer supplies the Ostwin OpenCode default so workers do not
+    depend on an implicit server fallback.
     """
     return textwrap.dedent(f"""\
     ---
@@ -910,6 +927,7 @@ def _opencode_config(_model: Optional[str] = None) -> dict:
     # write ~/.ostwin/.agents/plans.
     return {
         "$schema": "https://opencode.ai/config.json",
+        "model": _model or DEFAULT_OPENCODE_MODEL,
         "agent": {
             "ostwin": {
                 "tools": {
@@ -1042,7 +1060,7 @@ def generate_all(
     model: Optional[str] = None,
 ) -> list[Path]:
     project_root = project_root or _resolve_project_root()
-    helpers = _api_helpers_inlined(dashboard_port)
+    helpers = _api_helpers_inlined(dashboard_port, model)
     written: list[Path] = []
 
     tools_dir = project_root / ".opencode" / "tools"

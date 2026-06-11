@@ -380,11 +380,9 @@ class TestRoundTripAcrossRestart:
         self, tmp_config_resolver
     ):
         """Regression: on a fresh install (no persisted runtime model), the
-        provider sent to OpenCode must be the OpenCode-style ``google`` —
-        not the legacy direct-LLM ``google-vertex``. Without this, every
-        connector ``/api/chat`` call on a brand-new dashboard targets a
-        provider OpenCode doesn't know about until the user opens settings
-        and explicitly saves a model."""
+        provider/model sent to OpenCode must match the generated server
+        default, so connector ``/api/chat`` calls do not depend on an implicit
+        OpenCode fallback."""
         from dashboard import master_agent as ma
         from dashboard.llm_client import ChatMessage
 
@@ -414,21 +412,21 @@ class TestRoundTripAcrossRestart:
             )
 
         body = mock_client.post.call_args.kwargs["body"]
-        assert body["model"]["providerID"] == "google"
+        assert body["model"]["providerID"] == "opencode"
+        assert body["model"]["modelID"] == "big-pickle"
         assert body["model"]["providerID"] != "google-vertex"
 
     @pytest.mark.asyncio
-    async def test_stale_google_vertex_runtime_is_normalised_for_chat(
+    async def test_google_vertex_runtime_is_preserved_for_chat(
         self, tmp_config_resolver
     ):
-        """Regression: if a previously persisted value still has the legacy
-        ``google-vertex`` prefix (e.g. from before this fix), the chat body
-        sent to OpenCode must still use ``google``."""
+        """``google-vertex`` is a real OpenCode provider and should not be
+        rewritten when the user explicitly selected a Vertex model."""
         from dashboard import master_agent as ma
         from dashboard.llm_client import ChatMessage
 
         ma._master_config.model = "gemini-3.1-pro-preview"
-        ma._master_config.provider = "google-vertex"  # stale legacy value
+        ma._master_config.provider = "google-vertex"
         ma._master_config.is_explicit = True
 
         mock_client = MagicMock()
@@ -449,7 +447,8 @@ class TestRoundTripAcrossRestart:
             )
 
         body = mock_client.post.call_args.kwargs["body"]
-        assert body["model"]["providerID"] == "google"
+        assert body["model"]["providerID"] == "google-vertex"
+        assert body["model"]["modelID"] == "gemini-3.1-pro-preview"
 
 
 # ── 4. Lifespan startup hydrates before background tasks ───────────────────
