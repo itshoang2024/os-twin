@@ -73,7 +73,7 @@ export const ClawhubMarketplace: React.FC<ClawhubMarketplaceProps> = ({ onInstal
         </span>
         <input
           type="text"
-          placeholder="Search ClawhHub marketplace..."
+          placeholder="Search ClawHub marketplace..."
           className="bg-transparent border-none outline-none text-xs w-full"
           style={{ color: 'var(--color-text-main)' }}
           value={searchTerm}
@@ -113,7 +113,7 @@ export const ClawhubMarketplace: React.FC<ClawhubMarketplaceProps> = ({ onInstal
             store
           </span>
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Search the ClawhHub marketplace to discover and install community skills
+            Search the ClawHub marketplace to discover and install community skills
           </p>
         </div>
       )}
@@ -130,7 +130,7 @@ export const ClawhubMarketplace: React.FC<ClawhubMarketplaceProps> = ({ onInstal
       {/* Error */}
       {isError && (
         <div className="p-8 text-center text-sm" style={{ color: 'var(--color-danger)' }}>
-          Failed to search ClawhHub. Make sure the service is reachable.
+          Failed to search ClawHub. Make sure the service is reachable.
         </div>
       )}
 
@@ -138,7 +138,7 @@ export const ClawhubMarketplace: React.FC<ClawhubMarketplaceProps> = ({ onInstal
       {debouncedSearch && !isLoading && results && results.length > 0 && (
         <>
           <div className="text-[11px] font-medium" style={{ color: 'var(--color-text-faint)' }}>
-            {results.length} result{results.length !== 1 ? 's' : ''} from ClawhHub
+            {results.length} result{results.length !== 1 ? 's' : ''} from ClawHub
           </div>
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
             {results.map((skill) => {
@@ -167,7 +167,7 @@ export const ClawhubMarketplace: React.FC<ClawhubMarketplaceProps> = ({ onInstal
             search_off
           </span>
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            No skills found on ClawhHub for &quot;{debouncedSearch}&quot;
+            No skills found on ClawHub for &quot;{debouncedSearch}&quot;
           </p>
         </div>
       )}
@@ -343,7 +343,7 @@ const ClawhubDetailModal: React.FC<ClawhubDetailModalProps> = ({ skill, isInstal
             style={{ color: 'var(--color-primary)' }}
           >
             <span className="material-symbols-outlined text-sm">open_in_new</span>
-            View on ClawhHub
+            View on ClawHub
           </a>
           {installed ? (
             <span className="flex items-center gap-1 px-4 py-2 rounded-lg text-xs font-semibold"
@@ -371,7 +371,7 @@ const ClawhubDetailModal: React.FC<ClawhubDetailModalProps> = ({ skill, isInstal
   );
 };
 
-/* ─── Card for a ClawhHub result ──────────────────────────────────────────── */
+/* ─── Card for a ClawHub result ──────────────────────────────────────────── */
 
 interface ClawhubSkillCardProps {
   skill: ClawhubSkill;

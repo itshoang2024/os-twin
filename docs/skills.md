@@ -140,7 +140,7 @@ Example from the audit role:
 }
 ```
 
-## Skill Marketplace (ClawhHub)
+## Skill Marketplace (ClawHub)
 
 The dashboard provides a skill marketplace:
 - `GET /api/skills/clawhub-search` -- search for skills

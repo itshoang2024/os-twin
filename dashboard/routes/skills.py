@@ -235,11 +235,11 @@ async def list_skill_roles(user: dict = Depends(get_current_user)):
     return [r["name"] for r in roles]
 
 
-# ─── ClawhHub Marketplace (search must be registered before {name} wildcard) ──
+# ─── ClawHub Marketplace (search must be registered before {name} wildcard) ──
 
 _CLAWHUB_CONVEX_BASE = "https://wry-manatee-359.convex.cloud/api"
 
-# Global skills directory — all ClawhHub installs go here
+# Global skills directory — all ClawHub installs go here
 _GLOBAL_SKILLS_DIR = Path.home() / ".ostwin" / ".agents" / "skills"
 # clawhub CLI writes its lock to <workdir>/.clawhub/lock.json
 _CLAWHUB_WORKDIR = Path.home() / ".ostwin" / ".agents"
@@ -427,7 +427,7 @@ def _skill_migration_plan() -> Dict[str, Any]:
 
 
 def _map_clawhub_result(entry: dict) -> dict:
-    """Normalise a ClawhHub API result into a stable shape for the frontend."""
+    """Normalise a ClawHub API result into a stable shape for the frontend."""
     # search:searchSkills nests under "skill" + "owner"; listPublicPageV4 uses the same shape
     skill = entry.get("skill") or entry
     owner = entry.get("owner") or {}
@@ -449,11 +449,11 @@ def _map_clawhub_result(entry: dict) -> dict:
 
 @router.get("/api/skills/clawhub-search")
 async def clawhub_search(
-    q: str = Query("", description="Search query for ClawhHub skills"),
+    q: str = Query("", description="Search query for ClawHub skills"),
     limit: int = Query(25, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    """Search the ClawhHub marketplace.
+    """Search the ClawHub marketplace.
 
     Uses the vector-search action (search:searchSkills) when a query is
     provided, and falls back to the paginated browse endpoint
@@ -496,7 +496,7 @@ async def clawhub_search(
 
         if data.get("status") != "success":
             raise HTTPException(
-                status_code=502, detail="Unexpected response from ClawhHub"
+                status_code=502, detail="Unexpected response from ClawHub"
             )
 
         value = data["value"]
@@ -514,18 +514,18 @@ async def clawhub_search(
     except httpx.HTTPStatusError as exc:
         raise HTTPException(
             status_code=exc.response.status_code,
-            detail=f"ClawhHub returned {exc.response.status_code}",
+            detail=f"ClawHub returned {exc.response.status_code}",
         )
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to reach ClawhHub: {exc}",
+            detail=f"Failed to reach ClawHub: {exc}",
         )
 
 
 @router.get("/api/skills/clawhub-installed")
 async def clawhub_installed(user: dict = Depends(get_current_user)):
-    """Return ClawhHub skill slugs that are actually installed on disk.
+    """Return ClawHub skill slugs that are actually installed on disk.
 
     Reads the global lock file at ~/.ostwin/.agents/skills/.clawhub-lock.json
     and verifies the skill folder exists in ~/.ostwin/.agents/skills/.
@@ -1118,7 +1118,7 @@ async def check_duplicate_skill(
 
 
 async def _verify_clawhub_skill_exists(slug: str) -> bool:
-    """Check that a skill actually exists on ClawhHub before installing."""
+    """Check that a skill actually exists on ClawHub before installing."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
@@ -1138,12 +1138,12 @@ async def clawhub_install(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """Install a skill from ClawhHub using the clawhub CLI.
+    """Install a skill from ClawHub using the clawhub CLI.
 
     Protections:
     - Requires X-Confirm-Install: true header (admin intent gate)
     - skill_name is validated against a strict allowlist pattern
-    - Skill existence is verified on ClawhHub before install
+    - Skill existence is verified on ClawHub before install
     - Only one install runs at a time (global lock)
     - Subprocess runs async (non-blocking)
     - Atomic directory swap with backup/rollback on failure
@@ -1160,11 +1160,11 @@ async def clawhub_install(
     username = user.get("username", "unknown")
     logger.info("clawhub-install requested by=%s skill=%s", username, skill_name)
 
-    # ── Verify skill exists on ClawhHub before running anything ──────────
+    # ── Verify skill exists on ClawHub before running anything ──────────
     if not await _verify_clawhub_skill_exists(skill_name):
         raise HTTPException(
             status_code=404,
-            detail=f"Skill '{skill_name}' not found on ClawhHub. Verify the slug is correct.",
+            detail=f"Skill '{skill_name}' not found on ClawHub. Verify the slug is correct.",
         )
 
     # ── Concurrency gate ─────────────────────────────────────────────────

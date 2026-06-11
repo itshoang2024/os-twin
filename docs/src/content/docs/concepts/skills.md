@@ -283,7 +283,7 @@ OSTwin agent  ──┐
                 ├──→  .agents/skills/build-verify/SKILL.md
 Cursor rule   ──┤     (same file, consumed differently)
 Windsurf      ──┤
-ClawhHub      ──┘
+ClawHub      ──┘
 ```
 
 Each tool consumes the skill differently:
@@ -293,12 +293,12 @@ Each tool consumes the skill differently:
 | **OSTwin** | Full pipeline: resolve → stage → lean index → load on demand via `skill` tool |
 | **Cursor** | Reads SKILL.md as a project rule; frontmatter maps to rule metadata |
 | **Windsurf** | Imports SKILL.md as a workflow definition; triggers map to activation events |
-| **ClawhHub** | Hosts SKILL.md as a publishable artifact; version and trust_level drive discovery |
+| **ClawHub** | Hosts SKILL.md as a publishable artifact; version and trust_level drive discovery |
 | **Any vibe-code tool** | Parses YAML frontmatter for metadata, markdown body for instructions |
 
 The key insight: **the skill document is the contract, not the integration**. No tool-specific adapters, no plugin APIs, no SDK dependencies. A skill written for OSTwin works in any environment that can read markdown and YAML.
 
-This is why adaptive mode matters at the ecosystem level. When you publish a skill to ClawhHub, it isn't published *for OSTwin* — it's published as a portable expertise document that any compatible tool can consume. The skill adapts to the tool, not the other way around.
+This is why adaptive mode matters at the ecosystem level. When you publish a skill to ClawHub, it isn't published *for OSTwin* — it's published as a portable expertise document that any compatible tool can consume. The skill adapts to the tool, not the other way around.
 
 ### Adaptive vs. Static: A Comparison
 
@@ -318,27 +318,27 @@ Consider a concrete scenario: an engineer role is assigned to a war-room working
 
 1. **Phase 1** resolves `skill_refs: ["implement-epic", "write-tests"]` from the role definition
 2. **Phase 2a** scans the task brief, finds keywords like "Unity", "scene", "animation", and discovers `add-feature`, `add-ui`, and `Create Animation Clip` skills — even though they weren't in `skill_refs`
-3. **Phase 2b** queries the remote API and finds a `unity-shader-patterns` skill published on ClawhHub
+3. **Phase 2b** queries the remote API and finds a `unity-shader-patterns` skill published on ClawHub
 4. **Phase 3** resolves all refs: `implement-epic` from the local role directory, `unity-shader-patterns` from the backend (downloaded and staged), `add-ui` from the cross-role directory
 5. **Platform gate** filters out any skills that declare `platform: [linux]` since this session runs on macOS
 6. **Trust gate** blocks an `experimental` skill unless the war-room config opts in
 
 The agent now has expertise perfectly tailored to the task — discovered, resolved, and loaded entirely at runtime. No one edited the role definition. No one pre-installed the Unity skills. The system adapted.
 
-## Skill Marketplace: ClawhHub
+## Skill Marketplace: ClawHub
 
-ClawhHub is the runtime fulfillment source for adaptive mode — when a skill can't be found locally, the marketplace can supply it on demand:
+ClawHub is the runtime fulfillment source for adaptive mode — when a skill can't be found locally, the marketplace can supply it on demand:
 
 ```powershell
 # Search for skills
 Invoke-SkillSearch -Query "testing" -Tags "qa,automation"
 
 # Install from marketplace
-Install-Skill -Name "performance-testing" -Source "clawhhub"
+Install-Skill -Name "performance-testing" -Source "clawhub"
 ```
 
 :::note[Community Skills]
-ClawhHub hosts 50+ community-contributed skills spanning game development, web engineering, DevOps, documentation, and more. Skills are versioned and reviewed before publication.
+ClawHub hosts 50+ community-contributed skills spanning game development, web engineering, DevOps, documentation, and more. Skills are versioned and reviewed before publication.
 :::
 
 ## Search Directories
@@ -349,8 +349,8 @@ The skill discovery system searches these directories in order (highest priority
 2. `.agents/skills/global/` -- Global skills for all roles
 3. `.agents/skills/roles/{current_role}/` -- Role-specific skills
 4. `~/.agents/skills/` -- User-installed global skills
-5. `~/.ostwin/.agents/skills/` -- ClawhHub-installed skills
-6. ClawhHub remote index -- Online marketplace (runtime fetch, lowest priority)
+5. `~/.ostwin/.agents/skills/` -- ClawHub-installed skills
+6. ClawHub remote index -- Online marketplace (runtime fetch, lowest priority)
 
 ## Key Source Files
 
@@ -361,8 +361,8 @@ The skill discovery system searches these directories in order (highest priority
 | `.agents/roles/_base/Invoke-Agent.ps1` | Agent launcher + skill staging |
 | `.agents/roles/_base/Build-SystemPrompt.ps1` | System prompt (skills NOT inlined) |
 | `.agents/plan/Test-SkillCoverage.ps1` | Pre-flight skill coverage check |
-| `.agents/bin/skills/` | ClawhHub installation + CLI skill loader |
-| `dashboard/routes/skills.py` | Skills API + ClawhHub integration |
+| `.agents/bin/skills/` | ClawHub installation + CLI skill loader |
+| `dashboard/routes/skills.py` | Skills API + ClawHub integration |
 | `.agents/skills/global/` | Skills available to all roles |
 | `.agents/skills/roles/` | Role-scoped skill directories |
 

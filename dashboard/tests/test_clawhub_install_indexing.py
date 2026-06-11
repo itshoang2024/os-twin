@@ -1,4 +1,4 @@
-"""Unit tests for ClawhHub install → zvec indexing (post-install searchability fix)."""
+"""Unit tests for ClawHub install → zvec indexing (post-install searchability fix)."""
 import os
 import asyncio
 import pytest
