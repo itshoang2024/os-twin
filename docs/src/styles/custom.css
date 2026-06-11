@@ -21,6 +21,12 @@
   --sl-color-accent-high: oklch(96% 0.045 120);
 }
 
+@media (min-width: 72rem) {
+  html[data-has-sidebar][data-has-toc] {
+    --sl-content-width: 64rem;
+  }
+}
+
 :root[data-theme='dark'] {
   color-scheme: dark;
   --sl-color-bg: oklch(13% 0.018 240);
@@ -190,6 +196,15 @@ button:focus-visible {
     linear-gradient(90deg, rgba(var(--ostwin-cyan-rgb), 0.14), rgba(var(--ostwin-acid-rgb), 0.08));
 }
 
+.right-sidebar-panel starlight-toc :where(a) {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.right-sidebar-panel starlight-toc ul ul :where(a) {
+  font-size: 0.86rem;
+}
+
 .sl-markdown-content {
   color: var(--sl-color-gray-2);
 }
@@ -211,8 +226,10 @@ button:focus-visible {
 }
 
 pre {
+  max-width: 100%;
   border: 1px solid var(--sl-color-hairline);
   border-radius: 8px;
+  overflow-x: auto;
   box-shadow: 0 18px 42px rgba(5, 8, 14, 0.18);
 }
 

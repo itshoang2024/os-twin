@@ -5,38 +5,13 @@ sidebar:
   order: 8
 ---
 
+import SystemArchitectureDiagram from '../../../components/SystemArchitectureDiagram';
+
 OSTwin is built from four independent subsystems that communicate through the filesystem. There is no central process, no message broker, and no shared database. This section maps the complete system architecture.
 
 ## Architecture Overview
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                      User / CLI                          │
-└──────────────┬───────────────────────────┬───────────────┘
-               │                           │
-    ┌──────────▼──────────┐     ┌──────────▼──────────┐
-    │   Engine (.agents/)       │     │  Dashboard (Py+JS)  │
-    │                     │     │                     │
-    │  Invoke-Agent.ps1   │     │  FastAPI backend    │
-    │  Build-PlanningDAG.ps1      │◄───►│  Next.js frontend   │
-    │  New-WarRoom.ps1    │     │  SSE streaming      │
-    │  Resolve-*.ps1      │     │                     │
-    └──────────┬──────────┘     └──────────┬──────────┘
-               │                           │
-    ┌──────────▼───────────────────────────▼──────────┐
-    │              Filesystem (.agents/)               │
-    │  plans/ war-rooms/ roles/ skills/ ledger.jsonl   │
-    └──────────┬───────────────────────────┬──────────┘
-               │                           │
-    ┌──────────▼──────────┐     ┌──────────▼──────────┐
-    │  MCP Servers (Py)   │     │     Bot (TS)        │
-    │                     │     │                     │
-    │  memory server      │     │  Discord adapter    │
-    │  warroom server     │     │  Telegram adapter   │
-    │  dashboard server   │     │  Slack adapter      │
-    │  skills server      │     │                     │
-    └─────────────────────┘     └─────────────────────┘
-```
+<SystemArchitectureDiagram />
 
 ## Subsystem 1: Engine (PowerShell)
 

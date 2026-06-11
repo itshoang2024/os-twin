@@ -70,11 +70,13 @@ PLAN.md           # Epics, dependencies, roles, acceptance gates
 
 Exit gate: every epic can be assigned to an agent team with a clear product outcome, a system boundary, owned artifacts, test evidence, and a dependency position in the delivery graph.
 
-### Distribution Rule
+<!--
+### Split Epics by Outcome
 
-Do not distribute work by technical layer alone. Distribute work by **thin product slices with clear system ownership**.
+Do not split epics into frontend, backend, database, and test workstreams. Split them by **the outcome a user or operator can verify**.
 
-A strong epic usually owns one customer-visible improvement or one enabling platform capability. It may touch frontend, backend, data, tests, and docs, but it should still have one outcome, one primary boundary, and one verification story.
+A strong epic owns one customer-visible improvement or one enabling platform capability. It may touch UI, APIs, data, tests, and docs, but it should still have one owner, one boundary, and one acceptance test.
+-->
 
 ---
 

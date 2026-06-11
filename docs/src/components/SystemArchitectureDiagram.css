@@ -1,0 +1,198 @@
+.system-architecture-diagram {
+  --diagram-panel: color-mix(in oklch, var(--sl-color-bg) 78%, var(--sl-color-gray-6));
+  --diagram-panel-strong: color-mix(in oklch, var(--sl-color-bg) 64%, var(--sl-color-gray-6));
+  --diagram-line: color-mix(in oklch, rgb(var(--ostwin-cyan-rgb)) 72%, var(--sl-color-gray-2));
+  --diagram-line-muted: rgba(var(--ostwin-cyan-rgb), 0.14);
+  --diagram-text: var(--sl-color-gray-1);
+  --diagram-muted: var(--sl-color-gray-3);
+  display: block;
+  width: min(100%, 64rem);
+  max-width: 100%;
+  margin: 1.75rem 0 2rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(var(--ostwin-cyan-rgb), 0.12), transparent 34%),
+    linear-gradient(315deg, rgba(var(--ostwin-acid-rgb), 0.1), transparent 42%),
+    var(--diagram-panel);
+  box-shadow: 0 22px 54px rgba(5, 8, 14, 0.18);
+}
+
+.system-architecture-diagram,
+.system-architecture-diagram * {
+  box-sizing: border-box;
+}
+
+.system-architecture-diagram__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.system-architecture-diagram__field {
+  fill: rgba(255, 255, 255, 0.025);
+  stroke: var(--sl-color-hairline);
+  stroke-width: 1.5;
+}
+
+:root[data-theme='light'] .system-architecture-diagram__field {
+  fill: rgba(255, 255, 255, 0.58);
+}
+
+.system-architecture-diagram__connectors {
+  color: var(--diagram-line);
+}
+
+.system-architecture-diagram__connector {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.system-architecture-diagram__arrow {
+  fill: var(--diagram-line);
+}
+
+.system-architecture-diagram__node-frame {
+  fill: var(--diagram-panel-strong);
+  stroke: var(--sl-color-hairline);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.system-architecture-diagram__node--entry .system-architecture-diagram__node-frame {
+  fill: color-mix(in oklch, var(--diagram-panel-strong) 72%, rgb(var(--ostwin-cyan-rgb)));
+}
+
+.system-architecture-diagram__node--coordination .system-architecture-diagram__node-frame {
+  fill: color-mix(in oklch, var(--diagram-panel-strong) 76%, rgb(var(--ostwin-acid-rgb)));
+}
+
+.system-architecture-diagram__node-title {
+  fill: var(--diagram-text);
+  font-family: var(--sl-font);
+  font-size: 28px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.system-architecture-diagram__node-subtitle {
+  fill: color-mix(in oklch, var(--diagram-muted) 78%, rgb(var(--ostwin-cyan-rgb)));
+  font-family: var(--sl-font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.system-architecture-diagram__node-line {
+  fill: var(--sl-color-gray-2);
+  font-family: var(--sl-font-mono);
+  font-size: 20px;
+  font-weight: 520;
+}
+
+.system-architecture-diagram__node--edge .system-architecture-diagram__node-line {
+  font-size: 18px;
+}
+
+.system-architecture-diagram figcaption {
+  margin: 0;
+  border-top: 1px solid var(--sl-color-hairline);
+  padding: 0.9rem 1rem;
+  color: var(--sl-color-gray-3);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.system-architecture-diagram__mobile-flow {
+  display: none;
+}
+
+@media (max-width: 46rem) {
+  .system-architecture-diagram {
+    margin-inline: calc(-1 * min(1rem, var(--sl-content-pad-x, 1rem)));
+    width: calc(100% + 2 * min(1rem, var(--sl-content-pad-x, 1rem)));
+    border-radius: 0;
+  }
+
+  .system-architecture-diagram__canvas {
+    display: none !important;
+  }
+
+  .system-architecture-diagram__mobile-flow {
+    position: relative;
+    display: grid;
+    gap: 0.8rem;
+    padding: 1rem;
+  }
+
+  .system-architecture-diagram__mobile-flow::before {
+    position: absolute;
+    inset: 3.4rem auto 3.4rem 50%;
+    width: 2px;
+    content: '';
+    background: linear-gradient(
+      180deg,
+      rgba(var(--ostwin-cyan-rgb), 0.24),
+      rgba(var(--ostwin-acid-rgb), 0.5),
+      rgba(var(--ostwin-cyan-rgb), 0.2)
+    );
+    transform: translateX(-50%);
+  }
+
+  .system-architecture-diagram__mobile-node {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 0.22rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 8px;
+    padding: 0.72rem;
+    background: var(--diagram-panel-strong);
+    text-align: center;
+  }
+
+  .system-architecture-diagram__mobile-node--entry {
+    background: color-mix(in oklch, var(--diagram-panel-strong) 72%, rgb(var(--ostwin-cyan-rgb)));
+  }
+
+  .system-architecture-diagram__mobile-node--coordination {
+    background: color-mix(in oklch, var(--diagram-panel-strong) 76%, rgb(var(--ostwin-acid-rgb)));
+  }
+
+  .system-architecture-diagram__mobile-node strong {
+    color: var(--sl-color-gray-1);
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .system-architecture-diagram__mobile-node span,
+  .system-architecture-diagram__mobile-node small {
+    color: var(--sl-color-gray-3);
+    font-family: var(--sl-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .system-architecture-diagram__mobile-node small {
+    color: var(--sl-color-gray-2);
+    overflow-wrap: anywhere;
+  }
+
+  .system-architecture-diagram__mobile-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.62rem;
+  }
+}
+
+@media (min-width: 34rem) and (max-width: 46rem) {
+  .system-architecture-diagram__mobile-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
