@@ -260,7 +260,7 @@ export default function RolesTable({ roles, skills, mcpServers: _mcpServers, onE
                     <div className="flex flex-wrap gap-1.5 max-w-[200px]">
                       {roleSkills.slice(0, 2).map((s) => (
                         <span
-                          key={s.id}
+                          key={s.name}
                           className="px-2 py-0.5 rounded-full text-[10px] font-bold border"
                           style={{ background: 'var(--color-primary-muted)', color: 'var(--color-primary)', borderColor: 'rgba(var(--color-primary-rgb), 0.1)' }}
                         >

@@ -146,6 +146,40 @@ def test_delete_plan_400_for_invalid_id(client, plan_dirs):
     assert resp.status_code == 400
 
 
+def test_delete_ghost_plan_clears_zvec_index(client, plan_dirs):
+    """A plan that exists only in the zvec index (no files on disk) should still
+    be deletable so it can be cleared from the UI, returning 200 and calling
+    store.delete_plan()."""
+    plans_dir, tmp_path = plan_dirs
+    plan_id = "abcdef012345"
+    # No files created on disk — this is a stale/ghost index entry.
+
+    mock_store = MagicMock()
+    mock_store.get_plan.return_value = {"plan_id": plan_id, "title": "Ghost"}
+    mock_store.delete_plan.return_value = True
+
+    with patch("dashboard.routes.plans.global_state") as mock_gs:
+        mock_gs.store = mock_store
+        resp = client.delete(f"/api/plans/{plan_id}", headers=AUTH)
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deleted"
+    mock_store.delete_plan.assert_called_once_with(plan_id)
+
+
+def test_delete_plan_404_when_absent_from_disk_and_index(client, plan_dirs):
+    """404 only when the plan is in neither disk nor the zvec index."""
+    mock_store = MagicMock()
+    mock_store.get_plan.return_value = None
+
+    with patch("dashboard.routes.plans.global_state") as mock_gs:
+        mock_gs.store = mock_store
+        resp = client.delete("/api/plans/abcdef012345", headers=AUTH)
+
+    assert resp.status_code == 404
+    mock_store.delete_plan.assert_not_called()
+
+
 def test_delete_plan_no_working_dir_in_meta(client, plan_dirs):
     """DELETE should succeed even when meta.json has no working_dir."""
     plans_dir, tmp_path = plan_dirs

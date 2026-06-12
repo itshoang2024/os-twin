@@ -2120,8 +2120,21 @@ async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
     if not re.fullmatch(r"[0-9a-f]{12}", plan_id):
         raise HTTPException(status_code=400, detail="Invalid plan ID format")
 
+    # Disk is the source of truth, but the zvec index can retain a stale entry
+    # for a plan whose files were already removed (e.g. an earlier delete where
+    # store.delete_plan failed and was only warned). The detail view serves such
+    # "ghost" plans from zvec, so we must stay idempotent here and still clear
+    # the index — otherwise the ghost can never be removed from the UI. Only 404
+    # when the plan is absent from BOTH disk and the index.
+    store = global_state.store
     plan_file = _find_plan_file(plan_id)
-    if not plan_file:
+    in_index = False
+    if store and not plan_file:
+        try:
+            in_index = store.get_plan(plan_id) is not None
+        except Exception as e:
+            logger.warning("Failed to look up plan %s in zvec index: %s", plan_id, e)
+    if not plan_file and not in_index:
         raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found")
 
     cleaned: list[str] = []
@@ -2137,7 +2150,7 @@ async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
             pass
 
     # --- 1. Remove from global store (~/.ostwin/.agents/plans/) ---
-    plans_dir = plan_file.parent
+    plans_dir = plan_file.parent if plan_file else GLOBAL_PLANS_DIR
     for suffix in (".md", ".meta.json", ".roles.json"):
         f = plans_dir / f"{plan_id}{suffix}"
         if f.exists():
@@ -2164,7 +2177,6 @@ async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
                 cleaned.append(str(warrooms_dir))
 
     # --- 3. Remove from zvec index ---
-    store = global_state.store
     if store:
         try:
             store.delete_plan(plan_id)
@@ -2290,6 +2302,29 @@ async def detach_skill(plan_id: str, skill_name: str, user: dict = Depends(get_c
     config_file = plans_dir / f"{plan_id}.roles.json"
     config_file.write_text(json.dumps(config, indent=2) + "\n")
     return {"status": "detached", "plan_id": plan_id, "skill": skill_name}
+
+def _ostwin_command(ostwin_bin: Path, *args: str) -> list[str]:
+    """Build a platform-correct argv to invoke the ostwin CLI.
+
+    The `ostwin` file is a pwsh script (shebang `#!/usr/bin/env -S pwsh`), not a
+    native executable. On POSIX it can be exec'd directly, but on Windows
+    CreateProcess only runs PE binaries, so passing it to subprocess raises
+    `OSError: [WinError 193] %1 is not a valid Win32 application`. Route it
+    through pwsh/powershell using the sibling `ostwin.ps1` instead.
+    """
+    if os.name == "nt":
+        ps1 = ostwin_bin.with_suffix(".ps1")
+        target = ps1 if ps1.exists() else ostwin_bin
+        exe = shutil.which("pwsh") or shutil.which("powershell")
+        if exe:
+            return [exe, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(target), *args]
+        # Fall back to the .cmd shim (requires shell=True at the call site).
+        cmd = ostwin_bin.with_suffix(".cmd")
+        if cmd.exists():
+            return [str(cmd), *args]
+    return [str(ostwin_bin), *args]
+
 
 @router.post("/api/run")
 async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
@@ -2467,7 +2502,7 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
         logger.info(f"run_plan: target dir {wd_path} not initialized, running ostwin init...")
         if ostwin_bin.exists():
             init_result = subprocess.run(
-                [str(ostwin_bin), "init"],
+                _ostwin_command(ostwin_bin, "init"),
                 cwd=str(wd_path),
                 capture_output=True, text=True, timeout=120,
             )
@@ -2522,14 +2557,14 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
     # Spawn OS Twin in background (capture output to log file)
     # Run from working_dir - ostwin will auto-detect project context
     proc = subprocess.Popen(
-        [
-            str(ostwin_bin), "run", str(launch_plan_path), "--non-interactive",
+        _ostwin_command(
+            ostwin_bin, "run", str(launch_plan_path), "--non-interactive",
             "--workspace-isolation", workspace_isolation,
             *(
                 ["--worktree-root", worktree_root]
                 if worktree_root else []
             ),
-        ],
+        ),
         cwd=str(wd_path),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
