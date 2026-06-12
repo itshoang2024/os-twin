@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSettings } from '@/hooks/use-settings';
 import { useConfiguredModels } from '@/hooks/use-configured-models';
@@ -78,6 +78,29 @@ function SettingsPageContent() {
   }, [searchParams]);
 
   // Fetch model registry (backward compat + dynamic)
+  const refreshModelCatalog = useCallback(async () => {
+    try {
+      await reloadModels();
+    } catch {
+      // The live registry refresh is best-effort; we still try to refresh the UI state below.
+    }
+
+    try {
+      const data = await apiGet<Record<string, ModelInfo[]>>('/models/registry');
+      setModelRegistry(data ?? {});
+    } catch {
+      setModelRegistry({});
+    }
+  }, [reloadModels]);
+
+  useEffect(() => {
+    const handler = () => {
+      void refreshModelCatalog();
+    };
+    window.addEventListener('ostwin:models-updated', handler);
+    return () => window.removeEventListener('ostwin:models-updated', handler);
+  }, [refreshModelCatalog]);
+
   useEffect(() => {
     const fetchRegistry = async () => {
       try {

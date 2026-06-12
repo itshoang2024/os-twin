@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 import * as React from 'react';
+import { apiGet } from '@/lib/api-client';
 
 const mockSettings = {
   providers: {},
@@ -9,6 +10,8 @@ const mockSettings = {
   memory: {},
   knowledge: { llm_model: '', embedding_model: '', embedding_dimension: 384 },
 };
+
+const mockReloadModels = vi.hoisted(() => vi.fn());
 
 vi.mock('@/hooks/use-settings', () => ({
   useSettings: () => ({
@@ -28,7 +31,7 @@ vi.mock('@/hooks/use-configured-models', () => ({
       { id: 'anthropic/claude-opus-4', label: 'Claude Opus 4', provider_id: 'anthropic' },
       { id: 'openai/gpt-5', label: 'GPT-5', provider_id: 'openai' },
     ],
-    reload: vi.fn(),
+    reload: mockReloadModels,
   }),
 }));
 
@@ -228,6 +231,31 @@ describe('Settings Page Integration', () => {
       await waitFor(() => {
         const statusElements = screen.getAllByText(/ACTIVE|INACTIVE/);
         expect(statusElements.length).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('Model catalog refresh', () => {
+    it('refreshes configured models after a model-update event', async () => {
+      render(
+        <React.Suspense fallback={<div>Loading...</div>}>
+          <SettingsPage />
+        </React.Suspense>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Global Model Provisioning')).toBeInTheDocument();
+      });
+
+      window.dispatchEvent(new CustomEvent('ostwin:models-updated'));
+
+      await waitFor(() => {
+        expect(mockReloadModels).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        const registryCalls = vi.mocked(apiGet).mock.calls.filter(([url]) => url === '/models/registry');
+        expect(registryCalls.length).toBeGreaterThan(1);
       });
     });
   });
