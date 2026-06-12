@@ -28,6 +28,6 @@
     "war-room-communication"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
+  "model": "google-vertex/zai-org/glm-5-maas",
   "timeout": 3600
 }

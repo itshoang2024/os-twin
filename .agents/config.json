@@ -58,6 +58,8 @@
       "base_url": null,
       "org_id": null,
       "enabled": true,
+      "auth_mode": null,
+      "model_variant": null,
       "deployment_mode": "vertex",
       "project_id": "igot-studio",
       "vertex_location": null,

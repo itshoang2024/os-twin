@@ -20,8 +20,8 @@
     "roles"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
-  "timeout": 2400,
+  "model": "openai/gpt-5.5",
+  "timeout": 600,
   "instance_type": "evaluator",
   "skill_refs": [
     "agent-browser",
@@ -34,5 +34,6 @@
   "mcp_refs": [
     "chrome-devtools",
     "playwright"
-  ]
+  ],
+  "timeout_seconds": 600
 }

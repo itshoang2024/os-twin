@@ -1,6 +1,7 @@
 {
-  "model": "opencode/big-pickle",
+  "model": "google-vertex/gemini-3-flash-preview",
   "skill_refs": [],
   "timeout": 300,
-  "description": ""
+  "description": "",
+  "instance_type": "worker"
 }

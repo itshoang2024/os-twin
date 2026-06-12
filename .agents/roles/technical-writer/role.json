@@ -6,9 +6,11 @@
     "roles"
   ],
   "prompt_file": "ROLE.md",
-  "timeout": 600,
+  "timeout": 1200,
   "description": "Document gameplay instructions and verify final project state",
   "name": "technical-writer",
   "cli": "agent",
-  "model": "opencode/big-pickle"
+  "model": "google-vertex/gemini-3-flash-preview",
+  "timeout_seconds": 1200,
+  "instance_type": "worker"
 }

@@ -30,7 +30,8 @@
     "agent-browser"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
-  "timeout": 2400,
-  "instance_type": "evaluator"
+  "model": "openai/gpt-5.5",
+  "timeout": 3600,
+  "instance_type": "evaluator",
+  "timeout_seconds": 3600
 }

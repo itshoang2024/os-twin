@@ -1,7 +1,7 @@
 {
   "name": "security-engineer",
   "description": "Security Engineer — shift-left security specialist owning threat modeling, risk-based secure code review, OWASP Top 10 validation, dependency vulnerability management, security architecture review, and compliance mapping",
-  "instance_type": "worker",
+  "instance_type": "evaluator",
   "capabilities": [
     "security",
     "threat-modeling",
@@ -30,6 +30,6 @@
     "war-room-communication"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
+  "model": "google-vertex/zai-org/glm-5-maas",
   "timeout": 3600
 }

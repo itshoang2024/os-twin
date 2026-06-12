@@ -19,7 +19,8 @@
     "create-role"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
-  "timeout": 900,
-  "instance_type": "evaluator"
+  "model": "google-vertex/zai-org/glm-5-maas",
+  "timeout": 1200,
+  "instance_type": "evaluator",
+  "timeout_seconds": 1200
 }

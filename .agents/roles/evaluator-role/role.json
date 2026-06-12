@@ -2,5 +2,6 @@
   "instance_type": "evaluator",
   "skill_refs": [],
   "name": "evaluator-role",
-  "model": "opencode/big-pickle"
+  "model": "google-vertex/gemini-3-flash-preview",
+  "timeout_seconds": 300
 }

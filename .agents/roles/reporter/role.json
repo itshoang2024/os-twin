@@ -14,6 +14,8 @@
   ],
   "skill_refs": [],
   "cli": "agent",
-  "model": "opencode/big-pickle",
-  "timeout": 600
+  "model": "google-vertex/gemini-3-flash-preview",
+  "timeout": 1200,
+  "timeout_seconds": 1200,
+  "instance_type": "worker"
 }

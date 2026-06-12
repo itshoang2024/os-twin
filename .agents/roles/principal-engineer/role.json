@@ -1,7 +1,7 @@
 {
   "name": "principal-engineer",
   "description": "Principal Engineer — sets multi-quarter technical direction, writes RFCs, resolves cross-team technical disputes, and mentors staff engineers at the systems design and technology strategy level",
-  "instance_type": "evaluator",
+  "instance_type": "worker",
   "capabilities": [
     "rfc-authoring",
     "technology-evaluation",
@@ -28,6 +28,6 @@
     "war-room-communication"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
+  "model": "openai/gpt-5.5",
   "timeout": 3600
 }

@@ -7,8 +7,9 @@
   "prompt_file": "ROLE.md",
   "description": "Design the high-level system architecture and database schemas for the video platform.",
   "timeout": 600,
-  "model": "opencode/big-pickle",
+  "model": "google-vertex/gemini-3-flash-preview",
   "capabilities": [],
   "quality_gates": [],
-  "name": "database-architect"
+  "name": "database-architect",
+  "instance_type": "worker"
 }

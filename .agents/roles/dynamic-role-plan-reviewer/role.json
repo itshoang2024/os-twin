@@ -12,6 +12,7 @@
     "create-role"
   ],
   "cli": "agent",
-  "model": "opencode/big-pickle",
-  "timeout": 600
+  "model": "google-vertex/gemini-3-flash-preview",
+  "timeout": 600,
+  "instance_type": "worker"
 }
