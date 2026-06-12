@@ -393,10 +393,9 @@ async def startup_all():
                 except Exception as e:
                     logger.warning("OpenCode tool generation failed: %s", e)
                 
-                # Initialization (slow — loads 600MB model)
-                global_state.store.ensure_collections()
-
-                # Syncing
+                # Syncing (collections already opened synchronously at startup;
+                # re-running ensure_collections() here would deadlock on the
+                # RocksDB LOCK held by the foreground open — see tasks.py:361)
                 global_state.store.sync_from_disk()
                 from dashboard.api_utils import SKILLS_DIRS
 

@@ -2091,7 +2091,7 @@ class OSTwinStore:
 
         if config_file.exists():
             try:
-                data = json.loads(config_file.read_text())
+                data = json.loads(config_file.read_text(encoding="utf-8"))
                 for r in data:
                     role_id = r.get("id", "")
                     if role_id:
@@ -2100,7 +2100,7 @@ class OSTwinStore:
                 logger.warning("Failed to read roles config.json: %s", e)
         elif registry_file.exists():
             try:
-                data = json.loads(registry_file.read_text())
+                data = json.loads(registry_file.read_text(encoding="utf-8"))
                 for r in data.get("roles", []):
                     role_name = r.get("name", "")
                     role_id = r.get("id", f"registry-{role_name}")

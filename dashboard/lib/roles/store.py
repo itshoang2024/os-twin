@@ -48,7 +48,7 @@ def utc_now() -> str:
 
 def read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -75,7 +75,8 @@ class RoleProjectionWriter:
     def write_dashboard_config(self, roles: Iterable[Role]) -> None:
         self.roles_config_file.parent.mkdir(parents=True, exist_ok=True)
         self.roles_config_file.write_text(
-            json.dumps([role.model_dump() for role in roles], indent=2)
+            json.dumps([role.model_dump() for role in roles], indent=2),
+            encoding="utf-8",
         )
 
     def write_engine_config(self, roles: Iterable[Role]) -> None:
@@ -114,7 +115,7 @@ class RoleProjectionWriter:
             config[role.name] = entry
 
         self.engine_config_file.parent.mkdir(parents=True, exist_ok=True)
-        self.engine_config_file.write_text(json.dumps(config, indent=2))
+        self.engine_config_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 class RoleRepository:
@@ -162,8 +163,8 @@ class RoleRepository:
         role_dir = self.global_roles_dir / role.name
         role_dir.mkdir(parents=True, exist_ok=True)
         role_file = role_dir / "role.json"
-        role_file.write_text(json.dumps(self._role_to_role_json(role), indent=2))
-        (role_dir / "ROLE.md").write_text(role.instructions or "")
+        role_file.write_text(json.dumps(self._role_to_role_json(role), indent=2), encoding="utf-8")
+        (role_dir / "ROLE.md").write_text(role.instructions or "", encoding="utf-8")
         self.write_opencode_agent(role)
 
     def delete_role(self, role: Role) -> None:
@@ -184,8 +185,8 @@ class RoleRepository:
         """
         self.opencode_agents_dir.mkdir(parents=True, exist_ok=True)
         agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
-        existing_content = agent_file.read_text() if agent_file.exists() else None
-        agent_file.write_text(self._render_opencode_agent_markdown(role, existing_content))
+        existing_content = agent_file.read_text(encoding="utf-8") if agent_file.exists() else None
+        agent_file.write_text(self._render_opencode_agent_markdown(role, existing_content), encoding="utf-8")
 
     def delete_opencode_agent(self, role: Role) -> None:
         agent_file = self.opencode_agents_dir / f"{stable_role_id(role.name)}.md"
@@ -278,7 +279,7 @@ class RoleRepository:
         )
         role_md_file = role_dir / "ROLE.md"
         instructions = (
-            role_md_file.read_text()
+            role_md_file.read_text(encoding="utf-8")
             if role_md_file.exists()
             else role_json.get("instructions")
             or (legacy.instructions if legacy else "")

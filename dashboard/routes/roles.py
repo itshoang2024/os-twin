@@ -350,7 +350,7 @@ async def update_role(role_id: str, req: CreateRoleRequest, user: dict = Depends
                 if plans_dir.exists():
                     for f in plans_dir.glob("*.roles.json"):
                         try:
-                            config = json.loads(f.read_text())
+                            config = json.loads(f.read_text(encoding="utf-8"))
                             if old_name in config:
                                 config[new_name] = config.pop(old_name)
                                 f.write_text(json.dumps(config, indent=2))
@@ -489,11 +489,11 @@ async def get_role_dependencies(role_id: str, user: dict = Depends(get_current_u
                 status_file = room_dir / "status"
                 if config_file.exists():
                     try:
-                        with open(config_file, "r") as f:
+                        with open(config_file, "r", encoding="utf-8") as f:
                             config = json.load(f)
                             candidates = config.get("assignment", {}).get("candidate_roles", [])
                             if role.name in candidates:
-                                status = canonical_room_status(status_file.read_text().strip() if status_file.exists() else "unknown")
+                                status = canonical_room_status(status_file.read_text(encoding="utf-8").strip() if status_file.exists() else "unknown")
                                 room_info = {"id": room_dir.name, "status": status}
                                 if status not in ["done", "failed", "signoff"]:
                                     active_warrooms.append(room_info)
@@ -507,7 +507,7 @@ async def get_role_dependencies(role_id: str, user: dict = Depends(get_current_u
     if plans_dir.exists():
         for f in plans_dir.glob("*.roles.json"):
             try:
-                config = json.loads(f.read_text())
+                config = json.loads(f.read_text(encoding="utf-8"))
                 if role.name in config:
                     plans.append(f.name.replace(".roles.json", ""))
             except Exception:
@@ -548,7 +548,7 @@ async def delete_role(role_id: str, force: bool = False, user: dict = Depends(ge
         if plans_dir.exists():
             for f in plans_dir.glob("*.roles.json"):
                 try:
-                    config = json.loads(f.read_text())
+                    config = json.loads(f.read_text(encoding="utf-8"))
                     if role_to_delete.name in config:
                         del config[role_to_delete.name]
                         f.write_text(json.dumps(config, indent=2))
