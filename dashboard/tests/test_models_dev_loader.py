@@ -211,7 +211,7 @@ def test_reads_opencode_json_custom_providers(fake_opencode_json):
 
     assert "byteplus" in providers
     assert "myprovider" in providers
-    assert providers["byteplus"]["source"] == "opencode.json"
+    assert providers["byteplus"]["source"] == str(fake_opencode_json)
     assert providers["byteplus"]["type"] == "custom"
 
 
@@ -401,6 +401,40 @@ def test_openai_oauth_filters_to_opencode_models(fake_raw_catalog):
 
     models = result["providers"]["openai"]["models"]
     assert set(models) == {"gpt-5.3-codex"}
+
+
+def test_github_copilot_oauth_adds_opencode_only_models():
+    raw_catalog = {
+        "github-copilot": {
+            "id": "github-copilot",
+            "name": "GitHub Copilot",
+            "models": {
+                "gpt-5.4": {"id": "gpt-5.4", "name": "GPT-5.4"},
+                "claude-opus-4.6": {"id": "claude-opus-4.6", "name": "Claude Opus 4.6"},
+            },
+        }
+    }
+    providers = {"github-copilot": {"type": "oauth", "source": "auth.json", "has_key": True}}
+
+    with patch("dashboard.lib.settings.models_dev_loader.OPENCODE_CONFIG_PATH", Path("/nonexistent")):
+        with patch(
+            "dashboard.lib.settings.models_dev_loader._live_github_copilot_models",
+            return_value=set(),
+        ):
+            with patch(
+                "dashboard.lib.settings.models_dev_loader._list_opencode_models",
+                return_value={
+                    "github-copilot/gpt-5.4",
+                    "gpt-5.4",
+                    "github-copilot/claude-opus-4.6-fast",
+                    "claude-opus-4.6-fast",
+                },
+            ):
+                result = _build_configured_models(raw_catalog, providers)
+
+    models = result["providers"]["github-copilot"]["models"]
+    assert sorted(models) == ["claude-opus-4.6-fast", "gpt-5.4"]
+    assert models["claude-opus-4.6-fast"]["source"] == "opencode"
 
 
 def test_build_includes_custom_models_from_opencode(fake_raw_catalog, fake_opencode_json):
@@ -601,14 +635,22 @@ def test_rebuild_configured_models_from_cache_picks_up_github_copilot(tmp_path):
             with patch("dashboard.lib.settings.models_dev_loader.USER_OPENCODE_CONFIG_PATH", Path("/nonexistent")):
                 with patch("dashboard.lib.settings.models_dev_loader._HOME_RAW_PATH", raw_path):
                     with patch("dashboard.lib.settings.models_dev_loader.CONFIGURED_MODELS_PATH", configured_path):
-                        result = rebuild_configured_models_from_cache()
+                        with patch(
+                            "dashboard.lib.settings.models_dev_loader._live_github_copilot_models",
+                            return_value=set(),
+                        ):
+                            with patch(
+                                "dashboard.lib.settings.models_dev_loader._list_opencode_models",
+                                return_value={"github-copilot/gpt-5.2", "gpt-5.2"},
+                            ):
+                                result = rebuild_configured_models_from_cache()
 
     assert "github-copilot" in result["configured_provider_ids"]
     assert result["providers"]["github-copilot"]["models"]["gpt-5.2"]["name"] == "GPT-5.2"
     assert configured_path.exists()
 
 
-def test_github_copilot_oauth_alias_suppresses_native_catalog_models(monkeypatch):
+def test_github_copilot_native_reflects_live_copilot_models(monkeypatch):
     from dashboard.lib.settings import models_dev_loader as loader
 
     raw_catalog = {
@@ -618,33 +660,38 @@ def test_github_copilot_oauth_alias_suppresses_native_catalog_models(monkeypatch
             "models": {
                 "gpt-5.2": {"id": "gpt-5.2", "name": "GPT-5.2"},
                 "claude-sonnet-4.5": {"id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5"},
+                "gpt-3.5-turbo": {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
             },
         }
     }
     configured = {
         "github-copilot": {"type": "oauth", "source": "auth.json", "has_key": True},
-        "github-copilot-oauth": {"type": "custom", "source": "opencode.json", "has_key": True},
     }
+    # Live Copilot entitlement: only these two models, plus one not in the
+    # catalog that must still be surfaced as an opencode-sourced entry.
     monkeypatch.setattr(
         loader,
-        "_read_opencode_custom_providers",
-        lambda: {
-            "github-copilot-oauth": {
-                "options": {"baseURL": "https://api.githubcopilot.com", "apiKey": "{env:GITHUB_COPILOT_TOKEN}"},
-                "models": {
-                    "gpt-4o-mini": {"name": "gpt-4o-mini (Copilot)"},
-                    "gpt-4o": {"name": "gpt-4o (Copilot)"},
-                },
-            }
-        },
+        "_live_github_copilot_models",
+        lambda: {"gpt-5.2", "claude-sonnet-4.5", "o4-mini"},
+    )
+    # OpenCode discovery must NOT be consulted when the live list is available.
+    monkeypatch.setattr(
+        loader,
+        "_list_opencode_models",
+        lambda provider_id: {"github-copilot/gpt-3.5-turbo", "gpt-3.5-turbo"},
     )
 
     result = loader._build_configured_models(raw_catalog, configured)
 
-    assert "github-copilot" not in result["configured_provider_ids"]
-    assert "github-copilot" not in result["providers"]
-    assert "github-copilot-oauth" in result["configured_provider_ids"]
-    assert sorted(result["providers"]["github-copilot-oauth"]["models"].keys()) == ["gpt-4o", "gpt-4o-mini"]
+    assert "github-copilot" in result["configured_provider_ids"]
+    assert "github-copilot-oauth" not in result["configured_provider_ids"]
+    # Native github-copilot reflects the live entitlement, not the full catalog.
+    assert sorted(result["providers"]["github-copilot"]["models"].keys()) == [
+        "claude-sonnet-4.5",
+        "gpt-5.2",
+        "o4-mini",
+    ]
+    assert result["providers"]["github-copilot"]["models"]["o4-mini"]["source"] == "opencode"
 
 
 # ── configured_models structure ───────────────────────────────────────

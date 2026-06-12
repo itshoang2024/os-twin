@@ -106,7 +106,7 @@ export function GitHubCopilotPanel({
       onSettingsChange({
         enabled: true,
         auth_mode: 'copilot_oauth',
-        default_model: provider.default_model || 'github-copilot-oauth/gpt-4o-mini',
+        default_model: provider.default_model || 'github-copilot/gpt-4o-mini',
       }),
     );
     setConnected(true);

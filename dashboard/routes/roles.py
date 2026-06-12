@@ -811,7 +811,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
 
     cmd = [opencode, "run", "just say YES", "--model", resolved_version, "--dir", "/tmp"]
     env = {**os.environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"}
-    if resolved_version.startswith("github-copilot-oauth/") and not env.get("GITHUB_COPILOT_TOKEN"):
+    if resolved_version.startswith("github-copilot/") and not env.get("GITHUB_COPILOT_TOKEN"):
         try:
             from dashboard.lib.settings.github_copilot_auth import get_saved_github_copilot_token
 

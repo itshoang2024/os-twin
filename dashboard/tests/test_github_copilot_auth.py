@@ -94,32 +94,111 @@ def test_exchange_github_oauth_rejects_non_copilot_token(tmp_path, monkeypatch):
     assert not auth_path.exists()
 
 
-def test_fetch_copilot_model_ids_reads_data_ids(monkeypatch):
-    class _Response:
+def test_exchange_copilot_token_returns_token_and_api_url(monkeypatch):
+    """_exchange_copilot_token should call the internal token endpoint and parse result."""
+    exchange_payload = {
+        "token": "tid_abc123",
+        "expires_at": 9999999999,
+        "endpoints": {"api": "https://api.githubcopilot.com"},
+    }
+
+    class _Resp:
         def __enter__(self):
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *a):
             return None
 
         def read(self):
-            return json.dumps({"data": [{"id": "gpt-a"}, {"id": "gpt-b"}, {"name": "fallback-name"}]}).encode()
+            return json.dumps(exchange_payload).encode()
 
     captured = {}
 
-    def fake_urlopen(req, timeout=30):
+    def fake_urlopen(req, timeout=15):
         captured["url"] = req.full_url
-        captured["authorization"] = req.headers.get("Authorization")
-        return _Response()
+        captured["auth"] = req.headers.get("Authorization")
+        return _Resp()
 
     monkeypatch.setattr(copilot.urllib.request, "urlopen", fake_urlopen)
+    # Clear cache so a real exchange is triggered.
+    copilot._copilot_token_cache.clear()
 
-    assert copilot._fetch_copilot_model_ids("secret-token") == ["gpt-a", "gpt-b", "fallback-name"]
-    assert captured["url"] == "https://api.githubcopilot.com/models"
-    assert captured["authorization"] == "Bearer secret-token"
+    result = copilot._exchange_copilot_token("gho_secret")
+
+    assert captured["url"] == copilot.GITHUB_TOKEN_URL
+    assert captured["auth"] == "token gho_secret"
+    assert result["token"] == "tid_abc123"
+    assert result["api_url"] == "https://api.githubcopilot.com"
 
 
-def test_sync_github_copilot_opencode_config_writes_global_managed_and_project(tmp_path, monkeypatch):
+def test_exchange_copilot_token_uses_cache(monkeypatch):
+    """A cached non-expired entry should be returned without a network call."""
+    future_exp = copilot.time.time() + 3600
+    copilot._copilot_token_cache["gho_cached"] = {
+        "token": "cached_tok",
+        "api_url": "https://api.githubcopilot.com",
+        "expires_at": future_exp,
+    }
+
+    calls = []
+    monkeypatch.setattr(
+        copilot.urllib.request,
+        "urlopen",
+        lambda *a, **kw: calls.append(1),
+    )
+
+    result = copilot._exchange_copilot_token("gho_cached")
+
+    assert result["token"] == "cached_tok"
+    assert calls == []
+    copilot._copilot_token_cache.pop("gho_cached", None)
+
+
+def test_fetch_copilot_model_ids_reads_data_ids(monkeypatch):
+    """_fetch_copilot_model_ids should exchange the gho token, then call /models."""
+    exchange_payload = {
+        "token": "cpilot_tok",
+        "expires_at": 9999999999,
+        "endpoints": {"api": "https://api.githubcopilot.com"},
+    }
+    models_payload = {"data": [{"id": "gpt-a"}, {"id": "gpt-b"}, {"name": "fallback-name"}]}
+
+    responses = iter([exchange_payload, models_payload])
+    captured_requests = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def read(self):
+            return json.dumps(self._payload).encode()
+
+    def fake_urlopen(req, timeout=None):
+        captured_requests.append({"url": req.full_url, "auth": req.headers.get("Authorization")})
+        return _Resp(next(responses))
+
+    monkeypatch.setattr(copilot.urllib.request, "urlopen", fake_urlopen)
+    copilot._copilot_token_cache.clear()
+
+    result = copilot._fetch_copilot_model_ids("gho_secret")
+
+    assert result == ["gpt-a", "gpt-b", "fallback-name"]
+    # First call: token exchange
+    assert captured_requests[0]["url"] == copilot.GITHUB_TOKEN_URL
+    assert captured_requests[0]["auth"] == "token gho_secret"
+    # Second call: models list using exchanged copilot token
+    assert captured_requests[1]["url"] == "https://api.githubcopilot.com/models"
+    assert captured_requests[1]["auth"] == "Bearer cpilot_tok"
+    copilot._copilot_token_cache.clear()
+
+
+def test_sync_github_copilot_opencode_config_strips_legacy_alias(tmp_path, monkeypatch):
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(
         json.dumps({"github-copilot": {"type": "oauth", "refresh": "gho_secret", "access": "gho_secret"}}),
@@ -129,8 +208,20 @@ def test_sync_github_copilot_opencode_config_writes_global_managed_and_project(t
     managed_config = tmp_path / "managed" / "opencode.json"
     project_dir = tmp_path / "project"
     project_config = project_dir / ".opencode" / "opencode.json"
-    project_config.parent.mkdir(parents=True)
-    project_config.write_text(json.dumps({"mcp": {"memory": {"type": "local"}}}), encoding="utf-8")
+
+    legacy_block = {
+        "github-copilot-oauth": {
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {"apiKey": "{env:GITHUB_COPILOT_TOKEN}"},
+            "models": {"gpt-old": {"name": "gpt-old (Copilot)"}},
+        }
+    }
+    for path in (user_config, managed_config, project_config):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"provider": dict(legacy_block), "mcp": {"memory": {"type": "local"}}}),
+            encoding="utf-8",
+        )
 
     monkeypatch.setattr(copilot, "OPENCODE_AUTH_JSON", auth_path)
     monkeypatch.setattr(copilot, "get_user_opencode_config_path", lambda: user_config)
@@ -144,12 +235,10 @@ def test_sync_github_copilot_opencode_config_writes_global_managed_and_project(t
     assert sorted(result.models) == ["gpt-a", "gpt-b"]
     for path in (user_config, managed_config, project_config):
         data = json.loads(path.read_text(encoding="utf-8"))
-        provider = data["provider"]["github-copilot-oauth"]
-        assert provider["options"]["apiKey"] == "{env:GITHUB_COPILOT_TOKEN}"
-        assert "gho_secret" not in path.read_text(encoding="utf-8")
-        assert sorted(provider["models"].keys()) == ["gpt-a", "gpt-b"]
-    project_data = json.loads(project_config.read_text(encoding="utf-8"))
-    assert project_data["mcp"] == {"memory": {"type": "local"}}
+        # The deprecated alias is removed.
+        assert "github-copilot-oauth" not in data.get("provider", {})
+        # Unrelated config is preserved.
+        assert data["mcp"] == {"memory": {"type": "local"}}
 
 
 def test_sync_github_copilot_opencode_config_skips_missing_project_config(tmp_path, monkeypatch):
@@ -205,13 +294,6 @@ def test_device_status_prefers_saved_auth_over_stale_session(tmp_path, monkeypat
     assert response.status == "connected"
     assert response.message == "GitHub Copilot connected."
     copilot._device_auth_session = None
-
-
-class _FakeProcess:
-    returncode = None
-
-    def poll(self):
-        return self.returncode
 
 
 def test_start_device_auth_requests_github_device_code(tmp_path, monkeypatch):

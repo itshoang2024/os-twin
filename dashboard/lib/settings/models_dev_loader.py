@@ -838,23 +838,78 @@ def _list_opencode_models(provider_id: str) -> Set[str]:
     return models | short
 
 
+def _live_github_copilot_models() -> Set[str]:
+    """Return live Copilot model ids from the GitHub Copilot API.
+
+    Uses the saved GitHub OAuth token, exchanged for a short-lived Copilot
+    token.  Returns an empty set when no token is saved or the request fails,
+    so callers can fall back to OpenCode's discovered model list.
+    """
+    try:
+        from dashboard.lib.settings import github_copilot_auth
+    except Exception:
+        return set()
+    try:
+        token = github_copilot_auth.get_saved_github_copilot_token()
+        if not token:
+            return set()
+        return set(github_copilot_auth._fetch_copilot_model_ids(token))
+    except Exception:
+        return set()
+
+
 def _filter_oauth_provider_models(
     provider_id: str,
     provider_cfg: Dict[str, Any],
     provider_entry: Dict[str, Any],
 ) -> None:
-    if provider_id != "openai" or provider_cfg.get("type") != "oauth":
+    if provider_id not in {"openai", "github-copilot"} or provider_cfg.get("type") != "oauth":
         return
 
-    allowed = _list_opencode_models(provider_id)
+    # Native github-copilot reflects the user's live Copilot entitlement,
+    # falling back to OpenCode's discovered list when the API is unavailable.
+    if provider_id == "github-copilot":
+        allowed = _live_github_copilot_models() or _list_opencode_models(provider_id)
+    else:
+        allowed = _list_opencode_models(provider_id)
     if not allowed:
         return
 
-    provider_entry["models"] = {
+    allowed_model_ids = {
+        model.split("/", 1)[1]
+        if model.startswith(f"{provider_id}/") and "/" in model
+        else model
+        for model in allowed
+        if model and "/" not in model or model.startswith(f"{provider_id}/")
+    }
+    if not allowed_model_ids:
+        return
+
+    filtered_models = {
         model_id: model_data
         for model_id, model_data in provider_entry["models"].items()
-        if model_id in allowed or f"{provider_id}/{model_id}" in allowed
+        if model_id in allowed_model_ids
     }
+    for model_id in sorted(allowed_model_ids):
+        if model_id in filtered_models:
+            continue
+        filtered_models[model_id] = {
+            "id": model_id,
+            "name": model_id,
+            "family": "",
+            "reasoning": False,
+            "tool_call": False,
+            "attachment": False,
+            "temperature": True,
+            "cost": {},
+            "limit": {},
+            "modalities": {},
+            "knowledge": "",
+            "release_date": "",
+            "source": "opencode",
+        }
+
+    provider_entry["models"] = filtered_models
 
 
 def _build_configured_models(
@@ -878,16 +933,7 @@ def _build_configured_models(
     """
     # Read the opencode.json provider block once
     custom_providers = _read_opencode_custom_providers()
-    suppress_native_copilot = (
-        "github-copilot" in configured_providers
-        and "github-copilot-oauth" in configured_providers
-        and "github-copilot-oauth" in custom_providers
-    )
-    visible_provider_ids = {
-        provider_id
-        for provider_id in configured_providers.keys()
-        if not (suppress_native_copilot and provider_id == "github-copilot")
-    }
+    visible_provider_ids = set(configured_providers.keys())
 
     result: Dict[str, Any] = {
         "loaded_at": _iso_now(),
@@ -897,9 +943,6 @@ def _build_configured_models(
     }
 
     for provider_id, provider_cfg in configured_providers.items():
-        if suppress_native_copilot and provider_id == "github-copilot":
-            continue
-
         raw_provider = raw_catalog.get(provider_id)
         custom_block = custom_providers.get(provider_id)
 

@@ -128,7 +128,7 @@ describe('GitHubCopilotPanel', () => {
       expect(onSettingsChange).toHaveBeenCalledWith({
         enabled: true,
         auth_mode: 'copilot_oauth',
-        default_model: 'github-copilot-oauth/gpt-4o-mini',
+        default_model: 'github-copilot/gpt-4o-mini',
       });
     });
   });

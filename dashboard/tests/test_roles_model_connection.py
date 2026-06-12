@@ -3,7 +3,7 @@ import shutil
 import subprocess
 
 
-def test_model_connection_injects_copilot_oauth_token(monkeypatch):
+def test_model_connection_injects_copilot_token(monkeypatch):
     from dashboard.lib.settings import github_copilot_auth
     from dashboard.routes.roles import test_model_connection
 
@@ -19,7 +19,7 @@ def test_model_connection_injects_copilot_oauth_token(monkeypatch):
     monkeypatch.setattr(github_copilot_auth, "get_saved_github_copilot_token", lambda: "gho_test")
 
     result = asyncio.run(
-        test_model_connection("github-copilot-oauth/gpt-4o-2024-08-06", user={})
+        test_model_connection("github-copilot/gpt-4o-2024-08-06", user={})
     )
 
     assert result["status"] == "ok"
@@ -28,7 +28,7 @@ def test_model_connection_injects_copilot_oauth_token(monkeypatch):
         "run",
         "just say YES",
         "--model",
-        "github-copilot-oauth/gpt-4o-2024-08-06",
+        "github-copilot/gpt-4o-2024-08-06",
         "--dir",
         "/tmp",
     ]

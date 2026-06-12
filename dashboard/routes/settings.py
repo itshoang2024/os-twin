@@ -42,19 +42,7 @@ from dashboard.lib.settings.openai_codex_auth import (
     start_codex_device_auth,
     start_codex_oauth,
 )
-from dashboard.lib.settings.github_copilot_auth import (
-    GitHubCopilotDeviceAuthResponse,
-    GitHubCopilotOAuthStartResponse,
-    GitHubCopilotSessionStatus,
-    GitHubCopilotSyncResponse,
-    exchange_github_copilot_oauth_code,
-    github_copilot_oauth_result_page,
-    get_github_copilot_device_auth_status,
-    get_github_copilot_session_status,
-    start_github_copilot_oauth,
-    start_github_copilot_device_auth,
-    sync_github_copilot_opencode_config,
-)
+from dashboard.lib.settings import github_copilot_auth
 
 
 logger = logging.getLogger(__name__)
@@ -661,6 +649,7 @@ async def test_provider_connection(
             "openai": "gpt-4o",
             "anthropic": "claude-3-5-sonnet-20241022",
             "byteplus": "byteplus/seed-2-0-pro-260328",
+            "github-copilot": "github-copilot/gpt-4o",
         }
         test_model = _map.get(provider, provider)
 
@@ -789,7 +778,7 @@ async def migrate_secrets_to_vault(
 async def sync_opencode(
     user: dict = Depends(get_current_user),
 ):
-    """Sync provider keys + models to the Ostwin-managed opencode.json.
+    """Sync provider keys + models to ~/.config/opencode/opencode.json.
 
     Only gemini (non-vertex) and byteplus are synced -- other providers
     are handled natively by OpenCode via env vars.
@@ -900,87 +889,6 @@ async def openai_codex_device_status(
 ):
     """Return current dashboard-managed Codex device-login status."""
     return get_codex_device_auth_status()
-
-
-# ── GitHub Copilot / OpenCode Auth Flow ───────────────────────────────
-
-
-@router.get("/github/copilot/session", response_model=GitHubCopilotSessionStatus)
-async def github_copilot_session(
-    user: dict = Depends(get_current_user),
-):
-    """Return whether the local OpenCode GitHub Copilot credential exists."""
-    return get_github_copilot_session_status()
-
-
-@router.post("/github/oauth/start", response_model=GitHubCopilotOAuthStartResponse)
-async def github_copilot_oauth_start(
-    user: dict = Depends(get_current_user),
-):
-    """Start dashboard-managed GitHub OAuth web flow for Copilot."""
-    try:
-        return start_github_copilot_oauth()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/github/oauth/callback")
-async def github_copilot_oauth_callback(
-    code: str = Query(""),
-    state: str = Query(""),
-    error: str = Query(""),
-):
-    """Receive GitHub OAuth callback and save the OpenCode Copilot token."""
-    success = False
-    message = ""
-    try:
-        if error:
-            raise RuntimeError(f"GitHub returned error: {error}")
-        exchange_github_copilot_oauth_code(code, state)
-        success = True
-        message = "GitHub Copilot credential saved for OpenCode."
-    except Exception as exc:  # noqa: BLE001
-        message = str(exc)
-    return Response(
-        content=github_copilot_oauth_result_page(success=success, message=message),
-        media_type="text/html",
-    )
-
-
-@router.post("/github/copilot/device/start", response_model=GitHubCopilotDeviceAuthResponse)
-async def github_copilot_device_start(
-    user: dict = Depends(get_current_user),
-):
-    """Start dashboard-managed GitHub device-code login for Copilot."""
-    try:
-        return start_github_copilot_device_auth()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/github/copilot/device/status", response_model=GitHubCopilotDeviceAuthResponse)
-async def github_copilot_device_status(
-    user: dict = Depends(get_current_user),
-):
-    """Return current dashboard-managed GitHub Copilot login status."""
-    return get_github_copilot_device_auth_status()
-
-
-class GitHubCopilotSyncRequest(BaseModel):
-    project_dir: str = ""
-
-
-@router.post("/github/copilot/sync-opencode", response_model=GitHubCopilotSyncResponse)
-async def github_copilot_sync_opencode(
-    request: GitHubCopilotSyncRequest = Body(default_factory=GitHubCopilotSyncRequest),
-    user: dict = Depends(get_current_user),
-):
-    """Sync the GitHub Copilot OAuth provider alias into OpenCode config files."""
-    try:
-        project_dir = FSPath(request.project_dir).expanduser() if request.project_dir else None
-        return sync_github_copilot_opencode_config(project_dir=project_dir)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Google OAuth2 Flow ─────────────────────────────────────────────────
@@ -1135,6 +1043,101 @@ def _oauth_result_page(
 </script>
 </body></html>"""
     return HTMLResponse(content=html)
+
+
+# ── GitHub Copilot OAuth & device flow ────────────────────────────────
+
+
+@router.get("/github/copilot/session")
+async def github_copilot_session(
+    user: dict = Depends(get_current_user),
+):
+    """Report whether a GitHub Copilot credential is saved."""
+    return github_copilot_auth.get_github_copilot_session_status()
+
+
+@router.post("/github/copilot/device/start")
+async def github_copilot_device_start(
+    user: dict = Depends(get_current_user),
+):
+    """Begin the GitHub Copilot device-authorization flow via OpenCode.
+
+    Returns ``user_code`` + ``verification_url`` for the user to enter in a
+    browser, plus the current ``status``.
+    """
+    try:
+        return github_copilot_auth.start_github_copilot_device_auth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/github/copilot/device/status")
+async def github_copilot_device_status(
+    user: dict = Depends(get_current_user),
+):
+    """Return the current state of an in-progress device-authorization flow."""
+    return github_copilot_auth.get_github_copilot_device_auth_status()
+
+
+@router.get("/github/copilot/models")
+async def github_copilot_models(
+    user: dict = Depends(get_current_user),
+):
+    """Return the live list of model IDs available to the connected Copilot user.
+
+    Performs the GitHub → Copilot token exchange on demand.  Falls back to the
+    static model list when Copilot is not connected or the exchange fails.
+    """
+    token = github_copilot_auth.get_saved_github_copilot_token()
+    if not token:
+        return {"connected": False, "models": list(github_copilot_auth.FALLBACK_COPILOT_MODELS)}
+    try:
+        models = github_copilot_auth._fetch_copilot_model_ids(token)
+    except Exception:  # noqa: BLE001
+        models = list(github_copilot_auth.FALLBACK_COPILOT_MODELS)
+    return {"connected": True, "models": models}
+
+
+@router.post("/github/oauth/start")
+async def github_copilot_oauth_start(
+    user: dict = Depends(get_current_user),
+):
+    """Begin the browser-based GitHub OAuth flow for Copilot."""
+    try:
+        return github_copilot_auth.start_github_copilot_oauth()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/github/oauth/callback")
+async def github_copilot_oauth_callback(
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+):
+    """OAuth callback for the browser-based GitHub Copilot login flow."""
+    from fastapi.responses import HTMLResponse as _HTML
+
+    if error:
+        page = github_copilot_auth.github_copilot_oauth_result_page(
+            success=False,
+            message=f"GitHub returned an error: {error}",
+        )
+        return _HTML(content=page)
+
+    try:
+        github_copilot_auth.exchange_github_copilot_oauth_code(code, state)
+        _try_opencode_sync()
+        page = github_copilot_auth.github_copilot_oauth_result_page(
+            success=True,
+            message="GitHub Copilot connected successfully.",
+        )
+    except RuntimeError as exc:
+        page = github_copilot_auth.github_copilot_oauth_result_page(
+            success=False,
+            message=str(exc),
+        )
+    return _HTML(content=page)
 
 
 def _notify_bot_restart() -> None:
