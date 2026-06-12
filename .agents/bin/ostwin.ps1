@@ -1,1 +1,2537 @@
-ostwin
+#!/usr/bin/env -S pwsh -NoProfile
+<#
+.SYNOPSIS
+    ostwin CLI — unified entry point for Agent OS (pure PowerShell)
+
+.DESCRIPTION
+    Multi-Agent War-Room Orchestrator.
+    100% PowerShell implementation — zero bash/shell dependencies.
+    All commands invoke .ps1 scripts directly.
+
+.EXAMPLE
+    ostwin.ps1 run plans/my-feature.md
+    ostwin.ps1 status --watch
+    ostwin.ps1 plan create "My Plan"
+    ostwin.ps1 skills install https://github.com/user/repo
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)]
+    [string]$Command,
+
+    [Parameter(Position = 1, ValueFromRemainingArguments)]
+    [string[]]$Arguments
+)
+
+$ErrorActionPreference = "Stop"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Activate the Ostwin venv — makes `python` resolve to the managed interpreter
+# ──────────────────────────────────────────────────────────────────────────────
+$OstwinHome = if ($env:OSTWIN_HOME) { $env:OSTWIN_HOME } else { Join-Path ($env:USERPROFILE ?? $HOME) ".ostwin" }
+
+# Cross-platform: Windows uses Scripts/, macOS+Linux use bin/
+$venvActivate = if ($IsWindows) {
+    Join-Path $OstwinHome ".venv" "Scripts" "Activate.ps1"
+} else {
+    Join-Path $OstwinHome ".venv" "bin" "Activate.ps1"
+}
+if (Test-Path $venvActivate) {
+    . $venvActivate
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Load global .env (from ~/.ostwin/.env)
+# ──────────────────────────────────────────────────────────────────────────────
+function Import-EnvFile {
+    [CmdletBinding()]
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    foreach ($line in Get-Content $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed -notmatch '=') { continue }
+        $eqIdx = $trimmed.IndexOf('=')
+        $key = $trimmed.Substring(0, $eqIdx).Trim()
+        $val = $trimmed.Substring($eqIdx + 1).Trim()
+        # Strip surrounding quotes
+        if (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+            ($val.StartsWith("'") -and $val.EndsWith("'"))) {
+            $val = $val.Substring(1, $val.Length - 2)
+        }
+        # Only set if not already defined
+        if ($key -and -not [System.Environment]::GetEnvironmentVariable($key, 'Process')) {
+            [System.Environment]::SetEnvironmentVariable($key, $val, 'Process')
+        }
+    }
+}
+
+$globalEnv = Join-Path $OstwinHome ".env"
+Import-EnvFile -Path $globalEnv
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Resolve AGENTS_DIR — search from cwd upward for .agents/
+# ──────────────────────────────────────────────────────────────────────────────
+$AgentsDir = ""
+
+$cwd = (Get-Location).Path
+if ((Test-Path (Join-Path $cwd ".agents/config.json"))) {
+    # Running from project root
+    $AgentsDir = (Resolve-Path (Join-Path $cwd ".agents")).Path
+}
+elseif ((Test-Path (Join-Path $cwd "config.json")) -and (Test-Path (Join-Path $cwd "bin"))) {
+    # Running from inside .agents itself
+    $AgentsDir = $cwd
+}
+else {
+    # Walk up to find .agents
+    $searchDir = $cwd
+    while ($searchDir -and $searchDir -ne [System.IO.Path]::GetPathRoot($searchDir)) {
+        if ((Test-Path (Join-Path $searchDir "config.json")) -and (Test-Path (Join-Path $searchDir "bin"))) {
+            $AgentsDir = $searchDir
+            break
+        }
+        $agentsCandidate = Join-Path $searchDir ".agents"
+        if ((Test-Path (Join-Path $agentsCandidate "config.json"))) {
+            $AgentsDir = (Resolve-Path $agentsCandidate).Path
+            break
+        }
+        $searchDir = Split-Path $searchDir -Parent
+    }
+}
+
+# Final fallback: script-relative
+if (-not $AgentsDir) {
+    if ($PSCommandPath) {
+        $scriptDir = Split-Path $PSCommandPath -Parent
+        $AgentsDir = (Resolve-Path (Join-Path $scriptDir "..")).Path
+    } else {
+        $AgentsDir = Join-Path $OstwinHome ".agents"
+    }
+}
+
+# After venv activation, resolve python
+$PythonCmd = if (Get-Command python -ErrorAction SilentlyContinue) { "python" }
+elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
+else { "python" }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. Load project .env (from AGENTS_DIR/.env)
+# ──────────────────────────────────────────────────────────────────────────────
+Import-EnvFile -Path (Join-Path (Split-Path $AgentsDir -Parent) ".env")  # project root .env
+Import-EnvFile -Path (Join-Path $AgentsDir ".env")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. Global variables
+# ──────────────────────────────────────────────────────────────────────────────
+# Version from config.json
+$Version = "unknown"
+try {
+    $configPath = Join-Path $AgentsDir "config.json"
+    if (Test-Path $configPath) {
+        $configData = Get-Content $configPath -Raw | ConvertFrom-Json
+        $Version = $configData.version
+    }
+}
+catch { }
+
+# Build hash
+$BuildHash = ""
+foreach ($hashFile in @((Join-Path $OstwinHome ".build-hash"), (Join-Path $AgentsDir ".build-hash"))) {
+    if (Test-Path $hashFile) {
+        $BuildHash = (Get-Content $hashFile -Raw).Trim()
+        break
+    }
+}
+
+# Dashboard URL
+if (-not $env:DASHBOARD_URL) {
+    $env:DASHBOARD_URL = "http://localhost:3366"
+}
+$DashboardUrl = $env:DASHBOARD_URL
+
+# API key for auth headers
+$OstwinApiKey = $env:OSTWIN_API_KEY
+$AuthHeaders = @{}
+if ($OstwinApiKey) {
+    $AuthHeaders["X-API-Key"] = $OstwinApiKey
+}
+
+# Default WARROOMS_DIR
+$warRoomsDirWasDefaulted = $false
+if (-not $env:WARROOMS_DIR) {
+    $defaultWarRoomsBase = if ((Split-Path $cwd -Leaf) -eq '.agents') { Split-Path $cwd -Parent } else { $cwd }
+    $env:WARROOMS_DIR = Join-Path $defaultWarRoomsBase ".war-rooms"
+    $warRoomsDirWasDefaulted = $true
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. Helper functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+function Test-DashboardReachable {
+    [CmdletBinding()]
+    param([string]$Url = $DashboardUrl)
+    try {
+        $null = Invoke-RestMethod -Uri "$Url/api/status" -Headers $AuthHeaders -TimeoutSec 3 -ErrorAction Stop
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Invoke-DashboardApi {
+    <#
+    .SYNOPSIS
+        Calls a dashboard API endpoint with auth headers.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Endpoint,
+        [string]$Method = "GET",
+        [object]$Body,
+        [switch]$Raw
+    )
+    $uri = "$DashboardUrl$Endpoint"
+    $params = @{
+        Uri         = $uri
+        Method      = $Method
+        Headers     = $AuthHeaders
+        TimeoutSec  = 30
+        ErrorAction = "Stop"
+    }
+    if ($Body) {
+        $params["ContentType"] = "application/json"
+        if ($Body -is [string]) {
+            $params["Body"] = $Body
+        }
+        else {
+            $params["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress)
+        }
+    }
+    if ($Raw) {
+        return Invoke-WebRequest @params
+    }
+    return Invoke-RestMethod @params
+}
+
+function Resolve-PlanId {
+    <#
+    .SYNOPSIS
+        Resolves a plan_id (hex) or file path to a plan file path and working_dir.
+    .OUTPUTS
+        Returns a PSObject with PlanFile and WorkingDir properties, or $null on failure.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Arg)
+
+    # If it's an existing file, use directly
+    if (Test-Path $Arg -PathType Leaf) {
+        $content = Get-Content $Arg -Raw
+        $workingDir = ""
+        if ($content -match '(?m)^\s*working_dir:\s*(.+)$') {
+            $workingDir = $Matches[1].Trim()
+        }
+        if (-not $workingDir -and ($content -match '(?m)^>\s*Project:\s*(.+)$')) {
+            $workingDir = $Matches[1].Trim()
+        }
+        return [PSCustomObject]@{ PlanFile = (Resolve-Path $Arg).Path; WorkingDir = $workingDir }
+    }
+
+    # If it looks like a hex plan_id (8-64 hex chars, no slashes/dots)
+    if ($Arg -match '^[0-9a-fA-F]{8,64}$') {
+        $localCandidates = @(
+            (Join-Path $OstwinHome ".agents/plans" "$Arg.md"),
+            (Join-Path $AgentsDir "plans" "$Arg.md")
+        )
+
+        $localPlanFile = ""
+        foreach ($c in $localCandidates) {
+            if (Test-Path $c) {
+                $localPlanFile = $c
+                break
+            }
+        }
+
+        if ($localPlanFile) {
+            $workingDir = ""
+            $metaFile = $localPlanFile -replace '\.md$', '.meta.json'
+            if (Test-Path $metaFile) {
+                try {
+                    $meta = Get-Content $metaFile -Raw | ConvertFrom-Json
+                    if ($meta.working_dir) { $workingDir = $meta.working_dir }
+                }
+                catch { }
+            }
+            if (-not $workingDir) {
+                $content = Get-Content $localPlanFile -Raw
+                if ($content -match '(?m)^\s*working_dir:\s*(.+)$') {
+                    $workingDir = $Matches[1].Trim()
+                }
+                if (-not $workingDir -and ($content -match '(?m)^>\s*Project:\s*(.+)$')) {
+                    $workingDir = $Matches[1].Trim()
+                }
+            }
+            Write-Host ([char]0x2713 + " Resolved plan_id '$Arg' -> $localPlanFile (local)")
+            if ($workingDir) {
+                Write-Host "  Working dir: $workingDir"
+            }
+            return [PSCustomObject]@{ PlanFile = $localPlanFile; WorkingDir = $workingDir }
+        }
+
+        if (Test-DashboardReachable) {
+            try {
+                $apiResponse = Invoke-DashboardApi -Endpoint "/api/plans/$Arg"
+                $plan = $apiResponse.plan
+                $filename = $plan.filename
+                $workingDir = if ($plan.working_dir) { $plan.working_dir }
+                elseif ($plan.meta.working_dir) { $plan.meta.working_dir }
+                else { "" }
+
+                $planFile = ""
+                if ($filename) {
+                    $candidates = @(
+                        (Join-Path $AgentsDir "plans" $filename),
+                        (Join-Path $OstwinHome ".agents/plans" $filename)
+                    )
+                    foreach ($c in $candidates) {
+                        if (Test-Path $c) {
+                            $planFile = $c
+                            break
+                        }
+                    }
+                    if (-not $planFile) {
+                        $planFile = $candidates[0]
+                    }
+                }
+
+                if ($planFile -and (Test-Path $planFile)) {
+                    Write-Host ([char]0x2713 + " Resolved plan_id '$Arg' -> $planFile")
+                    if ($workingDir) {
+                        Write-Host "  Working dir: $workingDir"
+                    }
+                    return [PSCustomObject]@{ PlanFile = $planFile; WorkingDir = $workingDir }
+                }
+                else {
+                    Write-Error ([char]0x2717 + " Plan file not found for plan_id '$Arg'")
+                    Write-Error "  Searched: $AgentsDir/plans/ and ~/.ostwin/.agents/plans/"
+                    return $null
+                }
+            }
+            catch {
+                $errDetail = ""
+                if ($_.Exception -is [System.Management.Automation.ErrorRecord] -and $_.Exception.Response) {
+                    try {
+                        $sr = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+                        $errBody = $sr.ReadToEnd()
+                        $sr.Close()
+                        if ($errBody -match '"detail"') {
+                            $errJson = $errBody | ConvertFrom-Json
+                            $errDetail = $errJson.detail
+                        }
+                    }
+                    catch { }
+                }
+                if ($errDetail -match "nvalid API key|Missing API key|401|Unauthorized") {
+                    Write-Error ([char]0x2717 + " Auth failed: $errDetail")
+                    Write-Error "  Set OSTWIN_API_KEY or use a file path instead."
+                }
+                else {
+                    Write-Error ([char]0x2717 + " Plan '$Arg' not found via API: $errDetail")
+                }
+                return $null
+            }
+        }
+        else {
+            Write-Error ([char]0x2717 + " Plan '$Arg' not found on disk and dashboard unreachable")
+            Write-Error "  Searched: $($localCandidates -join ', ')"
+            Write-Error "  Start dashboard with: ostwin dashboard"
+            return $null
+        }
+    }
+
+    # Not a file and not hex — pass through
+    return [PSCustomObject]@{ PlanFile = $Arg; WorkingDir = "" }
+}
+
+function Resolve-OstwinRunWorkingDir {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$WorkingDir)
+
+    $effective = $WorkingDir
+    if ([string]::IsNullOrWhiteSpace($effective) -or $effective -eq '.') {
+        $effective = (Get-Location).Path
+        if ((Split-Path $effective -Leaf) -eq '.agents') {
+            $effective = Split-Path $effective -Parent
+        }
+    } elseif (-not [System.IO.Path]::IsPathRooted($effective)) {
+        $effective = Join-Path (Get-Location).Path $effective
+    }
+
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($effective)
+}
+
+function Invoke-OstwinRunGitPreflight {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WorkingDir,
+        [ValidateSet('room-worktree','shared')][string]$WorkspaceIsolation = 'shared'
+    )
+
+    if ($WorkspaceIsolation -eq 'shared') { return }
+    $workspaceModule = Join-Path $AgentsDir "workspace/GitWorkspace.psm1"
+    if (-not (Test-Path $workspaceModule)) {
+        Write-Error "Workspace isolation requires GitWorkspace.psm1, but it was not found at $workspaceModule"
+        exit 1
+    }
+    Import-Module (Resolve-Path $workspaceModule).Path -Force
+
+    $ready = Test-GitReady -WorkingDir $WorkingDir -AllowRuntimeState
+    if (-not $ready.Ready) {
+        Write-Error "Git preflight failed for '$WorkingDir': $($ready.Message)"
+        Write-Host "  Room worktree isolation needs an existing Git work tree with a HEAD commit and no dirty tracked files." -ForegroundColor Yellow
+        Write-Host "  Commit or stash tracked changes, finish any merge/rebase/cherry-pick/revert, then rerun." -ForegroundColor Yellow
+        Write-Host "  For non-Git experiments only, rerun with --workspace-isolation shared." -ForegroundColor Yellow
+        exit 1
+    }
+
+    # Untracked files never block: room worktrees fork from HEAD so this work
+    # is simply invisible to agents until committed. Surface that clearly.
+    if (($ready.PSObject.Properties.Name -contains 'UntrackedPaths') -and @($ready.UntrackedPaths).Count -gt 0) {
+        Write-Host "  [preflight] Untracked files present — NOT visible to room worktrees until committed:" -ForegroundColor Yellow
+        foreach ($p in @($ready.UntrackedPaths) | Select-Object -First 10) {
+            Write-Host "    - $p" -ForegroundColor Yellow
+        }
+        if (@($ready.UntrackedPaths).Count -gt 10) {
+            Write-Host "    ... and $(@($ready.UntrackedPaths).Count - 10) more" -ForegroundColor Yellow
+        }
+    }
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. Help text
+# ──────────────────────────────────────────────────────────────────────────────
+function Show-OstwinHelp {
+    $hashSuffix = if ($BuildHash) { " ($BuildHash)" } else { "" }
+    Write-Host @"
+ostwin v${Version}${hashSuffix} -- Multi-Agent War-Room Orchestrator
+
+Usage:
+  ostwin <command> [options]
+
+Commands:
+  run <plan_id|file> Execute a plan by ID or file path
+                     Options: --dry-run, --resume, --expand, --enable-planning,
+                              --working-dir PATH,
+                               --workspace-isolation room-worktree|shared
+  plan <sub>        Plan management (AI-assisted)
+                     Subcommands: create [Title|file.md] [--file FILE], start, list, clear
+  init [directory]  Scaffold Agent OS into a project
+  sync [directory]  Sync framework updates to an initialized project
+  status            Show war-room dashboard
+                     Options: --json, --watch
+  logs [room-id]    View channel logs
+                     Options: --follow, --type TYPE, --last N
+  stop              Graceful shutdown of running manager
+                     Options: --force
+  dashboard         Launch web dashboard
+                      Options: --port PORT, --project-dir PATH
+                      Subcommands: start, stop, restart, status, logs, autostart
+  channel <sub>     Manage communication channels (telegram, discord, slack)
+                     Subcommands: list, connect, disconnect, test, pair
+  config            View or update configuration
+                     Options: --get KEY, --set KEY VALUE
+  mac <script> <cmd>  macOS desktop automation (shorthand for role dispatch)
+                      Scripts: app, window, click, type, capture, system,
+                               finder, axbridge, devtools
+                      Run 'ostwin mac <script> help' for per-script usage
+  role <name> [sub]  Run a role's subcommand
+                       Options: ostwin role (list roles)
+                                ostwin role <name> (show subcommands)
+                                ostwin role <name> <sub> [args...]
+  health            Check system health
+  skills <sub>      Manage skills installation and sync
+                     Subcommands: sync, install [<slug>|--from DIR], list,
+                                  search <query>, update [--all|<slug>], remove <slug>
+  mcp               Manage MCP extensions
+                     Subcommands: install, list, catalog, remove, sync,
+                                  test, compile, credentials, migrate, init-project
+  search-engine     Install and run local SearXNG search under ~/.ostwin
+                     Subcommands: install, configure, start, stop, status, settings
+  reload-env        Reload ~/.ostwin/.env into MCP config env blocks
+  memory <sub>      Manage agent memory namespaces
+                     Subcommands: list, stats, tree, clear, delete, archive, export
+  test              Run test suites
+                     Options: --suite NAME, --path PATH, --verbose
+  version           Show version
+
+Examples:
+  ostwin run plans/my-feature.md
+  ostwin run plans/my-feature.md --dry-run
+  ostwin run plans/my-feature.md --resume --expand --enable-planning
+  ostwin status --watch
+  ostwin logs room-001 --follow
+  ostwin stop
+
+Environment:
+  ENGINEER_CMD        Override engineer CLI
+  QA_CMD              Override QA CLI
+  MOCK_SIGNOFF        Set to "true" for auto-signoff (testing)
+  AGENT_OS_LOG_LEVEL  Log level: DEBUG, INFO, WARN, ERROR (default: INFO)
+  WARROOMS_DIR        Override war-rooms data directory
+                      (default: <project>\.war-rooms)
+"@
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 8. Command dispatch
+# ──────────────────────────────────────────────────────────────────────────────
+switch ($Command) {
+
+
+
+    # ── run ──────────────────────────────────────────────────────────────────
+    "run" {
+        $runArgs = [System.Collections.ArrayList]::new()
+        $planArgResolved = $false
+        $resolvedPlanFile = ""
+        # `ostwin run` is intentionally anchored to the directory where the
+        # command is invoked. Plan files may contain stale `working_dir:` values
+        # from creation time; those are treated as metadata unless the caller
+        # explicitly passes --working-dir.
+        $commandWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir ""
+        $resolvedWorkingDir = $commandWorkingDir
+        $planDeclaredWorkingDir = ""
+        $workspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "shared" }
+        $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
+        $expectingValueFor = ""
+        $explicitWorkingDir = $false
+
+        foreach ($a in $Arguments) {
+            if ($expectingValueFor) {
+                $null = $runArgs.Add($a)
+                switch ($expectingValueFor) {
+                    '--workspace-isolation' { $workspaceIsolation = $a }
+                    '--working-dir' { $resolvedWorkingDir = $a }
+                    '--plan-file' { $resolvedPlanFile = $a; $planArgResolved = $true }
+                    $deprecatedWorkspaceRootFlag { }
+                }
+                $expectingValueFor = ""
+                continue
+            }
+            if ($a -in @('--workspace-isolation', $deprecatedWorkspaceRootFlag, '--working-dir', '--plan-file', '--max-rooms')) {
+                if ($a -eq '--working-dir') {
+                    $explicitWorkingDir = $true
+                    for ($ri = $runArgs.Count - 1; $ri -ge 0; $ri--) {
+                        if ($runArgs[$ri] -eq '--working-dir') {
+                            if (($ri + 1) -lt $runArgs.Count) {
+                                $runArgs.RemoveAt($ri + 1)
+                            }
+                            $runArgs.RemoveAt($ri)
+                        }
+                    }
+                }
+                $null = $runArgs.Add($a)
+                $expectingValueFor = $a
+                continue
+            }
+            if ((-not $planArgResolved) -and ($a -notmatch '^--')) {
+                $resolved = Resolve-PlanId -Arg $a
+                if (-not $resolved) { exit 1 }
+                $resolvedPlanFile = $resolved.PlanFile
+                if ($resolved.WorkingDir) {
+                    $planDeclaredWorkingDir = $resolved.WorkingDir
+                }
+                $null = $runArgs.Add("--plan-file")
+                $null = $runArgs.Add($resolvedPlanFile)
+                $planArgResolved = $true
+            }
+            else {
+                $null = $runArgs.Add($a)
+            }
+        }
+
+        # ── Check for missing roles ──
+        if ($planArgResolved -and (Test-Path $resolvedPlanFile)) {
+            $planContent = Get-Content $resolvedPlanFile -Raw
+            # Extract all roles from Roles: lines — mirrors PlanParser.psm1 logic
+            $neededRoles = [regex]::Matches($planContent, '(?m)^Roles:\s*(.+)$') |
+                ForEach-Object {
+                    $line = $_.Groups[1].Value -replace '\(.*$', ''   # strip inline comments
+                    ($line -split '[,\s]+') |
+                        ForEach-Object { ($_.Trim() -replace '^@', '') } |
+                        Where-Object { $_ -match '[a-zA-Z0-9]' -and $_ -notmatch '^<.*>$' }
+                } |
+                Sort-Object -Unique
+
+            $projectRoot = Split-Path $AgentsDir -Parent
+            $missingRoles = @()
+            foreach ($r in $neededRoles) {
+                $found = $false
+                foreach ($roleDir in @(
+                        (Join-Path $AgentsDir "roles" $r),
+                        (Join-Path $OstwinHome ".agents/roles" $r),
+                        (Join-Path $projectRoot "contributes/roles" $r)
+                    )) {
+                    if (Test-Path $roleDir -PathType Container) {
+                        $found = $true
+                        break
+                    }
+                }
+                if (-not $found) { $missingRoles += $r }
+            }
+
+            if ($missingRoles.Count -gt 0) {
+                Write-Host ([char]0x26A0 + " Found missing roles needed by the plan: $($missingRoles -join ', ')")
+
+                $isInteractive = [Environment]::UserInteractive -and
+                (-not ($runArgs -contains '--non-interactive')) -and
+                (-not ($runArgs -contains '-n'))
+
+                $doCreate = $false
+                if ($isInteractive) {
+                    $reply = Read-Host "Do you want the manager agent to automatically create these roles now? [Y/n]"
+                    if (-not $reply -or $reply -match '^[Yy]') { $doCreate = $true }
+                }
+                else {
+                    Write-Host "Non-interactive mode. Auto-creating missing roles..."
+                    $doCreate = $true
+                }
+
+                if ($doCreate) {
+                    Write-Host "Scaffolding missing roles..."
+                    $createRoleScript = Join-Path $AgentsDir "bin/Auto-CreateRole.ps1"
+                    foreach ($mr in $missingRoles) {
+                        if (Test-Path $createRoleScript) {
+                            & pwsh -NoProfile -File $createRoleScript $mr $AgentsDir
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-Warning "Auto-CreateRole.ps1 exited with code $LASTEXITCODE for role '$mr'"
+                            }
+                        }
+                        else {
+                            Write-Warning "Auto-CreateRole.ps1 not found — skipping role '$mr'"
+                        }
+                    }
+
+                    # Verify creation
+                    $failedRoles = @()
+                    foreach ($mr in $missingRoles) {
+                        $found = $false
+                        foreach ($roleDir in @(
+                                (Join-Path $AgentsDir "roles" $mr),
+                                (Join-Path $OstwinHome ".agents/roles" $mr),
+                                (Join-Path $projectRoot "contributes/roles" $mr)
+                            )) {
+                            if (Test-Path $roleDir -PathType Container) {
+                                $found = $true
+                                break
+                            }
+                        }
+                        if (-not $found) { $failedRoles += $mr }
+                    }
+
+                    if ($failedRoles.Count -gt 0) {
+                        Write-Error ([char]0x2717 + " Failed to create roles: $($failedRoles -join ', '). Aborting.")
+                        exit 1
+                    }
+                }
+                else {
+                    Write-Host "Aborting run. Please create the missing roles manually."
+                    exit 1
+                }
+            }
+        }
+
+        # ── Preserve plan-declared working_dir for diagnostics only. Runtime
+        # working_dir remains the command cwd unless --working-dir was supplied.
+        if (-not $planDeclaredWorkingDir -and (Test-Path $resolvedPlanFile)) {
+            $pc = Get-Content $resolvedPlanFile -Raw
+            # Pattern 1: YAML-style  working_dir: /path
+            if ($pc -match '(?m)^\s*working_dir:\s*(.+)$') {
+                $planDeclaredWorkingDir = $Matches[1].Trim()
+            }
+            # Pattern 2: Markdown    > **Working dir:** `/path`
+            if (-not $planDeclaredWorkingDir -and ($pc -match '(?m)^>\s*\*\*Working dir:\*\*\s*`([^`]+)`')) {
+                $planDeclaredWorkingDir = $Matches[1].Trim()
+            }
+            # Pattern 3: Markdown    > Project: /path
+            if (-not $planDeclaredWorkingDir -and ($pc -match '(?m)^>\s*Project:\s*(.+)$')) {
+                $planDeclaredWorkingDir = $Matches[1].Trim()
+            }
+        }
+
+        if ($workspaceIsolation -notin @('room-worktree', 'shared')) {
+            Write-Error "Invalid --workspace-isolation '$workspaceIsolation'. Expected room-worktree or shared."
+            exit 1
+        }
+
+        $effectiveWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir $resolvedWorkingDir
+        if ($warRoomsDirWasDefaulted) {
+            $env:WARROOMS_DIR = Join-Path $effectiveWorkingDir ".war-rooms"
+        }
+        if ($explicitWorkingDir) {
+            Write-Host "  Working dir override: $effectiveWorkingDir" -ForegroundColor DarkGray
+        }
+        if ($workspaceIsolation -eq 'room-worktree') {
+            # The .opencode/opencode.json runtime check happens AFTER the
+            # auto-init below — init generates it, so checking here would make
+            # a freshly cleaned project impossible to bootstrap.
+            Invoke-OstwinRunGitPreflight -WorkingDir $effectiveWorkingDir -WorkspaceIsolation $workspaceIsolation
+        }
+        if ($effectiveWorkingDir -and $effectiveWorkingDir -ne ".") {
+            if (-not (Test-Path $effectiveWorkingDir -PathType Container)) {
+                Write-Host ([char]::ConvertFromUtf32(0x1F4C1) + " Creating project directory: $effectiveWorkingDir")
+                New-Item -ItemType Directory -Path $effectiveWorkingDir -Force | Out-Null
+            }
+        }
+        # Ensure project env is initialized (.agents/ + .opencode/opencode.json)
+        # Uses the same pattern as `ostwin init`, plus -PlanId for memory binding.
+        # init.ps1 handles idempotency — fast-exits when already set up.
+        $initTarget = $effectiveWorkingDir
+        $initPs1 = Join-Path $AgentsDir "init.ps1"
+        if (Test-Path $initPs1) {
+            $psArgs = [System.Collections.ArrayList]::new()
+            $null = $psArgs.Add($initTarget)
+            $null = $psArgs.Add('-Yes')   # non-interactive during run
+            # Extract plan_id: use hash ID if filename is hex, else generate stable hash
+            if ($resolvedPlanFile) {
+                $initPlanStem = [System.IO.Path]::GetFileNameWithoutExtension($resolvedPlanFile)
+                $initPlanStem = $initPlanStem -replace '\.refined$', ''
+                if ($initPlanStem -and $initPlanStem -ne 'PLAN.template') {
+                    if ($initPlanStem -match '^[0-9a-fA-F]{8,64}$') {
+                        $initPlanId = $initPlanStem
+                    } else {
+                        # Generate stable hash from working_dir + filename
+                        $hashInput = "${initTarget}:${initPlanStem}"
+                        $sha = [System.Security.Cryptography.SHA256]::Create()
+                        $bytes = [System.Text.Encoding]::UTF8.GetBytes($hashInput)
+                        $hash = $sha.ComputeHash($bytes)
+                        $initPlanId = [BitConverter]::ToString($hash).Replace('-', '').Substring(0, 12).ToLower()
+                    }
+                    $null = $psArgs.Add('-PlanId')
+                    $null = $psArgs.Add($initPlanId)
+                }
+            }
+            try {
+                & pwsh -NoProfile -File $initPs1 @psArgs
+            } catch {
+                Write-Host "  [init] Warning: init.ps1 returned non-zero: $_"
+            }
+        } else {
+            Write-Error "[ERROR] init.ps1 not found at $initPs1"
+        }
+
+        # Room-worktree mode needs the pre-compiled opencode config. Verify it
+        # exists now that auto-init has run (it scaffolds .opencode/opencode.json).
+        if ($workspaceIsolation -eq 'room-worktree' -and -not (Test-Path (Join-Path $effectiveWorkingDir ".opencode/opencode.json"))) {
+            Write-Error "Ostwin runtime initialization failed in '$effectiveWorkingDir' (.opencode/opencode.json still missing after auto-init). Run 'ostwin init $effectiveWorkingDir' manually and check its output for errors."
+            exit 1
+        }
+
+        # Normalize the runtime working directory passed to Start-Plan. Remove any
+        # raw/relative --working-dir occurrence collected during argument parsing
+        # and replace it with the effective absolute path.
+        for ($ri = $runArgs.Count - 1; $ri -ge 0; $ri--) {
+            if ($runArgs[$ri] -eq '--working-dir') {
+                if (($ri + 1) -lt $runArgs.Count) {
+                    $runArgs.RemoveAt($ri + 1)
+                }
+                $runArgs.RemoveAt($ri)
+            }
+            elseif ($runArgs[$ri] -eq '--workspace-isolation') {
+                if (($ri + 1) -lt $runArgs.Count) {
+                    $runArgs.RemoveAt($ri + 1)
+                }
+                $runArgs.RemoveAt($ri)
+            }
+            elseif ($runArgs[$ri] -eq $deprecatedWorkspaceRootFlag) {
+                if (($ri + 1) -lt $runArgs.Count) {
+                    $runArgs.RemoveAt($ri + 1)
+                }
+                $runArgs.RemoveAt($ri)
+            }
+        }
+        $null = $runArgs.Add('--working-dir')
+        $null = $runArgs.Add($effectiveWorkingDir)
+        $null = $runArgs.Add('--workspace-isolation')
+        $null = $runArgs.Add($workspaceIsolation)
+        # Dispatch to Start-Plan.ps1
+        $startPlan = Join-Path $AgentsDir "plan/Start-Plan.ps1"
+        if (Test-Path $startPlan) {
+            # Convert remaining bash-style flags to PS params
+            $psArgs = [System.Collections.ArrayList]::new()
+            $i = 0
+            while ($i -lt $runArgs.Count) {
+                switch ($runArgs[$i]) {
+                    '--dry-run' { $null = $psArgs.Add('-DryRun'); $i++ }
+                    '--resume' { $null = $psArgs.Add('-Resume'); $i++ }
+                    '--expand' { $null = $psArgs.Add('-Expand'); $i++ }
+                    '--review' { $null = $psArgs.Add('-Review'); $i++ }
+                    '--max-rooms' { $null = $psArgs.Add('-MaxConcurrent'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--plan-file' { $null = $psArgs.Add('-PlanFile'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $i++; $null = $psArgs.Add($runArgs[$i]); $i++ }
+                    '--non-interactive' { $null = $psArgs.Add('-NonInteractive'); $i++ }
+                    '--enable-planning' { $null = $psArgs.Add('-EnablePlanning'); $i++ }
+                    '-n' { $null = $psArgs.Add('-NonInteractive'); $i++ }
+                    default { $null = $psArgs.Add($runArgs[$i]); $i++ }
+                }
+            }
+            # `ostwin run` always treats the invocation directory (or explicit
+            # --working-dir) as authoritative, preventing stale PLAN.md
+            # working_dir values from overriding the user's current context.
+            $null = $psArgs.Add('-IgnorePlanWorkingDir')
+            & pwsh -NoProfile -File $startPlan @psArgs
+        }
+        else {
+            Write-Error "[ERROR] Start-Plan.ps1 not found at $startPlan"
+            exit 1
+        }
+    }
+
+    # ── plan ─────────────────────────────────────────────────────────────────
+    "plan" {
+        $planSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
+        $planArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
+
+        switch ($planSub) {
+            { $_ -in @("help", "--help", "-h") } {
+                Write-Host "Usage: ostwin plan <subcommand> [options]"
+                Write-Host ""
+                Write-Host "Subcommands:"
+                Write-Host "  create [Title|file.md] [--file FILE]   Create a plan via dashboard"
+                Write-Host "  start <plan_id|file> [options]         Execute a plan"
+                Write-Host "  list                                   List plans via dashboard"
+                Write-Host "  clear [--force]                        Clear local plan registry"
+                exit 0
+            }
+
+            "create" {
+                $planTitle = ""
+                $initFile = ""
+                $projectDir = $cwd
+
+                # Parse arguments
+                $idx = 0
+                while ($idx -lt $planArgs.Count) {
+                    switch ($planArgs[$idx]) {
+                        { $_ -eq '--file' -or $_ -eq '-f' } {
+                            $idx++
+                            $initFile = $planArgs[$idx]
+                            $idx++
+                        }
+                        { $_.StartsWith('-') } {
+                            Write-Error "Unknown option for plan create: $($planArgs[$idx])"
+                            exit 1
+                        }
+                        default {
+                            # Smart detect: if existing .md file, treat as --file
+                            if (-not $initFile -and (Test-Path $planArgs[$idx]) -and $planArgs[$idx] -match '\.md$') {
+                                $initFile = $planArgs[$idx]
+                            }
+                            elseif (-not $planTitle) {
+                                $planTitle = $planArgs[$idx]
+                            }
+                            $idx++
+                        }
+                    }
+                }
+
+                # Read init file content if provided
+                $initContent = ""
+                if ($initFile) {
+                    if (-not (Test-Path $initFile)) {
+                        Write-Error ([char]0x2717 + " File not found: $initFile")
+                        exit 1
+                    }
+                    $initContent = Get-Content $initFile -Raw
+
+                    # Extract title from markdown if not explicitly provided
+                    if (-not $planTitle) {
+                        $titleMatch = [regex]::Match($initContent, '(?m)^#\s+(?:Plan:\s*)?(.+)')
+                        if ($titleMatch.Success) {
+                            $planTitle = $titleMatch.Groups[1].Value.Trim()
+                        }
+                        else {
+                            $planTitle = [System.IO.Path]::GetFileNameWithoutExtension($initFile)
+                        }
+                    }
+                }
+
+                if (-not $planTitle) { $planTitle = "Untitled" }
+
+                # Check dashboard reachable
+                if (-not (Test-DashboardReachable)) {
+                    Write-Warning "Dashboard not reachable at $DashboardUrl"
+                    Write-Warning "Start it with: ostwin dashboard"
+                    exit 1
+                }
+
+                # Build JSON payload
+                $payload = @{ path = $projectDir; title = $planTitle }
+                if ($initContent) { $payload["content"] = $initContent }
+                $jsonPayload = $payload | ConvertTo-Json -Depth 5 -Compress
+
+                # Create plan via API
+                try {
+                    $response = Invoke-DashboardApi -Endpoint "/api/plans/create" -Method POST -Body $jsonPayload
+                }
+                catch {
+                    Write-Error ([char]0x2717 + " Failed to create plan: $_")
+                    exit 1
+                }
+
+                $planId = $response.plan_id
+                $planUrl = $response.url
+
+                if (-not $planId) {
+                    Write-Error ([char]0x2717 + " Failed to parse plan ID from response")
+                    exit 1
+                }
+
+                # Prefer tunnel URL
+                $shareUrl = $DashboardUrl
+                try {
+                    $tunnelData = Invoke-DashboardApi -Endpoint "/api/tunnel/status"
+                    if ($tunnelData.url) { $shareUrl = $tunnelData.url }
+                }
+                catch { }
+
+                $editorUrl = "${shareUrl}${planUrl}"
+                Write-Host ([char]0x2713 + " Plan created: $planId")
+                Write-Host "  Title:  $planTitle"
+                Write-Host "  Dir:    $projectDir"
+                if ($initFile) { Write-Host "  Source: $initFile" }
+                Write-Host "  Editor: $editorUrl"
+
+                # Open browser on Windows
+                try { Start-Process $editorUrl } catch { Write-Host "  -> Open this URL in your browser to edit the plan" }
+            }
+
+            "start" {
+                $startArgs = [System.Collections.ArrayList]::new()
+                $startResolved = $false
+                $startWorkspaceIsolation = if ($env:OSTWIN_WORKSPACE_ISOLATION) { $env:OSTWIN_WORKSPACE_ISOLATION } else { "shared" }
+                $deprecatedWorkspaceRootFlag = ('--work' + 'tree-root')
+                $startWorkingDir = ""
+                $startExpectingValueFor = ""
+
+                foreach ($a in $planArgs) {
+                    if ($startExpectingValueFor) {
+                        $null = $startArgs.Add($a)
+                        switch ($startExpectingValueFor) {
+                            '--workspace-isolation' { $startWorkspaceIsolation = $a }
+                            '--working-dir' { $startWorkingDir = $a }
+                            $deprecatedWorkspaceRootFlag { }
+                        }
+                        $startExpectingValueFor = ""
+                        continue
+                    }
+                    if ($a -in @('--workspace-isolation', $deprecatedWorkspaceRootFlag, '--working-dir')) {
+                        $null = $startArgs.Add($a)
+                        $startExpectingValueFor = $a
+                        continue
+                    }
+                    if ((-not $startResolved) -and ($a -notmatch '^--')) {
+                        $resolved = Resolve-PlanId -Arg $a
+                        if (-not $resolved) { exit 1 }
+                        $null = $startArgs.Add($resolved.PlanFile)
+                        if ($resolved.WorkingDir -and -not $startWorkingDir) {
+                            $startWorkingDir = $resolved.WorkingDir
+                            $null = $startArgs.Add("--working-dir")
+                            $null = $startArgs.Add($resolved.WorkingDir)
+                        }
+                        $startResolved = $true
+                    }
+                    else {
+                        $null = $startArgs.Add($a)
+                    }
+                }
+
+                $startPlan = Join-Path $AgentsDir "plan/Start-Plan.ps1"
+                if (Test-Path $startPlan) {
+                    # Translate flags
+                    $psArgs = [System.Collections.ArrayList]::new()
+                    if ($startWorkspaceIsolation -notin @('room-worktree', 'shared')) {
+                        Write-Error "Invalid --workspace-isolation '$startWorkspaceIsolation'. Expected room-worktree or shared."
+                        exit 1
+                    }
+                    $effectiveStartWorkingDir = Resolve-OstwinRunWorkingDir -WorkingDir $startWorkingDir
+                    Invoke-OstwinRunGitPreflight -WorkingDir $effectiveStartWorkingDir -WorkspaceIsolation $startWorkspaceIsolation
+                    if (-not ($startArgs -contains '--working-dir')) {
+                        $null = $startArgs.Add('--working-dir')
+                        $null = $startArgs.Add($effectiveStartWorkingDir)
+                    }
+                    for ($sri = $startArgs.Count - 1; $sri -ge 0; $sri--) {
+                        if ($startArgs[$sri] -eq '--workspace-isolation') {
+                            if (($sri + 1) -lt $startArgs.Count) { $startArgs.RemoveAt($sri + 1) }
+                            $startArgs.RemoveAt($sri)
+                        }
+                        elseif ($startArgs[$sri] -eq $deprecatedWorkspaceRootFlag) {
+                            if (($sri + 1) -lt $startArgs.Count) { $startArgs.RemoveAt($sri + 1) }
+                            $startArgs.RemoveAt($sri)
+                        }
+                    }
+                    $null = $startArgs.Add('--workspace-isolation')
+                    $null = $startArgs.Add($startWorkspaceIsolation)
+                    $si = 0
+                    while ($si -lt $startArgs.Count) {
+                        switch ($startArgs[$si]) {
+                            '--dry-run' { $null = $psArgs.Add('-DryRun'); $si++ }
+                            '--resume' { $null = $psArgs.Add('-Resume'); $si++ }
+                            '--expand' { $null = $psArgs.Add('-Expand'); $si++ }
+                            '--review' { $null = $psArgs.Add('-Review'); $si++ }
+                            '--working-dir' { $null = $psArgs.Add('-ProjectDir'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
+                            '--workspace-isolation' { $null = $psArgs.Add('-WorkspaceIsolation'); $si++; $null = $psArgs.Add($startArgs[$si]); $si++ }
+                            '--enable-planning' { $null = $psArgs.Add('-EnablePlanning'); $si++ }
+                            default { $null = $psArgs.Add($startArgs[$si]); $si++ }
+                        }
+                    }
+                    & pwsh -NoProfile -File $startPlan @psArgs
+                }
+                else {
+                    Write-Error "[ERROR] Start-Plan.ps1 not found."
+                    exit 1
+                }
+            }
+
+            "list" {
+                if (-not (Test-DashboardReachable)) {
+                    Write-Warning "Dashboard not reachable at $DashboardUrl"
+                    exit 1
+                }
+                try {
+                    $data = Invoke-DashboardApi -Endpoint "/api/plans"
+                    $plans = $data.plans
+                    if (-not $plans -or $plans.Count -eq 0) {
+                        Write-Host "No plans found."
+                    }
+                    else {
+                        foreach ($p in $plans) {
+                            $id = $p.plan_id.Substring(0, [Math]::Min(12, $p.plan_id.Length))
+                            $title = if ($p.title) { $p.title } else { "Untitled" }
+                            $status = if ($p.status) { $p.status } else { "unknown" }
+                            $epicCount = if ($p.epic_count) { $p.epic_count } else { 0 }
+                            Write-Host ("  {0}  {1,-30}  {2,-10}  {3} epics" -f $id, $title, $status, $epicCount)
+                        }
+                    }
+                }
+                catch {
+                    Write-Host "Failed to list plans."
+                }
+            }
+
+            "clear" {
+                $force = $false
+                foreach ($a in $planArgs) {
+                    if ($a -in @('-f', '--force', '-y', '--yes')) { $force = $true }
+                }
+
+                $plansDir = Join-Path $OstwinHome ".agents/plans"
+
+                # Check for OSTWIN_ZVEC_DIR or use default ~/.config/ostwin/.zvec
+                $envZvec = [Environment]::GetEnvironmentVariable("OSTWIN_ZVEC_DIR")
+                if ($envZvec) {
+                    $zvecPlans = Join-Path $envZvec "plans_v2"
+                } else {
+                    $userProfile = [Environment]::GetFolderPath("UserProfile")
+                    $zvecPlans = Join-Path $userProfile ".config/ostwin/.zvec/plans_v2"
+                }
+
+                # Count files to remove
+                $fileCount = 0
+                if (Test-Path $plansDir) {
+                    $fileCount = (Get-ChildItem -Path $plansDir -File | Where-Object { $_.Name -ne 'PLAN.template.md' }).Count
+                }
+                $zvecExists = Test-Path $zvecPlans -PathType Container
+
+                if ($fileCount -eq 0 -and -not $zvecExists) {
+                    Write-Host ([char]0x2713 + " No plans to clear (registry already empty)")
+                    exit 0
+                }
+
+                Write-Host "Will clear:"
+                if ($fileCount -gt 0) { Write-Host "  * $fileCount plan file(s) in $plansDir" }
+                if ($zvecExists) { Write-Host "  * zvec index at $zvecPlans" }
+
+                if (-not $force) {
+                    $reply = Read-Host "Proceed? [y/N]"
+                    if ($reply -notmatch '^[Yy]') {
+                        Write-Host "Cancelled."
+                        exit 0
+                    }
+                }
+
+                # Stop dashboard if running
+                $dashboardWasRunning = $false
+                $pidFile = Join-Path $OstwinHome "dashboard.pid"
+                if (Test-Path $pidFile) {
+                    $dashPid = (Get-Content $pidFile -Raw).Trim()
+                    try {
+                        $proc = Get-Process -Id $dashPid -ErrorAction Stop
+                        $dashboardWasRunning = $true
+                        Write-Host "-> Stopping dashboard (PID $dashPid)..."
+                        Stop-Process -Id $dashPid -Force -ErrorAction SilentlyContinue
+                        # Wait up to 5s
+                        for ($w = 0; $w -lt 5; $w++) {
+                            try { $null = Get-Process -Id $dashPid -ErrorAction Stop; Start-Sleep -Seconds 1 }
+                            catch { break }
+                        }
+                    }
+                    catch { }
+                }
+
+                # Delete plan files (preserve template)
+                if ($fileCount -gt 0) {
+                    Get-ChildItem -Path $plansDir -File | Where-Object { $_.Name -ne 'PLAN.template.md' } | Remove-Item -Force
+                    Write-Host ([char]0x2713 + " Deleted $fileCount plan file(s)")
+                }
+
+                # Remove zvec index
+                if ($zvecExists) {
+                    Remove-Item -Path $zvecPlans -Recurse -Force
+                    Write-Host ([char]0x2713 + " Cleared zvec plans index")
+                }
+
+                # Restart dashboard if it was running
+                if ($dashboardWasRunning) {
+                    Write-Host "-> Restarting dashboard..."
+                    $logsDir = Join-Path $OstwinHome "logs"
+                    if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
+                    $dashPs1 = Join-Path $AgentsDir "dashboard.ps1"
+                    if (Test-Path $dashPs1) {
+                        $dashProc = Start-Process -FilePath "pwsh" `
+                            -ArgumentList "-NoProfile", "-File", $dashPs1, "-Background", "-Port", "3366", "-ProjectDir", $OstwinHome `
+                            -NoNewWindow -PassThru `
+                            -RedirectStandardOutput (Join-Path $logsDir "dashboard.log") `
+                            -RedirectStandardError (Join-Path $logsDir "dashboard-error.log")
+                        Write-Host "  PID $($dashProc.Id)"
+                    }
+                }
+
+                Write-Host ([char]0x2713 + " All plans cleared")
+            }
+
+            default {
+                Write-Host "Unknown plan subcommand: $planSub" -ForegroundColor Red
+                Write-Host "  Usage: ostwin plan create [Title] [--file FILE]"
+                Write-Host "         ostwin plan start [plan-file] [--enable-planning] [--workspace-isolation room-worktree|shared]"
+                Write-Host "         ostwin plan list"
+                Write-Host "         ostwin plan clear [--force]"
+                exit 1
+            }
+        }
+    }
+
+    # ── init ─────────────────────────────────────────────────────────────────
+    "init" {
+        $initPs1 = Join-Path $AgentsDir "init.ps1"
+        if (Test-Path $initPs1) {
+            # Translate bash-style flags to PS params
+            $psArgs = [System.Collections.ArrayList]::new()
+            $ii = 0
+            while ($ii -lt $Arguments.Count) {
+                switch ($Arguments[$ii]) {
+                    { $_ -in @('--yes', '-y') } { $null = $psArgs.Add('-Yes'); $ii++ }
+                    { $_ -in @('--help', '-h') } { $null = $psArgs.Add('-Help'); $ii++ }
+                    default { $null = $psArgs.Add($Arguments[$ii]); $ii++ }
+                }
+            }
+            & pwsh -NoProfile -File $initPs1 @psArgs
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        }
+        else {
+            Write-Error "[ERROR] init.ps1 not found at $initPs1"
+            exit 1
+        }
+    }
+
+    # ── sync ─────────────────────────────────────────────────────────────────
+    "sync" {
+        $syncPs1 = Join-Path $AgentsDir "sync.ps1"
+        if (Test-Path $syncPs1) {
+            & pwsh -NoProfile -File $syncPs1 @Arguments
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        }
+        else {
+            Write-Error "[ERROR] sync.ps1 not found."
+            exit 1
+        }
+    }
+
+    # ── status ───────────────────────────────────────────────────────────────
+    "status" {
+        $statusPs1 = Join-Path $AgentsDir "war-rooms/Get-WarRoomStatus.ps1"
+        if (Test-Path $statusPs1) {
+            # Translate flags
+            $psArgs = [System.Collections.ArrayList]::new()
+            $si = 0
+            while ($si -lt $Arguments.Count) {
+                switch ($Arguments[$si]) {
+                    '--json' { $null = $psArgs.Add('-JsonOutput'); $si++ }
+                    '--watch' { $null = $psArgs.Add('-Watch'); $si++ }
+                    default { $null = $psArgs.Add($Arguments[$si]); $si++ }
+                }
+            }
+            & pwsh -NoProfile -File $statusPs1 @psArgs
+        }
+        else {
+            Write-Error "[ERROR] Get-WarRoomStatus.ps1 not found."
+            exit 1
+        }
+    }
+
+    # ── logs ─────────────────────────────────────────────────────────────────
+    "logs" {
+        $logsPs1 = Join-Path $AgentsDir "logs.ps1"
+        if (Test-Path $logsPs1) {
+            # Translate bash-style flags to PS params
+            $psArgs = [System.Collections.ArrayList]::new()
+            $li = 0
+            while ($li -lt $Arguments.Count) {
+                switch ($Arguments[$li]) {
+                    { $_ -in @('--follow', '-f') } { $null = $psArgs.Add('-Follow'); $li++ }
+                    '--type' { $null = $psArgs.Add('-Type'); $li++; $null = $psArgs.Add($Arguments[$li]); $li++ }
+                    '--from' { $null = $psArgs.Add('-From'); $li++; $null = $psArgs.Add($Arguments[$li]); $li++ }
+                    '--last' { $null = $psArgs.Add('-Last'); $li++; $null = $psArgs.Add($Arguments[$li]); $li++ }
+                    default { $null = $psArgs.Add($Arguments[$li]); $li++ }
+                }
+            }
+            & pwsh -NoProfile -File $logsPs1 @psArgs
+        }
+        else {
+            Write-Error "[ERROR] logs.ps1 not found."
+            exit 1
+        }
+    }
+
+    # ── stop ─────────────────────────────────────────────────────────────────
+    "stop" {
+        $forceStop = $Arguments -contains '--force'
+        $killTree = {
+            param([string]$PidToKill)
+            if ($IsWindows) {
+                & taskkill /F /T /PID $PidToKill 2>$null | Out-Null
+            }
+            else {
+                Stop-Process -Id $PidToKill -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Stop dashboard
+        $pidFile = Join-Path $OstwinHome "dashboard.pid"
+        if (Test-Path $pidFile) {
+            $dashPid = (Get-Content $pidFile -Raw).Trim()
+            try {
+                $proc = Get-Process -Id $dashPid -ErrorAction Stop
+                Write-Host "Stopping dashboard (PID $dashPid)..."
+                if ($forceStop) {
+                    # Force kill entire process tree immediately
+                    & $killTree $dashPid
+                }
+                else {
+                    # Graceful: send termination signal, wait up to 5s
+                    Stop-Process -Id $dashPid -ErrorAction SilentlyContinue
+                    for ($w = 0; $w -lt 5; $w++) {
+                        try { $null = Get-Process -Id $dashPid -ErrorAction Stop; Start-Sleep -Seconds 1 }
+                        catch { break }
+                    }
+                    # Force kill tree if still alive
+                    try {
+                        $null = Get-Process -Id $dashPid -ErrorAction Stop
+                        & $killTree $dashPid
+                    } catch {}
+                }
+                Write-Host ([char]0x2713 + " Dashboard stopped")
+            }
+            catch {
+                Write-Host "Dashboard not running (stale PID file)"
+            }
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        }
+        else {
+            Write-Host "No dashboard PID file found"
+        }
+
+        # Stop channel processes — check both legacy and current PID file locations
+        $channelPidFile = Join-Path $OstwinHome "channels.pid"
+        $channelPidFileAlt = Join-Path $OstwinHome ".agents/channel.pid"
+        $chanPid = $null
+        foreach ($cpf in @($channelPidFile, $channelPidFileAlt)) {
+            if (-not (Test-Path $cpf)) { continue }
+
+            $candidatePid = (Get-Content $cpf -Raw -ErrorAction SilentlyContinue).Trim()
+            # Only accept if non-empty AND looks like a valid numeric PID
+            if ($candidatePid -and $candidatePid -match '^\d+$') {
+                try {
+                    $proc = Get-Process -Id $candidatePid -ErrorAction Stop
+                    # Verify it's actually a channel process to avoid killing wrong process after PID reuse
+                    # Cross-platform: Win32_Process only exists on Windows
+                    $isValidChannel = $true
+                    if ($IsWindows -or (-not $IsLinux -and -not $IsMacOS)) {
+                        # Windows: use tight command-line validation
+                        $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$candidatePid" -ErrorAction SilentlyContinue).CommandLine
+                        # Must have channel-related path - tight validation to prevent PID reuse attacks
+                        # Accept: (tsx OR node as executable) AND (.agents/channel OR channel.ts/channels.ts OR src/index.ts)
+                        # Use word boundary to avoid false positives like "some_tsx_folder/script.sh"
+                        $hasRuntime = $cmdLine -match "(^|[\s/\\`"\'])(tsx|node)(\.exe)?(\s|$|`")"
+                        $hasChannelPath = $cmdLine -match "\.agents[/\\]channel" -or $cmdLine -match "channels?\.ts" -or $cmdLine -match "src[/\\]index\.ts"
+                        if (-not ($cmdLine -and $hasRuntime -and $hasChannelPath)) {
+                            $isValidChannel = $false
+                        }
+                    }
+                    # else: non-Windows - accept if process exists (no tight validation available cross-platform)
+
+                    if ($isValidChannel) {
+                        # Valid channel process - use this PID
+                        $chanPid = $candidatePid
+                        $channelPidFile = $cpf
+                        break
+                    }
+                    # Process exists but not a channel process - PID was reused, clean up and continue
+                    Remove-Item $cpf -Force -ErrorAction SilentlyContinue
+                    continue
+                } catch {
+                    # PID is numeric but process doesn't exist - stale, clean up and continue
+                    Remove-Item $cpf -Force -ErrorAction SilentlyContinue
+                    continue
+                }
+            }
+
+            # File exists but is empty/invalid — clean it up and continue to fallback
+            Remove-Item $cpf -Force -ErrorAction SilentlyContinue
+        }
+        if ($chanPid) {
+            try {
+                $proc = Get-Process -Id $chanPid -ErrorAction Stop
+                Write-Host "Stopping channels (PID $chanPid)..."
+                if ($forceStop) {
+                    & $killTree $chanPid
+                }
+                else {
+                    Stop-Process -Id $chanPid -ErrorAction SilentlyContinue
+                    for ($w = 0; $w -lt 5; $w++) {
+                        try { $null = Get-Process -Id $chanPid -ErrorAction Stop; Start-Sleep -Seconds 1 }
+                        catch { break }
+                    }
+                    try {
+                        $null = Get-Process -Id $chanPid -ErrorAction Stop
+                        & $killTree $chanPid
+                    } catch {}
+                }
+                Write-Host ([char]0x2713 + " Channels stopped")
+            }
+            catch {
+                Write-Host "Channel process not running (stale PID file)"
+            }
+            Remove-Item $channelPidFile -Force -ErrorAction SilentlyContinue
+        }
+
+
+
+        Write-Host ([char]0x2713 + " Shutdown complete")
+    }
+
+    # ── dashboard ────────────────────────────────────────────────────────────
+    "dashboard" {
+        $dashPort = if ($env:DASHBOARD_PORT) { $env:DASHBOARD_PORT } else { "3366" }
+        $dashProjectDir = $OstwinHome
+        $dashSub = "help"
+        $dashArgsList = [System.Collections.ArrayList]::new()
+
+        # Accept options before or after the dashboard subcommand, e.g.
+        #   ostwin dashboard --port 3377 status
+        #   ostwin dashboard start --project-dir /repo --port 3377
+        $dashIdx = 0
+        while ($dashIdx -lt $Arguments.Count) {
+            switch ($Arguments[$dashIdx]) {
+                '--port' {
+                    $dashIdx++
+                    if ($dashIdx -ge $Arguments.Count) { Write-Error "Missing value for --port"; exit 1 }
+                    $dashPort = $Arguments[$dashIdx]
+                    $dashIdx++
+                }
+                '--project-dir' {
+                    $dashIdx++
+                    if ($dashIdx -ge $Arguments.Count) { Write-Error "Missing value for --project-dir"; exit 1 }
+                    $dashProjectDir = $Arguments[$dashIdx]
+                    $dashIdx++
+                }
+                default {
+                    if ($dashSub -eq "help" -and $Arguments[$dashIdx] -notin @('-h', '--help', 'help')) {
+                        $dashSub = $Arguments[$dashIdx]
+                    }
+                    elseif ($Arguments[$dashIdx] -in @('-h', '--help', 'help') -and $dashSub -eq "help") {
+                        $dashSub = "help"
+                    }
+                    else {
+                        $null = $dashArgsList.Add($Arguments[$dashIdx])
+                    }
+                    $dashIdx++
+                }
+            }
+        }
+        $dashArgs = @($dashArgsList)
+        $dashScript = Join-Path $AgentsDir "dashboard.sh"
+        $logFile = Join-Path $OstwinHome "dashboard" "stdout.log"
+
+        # Find running dashboard PID by port (reliable, ignores stale PID files)
+        function Get-DashboardPid {
+            $pids = & lsof -ti:$dashPort -sTCP:LISTEN 2>$null
+            if (-not $pids) { return $null }
+            foreach ($p in ($pids -split "`n")) {
+                $p = $p.Trim()
+                if (-not $p) { continue }
+                $comm = & ps -p $p -o comm= 2>$null
+                if ($comm -match 'python|uvicorn') { return $p }
+            }
+            return $null
+        }
+
+        switch ($dashSub) {
+            "start" {
+                $existingPid = Get-DashboardPid
+                if ($existingPid) {
+                    Write-Host "Dashboard already running (PID $existingPid) on http://localhost:$dashPort" -ForegroundColor Yellow
+                    exit 0
+                }
+                Write-Host "Starting dashboard on http://localhost:$dashPort..."
+                if (Get-Command bash -ErrorAction SilentlyContinue) {
+                    & bash $dashScript --port $dashPort --project-dir $dashProjectDir --background --skip-build
+                } else {
+                    $dashPs1 = Join-Path $AgentsDir "dashboard.ps1"
+                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $dashProjectDir -Background
+                }
+                $ready = $false
+                for ($i = 0; $i -lt 15; $i++) {
+                    Start-Sleep -Seconds 1
+                    try {
+                        $null = Invoke-RestMethod -Uri "http://localhost:$dashPort/api/memory-pool/health" -TimeoutSec 2
+                        $ready = $true
+                        break
+                    } catch {}
+                }
+                if ($ready) {
+                    Write-Host "Dashboard running on http://localhost:$dashPort" -ForegroundColor Green
+                } else {
+                    Write-Host "Dashboard started but not yet responding. Check: ostwin dashboard logs" -ForegroundColor Yellow
+                }
+            }
+            "stop" {
+                $dashPid = Get-DashboardPid
+                if ($dashPid) {
+                    & kill $dashPid 2>$null
+                    Start-Sleep -Seconds 1
+                    & kill -0 $dashPid 2>$null
+                    if ($LASTEXITCODE -eq 0) { & kill -9 $dashPid 2>$null }
+                    Write-Host "Dashboard stopped (PID $dashPid)" -ForegroundColor Green
+                } else {
+                    Write-Host "Dashboard not running" -ForegroundColor Yellow
+                }
+            }
+            "restart" {
+                Write-Host "Restarting dashboard..."
+                # dashboard.sh handles stop+start internally, just call it
+                if (Get-Command bash -ErrorAction SilentlyContinue) {
+                    & bash $dashScript --port $dashPort --project-dir $dashProjectDir --background --skip-build
+                } else {
+                    $dashPs1 = Join-Path $AgentsDir "dashboard.ps1"
+                    & pwsh -NoProfile -File $dashPs1 -Port $dashPort -ProjectDir $dashProjectDir -Background
+                }
+                $ready = $false
+                for ($i = 0; $i -lt 15; $i++) {
+                    Start-Sleep -Seconds 1
+                    try {
+                        $null = Invoke-RestMethod -Uri "http://localhost:$dashPort/api/memory-pool/health" -TimeoutSec 2
+                        $ready = $true
+                        break
+                    } catch {}
+                }
+                if ($ready) {
+                    Write-Host "Dashboard restarted on http://localhost:$dashPort" -ForegroundColor Green
+                } else {
+                    Write-Host "Dashboard started but not yet responding. Check: ostwin dashboard logs" -ForegroundColor Yellow
+                }
+            }
+            "status" {
+                $runPid = Get-DashboardPid
+                $running = [bool]$runPid
+                if ($running) {
+                    Write-Host "Dashboard: running (PID $runPid)" -ForegroundColor Green
+                    Write-Host "  URL:  http://localhost:$dashPort"
+                    Write-Host "  Log:  $logFile"
+                    try {
+                        $health = Invoke-RestMethod -Uri "http://localhost:$dashPort/api/memory-pool/health" -TimeoutSec 3
+                        Write-Host "  Pool: $($health.active_slots) slot(s), ML $(if ($health.ml_ready) {'ready'} else {'loading'})"
+                    } catch {
+                        Write-Host "  Pool: not responding" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "Dashboard: not running" -ForegroundColor Red
+                }
+            }
+            "logs" {
+                if (Test-Path $logFile) {
+                    if ($dashArgs -contains "-f" -or $dashArgs -contains "--follow") {
+                        & tail -f $logFile
+                    } else {
+                        Get-Content $logFile -Tail 50
+                    }
+                } else {
+                    Write-Host "No log file at $logFile" -ForegroundColor Yellow
+                }
+            }
+            "autostart" {
+                $uninstall = $dashArgs -contains "--uninstall" -or $dashArgs -contains "-u"
+
+                if ($uninstall) {
+                    # ── Remove auto-start ──
+                    if ($IsWindows -or (-not $IsLinux -and -not $IsMacOS)) {
+                        # Windows: remove scheduled task
+                        try {
+                            $task = Get-ScheduledTask -TaskName "OstwinDashboard" -ErrorAction SilentlyContinue
+                            if ($task) {
+                                Unregister-ScheduledTask -TaskName "OstwinDashboard" -Confirm:$false
+                                Write-Host "Dashboard auto-start removed (Windows Task Scheduler)" -ForegroundColor Green
+                            } else {
+                                Write-Host "Dashboard auto-start not registered" -ForegroundColor Yellow
+                            }
+                        } catch {
+                            Write-Error "Failed to remove auto-start task: $_"
+                            exit 1
+                        }
+                    }
+                    elseif ($IsMacOS) {
+                        # macOS: unload and remove LaunchAgent
+                        $plistDest = Join-Path $HOME "Library/LaunchAgents/com.ostwin.dashboard.plist"
+                        if (Test-Path $plistDest) {
+                            & launchctl unload $plistDest 2>$null || true
+                            Remove-Item $plistDest -Force
+                            Write-Host "Dashboard auto-start removed (macOS LaunchAgent)" -ForegroundColor Green
+                        } else {
+                            Write-Host "Dashboard auto-start not registered" -ForegroundColor Yellow
+                        }
+                    }
+                    elseif ($IsLinux) {
+                        # Linux: disable and remove systemd user service
+                        if (Get-Command systemctl -ErrorAction SilentlyContinue) {
+                            & systemctl --user stop ostwin-dashboard 2>$null || true
+                            & systemctl --user disable ostwin-dashboard 2>$null || true
+                            $svcFile = Join-Path $HOME ".config/systemd/user/ostwin-dashboard.service"
+                            if (Test-Path $svcFile) { Remove-Item $svcFile -Force }
+                            & systemctl --user daemon-reload 2>$null || true
+                            Write-Host "Dashboard auto-start removed (Linux systemd)" -ForegroundColor Green
+                        } else {
+                            Write-Host "systemd not available" -ForegroundColor Red
+                            exit 1
+                        }
+                    }
+                    exit 0
+                }
+                else {
+                    # ── Register auto-start ──
+                    if ($IsWindows -or (-not $IsLinux -and -not $IsMacOS)) {
+                        # Windows: register scheduled task
+                        $dashboardPs1 = Join-Path $OstwinHome ".agents/dashboard.ps1"
+                        if (-not (Test-Path $dashboardPs1)) {
+                            Write-Error "dashboard.ps1 not found at $dashboardPs1"
+                            exit 1
+                        }
+                        $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+                        if (-not $pwshExe) { $pwshExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source }
+                        if (-not $pwshExe) { Write-Error "PowerShell not found"; exit 1 }
+
+                        $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$dashboardPs1`" -Background -Port $dashPort -ProjectDir `"$dashProjectDir`""
+                        try {
+                            $existing = Get-ScheduledTask -TaskName "OstwinDashboard" -ErrorAction SilentlyContinue
+                            if ($existing) { Unregister-ScheduledTask -TaskName "OstwinDashboard" -Confirm:$false -ErrorAction SilentlyContinue }
+                        } catch {}
+
+                        $action = New-ScheduledTaskAction -Execute $pwshExe -Argument $argList
+                        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+                        $trigger.Delay = "PT10S"
+                        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+                        Register-ScheduledTask -TaskName "OstwinDashboard" -Action $action -Trigger $trigger -Settings $settings -Description "Ostwin Dashboard auto-start" -Force | Out-Null
+                        Write-Host "Dashboard auto-start registered (Windows Task Scheduler)" -ForegroundColor Green
+                    }
+                    elseif ($IsMacOS) {
+                        # macOS: install LaunchAgent
+                        $installScript = Join-Path $OstwinHome ".agents/daemons/macos-dashboard/install.sh"
+                        if (Test-Path $installScript) {
+                            & bash $installScript
+                        } else {
+                            Write-Error "Auto-start installer not found: $installScript"
+                            exit 1
+                        }
+                    }
+                    elseif ($IsLinux) {
+                        # Linux: install systemd user service
+                        $installScript = Join-Path $OstwinHome ".agents/daemons/linux-dashboard/install.sh"
+                        if (Test-Path $installScript) {
+                            & bash $installScript
+                        } else {
+                            Write-Error "Auto-start installer not found: $installScript"
+                            exit 1
+                        }
+                    }
+                    exit 0
+                }
+            }
+            default {
+                Write-Host ""
+                Write-Host "  ostwin dashboard — Manage the dashboard server" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "  Usage:"
+                Write-Host "    ostwin dashboard start       Start in background"
+                Write-Host "    ostwin dashboard stop        Stop the dashboard"
+                Write-Host "    ostwin dashboard restart     Stop + start"
+                Write-Host "    ostwin dashboard status      Show running state + pool health"
+                Write-Host "    ostwin dashboard logs        Show last 50 log lines"
+                Write-Host "    ostwin dashboard logs -f     Follow log output"
+                Write-Host "    ostwin dashboard autostart   Register dashboard to start on login"
+                Write-Host "    ostwin dashboard autostart --uninstall  Remove login auto-start"
+                Write-Host ""
+            }
+        }
+    }
+
+    # ── channel ──────────────────────────────────────────────────────────────
+    "channel" {
+        $channelCmd = Join-Path $AgentsDir "bin/channel_cmd.py"
+        if (Test-Path $channelCmd) {
+            & $PythonCmd $channelCmd @Arguments
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        }
+        else {
+            Write-Error "[ERROR] channel_cmd.py not found at $channelCmd"
+            exit 1
+        }
+    }
+
+    # ── skills ───────────────────────────────────────────────────────────────
+    "skills" {
+        $skillsSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
+        $skillsArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
+
+        # Find sync-skills script (.ps1 only)
+        $syncScript = Join-Path $AgentsDir "sync-skills.ps1"
+        if (-not (Test-Path $syncScript)) {
+            $syncScript = Join-Path $OstwinHome "sync-skills.ps1"
+        }
+
+        # Find clawhub-install script (.ps1 only)
+        $clawHubScript = Join-Path $AgentsDir "clawhub-install.ps1"
+        if (-not (Test-Path $clawHubScript)) {
+            $clawHubScript = Join-Path $OstwinHome "clawhub-install.ps1"
+        }
+
+        switch ($skillsSub) {
+            { $_ -in @("help", "--help", "-h") } {
+                Write-Host "Usage: ostwin skills <subcommand> [options]"
+                Write-Host ""
+                Write-Host "Subcommands:"
+                Write-Host "  sync"
+                Write-Host "  install [<slug>|<github-url>|--from DIR] [--agent <role>]"
+                Write-Host "  search <query>"
+                Write-Host "  update [--all|<slug>]"
+                Write-Host "  remove <slug>"
+                Write-Host "  list"
+                exit 0
+            }
+
+            "sync" {
+                if (-not (Test-Path $syncScript)) {
+                    Write-Error ([char]0x2717 + " sync-skills.ps1 not found")
+                    exit 1
+                }
+                $env:OSTWIN_HOME = $OstwinHome
+                & pwsh -NoProfile -File $syncScript @skillsArgs
+            }
+
+            "install" {
+                $fromDir = ""
+                $agentRole = ""
+                $extraArgs = [System.Collections.ArrayList]::new()
+                $si = 0
+                while ($si -lt $skillsArgs.Count) {
+                    switch ($skillsArgs[$si]) {
+                        '--from' { $si++; $fromDir = $skillsArgs[$si]; $si++ }
+                        '--agent' { $si++; $agentRole = $skillsArgs[$si]; $si++ }
+                        default { $null = $extraArgs.Add($skillsArgs[$si]); $si++ }
+                    }
+                }
+
+                # Check for GitHub URL or ClawHub slug
+                if (-not $fromDir -and $extraArgs.Count -gt 0) {
+                    $firstArg = $extraArgs[0]
+
+                    # ── GitHub URL install ──
+                    if ($firstArg -match '^https?://github\.com/' -or $firstArg -match '^git@github\.com:') {
+                        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+                            Write-Error ([char]0x2717 + " git is required for GitHub installs but was not found in PATH.")
+                            exit 1
+                        }
+
+                        $ghUrl = $firstArg
+                        $ghRepoName = [System.IO.Path]::GetFileNameWithoutExtension(($ghUrl -split '/')[-1])
+
+                        Write-Host "Installing skill from GitHub: $ghUrl"
+
+                        $ghTmp = Join-Path ([System.IO.Path]::GetTempPath()) "ostwin-skill-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+                        try {
+                            Write-Host "  Cloning repository..."
+                            $cloneResult = & git clone --depth 1 $ghUrl "$ghTmp/repo" 2>&1
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-Host ($cloneResult | ForEach-Object { "    $_" })
+                                Write-Error ([char]0x2717 + " git clone failed for $ghUrl")
+                                exit 1
+                            }
+
+                            $ghCommit = & git -C "$ghTmp/repo" rev-parse HEAD 2>$null
+                            if (-not $ghCommit) { $ghCommit = "unknown" }
+                            $installTs = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                            $ghInstalled = 0
+
+                            # Find skills root
+                            # Scan the entire repo for SKILL.md at any depth.
+                            # No assumptions about folder structure — any directory
+                            # containing a SKILL.md is a candidate skill to install.
+                            $ghSkillsRoot = "$ghTmp/repo"
+
+                            if (-not (Get-ChildItem -Path $ghSkillsRoot -Filter "SKILL.md" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                                Write-Error ([char]0x2717 + " No SKILL.md found in $ghUrl")
+                                exit 1
+                            }
+
+                            # Collect top-level skill dirs (skip nested)
+                            $allSkillMds = Get-ChildItem -Path $ghSkillsRoot -Filter "SKILL.md" -Recurse -ErrorAction SilentlyContinue |
+                            Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' }
+
+                            $ghSkillDirs = @()
+                            foreach ($skillMd in $allSkillMds) {
+                                $skillDir = $skillMd.DirectoryName
+                                $isNested = $false
+                                $parentDir = Split-Path $skillDir -Parent
+                                while ($parentDir -and $parentDir -ne $ghSkillsRoot -and $parentDir -ne [System.IO.Path]::GetPathRoot($parentDir)) {
+                                    if (Test-Path (Join-Path $parentDir "SKILL.md")) {
+                                        $isNested = $true
+                                        break
+                                    }
+                                    $parentDir = Split-Path $parentDir -Parent
+                                }
+                                if (-not $isNested) { $ghSkillDirs += $skillDir }
+                            }
+
+                            if ($ghSkillDirs.Count -eq 0) {
+                                Write-Error ([char]0x2717 + " No SKILL.md found in $ghUrl")
+                                exit 1
+                            }
+
+                            # Install each skill
+                            foreach ($srcDir in $ghSkillDirs) {
+                                $dirName = Split-Path $srcDir -Leaf
+                                $skillMdPath = Join-Path $srcDir "SKILL.md"
+
+                                # Read name from frontmatter
+                                $metaName = ""
+                                $skillContent = Get-Content $skillMdPath -Raw -ErrorAction SilentlyContinue
+                                $frontmatter = [regex]::Match($skillContent, '(?s)\A---[ \t]*\r?\n(.*?)\r?\n---')
+                                if ($frontmatter.Success) {
+                                    $nameMatch = [regex]::Match($frontmatter.Groups[1].Value, '(?m)^name:[ \t]*[''"]?([^''"\r\n]*)[''"]?[ \t]*$')
+                                    if ($nameMatch.Success) {
+                                        $metaName = $nameMatch.Groups[1].Value.Trim()
+                                    }
+                                }
+
+                                $skillName = if ($metaName) { $metaName }
+                                elseif ($ghSkillDirs.Count -eq 1) { $ghRepoName }
+                                else { $dirName }
+
+                                $skillSubdir = if ($agentRole) { "roles/$agentRole/$skillName" } else { "global/$skillName" }
+
+                                $dest1 = Join-Path $OstwinHome ".agents/skills/$skillSubdir"
+                                $dest2 = Join-Path $OstwinHome "skills/$skillSubdir"
+
+                                foreach ($dest in @($dest1, $dest2)) {
+                                    if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
+                                    Get-ChildItem $dest -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+                                    Copy-Item -Path "$srcDir/*" -Destination $dest -Recurse -Force
+
+                                    # Write origin.json
+                                    $originJson = @{
+                                        source       = "github"
+                                        url          = $ghUrl
+                                        commit       = $ghCommit
+                                        agent        = $agentRole
+                                        installed_at = $installTs
+                                    } | ConvertTo-Json -Depth 3
+                                    Set-Content -Path (Join-Path $dest "origin.json") -Value $originJson
+                                }
+
+                                Write-Host "  Installed '$skillName' ->"
+                                Write-Host "    $($dest1 -replace [regex]::Escape($HOME), '~')"
+                                Write-Host "    $($dest2 -replace [regex]::Escape($HOME), '~')"
+                                $ghInstalled++
+
+                                # Add to role's skill_refs if --agent
+                                if ($agentRole) {
+                                    $roleJson = Join-Path $OstwinHome ".agents/roles/$agentRole/role.json"
+                                    if (Test-Path $roleJson) {
+                                        try {
+                                            $roleData = Get-Content $roleJson -Raw | ConvertFrom-Json
+                                            $refs = @($roleData.skill_refs)
+                                            if ($skillName -notin $refs) {
+                                                $refs += $skillName
+                                                $roleData.skill_refs = $refs
+                                                $roleData | ConvertTo-Json -Depth 10 | Set-Content $roleJson
+                                                Write-Host "  Added '$skillName' to $agentRole skill_refs"
+                                            }
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
+
+                            Write-Host "  $ghInstalled skill(s) installed from $ghRepoName"
+
+                            # Sync with dashboard if reachable
+                            if ((Test-DashboardReachable) -and (Test-Path $syncScript)) {
+                                Write-Host "  Syncing with dashboard..."
+                                $env:OSTWIN_HOME = $OstwinHome
+                                if ($syncScript -match '\.ps1$') {
+                                    & pwsh -NoProfile -File $syncScript 2>$null
+                                }
+                            }
+                        }
+                        finally {
+                            if (Test-Path $ghTmp) { Remove-Item $ghTmp -Recurse -Force -ErrorAction SilentlyContinue }
+                        }
+                        exit 0
+                    }
+
+                    # ── ClawHub slug install ──
+                    if ($firstArg -notmatch '^[/\\.]' -and -not (Test-Path $firstArg -PathType Container)) {
+                        if (Test-Path $clawHubScript) {
+                            $env:OSTWIN_HOME = $OstwinHome
+                            if ($clawHubScript -match '\.ps1$') {
+                                & pwsh -NoProfile -File $clawHubScript install @extraArgs
+                            }
+                            exit $LASTEXITCODE
+                        }
+                        else {
+                            Write-Error ([char]0x2717 + " clawhub-install script not found")
+                            exit 1
+                        }
+                    }
+                }
+
+                # Local install: scan cwd for skills
+                if (-not $fromDir) {
+                    foreach ($candidate in @(
+                            (Join-Path $cwd ".agents/skills"),
+                            (Join-Path $cwd "skills"),
+                            $cwd
+                        )) {
+                        if ((Test-Path $candidate) -and
+                            (Get-ChildItem -Path $candidate -Filter "SKILL.md" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                            $fromDir = $candidate
+                            break
+                        }
+                    }
+                }
+                if (-not $fromDir -or -not (Test-Path $fromDir)) {
+                    Write-Error ([char]0x2717 + " No skills found. Specify --from DIR, a ClawHub slug, or run from a project root.")
+                    exit 1
+                }
+
+                Write-Host "Installing skills from: $fromDir"
+                if (-not (Test-Path $syncScript)) {
+                    Write-Error ([char]0x2717 + " sync-skills script not found")
+                    exit 1
+                }
+                $env:OSTWIN_HOME = $OstwinHome
+                if ($syncScript -match '\.ps1$') {
+                    & pwsh -NoProfile -File $syncScript -InstallFrom $fromDir @extraArgs
+                }
+            }
+
+            "search" {
+                if (Test-Path $clawHubScript) {
+                    $env:OSTWIN_HOME = $OstwinHome
+                    & pwsh -NoProfile -File $clawHubScript search @skillsArgs
+                }
+                else {
+                    Write-Error ([char]0x2717 + " clawhub-install.ps1 not found")
+                    exit 1
+                }
+            }
+
+            "update" {
+                if (Test-Path $clawHubScript) {
+                    $env:OSTWIN_HOME = $OstwinHome
+                    & pwsh -NoProfile -File $clawHubScript update @skillsArgs
+                }
+                else {
+                    Write-Error ([char]0x2717 + " clawhub-install.ps1 not found")
+                    exit 1
+                }
+            }
+
+            "remove" {
+                if (Test-Path $clawHubScript) {
+                    $env:OSTWIN_HOME = $OstwinHome
+                    & pwsh -NoProfile -File $clawHubScript remove @skillsArgs
+                }
+                else {
+                    Write-Error ([char]0x2717 + " clawhub-install.ps1 not found")
+                    exit 1
+                }
+            }
+
+            "list" {
+                if (-not (Test-DashboardReachable)) {
+                    Write-Warning "Dashboard not reachable at $DashboardUrl"
+                    exit 1
+                }
+                try {
+                    $skills = Invoke-DashboardApi -Endpoint "/api/skills"
+                    if (-not $skills -or $skills.Count -eq 0) {
+                        Write-Host "No skills found."
+                    }
+                    else {
+                        foreach ($s in $skills) {
+                            $tags = if ($s.tags) { ($s.tags -join ', ') } else { "" }
+                            $desc = if ($s.description) { $s.description.Substring(0, [Math]::Min(50, $s.description.Length)) } else { "" }
+                            Write-Host ("  {0,-30}  {1,-50}  [{2}]" -f $s.name, $desc, $tags)
+                        }
+                    }
+                }
+                catch { Write-Host "Failed to list skills." }
+            }
+
+            default {
+                Write-Host "Unknown skills subcommand: $skillsSub" -ForegroundColor Red
+                Write-Host "  Usage: ostwin skills sync"
+                Write-Host "         ostwin skills install [<slug>|<github-url>|--from DIR] [--agent <role>]"
+                Write-Host "         ostwin skills search <query>"
+                Write-Host "         ostwin skills update [--all|<slug>]"
+                Write-Host "         ostwin skills remove <slug>"
+                Write-Host "         ostwin skills list"
+                Write-Host ""
+                Write-Host "  Options:"
+                Write-Host "    --agent <role>   Install to a specific role (e.g. engineer, qa, architect)"
+                Write-Host "                     Without --agent, skills install to global/"
+                Write-Host ""
+                Write-Host "  Examples:"
+                Write-Host "    ostwin skills install https://github.com/user/skill-repo"
+                Write-Host "    ostwin skills install https://github.com/user/repo --agent engineer"
+                exit 1
+            }
+        }
+    }
+
+    # ── mcp ──────────────────────────────────────────────────────────────────
+    "mcp" {
+        $mcpSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "" }
+        $mcpSubArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
+
+        if ($mcpSub -eq "sync") {
+            # ── ostwin mcp sync ──
+            # Canonical sync: resolve MCP servers + generate agent permissions
+            # from role.json mcp_refs. Writes to ~/.ostwin/.opencode/opencode.json.
+            $resolveScript = Join-Path $OstwinHome ".agents" "mcp" "resolve_opencode.py"
+            if (-not (Test-Path $resolveScript)) {
+                $resolveScript = Join-Path $AgentsDir "mcp" "resolve_opencode.py"
+            }
+            if (-not (Test-Path $resolveScript)) {
+                Write-Error "[ERROR] resolve_opencode.py not found."
+                exit 1
+            }
+
+            $syncArgs = [System.Collections.ArrayList]::new()
+            $null = $syncArgs.Add($resolveScript)
+            $null = $syncArgs.Add("sync")
+
+            # Parse --flags and forward to Python
+            foreach ($a in $mcpSubArgs) {
+                $null = $syncArgs.Add($a)
+            }
+
+            Write-Host "Syncing MCP permissions from role definitions..."
+            $env:OSTWIN_HOME = $OstwinHome
+            & $PythonCmd @syncArgs
+        }
+        else {
+            # ── All other MCP subcommands → mcp-extension.sh ──
+            # (install, list, catalog, remove, credentials, test, etc.)
+            $mcpSh = Join-Path $AgentsDir "mcp" "mcp-extension.sh"
+
+            # Also check the global install location
+            if (-not (Test-Path $mcpSh)) {
+                $mcpSh = Join-Path $OstwinHome ".agents" "mcp" "mcp-extension.sh"
+            }
+
+            if (Test-Path $mcpSh) {
+                & bash $mcpSh @Arguments
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            }
+            else {
+                Write-Error "[ERROR] mcp-extension.sh not found."
+                Write-Error "  Searched: $AgentsDir/mcp/ and $OstwinHome/.agents/mcp/"
+                exit 1
+            }
+        }
+    }
+
+    # -- search-engine -------------------------------------------------------
+    "search-engine" {
+        $searchScript = Join-Path $AgentsDir "search-engine.sh"
+        if (-not (Test-Path $searchScript)) {
+            $searchScript = Join-Path $OstwinHome ".agents/search-engine.sh"
+        }
+        if (-not (Test-Path $searchScript)) {
+            Write-Error "[ERROR] search-engine.sh not found."
+            Write-Error "  Searched: $AgentsDir and $OstwinHome/.agents/"
+            exit 1
+        }
+        if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+            Write-Error "[ERROR] bash is required for search-engine management."
+            exit 1
+        }
+        $env:OSTWIN_HOME = $OstwinHome
+        & bash $searchScript @Arguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    }
+
+    # ── reload-env ───────────────────────────────────────────────────────────
+    "reload-env" {
+        $envFile = Join-Path $OstwinHome ".env"
+        if (-not (Test-Path $envFile)) {
+            Write-Error ([char]0x2717 + " .env not found at $envFile")
+            exit 1
+        }
+
+        # Parse .env
+        $envVars = @{}
+        foreach ($line in Get-Content $envFile) {
+            $trimmed = $line.Trim()
+            if (-not $trimmed -or $trimmed.StartsWith('#') -or $trimmed -notmatch '=') { continue }
+            $eqIdx = $trimmed.IndexOf('=')
+            $key = $trimmed.Substring(0, $eqIdx).Trim()
+            $val = $trimmed.Substring($eqIdx + 1).Trim().Trim('"').Trim("'")
+            if ($key) { $envVars[$key] = $val }
+        }
+
+        if ($envVars.Count -eq 0) {
+            Write-Host "  No variables found in .env"
+            exit 0
+        }
+
+        # Collect MCP config files
+        $mcpConfigs = @(
+            (Join-Path $OstwinHome ".agents/mcp/config.json"),
+            (Join-Path $OstwinHome "mcp/config.json"),
+            (Join-Path $AgentsDir "mcp/config.json")
+        ) | Where-Object { Test-Path $_ } | Sort-Object -Unique
+
+        if ($mcpConfigs.Count -eq 0) {
+            Write-Error ([char]0x2717 + " No MCP config found")
+            exit 1
+        }
+
+        foreach ($mcpConfig in $mcpConfigs) {
+            Write-Host "Reloading $envFile -> $mcpConfig ..."
+            try {
+                $config = Get-Content $mcpConfig -Raw | ConvertFrom-Json
+
+                # Support both 'mcp' and 'mcpServers' keys
+                $servers = if ($config.mcp) { $config.mcp } elseif ($config.mcpServers) { $config.mcpServers } else { @{} }
+
+                foreach ($prop in $servers.PSObject.Properties) {
+                    $server = $prop.Value
+                    if ($server.type -eq 'remote') { continue }
+
+                    # Determine env key name
+                    $envKey = if ($server.PSObject.Properties['environment']) { 'environment' }
+                    elseif ($server.PSObject.Properties['env']) { 'env' }
+                    else { 'environment' }
+
+                    if (-not $server.PSObject.Properties[$envKey]) {
+                        $server | Add-Member -NotePropertyName $envKey -NotePropertyValue ([PSCustomObject]@{})
+                    }
+
+                    foreach ($kv in $envVars.GetEnumerator()) {
+                        $server.$envKey | Add-Member -NotePropertyName $kv.Key -NotePropertyValue $kv.Value -Force
+                    }
+                }
+
+                $config | ConvertTo-Json -Depth 10 | Set-Content $mcpConfig
+                Write-Host "  $([char]0x2713) Injected $($envVars.Count) var(s) into $($servers.PSObject.Properties.Count) MCP server(s)"
+                foreach ($name in $servers.PSObject.Properties.Name) {
+                    Write-Host "    * $name"
+                }
+            }
+            catch {
+                Write-Warning "Failed to update $mcpConfig : $_"
+            }
+        }
+        Write-Host "Done."
+    }
+
+    # ── role ─────────────────────────────────────────────────────────────────
+    "role" {
+        $roleName = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "" }
+
+        if (-not $roleName) {
+            # List all roles with subcommands.json
+            Write-Host "Available roles with subcommands:"
+            Write-Host ""
+
+            foreach ($searchDir in @(
+                    (Join-Path $AgentsDir "roles"),
+                    (Join-Path $OstwinHome ".agents/roles")
+                )) {
+                if (-not (Test-Path $searchDir)) { continue }
+                $isGlobal = $searchDir -like "*$OstwinHome*"
+                $suffix = if ($isGlobal) { " (global)" } else { "" }
+
+                foreach ($manifest in Get-ChildItem -Path $searchDir -Filter "subcommands.json" -Recurse -Depth 1 -ErrorAction SilentlyContinue) {
+                    $rname = $manifest.Directory.Name
+                    $desc = ""
+                    try {
+                        $data = Get-Content $manifest.FullName -Raw | ConvertFrom-Json
+                        $cmds = $data.subcommands
+                        if ($cmds -is [array]) {
+                            $names = $cmds | ForEach-Object { $_.name }
+                        }
+                        else {
+                            $names = $cmds.PSObject.Properties.Name
+                        }
+                        $desc = "$($names.Count) sub-commands: $($names -join ', ')"
+                    }
+                    catch { }
+                    Write-Host ("  {0,-30} {1}{2}" -f $rname, $desc, $suffix)
+                }
+            }
+            exit 0
+        }
+
+        $roleArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
+        $subName = if ($roleArgs.Count -gt 0) { $roleArgs[0] } else { "" }
+        $subArgs = @(if ($roleArgs.Count -gt 1) { $roleArgs[1..($roleArgs.Count - 1)] } else { @() })
+
+        # Find subcommands.json
+        $roleManifest = ""
+        foreach ($candidate in @(
+                (Join-Path $AgentsDir "roles/$roleName/subcommands.json"),
+                (Join-Path $OstwinHome ".agents/roles/$roleName/subcommands.json")
+            )) {
+            if (Test-Path $candidate) {
+                $roleManifest = $candidate
+                break
+            }
+        }
+
+        if (-not $roleManifest) {
+            Write-Error ([char]0x2717 + " Role '$roleName' not found or has no subcommands.json")
+            Write-Host "  Searched: $(Join-Path $AgentsDir "roles/$roleName")"
+            Write-Host "            $(Join-Path $OstwinHome ".agents/roles/$roleName")"
+            exit 1
+        }
+
+        $roleDir = Split-Path $roleManifest -Parent
+
+        if (-not $subName) {
+            # List subcommands
+            Write-Host "Subcommands for role '$roleName':"
+            Write-Host ""
+            try {
+                $data = Get-Content $roleManifest -Raw | ConvertFrom-Json
+                $cmds = $data.subcommands
+                if ($cmds -is [array]) {
+                    foreach ($c in $cmds) {
+                        $desc = if ($c.description) { $c.description } else { "" }
+                        Write-Host ("  {0,-20} {1}" -f $c.name, $desc)
+                    }
+                }
+                else {
+                    foreach ($prop in $cmds.PSObject.Properties) {
+                        $desc = if ($prop.Value.description) { $prop.Value.description } else { "" }
+                        Write-Host ("  {0,-20} {1}" -f $prop.Name, $desc)
+                    }
+                }
+            }
+            catch { Write-Error "Failed to parse subcommands.json" }
+            exit 0
+        }
+
+        # Dispatch the subcommand
+        try {
+            $data = Get-Content $roleManifest -Raw | ConvertFrom-Json
+            $moduleRoot = if ($data.module_root) { $data.module_root } else { "." }
+            $cmds = $data.subcommands
+            $cmd = $null
+
+            if ($cmds -is [array]) {
+                $cmd = $cmds | Where-Object { $_.name -eq $subName } | Select-Object -First 1
+            }
+            else {
+                if ($cmds.PSObject.Properties[$subName]) {
+                    $cmd = $cmds.$subName
+                }
+            }
+
+            if (-not $cmd) {
+                Write-Error ([char]0x2717 + " Subcommand '$subName' not found in role '$roleName'")
+                exit 1
+            }
+
+            $resolvedRoot = Join-Path $roleDir $moduleRoot | Resolve-Path -ErrorAction Stop
+            if (-not (Test-Path $resolvedRoot -PathType Container)) {
+                Write-Error ([char]0x2717 + " Module root not found: $resolvedRoot")
+                exit 1
+            }
+
+            # Build invocation: replace {args} with actual arguments
+            $invokeTemplate = $cmd.invoke
+            $argsStr = $subArgs -join ' '
+            $invokeCmd = $invokeTemplate -replace '\{args\}', $argsStr
+
+            Push-Location $resolvedRoot
+            try {
+                Invoke-Expression $invokeCmd
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            }
+            finally {
+                Pop-Location
+            }
+        }
+        catch {
+            Write-Error "Failed to dispatch role command: $_"
+            exit 1
+        }
+    }
+
+    # ── mac ──────────────────────────────────────────────────────────────────
+    "mac" {
+        # Shorthand for: ostwin role macos-automation-engineer <sub> [args]
+        $ostwinExec = if ($PSCommandPath) { $PSCommandPath } else { Join-Path $AgentsDir "bin" "ostwin" }
+        & $ostwinExec role macos-automation-engineer @Arguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    }
+
+    # ── config ───────────────────────────────────────────────────────────────
+    "config" {
+        $configPs1 = Join-Path $AgentsDir "config.ps1"
+        if (Test-Path $configPs1) {
+            # Translate bash-style flags to PS params
+            $psArgs = [System.Collections.ArrayList]::new()
+            $ci = 0
+            while ($ci -lt $Arguments.Count) {
+                switch ($Arguments[$ci]) {
+                    '--get' { $null = $psArgs.Add('-Get'); $ci++; $null = $psArgs.Add($Arguments[$ci]); $ci++ }
+                    '--set' { $null = $psArgs.Add('-Set'); $ci++; $null = $psArgs.Add($Arguments[$ci]); $ci++; $null = $psArgs.Add('-Value'); $null = $psArgs.Add($Arguments[$ci]); $ci++ }
+                    { $_ -in @('-h', '--help') } { $null = $psArgs.Add('-Help'); $ci++ }
+                    default { $null = $psArgs.Add($Arguments[$ci]); $ci++ }
+                }
+            }
+            & pwsh -NoProfile -File $configPs1 @psArgs
+        }
+        else {
+            Write-Error "[ERROR] config.ps1 not found."
+            exit 1
+        }
+    }
+
+    # ── health ───────────────────────────────────────────────────────────────
+    "health" {
+        $healthPs1 = Join-Path $AgentsDir "health.ps1"
+        if (Test-Path $healthPs1) {
+            $psArgs = [System.Collections.ArrayList]::new()
+            foreach ($a in $Arguments) {
+                if ($a -eq '--json') { $null = $psArgs.Add('-JsonOutput') }
+                else { $null = $psArgs.Add($a) }
+            }
+            & pwsh -NoProfile -File $healthPs1 @psArgs
+        }
+        else {
+            Write-Error "[ERROR] health.ps1 not found."
+            exit 1
+        }
+    }
+
+    # ── test ─────────────────────────────────────────────────────────────────
+    "test" {
+        if (-not (Get-Command Invoke-Pester -ErrorAction SilentlyContinue)) {
+            Write-Error "[ERROR] Pester is not installed. Install it with: Install-Module Pester -Scope CurrentUser"
+            exit 1
+        }
+
+        $testsRoot = Join-Path $AgentsDir "tests"
+        $binTestsRoot = Join-Path $AgentsDir "bin/tests"
+        $suiteMap = @{
+            all                 = @($testsRoot, $binTestsRoot)
+            cli                 = @($binTestsRoot)
+            bin                 = @($binTestsRoot)
+            channel             = @(Join-Path $testsRoot "channel")
+            events              = @(Join-Path $testsRoot "events")
+            installer           = @(Join-Path $testsRoot "installer")
+            lib                 = @(Join-Path $testsRoot "lib")
+            lifecycle           = @(Join-Path $testsRoot "lifecycle")
+            "lifecycle-scripts" = @(Join-Path $testsRoot "lifecycle-scripts")
+            mcp                 = @(Join-Path $testsRoot "mcp")
+            observe             = @(Join-Path $testsRoot "observe")
+            plan                = @(Join-Path $testsRoot "plan")
+            roles               = @(Join-Path $testsRoot "roles")
+            manager             = @(Join-Path $testsRoot "roles/manager")
+            workspace           = @(Join-Path $testsRoot "workspace")
+            warroom             = @(Join-Path $testsRoot "war-rooms")
+            "war-rooms"         = @(Join-Path $testsRoot "war-rooms")
+        }
+        $suiteName = "all"
+        $testPath = ""
+        $verbosity = "Minimal"
+
+        $ti = 0
+        while ($ti -lt $Arguments.Count) {
+            switch ($Arguments[$ti]) {
+                { $_ -in @('--help', '-h') } {
+                    Write-Host "Usage: ostwin test [--suite NAME] [--path PATH] [--verbose]"
+                    Write-Host ""
+                    Write-Host "Suites: $((@($suiteMap.Keys) | Sort-Object) -join ', ')"
+                    exit 0
+                }
+                '--suite' {
+                    $ti++
+                    if ($ti -ge $Arguments.Count) {
+                        Write-Error "Missing value for --suite"
+                        exit 1
+                    }
+                    $suiteName = $Arguments[$ti].ToLowerInvariant()
+                    $ti++
+                }
+                '--path' {
+                    $ti++
+                    if ($ti -ge $Arguments.Count) {
+                        Write-Error "Missing value for --path"
+                        exit 1
+                    }
+                    $testPath = $Arguments[$ti]
+                    $ti++
+                }
+                '--verbose' {
+                    $verbosity = "Detailed"
+                    $ti++
+                }
+                default {
+                    Write-Error "Unknown option for test: $($Arguments[$ti])"
+                    Write-Host "Run 'ostwin test --help' for usage."
+                    exit 1
+                }
+            }
+        }
+
+        if ($testPath) {
+            $selectedPaths = @($testPath)
+        }
+        elseif ($suiteMap.ContainsKey($suiteName)) {
+            $selectedPaths = @($suiteMap[$suiteName])
+        }
+        else {
+            Write-Error "Unknown test suite: $suiteName"
+            Write-Host "Available suites: $((@($suiteMap.Keys) | Sort-Object) -join ', ')"
+            exit 1
+        }
+
+        $existingPaths = @($selectedPaths | Where-Object { Test-Path $_ })
+        if ($existingPaths.Count -eq 0) {
+            Write-Error "No test paths found for suite '$suiteName'."
+            exit 1
+        }
+
+        $config = New-PesterConfiguration
+        $config.Run.Path = $existingPaths
+        $config.Run.Exit = $false
+        $config.Output.Verbosity = $verbosity
+        $result = Invoke-Pester -Configuration $config
+        if ($result.FailedCount -gt 0) { exit 1 }
+        exit 0
+    }
+
+    # ── version ──────────────────────────────────────────────────────────────
+    { $_ -in @('version', '-v', '--version') } {
+        if ($BuildHash) {
+            Write-Host "ostwin v${Version} (${BuildHash})"
+        }
+        else {
+            Write-Host "ostwin v${Version}"
+        }
+    }
+
+    # ── help ─────────────────────────────────────────────────────────────────
+    { $_ -in @('-h', '--help', 'help', '') } {
+        Show-OstwinHelp
+    }
+
+    # ── memory ────────────────────────────────────────────────────────────────
+    "memory" {
+        $memSub = if ($Arguments.Count -gt 0) { $Arguments[0] } else { "help" }
+        $memArgs = @(if ($Arguments.Count -gt 1) { $Arguments[1..($Arguments.Count - 1)] } else { @() })
+
+        # Resolve dashboard URL
+        $dashPort = if ($env:DASHBOARD_PORT) { $env:DASHBOARD_PORT } else { "3366" }
+        $dashBase = "http://localhost:$dashPort"
+        $apiKey = if ($env:OSTWIN_API_KEY) { $env:OSTWIN_API_KEY } else { "" }
+        $headers = @{}
+        if ($apiKey) { $headers["Authorization"] = "Bearer $apiKey" }
+
+        switch ($memSub) {
+            "list" {
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/namespaces" -Headers $headers
+                    if ($resp.Count -eq 0) {
+                        Write-Host "No memory namespaces found."
+                    } else {
+                        Write-Host ""
+                        Write-Host "  Memory Namespaces:" -ForegroundColor Cyan
+                        Write-Host "  $('-' * 70)"
+                        foreach ($ns in $resp) {
+                            $title = if ($ns.title) { $ns.title } else { $ns.plan_id }
+                            $size = if ($ns.disk_bytes -gt 1MB) { "{0:N1} MB" -f ($ns.disk_bytes / 1MB) }
+                                    elseif ($ns.disk_bytes -gt 1KB) { "{0:N0} KB" -f ($ns.disk_bytes / 1KB) }
+                                    else { "$($ns.disk_bytes) B" }
+                            $arc = if ($ns.archived_versions -gt 0) { " ($($ns.archived_versions) archived)" } else { "" }
+                            Write-Host ("  {0,-14} {1,-30} {2,5} notes  {3,8}{4}" -f $ns.plan_id, $title, $ns.notes_count, $size, $arc)
+                        }
+                        Write-Host ""
+                    }
+                } catch {
+                    Write-Error "Failed to list namespaces. Is the dashboard running? $_"
+                    exit 1
+                }
+            }
+            "stats" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "_global" }
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/$planId/stats" -Headers $headers
+                    Write-Host ""
+                    Write-Host "  Memory Stats: $planId" -ForegroundColor Cyan
+                    Write-Host "  Notes:    $($resp.total_notes)"
+                    Write-Host "  Tags:     $($resp.total_tags)"
+                    Write-Host "  Keywords: $($resp.total_keywords)"
+                    Write-Host "  Paths:    $($resp.total_paths)"
+                    Write-Host "  Dir:      $($resp.memory_dir)"
+                    Write-Host ""
+                } catch {
+                    Write-Error "Failed to get stats for '$planId': $_"
+                    exit 1
+                }
+            }
+            "tree" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "_global" }
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/$planId/tree" -Headers $headers
+                    Write-Host $resp
+                } catch {
+                    Write-Error "Failed to get tree for '$planId': $_"
+                    exit 1
+                }
+            }
+            "clear" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "" }
+                if (-not $planId) {
+                    Write-Error "Usage: ostwin memory clear <plan_id> [--force]"
+                    exit 1
+                }
+                $force = $memArgs -contains "--force"
+                if (-not $force) {
+                    Write-Host "This will permanently delete ALL notes for namespace '$planId'."
+                    $confirm = Read-Host "Type 'yes' to confirm"
+                    if ($confirm -ne "yes") {
+                        Write-Host "Cancelled."
+                        exit 0
+                    }
+                }
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/$planId" -Method Delete -Headers $headers
+                    Write-Host "Cleared $($resp.cleared) notes from '$planId'." -ForegroundColor Green
+                } catch {
+                    Write-Error "Failed to clear '$planId': $_"
+                    exit 1
+                }
+            }
+            "delete" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "" }
+                $noteId = if ($memArgs.Count -gt 1) { $memArgs[1] } else { "" }
+                if (-not $planId -or -not $noteId) {
+                    Write-Error "Usage: ostwin memory delete <plan_id> <note_id>"
+                    exit 1
+                }
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/$planId/notes/$noteId" -Method Delete -Headers $headers
+                    Write-Host "Deleted note '$noteId' from '$planId'." -ForegroundColor Green
+                } catch {
+                    Write-Error "Failed to delete note: $_"
+                    exit 1
+                }
+            }
+            "archive" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "" }
+                if (-not $planId) {
+                    Write-Error "Usage: ostwin memory archive <plan_id>"
+                    exit 1
+                }
+                try {
+                    $resp = Invoke-RestMethod -Uri "$dashBase/api/amem/$planId/archive" -Method Post -Headers $headers
+                    Write-Host "Archived $($resp.notes_archived) notes to '$($resp.archived_to)'." -ForegroundColor Green
+                    Write-Host "Namespace '$planId' is now empty — agents will start fresh."
+                } catch {
+                    Write-Error "Failed to archive '$planId': $_"
+                    exit 1
+                }
+            }
+            "export" {
+                $planId = if ($memArgs.Count -gt 0) { $memArgs[0] } else { "" }
+                if (-not $planId) {
+                    Write-Error "Usage: ostwin memory export <plan_id>"
+                    exit 1
+                }
+                $outFile = "memory-$planId.tar.gz"
+                try {
+                    Invoke-WebRequest -Uri "$dashBase/api/amem/$planId/export" -Headers $headers -OutFile $outFile
+                    Write-Host "Exported to $outFile" -ForegroundColor Green
+                } catch {
+                    Write-Error "Failed to export '$planId': $_"
+                    exit 1
+                }
+            }
+            default {
+                Write-Host ""
+                Write-Host "  ostwin memory — Manage agent memory namespaces" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "  Usage:"
+                Write-Host "    ostwin memory list                     List all namespaces with stats"
+                Write-Host "    ostwin memory stats <plan_id>          Show stats for a namespace"
+                Write-Host "    ostwin memory tree <plan_id>           Show note directory tree"
+                Write-Host "    ostwin memory clear <plan_id> [--force]  Clear all notes"
+                Write-Host "    ostwin memory delete <plan_id> <id>    Delete a single note"
+                Write-Host "    ostwin memory archive <plan_id>        Archive and start fresh"
+                Write-Host "    ostwin memory export <plan_id>         Export as .tar.gz"
+                Write-Host ""
+            }
+        }
+    }
+
+    # ── unknown ──────────────────────────────────────────────────────────────
+    default {
+        if (-not $Command) {
+            Show-OstwinHelp
+        }
+        else {
+            Write-Host "Unknown command: $Command" -ForegroundColor Red
+            Write-Host "Run 'ostwin --help' for usage."
+            exit 1
+        }
+    }
+}
