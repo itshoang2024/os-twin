@@ -132,7 +132,7 @@ def test_write_role_syncs_role_md_to_opencode_agent(tmp_path):
     assert role_md == role.instructions
     assert 'name: "principal-engineer"' in agent_md
     assert 'description: "Sets technical direction."' in agent_md
-    assert 'mode: "subagent"' in agent_md
+    assert 'mode: "all"' in agent_md
     assert 'model: "anthropic/claude-sonnet-4"' in agent_md
     assert agent_md.endswith(role.instructions + "\n")
 

@@ -363,7 +363,7 @@ class RoleRepository:
         frontmatter.update({
             "name": json.dumps(stable_role_id(role.name), ensure_ascii=False),
             "description": json.dumps(role.description or f"Ostwin role: {role.name}", ensure_ascii=False),
-            "mode": json.dumps("subagent"),
+            "mode": json.dumps("all"),
             "model": json.dumps(role.version, ensure_ascii=False),
             "temperature": json.dumps(role.temperature),
         })
