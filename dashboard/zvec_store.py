@@ -721,12 +721,19 @@ class OSTwinStore:
                     self._dim = None
 
                 def encode(self, texts, convert_to_numpy=False, show_progress_bar=False):
-                    if isinstance(texts, str):
+                    # Mirror sentence-transformers: a single string yields a 1D
+                    # vector, a list yields a 2D matrix. KnowledgeEmbedder.embed
+                    # always returns list[list[float]], so unwrap the single-text
+                    # case — otherwise callers get a nested [[...]] that zvec
+                    # rejects with "expected VECTOR_FP32, got list".
+                    single = isinstance(texts, str)
+                    if single:
                         texts = [texts]
                     vecs = self._ke.embed(texts)
                     if convert_to_numpy:
-                        return np.array(vecs)
-                    return vecs
+                        arr = np.array(vecs)
+                        return arr[0] if single else arr
+                    return vecs[0] if single else vecs
 
                 def get_sentence_embedding_dimension(self):
                     if self._dim is None:
