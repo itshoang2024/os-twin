@@ -19,10 +19,10 @@ def test_first_run_login_persists_api_key_and_username(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["username"] == "Ada Lovelace"
     assert response.cookies.get("ostwin_auth_key") == "ostwin_first_run_key"
-    assert Path(tmp_path / ".ostwin" / ".env").read_text().splitlines() == [
-        "OSTWIN_API_KEY=ostwin_first_run_key",
-        "OSTWIN_USERNAME='Ada Lovelace'",
-    ]
+    env_lines = Path(tmp_path / ".ostwin" / ".env").read_text().splitlines()
+    assert env_lines[0] == "OSTWIN_API_KEY=ostwin_first_run_key"
+    assert env_lines[1] == "OSTWIN_USERNAME='Ada Lovelace'"
+    assert env_lines[2].startswith("OSTWIN_VAULT_KEY=")
 
     me = client.get("/api/auth/me", headers={"X-API-Key": "ostwin_first_run_key"})
     assert me.status_code == 200

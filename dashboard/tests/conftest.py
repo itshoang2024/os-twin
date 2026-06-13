@@ -44,6 +44,7 @@ def isolated_test_env(tmp_path):
     # Fake API Key for tests that use authentication
     os.environ["OSTWIN_AUTH_KEY"] = "test-key"
     os.environ["OSTWIN_API_KEY"] = "test-key"
+    os.environ["OSTWIN_VAULT_KEY"] = "test-vault-key"
     
     yield
 

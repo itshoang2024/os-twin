@@ -225,6 +225,18 @@ def test_encrypted_file_health(tmp_path):
     assert backend.backend_type == VaultBackendType.ENCRYPTED_FILE
 
 
+def test_encrypted_file_missing_key_reports_actionable_error(tmp_path, monkeypatch):
+    monkeypatch.delenv("OSTWIN_VAULT_KEY", raising=False)
+    backend = EncryptedFileBackend(path=tmp_path / "vault.enc")
+
+    with pytest.raises(RuntimeError, match="OSTWIN_VAULT_KEY"):
+        backend.set("providers", "test-key", "test-value")
+
+    health = backend.health()
+    assert health.healthy is False
+    assert "OSTWIN_VAULT_KEY" in health.message
+
+
 def test_encrypted_file_permissions(tmp_path):
     path = tmp_path / "vault.enc"
     backend = EncryptedFileBackend(path=path)

@@ -1,5 +1,6 @@
 import os
 import re
+import secrets
 import shlex
 from ipaddress import ip_address
 from pathlib import Path
@@ -70,12 +71,15 @@ def _upsert_env_values(path: Path, values: dict[str, str]) -> None:
 
 def _persist_first_run_credentials(api_key: str, username: str) -> None:
     """Persist first-run auth credentials and update this process immediately."""
+    vault_key = os.environ.get("OSTWIN_VAULT_KEY") or secrets.token_urlsafe(32)
     _upsert_env_values(_ostwin_env_file(), {
         "OSTWIN_API_KEY": api_key,
         "OSTWIN_USERNAME": username,
+        "OSTWIN_VAULT_KEY": vault_key,
     })
     os.environ["OSTWIN_API_KEY"] = api_key
     os.environ["OSTWIN_USERNAME"] = username
+    os.environ["OSTWIN_VAULT_KEY"] = vault_key
 
 
 def _persist_username(username: str) -> None:
@@ -139,7 +143,6 @@ async def login_for_access_token(request: Request):
             content={"detail": "Invalid API key"},
         )
 
-    import secrets
     if not secrets.compare_digest(str(key), _get_api_key()):
         return JSONResponse(
             status_code=401,
