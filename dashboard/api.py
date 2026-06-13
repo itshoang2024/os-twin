@@ -187,6 +187,37 @@ async def app_lifespan(_app):
     loop.set_default_executor(heavy_executor)
     logger.info("Heavy-ops thread pool installed (size=%d)", _HEAVY_POOL_SIZE)
 
+    # On Windows, uvicorn drives a ProactorEventLoop. When a client (e.g. an
+    # agent/MCP subprocess spawned by /api/run) abruptly resets a connection
+    # mid-handshake, IOCP accept fails with WinError 64 ("network name no longer
+    # available") / 1236 / WSAECONNRESET. asyncio's default handler logs these as
+    # ERROR tracebacks plus "Task exception was never retrieved", which is pure
+    # noise — the server keeps serving. Downgrade just these transient socket
+    # errors to DEBUG and delegate everything else to the previous handler.
+    if os.name == "nt" and not os.environ.get("PYTEST_CURRENT_TEST"):
+        _TRANSIENT_WINERR = frozenset({64, 121, 995, 1236, 10053, 10054})
+        _prev_exc_handler = loop.get_exception_handler()
+
+        def _quiet_transient_socket_errors(_loop, context):
+            exc = context.get("exception")
+            message = context.get("message", "")
+            is_transient = (
+                isinstance(exc, (ConnectionResetError, ConnectionAbortedError))
+                or (isinstance(exc, OSError)
+                    and getattr(exc, "winerror", None) in _TRANSIENT_WINERR)
+                or message == "Accept failed on a socket"
+            )
+            if is_transient:
+                logger.debug("Suppressed transient socket error: %s", message or exc)
+                return
+            if _prev_exc_handler is not None:
+                _prev_exc_handler(_loop, context)
+            else:
+                _loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_quiet_transient_socket_errors)
+        logger.info("Installed transient-socket-error filter for ProactorEventLoop")
+
     async def _lifespan_shutdown() -> None:
         try:
             await _shutdown_app()

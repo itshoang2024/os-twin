@@ -574,12 +574,16 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
     Parses the raw output for known error signatures and returns structured
     diagnostics so the UI can show actionable information instead of raw logs.
     """
+    import os
     import re
-    import shutil
     import subprocess
+    import tempfile
     import time
 
-    opencode = shutil.which("opencode")
+    from dashboard.api_utils import PROJECT_ROOT
+    from dashboard.lib.opencode_paths import find_opencode
+
+    opencode = find_opencode()
     if not opencode:
         return {
             "status": "fail",
@@ -591,7 +595,20 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
     resolved_version = _resolve_model_id(version)
     logger.info("test_model_connection: %r → resolved %r", version, resolved_version)
 
-    cmd = [opencode, "run", "just say YES", "--model", resolved_version, "--dir", "/tmp"]
+    cmd = [opencode, "run", "just say YES", "--model", resolved_version, "--dir", tempfile.gettempdir()]
+
+    # Build the subprocess env the same way the agent runtime does, so the
+    # connection test authenticates against providers identically. Critically
+    # this sources the project ``.env`` (provider API keys, Vertex aliases),
+    # which the dashboard process itself may not have in its environment
+    # depending on how it was launched. Without this, providers like ``openai``
+    # are unauthenticated and opencode reports a misleading "model not found".
+    try:
+        from dashboard.lib import opencode_service
+        run_env = opencode_service._build_child_env(PROJECT_ROOT)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        logger.warning("test_model_connection: falling back to process env: %r", exc)
+        run_env = {**os.environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"}
 
     def _strip_ansi(text: str) -> str:
         return re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", text)
@@ -602,7 +619,7 @@ async def test_model_connection(version: str, user: dict = Depends(get_current_u
             capture_output=True,
             text=True,
             timeout=60,
-            env={**__import__("os").environ, "OPENCODE_DISABLE_CLAUDE_CODE": "1"},
+            env=run_env,
         )
         return (
             result.returncode,

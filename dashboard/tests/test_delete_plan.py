@@ -42,7 +42,8 @@ def plan_dirs(tmp_path, monkeypatch):
     return plans_dir, tmp_path
 
 
-def _create_test_plan(plans_dir: Path, plan_id: str, working_dir: str | None = None):
+def _create_test_plan(plans_dir: Path, plan_id: str, working_dir: str | None = None,
+                      runner_pid: int | None = None):
     """Helper to create a full test plan on disk."""
     (plans_dir / f"{plan_id}.md").write_text(f"# Plan: Test Plan\n\nGoal\n")
     meta = {
@@ -55,6 +56,8 @@ def _create_test_plan(plans_dir: Path, plan_id: str, working_dir: str | None = N
     }
     if working_dir:
         meta["working_dir"] = working_dir
+    if runner_pid is not None:
+        meta["runner_pid"] = runner_pid
     (plans_dir / f"{plan_id}.meta.json").write_text(json.dumps(meta, indent=2))
     (plans_dir / f"{plan_id}.roles.json").write_text(json.dumps({}, indent=2))
     assets_dir = plans_dir / "assets" / plan_id
@@ -144,6 +147,54 @@ def test_delete_plan_400_for_invalid_id(client, plan_dirs):
     # Non-hex
     resp = client.delete("/api/plans/xxxxxxxxxxxx", headers=AUTH)
     assert resp.status_code == 400
+
+
+def test_delete_running_plan_terminates_runner(client, plan_dirs):
+    """DELETE on a plan with a runner_pid should stop the runner process tree."""
+    plans_dir, tmp_path = plan_dirs
+    plan_id = "abcdef012345"
+    _create_test_plan(plans_dir, plan_id, runner_pid=424242)
+
+    killed = []
+    with patch("dashboard.routes.plans._terminate_runner_tree") as mock_kill, \
+         patch("dashboard.routes.plans.global_state") as mock_gs:
+        mock_gs.store = None
+        mock_kill.side_effect = lambda pid: (killed.append(pid) or True)
+        resp = client.delete(f"/api/plans/{plan_id}", headers=AUTH)
+
+    assert resp.status_code == 200
+    assert killed == [424242]
+
+
+def test_delete_plan_tolerates_locked_files(client, plan_dirs):
+    """A working-dir tree that can't be fully removed (e.g. a held handle) must
+    not 500 — it returns 200 and reports the path under failed_paths."""
+    plans_dir, tmp_path = plan_dirs
+    plan_id = "abcdef012345"
+    working_dir = tmp_path / "projects" / "p"
+    (working_dir / ".agents").mkdir(parents=True)
+    (working_dir / ".agents" / "x.log").write_text("locked")
+    _create_test_plan(plans_dir, plan_id, working_dir=str(working_dir))
+
+    agents_dir = str(working_dir / ".agents")
+
+    def fake_rmtree(path, *a, **k):
+        # Simulate a held handle on the working-dir .agents tree only.
+        if str(path) == agents_dir:
+            return f"[WinError 32] file in use: {path}"
+        return None
+
+    with patch("dashboard.routes.plans._force_rmtree", side_effect=fake_rmtree), \
+         patch("dashboard.routes.plans.global_state") as mock_gs:
+        mock_gs.store = None
+        resp = client.delete(f"/api/plans/{plan_id}", headers=AUTH)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "deleted"
+    assert agents_dir in data["failed_paths"]
+    # The global plan files (not locked) are still gone.
+    assert not (plans_dir / f"{plan_id}.md").exists()
 
 
 def test_delete_ghost_plan_clears_zvec_index(client, plan_dirs):

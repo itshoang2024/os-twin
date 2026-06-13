@@ -43,7 +43,7 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 from dashboard.opencode_tools import DEFAULT_OPENCODE_MODEL
-from dashboard.lib.opencode_paths import get_managed_opencode_config_path
+from dashboard.lib.opencode_paths import find_opencode, get_managed_opencode_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +153,73 @@ def _candidate_env_files(project_dir: Path) -> list[Path]:
     ]
 
 
+def _resolve_bash() -> Optional[str]:
+    """Return a usable POSIX bash, avoiding the WSL launcher on Windows.
+
+    A bare ``bash`` is unsafe on Windows: ``CreateProcess`` resolves it to
+    ``%SystemRoot%\\System32\\bash.exe`` (the WSL launcher) *before* any PATH
+    entry, even when Git Bash precedes it on PATH. That launcher cannot run our
+    scripts against Windows paths and fails with ``execvpe(/bin/bash) failed``,
+    so env loading silently returns nothing. We therefore resolve Git Bash
+    explicitly and never fall back to a ``System32``/Store ``bash``.
+    """
+    if sys.platform != "win32":
+        return shutil.which("bash")
+
+    candidates: list[Path] = []
+    for root_var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+        root = os.environ.get(root_var)
+        if root:
+            candidates.append(Path(root) / "Git" / "bin" / "bash.exe")
+            candidates.append(Path(root) / "Git" / "usr" / "bin" / "bash.exe")
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(Path(local) / "Programs" / "Git" / "bin" / "bash.exe")
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    # Last resort: a PATH lookup, but reject the WSL / Microsoft Store stubs.
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower() and "windowsapps" not in found.lower():
+        return found
+    return None
+
+
+def _parse_env_files_python(project_dir: Path) -> dict[str, str]:
+    """Fallback loader: parse plain ``KEY=value`` .env files without bash.
+
+    Used when no usable bash is available (e.g. Git Bash not installed). It
+    starts from the parent environment and overlays literal assignments from
+    every ``.env`` file in load order. It intentionally skips ``.env.sh``
+    files, whose shell logic cannot be evaluated safely in Python.
+    """
+    env = dict(os.environ)
+    for f in _candidate_env_files(project_dir):
+        if f.suffix == ".sh" or not f.exists():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            key, sep, value = line.partition("=")
+            if not sep:
+                continue
+            key = key.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if key and all(c.isalnum() or c == "_" for c in key):
+                env[key] = value
+    return env
+
+
 def _load_env_via_bash(project_dir: Path) -> dict[str, str]:
     """Source all candidate env files in bash and capture the resulting env.
 
@@ -162,6 +229,11 @@ def _load_env_via_bash(project_dir: Path) -> dict[str, str]:
     ``.env`` files also work because we use ``set -a`` so unprefixed
     assignments still get exported.
     """
+    bash = _resolve_bash()
+    if not bash:
+        logger.warning("[OPENCODE_SERVICE] no usable bash found; parsing .env files in Python")
+        return _parse_env_files_python(project_dir)
+
     parts = ["set -a"]
     for f in _candidate_env_files(project_dir):
         if f.exists():
@@ -173,14 +245,14 @@ def _load_env_via_bash(project_dir: Path) -> dict[str, str]:
     # survive even when no file overrides them.
     try:
         result = subprocess.run(
-            ["bash", "-c", script],
+            [bash, "-c", script],
             capture_output=True,
             timeout=10,
             check=False,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-        logger.warning("[OPENCODE_SERVICE] bash env load failed: %s", exc)
-        return dict(os.environ)
+        logger.warning("[OPENCODE_SERVICE] bash env load failed (%s); parsing .env in Python", exc)
+        return _parse_env_files_python(project_dir)
 
     env: dict[str, str] = {}
     for record in result.stdout.split(b"\0"):
@@ -192,8 +264,11 @@ def _load_env_via_bash(project_dir: Path) -> dict[str, str]:
             continue
         key, _, value = decoded.partition("=")
         if key:
-            env[key] = value
-    return env or dict(os.environ)
+            # ``.env`` files are often CRLF on Windows; strip the stray CR that
+            # bash keeps on the last value of each line so it can't corrupt
+            # secrets (a trailing \r in an API key breaks auth).
+            env[key] = value.rstrip("\r")
+    return env or _parse_env_files_python(project_dir)
 
 
 def _normalize_vertex_aliases(env: dict[str, str]) -> None:
@@ -414,8 +489,9 @@ def start() -> Optional[int]:
     calling :func:`stop` first if a previous instance may be running;
     use :func:`restart` to do both atomically.
     """
-    if not shutil.which("opencode"):
-        logger.warning("[OPENCODE_SERVICE] opencode CLI not on PATH — skipping start")
+    opencode = find_opencode()
+    if not opencode:
+        logger.warning("[OPENCODE_SERVICE] opencode CLI not found on PATH or npm globals — skipping start")
         return None
 
     SERVER_DIR.mkdir(parents=True, exist_ok=True)
@@ -430,7 +506,7 @@ def start() -> Optional[int]:
     log_handle = open(LOG_FILE, "a")
     try:
         proc = subprocess.Popen(
-            ["opencode", "serve", "--hostname", host, "--port", str(port)],
+            [opencode, "serve", "--hostname", host, "--port", str(port)],
             cwd=str(SERVER_DIR),
             env=env,
             stdin=subprocess.DEVNULL,

@@ -757,14 +757,18 @@ export OSTWIN_PYTHON='$venvPythonUnix'
             # $AgentCmd may be "opencode run", "'/path/to/agent'", or "/path/to/mock.ps1"
             $cmdParts = $AgentCmd.Trim("'").Trim('"').Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
             $exe = $cmdParts[0]
-            $cmdArgs = if ($cmdParts.Length -gt 1) { $cmdParts[1..($cmdParts.Length - 1)] } else { @() }
+            # Force array context: a single-element slice (e.g. "opencode run") would
+            # otherwise unwrap to a scalar string, making `$cmdArgs + $attemptArgs`
+            # do STRING concatenation ("run" + "--model …" -> "run--model …") and
+            # collapse every flag into one mangled argument.
+            $cmdArgs = @(if ($cmdParts.Length -gt 1) { $cmdParts[1..($cmdParts.Length - 1)] } else { @() })
 
             # If the command is a .ps1 script (possibly wrapped in "pwsh -NoProfile -File script.ps1"),
             # extract the script path and run it directly via call operator in the wrapper.
             # This avoids nested pwsh invocations with broken argument passing.
             if ($exe -match '\.ps1$') {
                 # exe is already the .ps1 file — cmdArgs are its parameters
-                $allArgs = $cmdArgs + $attemptArgs
+                $allArgs = @($cmdArgs) + @($attemptArgs)
             } elseif ($exe -eq 'pwsh' -or $exe -eq 'powershell') {
                 # Look for -File flag and extract the script path
                 $fileIdx = [Array]::FindIndex($cmdArgs, [Predicate[object]]{ param($a) $a -eq '-File' })
@@ -778,12 +782,12 @@ export OSTWIN_PYTHON='$venvPythonUnix'
                             ($i -gt 0 -and $cmdArgs[$i - 1] -eq '-ExecutionPolicy')) { continue }
                         $remaining += $cmdArgs[$i]
                     }
-                    $allArgs = $remaining + $attemptArgs
+                    $allArgs = @($remaining) + @($attemptArgs)
                 } else {
-                    $allArgs = $cmdArgs + $attemptArgs
+                    $allArgs = @($cmdArgs) + @($attemptArgs)
                 }
             } else {
-                $allArgs = $cmdArgs + $attemptArgs
+                $allArgs = @($cmdArgs) + @($attemptArgs)
             }
 
             # Serialize args array into the wrapper script as a PowerShell array literal
@@ -807,9 +811,16 @@ export OSTWIN_PYTHON='$venvPythonUnix'
 `$env:OSTWIN_PYTHON = '$venvPythonWin'
 if ('$winOpencodeConfig') { `$env:OPENCODE_CONFIG = '$winOpencodeConfig' }
 
-# Source user-controlled pre-exec hook
-`$envSh = Join-Path `$env:USERPROFILE '.ostwin' '.env.sh'
-if (Test-Path `$envSh) { . `$envSh }
+# Source user-controlled pre-exec hook (dynamic env logic).
+# Windows uses .env.ps1 (PowerShell), not the bash .env.sh.
+# Static KEY=VALUE pairs belong in ~/.ostwin/.env; this hook is for shell logic.
+`$envHooks = @(
+    (Join-Path '$winOstwinHome' '.env.ps1'),
+    (Join-Path `$env:USERPROFILE '.ostwin' '.env.ps1')
+) | Select-Object -Unique
+foreach (`$envHook in `$envHooks) {
+    if (Test-Path `$envHook) { . `$envHook }
+}
 `$env:OPENCODE_DISABLE_CLAUDE_CODE = '1'
 
 # exec-in-dir: run inside the scoped dir; failure to cd is fatal (isolation breach)

@@ -1144,7 +1144,10 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
                 # dashboard browser OAuth flow.
                 adc_file = get_adc_path()
                 if adc_file.exists():
-                    env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc_file)
+                    # Forward-slash form: the env loader sources this file via
+                    # bash (`_load_env_via_bash`), which eats backslashes in an
+                    # unquoted Windows path and corrupts the credential path.
+                    env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = adc_file.as_posix()
                 else:
                     _remove_env_vars({"GOOGLE_APPLICATION_CREDENTIALS"})
                     os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
@@ -1163,8 +1166,10 @@ def _sync_vertex_env(providers_value: Dict[str, Any]) -> None:
                     if sa_json:
                         sa_json = _decode_if_hex(sa_json)
                         _OSTWIN_DIR.mkdir(parents=True, exist_ok=True)
-                        _SA_FILE.write_text(sa_json)
-                        env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = str(_SA_FILE)
+                        _SA_FILE.write_text(sa_json, encoding="utf-8")
+                        # Forward-slash form so bash-based env sourcing keeps
+                        # the Windows path intact (see oauth branch above).
+                        env_updates["GOOGLE_APPLICATION_CREDENTIALS"] = _SA_FILE.as_posix()
                         wrote_service_account = True
                         logger.info("[SETTINGS] Wrote service-account JSON to %s", _SA_FILE)
                 except Exception as exc:
@@ -1230,7 +1235,7 @@ def _parse_env_file() -> list[dict]:
     if not _ENV_FILE.exists():
         return []
     entries: list[dict] = []
-    for line in _ENV_FILE.read_text().splitlines():
+    for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped:
             entries.append({"type": "blank"})
@@ -1281,6 +1286,26 @@ def _serialize_env_file(entries: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _write_env_atomic(text: str) -> None:
+    """Write ~/.ostwin/.env atomically as UTF-8.
+
+    Two failure modes this guards against on Windows:
+
+    * ``Path.write_text`` without an explicit encoding uses the locale code
+      page (cp1252), which cannot encode the box-drawing chars used in
+      section headers and raises ``UnicodeEncodeError`` — *after* it has
+      already truncated the file, leaving a 0-byte ``.env``.
+    * A crash mid-write leaving a partial file.
+
+    Writing to a temp file then ``os.replace`` makes the swap atomic, so the
+    real ``.env`` is never observed truncated or half-written.
+    """
+    _OSTWIN_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _ENV_FILE.parent / (_ENV_FILE.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(str(tmp), str(_ENV_FILE))
+
+
 def _upsert_env_vars(updates: Dict[str, str]) -> None:
     """Upsert env vars into ~/.ostwin/.env.  Creates the file if needed."""
     entries = _parse_env_file()
@@ -1305,8 +1330,7 @@ def _upsert_env_vars(updates: Dict[str, str]) -> None:
                 )
             entries.append({"type": "var", "key": key, "value": value, "enabled": True})
 
-    _OSTWIN_DIR.mkdir(parents=True, exist_ok=True)
-    _ENV_FILE.write_text(_serialize_env_file(entries))
+    _write_env_atomic(_serialize_env_file(entries))
 
 
 def _remove_env_vars(keys_to_remove: set[str]) -> None:
@@ -1320,7 +1344,7 @@ def _remove_env_vars(keys_to_remove: set[str]) -> None:
             e["enabled"] = False
             changed = True
     if changed:
-        _ENV_FILE.write_text(_serialize_env_file(entries))
+        _write_env_atomic(_serialize_env_file(entries))
 
 
 def _sync_shell_profile_env(
@@ -1343,7 +1367,7 @@ def _sync_shell_profile_env(
         if key in _VERTEX_ENV_KEYS and key not in remove and value
     }
 
-    existing = _ZSHRC_FILE.read_text() if _ZSHRC_FILE.exists() else ""
+    existing = _ZSHRC_FILE.read_text(encoding="utf-8") if _ZSHRC_FILE.exists() else ""
     without_block = _remove_empty_ostwin_env_headers(
         _remove_legacy_zshrc_vertex_block(
             _remove_managed_zshrc_block(existing)
@@ -1364,7 +1388,7 @@ def _sync_shell_profile_env(
         new_content = f"{without_block}\n" if without_block else ""
 
     if new_content != existing:
-        _ZSHRC_FILE.write_text(new_content)
+        _ZSHRC_FILE.write_text(new_content, encoding="utf-8")
 
 
 def _remove_managed_zshrc_block(content: str) -> str:

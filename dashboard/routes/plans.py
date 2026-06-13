@@ -2111,6 +2111,72 @@ async def save_plan(plan_id: str, request: SavePlanRequest, user: dict = Depends
     return {"status": "saved", "plan_id": plan_id}
 
 
+def _terminate_runner_tree(runner_pid: Optional[int]) -> bool:
+    """Best-effort stop of a plan's runner process tree before deletion.
+
+    A live runner (and its opencode/pwsh children) hold open handles inside the
+    working dir; on Windows that makes rmtree fail with WinError 32. We kill the
+    whole tree first. Returns True if a termination was attempted.
+
+    Note: on POSIX we only signal the runner pid itself — never killpg — because
+    the runner shares the dashboard's process group, so killpg would take the
+    dashboard down with it.
+    """
+    if not isinstance(runner_pid, int) or runner_pid <= 0:
+        return False
+    import signal as _signal
+    from dashboard import plan_lifecycle
+    # Drop our tracked handle so derive_lifecycle stops polling a dead pid.
+    proc = plan_lifecycle._runner_handles.pop(int(runner_pid), None)
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(runner_pid)],
+                capture_output=True, timeout=30,
+            )
+        else:
+            try:
+                os.kill(runner_pid, _signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+    except Exception as e:
+        logger.warning("delete_plan: failed to terminate runner pid %s: %s", runner_pid, e)
+    if proc is not None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return True
+
+
+def _force_rmtree(path: Path, retries: int = 4, delay: float = 0.4) -> Optional[str]:
+    """Remove a directory tree, clearing read-only bits and retrying briefly.
+
+    Returns None on full success, or the last error string if files remain
+    (e.g. a handle still held by a process that hasn't fully exited). Never
+    raises — callers report leftovers instead of returning HTTP 500.
+    """
+    import shutil
+    import stat as _stat
+    import time as _time
+
+    def _onerror(func, p, _exc):
+        # Read-only files (common under .git) reject unlink until chmod'd.
+        os.chmod(p, _stat.S_IWRITE)
+        func(p)
+
+    last_err: Optional[str] = None
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path, onerror=_onerror)
+            return None
+        except Exception as e:
+            last_err = str(e)
+            if attempt < retries - 1:
+                _time.sleep(delay)
+    return last_err if path.exists() else None
+
+
 @router.delete("/api/plans/{plan_id}")
 async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
     """Delete a plan and all its artifacts from global store and working directory."""
@@ -2138,43 +2204,58 @@ async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail=f"Plan {plan_id} not found")
 
     cleaned: list[str] = []
+    failed: list[str] = []
 
-    # --- Read meta.json for working_dir before we delete it ---
+    # --- Read meta.json for working_dir + runner_pid before we delete it ---
     working_dir = None
+    runner_pid = None
     meta_file = _find_plan_meta(plan_id)
     if meta_file and meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
             working_dir = meta.get("working_dir")
+            if isinstance(meta.get("runner_pid"), int):
+                runner_pid = meta["runner_pid"]
         except (json.JSONDecodeError, OSError):
             pass
+
+    # --- Stop the runner first ---
+    # A still-running plan's orchestrator (and its opencode/pwsh children) hold
+    # open handles inside the working dir. Deleting the files out from under it
+    # would both fail on Windows and leave an orphaned background process. Kill
+    # the tree before touching the working dir.
+    if _terminate_runner_tree(runner_pid):
+        logger.info("delete_plan: terminated runner pid %s for %s", runner_pid, plan_id)
+
+    def _remove_tree(path: Path) -> None:
+        if path.exists() and path.is_dir():
+            err = _force_rmtree(path)
+            if err is None:
+                cleaned.append(str(path))
+            else:
+                failed.append(str(path))
+                logger.warning("delete_plan: could not fully remove %s: %s", path, err)
 
     # --- 1. Remove from global store (~/.ostwin/.agents/plans/) ---
     plans_dir = plan_file.parent if plan_file else GLOBAL_PLANS_DIR
     for suffix in (".md", ".meta.json", ".roles.json"):
         f = plans_dir / f"{plan_id}{suffix}"
         if f.exists():
-            f.unlink()
-            cleaned.append(str(f))
+            try:
+                f.unlink()
+                cleaned.append(str(f))
+            except OSError as e:
+                failed.append(str(f))
+                logger.warning("delete_plan: could not remove %s: %s", f, e)
 
-    assets_dir = plans_dir / "assets" / plan_id
-    if assets_dir.exists() and assets_dir.is_dir():
-        shutil.rmtree(assets_dir)
-        cleaned.append(str(assets_dir))
+    _remove_tree(plans_dir / "assets" / plan_id)
 
     # --- 2. Remove working dir artifacts ---
     if working_dir:
         wd = Path(working_dir)
         if wd.exists() and wd.is_dir():
-            agents_dir = wd / ".agents"
-            if agents_dir.exists() and agents_dir.is_dir():
-                shutil.rmtree(agents_dir)
-                cleaned.append(str(agents_dir))
-
-            warrooms_dir = wd / ".war-rooms"
-            if warrooms_dir.exists() and warrooms_dir.is_dir():
-                shutil.rmtree(warrooms_dir)
-                cleaned.append(str(warrooms_dir))
+            _remove_tree(wd / ".agents")
+            _remove_tree(wd / ".war-rooms")
 
     # --- 3. Remove from zvec index ---
     if store:
@@ -2183,8 +2264,13 @@ async def delete_plan(plan_id: str, user: dict = Depends(get_current_user)):
         except Exception as e:
             logger.warning("Failed to remove plan %s from zvec index: %s", plan_id, e)
 
-    logger.info("Deleted plan %s — cleaned: %s", plan_id, cleaned)
-    return {"status": "deleted", "plan_id": plan_id, "cleaned_paths": cleaned}
+    logger.info("Deleted plan %s — cleaned: %s, failed: %s", plan_id, cleaned, failed)
+    return {
+        "status": "deleted",
+        "plan_id": plan_id,
+        "cleaned_paths": cleaned,
+        "failed_paths": failed,
+    }
 
 
 def _resolve_plan_file(plan_id: str) -> Optional[Path]:
@@ -2569,6 +2655,10 @@ async def run_plan(request: RunRequest, user: dict = Depends(get_current_user)):
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
+    # The child inherited its own dup of the fd; close the parent's copy so the
+    # dashboard process doesn't keep the launch log open for its whole lifetime.
+    # On Windows a lingering open handle blocks deleting the plan's working dir.
+    log_handle.close()
     logger.info(f"run_plan: launched ostwin run for {plan_id}, pid={proc.pid}, logs: {log_file}")
 
     # Record the runner PID so /api/plans, /api/stats, and the slash commands
